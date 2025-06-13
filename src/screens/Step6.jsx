@@ -1,6 +1,6 @@
 // src/screens/Step6.jsx
 
-import React, { useState, useRef, useMemo, useContext } from 'react';
+import React, { useRef, useMemo, useContext } from 'react';
 import { useSwipeable } from 'react-swipeable';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -44,11 +44,6 @@ export default function Step6() {
   };
 
   const toggleMenu = e => { e.stopPropagation(); setMenuOpen(o => !o); };
-  const toggleNav  = e => { e.stopPropagation(); setNavOpen(o => !o); };
-  const handleOuterClick = () => {
-    if (menuOpen) setMenuOpen(false);
-    if (navOpen)  setNavOpen(false);
-  };
 
   // ───── 캡처용 refs ─────
   const allocRef  = useRef();

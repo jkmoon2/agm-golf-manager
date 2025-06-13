@@ -48,7 +48,7 @@ export default function StepFlow() {
       setRoomNames(data.roomNames || Array((data.roomCount||4)).fill(''));
     });
     return () => unsub();
-  }, [mode, docsMap]);
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetAll = async () => {
     const key = mode === 'stroke' ? 'stroke-1' : 'agm-1';
