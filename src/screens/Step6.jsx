@@ -1,6 +1,6 @@
 // src/screens/Step6.jsx
 
-import React, { useRef, useMemo, useContext } from 'react';
+import React, { useState, useRef, useMemo, useContext } from 'react';
 import { useSwipeable } from 'react-swipeable';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -174,7 +174,7 @@ export default function Step6() {
   }, [resultByRoom, hiddenRooms]);
 
   return (
-    <div {...handlers} className={styles.step} onClick={handleOuterClick}>
+    <div className={styles.step} onClick={handleOuterClick}>
 
       {/* ─── 선택 메뉴 ─── */}
       <div className={styles.selectWrapper}>
