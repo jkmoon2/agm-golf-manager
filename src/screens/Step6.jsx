@@ -44,6 +44,7 @@ export default function Step6() {
   };
 
   const toggleMenu = e => { e.stopPropagation(); setMenuOpen(o => !o); };
+  const handleOuterClick = () => { if (menuOpen) setMenuOpen(false); };
 
   // ───── 캡처용 refs ─────
   const allocRef  = useRef();
