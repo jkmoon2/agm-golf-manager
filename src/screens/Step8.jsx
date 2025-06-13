@@ -1,6 +1,6 @@
 // src/screens/Step8.jsx
 
-import React, { useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';

@@ -1,6 +1,6 @@
 // src/screens/Step6.jsx
 
-import React, { useRef, useMemo, useContext } from 'react';
+import React, { useState, useRef, useMemo, useContext } from 'react';
 import { useSwipeable } from 'react-swipeable';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
