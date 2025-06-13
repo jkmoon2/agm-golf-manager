@@ -1,0 +1,371 @@
+/* ───────── Step6StrokeResults.module.css ───────── */
+
+/* ───────── step wrapper ───────── */
+.step {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  overflow: visible;
+}
+
+/* ───────── 헤더 ───────── */
+.stepHeader {
+  margin: 0 0 4px 0;
+  position: relative;
+}
+.stepHeader h3 {
+  margin: 0;
+  font-size: 18px;
+  text-align: center;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #ccc;
+}
+
+/* ───────── 선택 버튼 + 드롭다운 래퍼 ───────── */
+.selectWrapper {
+  position: relative;
+  margin: 2px 16px 2px; /* 상/하 2px로 줄여서 헤더–표 간격 최소화 */
+  text-align: right;
+}
+.selectWrapper .selectButton {
+  display: inline-block;
+  padding: 0 12px;
+  height: 32px;
+  line-height: 32px;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  z-index: 10; /* 드롭다운보다 위 */
+}
+
+/* 드롭다운 메뉴 (세로형, 버튼 바로 아래) */
+.selectWrapper .dropdownMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 9999;  /* 최상위로 렌더링 */
+}
+.selectWrapper .dropdownMenu hr {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 4px 0;
+}
+.selectWrapper .dropdownMenu label {
+  white-space: nowrap;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* ───────── 각 테이블 아래 JPG/PDF 버튼 ───────── */
+.actionButtons {
+  margin: 4px 6px 0;
+  text-align: left;
+}
+.actionButtons button {
+  margin-right: 8px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+
+/* ───────── 테이블 컨테이너 ───────── */
+.tableContainer {
+  margin: 8px 6px;
+  flex: none;
+  overflow-x: auto;
+  background: #fff;
+  border: 2px solid #ccc; /* 외곽선 두께 강화 */
+  position: relative;
+}
+.tableContainer .tableTitle {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  padding: 6px 8px;
+  font-size: 16px;
+  text-align: left;
+  margin: 0;
+  border-bottom: 1px solid #bbb; /* 조금 더 연한 선으로 */
+}
+
+/* ───────── 공통 테이블 ───────── */
+.table {
+  border-collapse: collapse;
+  width: auto;
+  min-width: max-content;
+  table-layout: auto;
+}
+/* 내부 실선 약간 얇게 */
+.table th,
+.table td {
+  border: 1px solid #ddd; 
+}
+.header {
+  background: #f7f7f7;
+  padding: 4px 8px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+.cell {
+  padding: 4px 8px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ───────── 합계/결과 셀 ───────── */
+.footerLabel,
+.footerValue,
+.footerBanddang,
+.footerResult,
+.footerRank {
+  padding: 4px 8px;
+  text-align: center;
+  font-weight: bold;
+}
+.tableContainer .table tfoot tr:first-child td {
+  background: #f7f7f7 !important;
+  text-align: center !important;
+}
+
+/* 최종결과표: 반땅·결과 합계 색상 */
+.step > .tableContainer:nth-of-type(3) .table tfoot tr:first-child td.footerBanddang {
+  color: blue  !important;
+}
+.step > .tableContainer:nth-of-type(3) .table tfoot tr:first-child td.footerResult {
+  color: red   !important;
+}
+/* 등수 셀 파란색 */
+.step > .tableContainer:nth-of-type(3) .table tfoot tr:last-child td.footerRank {
+  color: blue !important;
+}
+
+/* ───────── 하단 버튼 ───────── */
+.stepFooter {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding: 6px;
+  background: transparent;
+}
+.stepFooter button {
+  flex: 1;
+  height: 40px;
+  line-height: 40px;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #f0f0f0;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.stepFooter button:hover  { background: #e0e0e0; }
+.stepFooter button:active { background: #d0d0d0; }
+
+/* 1) 박스 내 모든 실선을 좀 더 가는 선으로 통일 */
+.table th,
+.table td {
+  border: 1px solid #ddd;  /* 기존보다 좀 더 연한 가는 실선 */
+}
+
+/* 2) 최종결과표 등수 셀 좌/우 선 삭제 */
+.step > .tableContainer:nth-of-type(3) .table tfoot tr:last-child td.footerRank {
+  border-left: none !important;
+  border-right: none !important;
+}
+
+/* 3) 최종결과표 등수 셀 배경색 아주 연한 노란색 */
+.step > .tableContainer:nth-of-type(3) .table tfoot tr:last-child td.footerRank {
+  background-color: rgba(255, 255, 0, 0.1) !important;
+}
+
+/* 1) “선택” 버튼을 방배정표 우측 외곽선 끝에 딱 붙이기 */
+.selectWrapper {
+  /* 기존 margin: 2px 16px 2px; 그대로 두고, 텍스트 우측 정렬 유지 */
+  text-align: right;
+}
+.selectWrapper .selectButton {
+  /* inline-block 이므로 right padding 대신 margin-right 로 외곽선까지 간격을 0으로 */
+  margin-right: 6px;   /* .tableContainer 가 margin-right:6px 이므로 동일하게 */
+}
+
+/* 2) 방배정표(JPG/PDF 포함) 전체를 위로 8px씩 당겨서 제목과 좀 더 가까이 붙이기 */
+.tableContainer:first-of-type {
+  margin-top: 4px !important;   /* 원래 8px → 4px */
+}
+.actionButtons:first-of-type {
+  margin-top: 0 !important;     /* 원래 4px → 0px */
+}
+
+/* 3) 최종결과표 합계 셀 색상 확실하게 적용 (반땅=파랑, 결과=빨강) */
+.step > .tableContainer:nth-of-type(3) .table tfoot tr:first-child td.footerBanddang {
+  color: #0066cc !important;    /* 보다 진한 파랑 */
+}
+.step > .tableContainer:nth-of-type(3) .table tfoot tr:first-child td.footerResult {
+  color: #cc0000 !important;    /* 보다 진한 빨강 */
+}
+
+/* 4) 모든 박스 내 경계선을 얇은 실선(#ddd 1px)으로 통일 */
+.tableContainer .table th,
+.tableContainer .table td {
+  border: 1px solid #ddd !important;
+}
+
+/* ───────── 1) 외곽 테두리선 완전 제거 ───────── */
+.tableContainer {
+  /* (기존 border:2px solid #ccc; 등은 덮어씌워집니다) */
+  border: none !important;
+}
+
+/* ───────── 2) 제목과 첫 번째 테이블 사이 간격 30% 축소 ───────── */
+.stepHeader {
+  /* 원래 margin-bottom:4px → 4px × 0.7 = 2.8px, 반올림해서 3px 사용 */
+  margin-bottom: 3px !important;
+}
+.tableContainer:first-of-type {
+  /* 원래 margin-top:8px → 8px × 0.7 = 5.6px, 반올림해서 6px 사용 */
+  margin-top: 6px !important;
+}
+
+/* ───────── 3) “선택” 버튼을 표 우측 경계에 딱 붙이기 ───────── */
+.selectWrapper {
+  /* 테이블의 좌우 여백(margin: 8px 6px)이 6px 이므로 동일하게 */
+  margin: 0 6px !important;
+  text-align: right !important;
+}
+.selectWrapper .selectButton {
+  /* 추가 여백 전부 제거해서 표 경계선과 나란히 */
+  margin: 0 !important;
+  padding: 0 12px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+}
+
+/* ───────── 4) 최종결과표 합계 색상 보정 ───────── */
+.resultContainer .footerBanddang {
+  /* 반땅 합계 파랑 */
+  color: blue !important;
+}
+.resultContainer .footerResult {
+  /* 결과 합계 빨강 */
+  color: red !important;
+}
+
+.step > .tableContainer.resultContainer
+  .table tfoot tr:last-child td.footerRank {
+  background-color: rgba(255, 255, 0, 0.1) !important;
+}
+
+
+/* ===================================================== */
+/*  ================ 추가된 전역 클래스 ================  */
+/* ===================================================== */
+
+/* 아래 모든 전역 클래스는 반드시 “하나의 selector 당 하나씩” :global(...) 형태로 작성해야 합니다. */
+
+/* ─── 드롭다운 메뉴 공통(“선택” 버튼과 “☰” 버튼 모두 사용) ─── */
+:global(.dropdownMenu) {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  padding: 8px;
+  display: flex;
+  flex-direction: column; /* 기본적으로 세로 정렬 */
+  gap: 4px;
+  z-index: 10000;         /* 최상위로 띄우기 */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+}
+
+/* 드롭다운 항목 */
+:global(.dropdownItem) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+:global(.dropdownItem:hover) {
+  background: #f0f0f0;
+}
+
+/* 드롭다운 구분선 */
+:global(.dropdownDivider) {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 4px 0;
+}
+
+/* 네비게이션 메뉴(“☰”) 세로 정렬 */
+:global(.vertical) {
+  flex-direction: column;
+}
+
+/* ─── “☰” 버튼 스타일 (헤더 우측 상단) ─── */
+:global(.stepHeader button) {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  z-index: 10;
+  padding: 0;
+}
+
+/* ─── “☰” 버튼을 눌렀을 때 나오는 네비게이션 메뉴 위치 보정 ─── */
+:global(.stepHeader .dropdownMenu) {
+  top: calc(100% + 4px); /* 헤더 바로 아래에 위치 */
+  right: 8px;            /* 헤더 우측 끝에 정렬 */
+}
+
+/* ───────── “☰” 버튼 스타일 (헤더 우측 상단 고정) ───────── */
+.stepHeader .navButton {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  z-index: 10;
+}
+
+/* ───────── 네비게이션용 세로 드롭다운 ───────── */
+.vertical {
+  flex-direction: column;
+}
+
+/* 표 가로 스크롤용 */
+.tableContainer,
+.resultContainer {
+  overflow-x: auto;                   /* 가로 스크롤 허용 */
+  -webkit-overflow-scrolling: touch;   /* iOS 부드러운 스크롤 */
+  touch-action: pan-x;                 /* 수평 제스처 우선, 부모 스와이프 방지 */
+}

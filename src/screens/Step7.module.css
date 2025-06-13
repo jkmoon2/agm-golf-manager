@@ -1,0 +1,197 @@
+/* src/components/Step7StrokeAgmAssign.module.css */
+
+/* ─── Container ─── */
+.step {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ─── 상단 헤더 ─── */
+.stepHeader {
+  margin: 0 0 4px 0;
+}
+.stepHeader h3 {
+  margin: 0;
+  font-size: 18px;
+  text-align: center;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #ccc;
+}
+
+/* ─── 테이블 헤더 ─── */
+.participantRowHeader {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  border-bottom: 2px solid #ccc;
+  background: #f7f7f7;
+  font-weight: 600;
+}
+.participantRowHeader .cell {
+  font-size: 14px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* flex 분배 */
+.participantRowHeader .group,
+.participantRow .group {
+  flex: 0 0 32px;
+}
+.participantRowHeader .nickname,
+.participantRow .nickname {
+  flex: 1;
+}
+.participantRowHeader .handicap,
+.participantRow .handicap {
+  flex: 0 0 32px;
+}
+.participantRowHeader .score,
+.participantRow .score {
+  flex: 0 0 32px;
+}
+.participantRowHeader .manual,
+.participantRow .manual {
+  flex: 0 0 32px;
+}
+.participantRowHeader .force,
+.participantRow .force {
+  flex: 0 0 32px;
+}
+
+/* ─── 리스트 영역 ─── */
+.participantTable {
+  flex: 1;
+  overflow-y: auto;
+  background: #fff;
+}
+
+/* ─── 각 데이터 행 ─── */
+.participantRow {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  height: 36px;
+}
+.participantRow .cell {
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── 입력박스: 조 / G핸디 / 점수 ─── */
+.participantRow .group input,
+.participantRow .handicap input,
+.participantRow .score input {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #f7f7f7;
+  box-sizing: border-box;
+}
+
+/* ─── 닉네임 입력박스 ─── */
+.participantRow .nickname input {
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #f7f7f7;
+  box-sizing: border-box;
+}
+
+/* ─── 수동/취소 버튼 스타일 ─── */
+.participantRow .manual button,
+.participantRow .force button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 28px;
+  background: #fff;
+  border: 1px solid #ccc;
+  color: #007bff;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.participantRow .manual button:hover,
+.participantRow .force button:hover {
+  background: #f0f0f0;
+}
+.participantRow .manual button:active,
+.participantRow .force button:active {
+  background: #e0e0e0;
+}
+
+/* ─── spinner 애니메이션 ─── */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ccc;
+  border-top-color: #333;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── disabled 버튼 투명도 ─── */
+.smallBtn[disabled],
+.textOnly[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─── 하단 버튼 ─── */
+.stepFooter {
+  display: flex;
+  gap: 6px;
+  margin: auto 6px 6px;
+}
+.stepFooter button {
+  flex: 1;
+  height: 36px;
+  line-height: 36px;
+  padding: 0;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #f0f0f0; /* 기본 “이전/다음” 버튼 배경 */
+  color: #333;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.stepFooter button:hover {
+  background: #e0e0e0;
+}
+.stepFooter button:active {
+  background: #d0d0d0;
+}
+
+/* ─── “자동배정/초기화” 전용 스타일 ─── */
+/* 기존 .stepFooter button 스타일보다 우선하도록 !important 처리 */
+.textOnly {
+  background: #fff !important;    /* 버튼 배경 흰색 */
+  color: #007bff !important;      /* 텍스트 파란색 */
+  border-color: #ccc !important;
+}
+.textOnly:hover {
+  background: #f0f0f0;
+}
+.textOnly:active {
+  background: #007bff;
+  color: #fff;
+  border-color: #ccc;
+}

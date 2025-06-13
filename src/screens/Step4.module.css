@@ -1,0 +1,166 @@
+/* src/components/Step4Participant.module.css */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.step4 {
+  /* 추가 전용 스타일 없음 */
+}
+
+/* 1차 헤더: 제목 */
+.stepHeader {
+  margin: 0 0 4px 0;             /* ↓ margin-bottom: 8px → 4px */
+}
+.stepHeader h3 {
+  margin: 0;
+  font-size: 18px;
+  text-align: center;
+  padding-bottom: 4px;           /* ↓ padding-bottom: 8px → 4px */
+  border-bottom: 1px solid #ccc;
+}
+
+/* 2차 헤더: 파일 선택 / 총 슬롯 */
+.excelHeader {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin: 2px 0;                 /* ↓ margin: 8px → 4px */
+  padding: 4px 8px;              /* ↓ padding: 8px → 4px */
+
+  background: #f7f7f7;
+  border-bottom: 1px solid #ccc;
+  font-weight: normal;
+}
+
+/* ← 여기만 수정: display:none → visibility:hidden */
+.manual {
+  visibility: hidden;
+}
+
+.total {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  font-weight: normal;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* 3차 헤더: 컬럼 타이틀 */
+.participantRowHeader {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #ccc;
+  background: #f7f7f7;
+  font-weight: 600;
+}
+.participantRowHeader .group    { flex: 0 0 40px; }
+.participantRowHeader .nickname { flex: 2.5;     }
+.participantRowHeader .handicap { flex: 0 0 50px; }
+.participantRowHeader .delete   { flex: 0 0 40px; font-size: 12px; }
+
+/* 그룹 선택 드롭다운 */
+.groupSelect {
+  width: 100%;
+  height: 32px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+/* 리스트 영역 */
+.participantTable {
+  flex: 1;
+  overflow-y: auto;
+  background: #fff;
+}
+
+.participantRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #eee;
+  height: 40px;
+}
+.participantRow .group    { flex: 0 0 40px; }
+.participantRow .nickname { flex: 2.5;     }
+.participantRow .handicap { flex: 0 0 50px; }
+.participantRow .delete   { flex: 0 0 40px; }
+
+/* 공통 cell 스타일 */
+.cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+/* 닉네임 / G핸디 입력 박스 */
+.nickname input,
+.handicap input {
+  width: 100%;
+  padding: 4px;
+  box-sizing: border-box;
+  text-align: center;
+  font-size: 16px;
+}
+
+/* ─── 하단 버튼 (40px 높이 유지) ─── */
+.stepFooter {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.stepFooter button {
+  flex: 1;
+  height: 40px;
+  line-height: 40px;
+  padding: 0;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.stepFooter button:hover {
+  background: #f0f0f0;
+}
+
+.stepFooter button:active {
+  background: #e0e0e0;
+}
+
+/* 이전/다음(회색) & 추가/삭제(파랑) 버튼 스타일 원본 유지 */
+.stepFooter button:first-child,
+.stepFooter button:last-child {
+  background: #f0f0f0;
+  color: #333;
+}
+.stepFooter button:nth-child(2),
+.stepFooter button:nth-child(3) {
+  color: #007bff;
+}
+
+/* ───────────────────────────────────────────────────────────
+   수동 모드에서 숨겨졌던 “총 슬롯” 텍스트를 다시 보이게 함
+─────────────────────────────────────────────────────────── */
+.total {
+  visibility: visible !important;
+}

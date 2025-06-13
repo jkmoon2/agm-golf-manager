@@ -1,0 +1,8 @@
+# 빌드 폴더
+build/
+# 의존성 폴더
+node_modules/
+# Firebase 관리자 SDK 파일 (민감 정보)
+agm-golf-manager-firebase-adminsdk-*.json
+# 환경 설정 파일
+.env*

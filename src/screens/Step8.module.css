@@ -1,0 +1,296 @@
+/* ─── Container ─── */
+.step {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  overflow: visible;
+}
+
+/* ─── 상단 헤더 ─── */
+.stepHeader {
+  margin: 0 0 4px 0;
+  position: relative; /* navButton을 absolute 배치하려고 */
+}
+.stepHeader h3 {
+  margin: 0;
+  font-size: 18px;
+  text-align: center;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #ccc;
+}
+
+/* ─── 네비게이션 “☰” 버튼 ─── */
+.navButton {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  z-index: 10;
+}
+.navButton:hover {
+  color: #333;
+}
+
+/* ─── 헤더 우측 “☰” 메뉴 드롭다운 ─── */
+.navDropdownMenu {
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  z-index: 9999;
+}
+.dropdownItem {
+  padding: 4px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dropdownItem:hover {
+  background: #f0f0f0;
+}
+
+/* ─── “선택” 버튼 + 드롭다운 래퍼 ─── */
+.selectWrapper {
+  position: relative;
+  margin: 2px 6px;
+  text-align: right;
+}
+.selectWrapper .selectButton {
+  padding: 0 12px;
+  height: 32px;
+  line-height: 32px;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  z-index: 10;
+}
+.selectWrapper .dropdownMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 9999;
+}
+.selectWrapper .dropdownMenu hr {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 4px 0;
+}
+.selectWrapper .dropdownMenu label {
+  white-space: nowrap;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* ─── 중간 컨텐츠 래퍼 (스크롤) ─── */
+.contentWrapper {
+  flex: 1;
+  overflow: auto; /* 전체 화면 세로 스크롤 이 영역에서만 */
+  position: relative;
+  padding-bottom: 12px;
+}
+
+/* ─── 공통 테이블 컨테이너 ─── */
+.tableContainer {
+  margin: 8px 6px;
+  flex: none;
+  overflow-x: auto; /* 가로 스크롤 허용 */
+  overflow-y: auto; /* 세로 스크롤 허용 */
+  max-height: 300px; /* 높이가 넘칠 경우 내부에서 스크롤 */
+  background: #fff;
+  border: 1px solid #ddd;
+  position: relative;
+}
+
+/* 테이블 제목(헤더) */
+.tableContainer .tableTitle {
+  background: #fff;
+  padding: 6px 8px;
+  font-size: 16px;
+  text-align: left;
+  margin: 0;
+  border-bottom: 1px solid #bbb;
+}
+
+/* ─── 테이블 공통 ─── */
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: max-content;
+}
+.table th,
+.table td {
+  border: 1px solid #ddd;
+}
+.header {
+  background: #f7f7f7;
+  padding: 4px 8px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+.cell {
+  padding: 4px 8px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Allocation/Result Footer ─── */
+.footerLabel,
+.footerValue,
+.footerBanddang,
+.footerResult,
+.footerRank {
+  padding: 4px 8px;
+  text-align: center;
+  font-weight: bold;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+}
+.footerValue {
+  color: black; /* G핸디 합계, 점수 합계는 검정 */
+}
+.footerBanddang {
+  color: blue; /* 반땅 합계는 파랑 */
+}
+.footerResult {
+  color: #cc0000; /* 최종 합계는 빨강 */
+}
+/* 등수 셀: 옅은 노란색 배경 */
+.footerRankFinal {
+  padding: 4px 8px;
+  text-align: center;
+  font-weight: bold;
+  color: blue;
+  background-color: rgba(255, 255, 0, 0.2);
+  border: 1px solid #ddd;
+}
+
+/* ─── Team 결과표 컨테이너 ─── */
+.teamContainer {
+  margin: 8px 6px;
+  flex: none;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 400px;
+  background: #fff;
+  border: 1px solid #ddd;
+  position: relative;
+
+  /* ① 제목 위쪽 여백을 8px 주기 위해 padding-top 추가 */
+  padding-top: 8px;
+}
+/* (제목 <h4> 기본 마진 없애기) */
+.teamContainer h4 {
+  margin: 0;
+}
+/* 제목 sticky 제거 */
+.teamContainer .tableTitle {
+  background: #fff;
+  padding: 6px 8px;
+  font-size: 16px;
+  text-align: left;
+  margin: 0;
+  border-bottom: 1px solid #bbb;
+}
+/* ─── Team 테이블 바로 밑 여백 수정 ─── */
+.teamContainer .tableContainer {
+  margin: 8px 6px 8px; /* 상단 8px (제목과 표 사이), 하단 8px 유지 */
+}
+
+/* ─── Team 테이블 공통 ─── */
+.teamContainer .table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: max-content;
+}
+.teamContainer .table th,
+.teamContainer .table td {
+  border: 1px solid #ddd;
+}
+.teamContainer .header {
+  background: #f7f7f7;
+  padding: 4px 8px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+.teamContainer .cell {
+  padding: 4px 8px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.teamContainer .footerResult {
+  padding: 4px 8px;
+  text-align: center;
+  font-weight: bold;
+  color: #cc0000;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+}
+.teamContainer .footerRank {
+  padding: 4px 8px;
+  text-align: center;
+  font-weight: bold;
+  color: blue;
+  background-color: rgba(255, 255, 0, 0.1);
+  border: 1px solid #ddd;
+}
+
+/* ─── 버튼 그룹 ─── */
+.actionButtons {
+  margin: 4px 6px 0;
+  text-align: left;
+}
+.actionButtons button {
+  margin-right: 8px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+
+/* ─── 하단 버튼 ─── */
+.stepFooter {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding: 6px 6px 12px;
+}
+.stepFooter button {
+  flex: 1;
+  height: 40px;
+  line-height: 40px;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #f0f0f0;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.stepFooter button:hover {
+  background: #e0e0e0;
+}
+.stepFooter button:active {
+  background: #d0d0d0;
+}

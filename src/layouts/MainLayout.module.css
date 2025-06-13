@@ -1,0 +1,45 @@
+/* **src/layouts/MainLayout.module.css** */
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.header {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  z-index: 10;
+}
+.title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #333;
+}
+.main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: #f5f5f5;
+}
+
+/* 기본 탭 */
+.navItem {
+  flex: 1;
+  text-align: center;
+  color: #555;
+}
+/* 활성화된 탭(파란색) */
+.navItemActive {
+  flex: 1;
+  text-align: center;
+  color: #0066ff; /* 파란색 */
+}
+/* 아이콘 크기 */
+.icon {
+  width: 24px;
+  height: 24px;
+}

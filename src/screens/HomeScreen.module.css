@@ -1,0 +1,31 @@
+/* **src/screens/HomeScreen.module.css** */
+
+.container { padding: 16px; overflow-y: auto; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.card {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: box-shadow .2s;
+}
+.card:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+
+/* 검정 텍스트(제목) 크게 */
+.stepTitle {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 8px;
+}
+/* 파란 텍스트(설명) 작게 */
+.stepDesc1, .stepDesc2 {
+  font-size: 0.75rem;
+  color: #007bff;
+  line-height: 1.2;
+}

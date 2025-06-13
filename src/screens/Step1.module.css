@@ -1,0 +1,97 @@
+/* src/components/Step1ModeTitle.module.css */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.step1 {
+  /* Step1 전용 추가 스타일 */
+}
+
+.stepHeader {
+  margin-bottom: 8px;
+}
+
+.stepHeader h3 {
+  font-size: 18px;
+  text-align: center;
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ccc;
+}
+
+.btnGroup {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.btnGroup button {
+  flex: 1;
+  padding: 8px;
+  font-size: 14px;
+  background: #fff;
+  border: 1px solid #ccc;
+  cursor: pointer;
+  color: #007bff;
+  height: 40px;
+  transition: background 0.2s ease;
+}
+
+.btnGroup button:hover {
+  background: #f0f0f0;
+}
+
+.btnGroup button.active {
+  background: #007bff;
+  color: #fff;
+  border-color: #007bff;
+}
+
+.fullWidthInput {
+  width: 100%;
+  padding: 8px;
+  font-size: 14px;
+  margin-top: 4px;
+  margin-bottom: 12px;
+  height: 40px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.fullWidthInput:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.stepFooter {
+  margin-top: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* ▼ 하단 버튼: 높이 40px, 텍스트 중앙 정렬, 회색 배경(기존 스타일) ▼ */
+.stepFooter button {
+  flex: 1;
+  height: 40px;      /* 입력박스와 동일 높이 */
+  line-height: 40px; /* 텍스트 수직 중앙 정렬 */
+  padding: 0;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid #ccc;
+  background: #f0f0f0; /* 회색 배경 */
+  color: #333;         /* 검은 텍스트 */
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.stepFooter button:hover {
+  background: #e0e0e0; /* 호버 시 진한 회색 */
+}
+
+.stepFooter button:active {
+  background: #d0d0d0; /* 클릭 시 더 진한 회색 */
+}

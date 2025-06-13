@@ -1,0 +1,65 @@
+/* **src/screens/LoginScreen.module.css** */
+
+.container {
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #f5f5f5;
+}
+
+.card {
+  width: 320px;
+  padding: 0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.cardInner {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.title {
+  margin: 0 0 16px;
+  font-size: 1.25rem;
+  text-align: center;
+  color: #333;
+}
+
+.label {
+  display: block;
+  margin: 8px 0 4px;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.button {
+  width: 100%;
+  /* 입력창과 동일한 간격(12px)만큼 아래로 이동 */
+  margin-top: 12px;
+  padding: 12px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.button:hover {
+  background: #0069d9;
+}
