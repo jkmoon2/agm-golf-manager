@@ -9,7 +9,6 @@ import { StepContext } from "../flows/StepFlow";
 export default function Step4(props) {
   const navigate = useNavigate();
   const {
-    mode,
     uploadMethod,
     participants,
     setParticipants,

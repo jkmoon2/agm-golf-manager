@@ -1,6 +1,6 @@
 // src/screens/Step8.jsx
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useRef, useMemo } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';
@@ -20,7 +20,6 @@ export default function Step8({
   // ── 1) UI 상태 ───────────────────────────────────────────
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
-  const [navMenuOpen, setNavMenuOpen]       = useState(false);
   const [visibleMetrics, setVisibleMetrics] = useState({
     score: true,
     banddang: true
