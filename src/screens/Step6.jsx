@@ -31,7 +31,6 @@ export default function Step6() {
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const [menuOpen, setMenuOpen]             = useState(false);
-  const [navOpen, setNavOpen]               = useState(false);
 
   // “선택” 메뉴: 방 숨기기 토글, 점수·반땅 토글
   const toggleRoom   = idx => {
