@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
-import { HomeIcon, UserGroupIcon, UserIcon, ChartBarIcon } from '@heroicons/react/outline'; 
+import { HomeIcon, UserGroupIcon, UserIcon, ChartBarIcon } from '@heroicons/react/24/outline';
 import styles from './MainLayout.module.css';
 
 export default function MainLayout() {
