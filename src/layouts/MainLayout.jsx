@@ -7,14 +7,19 @@ import styles from './MainLayout.module.css';
 
 export default function MainLayout() {
   return (
-    <div className={styles.page}>
-      <header>…</header>
+    <div className={styles.app}>
+      {/* ─── 상단 헤더 ─── */}
+      <header className={styles.header}>
+        <h1 className={styles.title}>Golf Manager</h1>
+      </header>
 
-      <main>
+      {/* ─── 중간 콘텐츠 영역 ─── */}
+      <main className={styles.content}>
         <Outlet />
       </main>
 
-      <footer className={styles.footerNav}>
+      {/* ─── 하단 탭바 ─── */}
+      <footer className={styles.tabbar}>
         <NavLink
           to="/"
           end
@@ -23,7 +28,7 @@ export default function MainLayout() {
           }
         >
           <HomeIcon className={styles.icon} />
-          <span>홈</span>
+          <span className={styles.label}>홈</span>
         </NavLink>
 
         <NavLink
@@ -33,7 +38,7 @@ export default function MainLayout() {
           }
         >
           <UserGroupIcon className={styles.icon} />
-          <span>운영자</span>
+          <span className={styles.label}>운영자</span>
         </NavLink>
 
         <NavLink
@@ -43,7 +48,7 @@ export default function MainLayout() {
           }
         >
           <UserIcon className={styles.icon} />
-          <span>참가자</span>
+          <span className={styles.label}>참가자</span>
         </NavLink>
 
         <NavLink
@@ -53,7 +58,7 @@ export default function MainLayout() {
           }
         >
           <ChartBarIcon className={styles.icon} />
-          <span>대시보드</span>
+          <span className={styles.label}>대시보드</span>
         </NavLink>
       </footer>
     </div>
