@@ -217,7 +217,7 @@ export default function Step6() {
       </div>
 
       {/* ─── 방배정표 ─── */}
-      <div ref={allocRef} className={styles.tableContainer}>
+      <div {...handlers} ref={allocRef} className={styles.tableContainer}>
         <h4 className={styles.tableTitle}>🏠 방배정표</h4>
         <table className={styles.table}>
           <thead>
@@ -279,7 +279,7 @@ export default function Step6() {
       </div>
 
       {/* ─── 최종결과표 ─── */}
-      <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
+      <div {...handlers} ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
         <h4 className={styles.tableTitle}>📊 최종결과표</h4>
         <table className={styles.table}>
           <thead>
