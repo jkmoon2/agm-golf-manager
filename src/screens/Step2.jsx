@@ -1,22 +1,23 @@
 // src/screens/Step2.jsx
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import styles from "./Step2.module.css";
+import { StepContext } from "../flows/StepFlow";
 
-export default function Step2({
-  step,
-  roomCount,
-  setRoomCount,
-  roomNames,
-  setRoomNames
-}) {
+export default function Step2() {
   const navigate = useNavigate();
 
-  // 기본 방 개수: props.roomCount가 없거나 3 미만이면 4로 초기화
-  const defaultCount = Number(roomCount) >= 3 ? roomCount : 4;
+  // ── Context에서만 꺼내세요 ──
+  const {
+    roomCount,
+    setRoomCount,
+    roomNames,
+    setRoomNames
+  } = useContext(StepContext);
 
-  // 1) 로컬 상태: localRoomCount, localRoomNames
+  // ── 로컬 상태 ──
+  const defaultCount = Number(roomCount) >= 3 ? roomCount : 4;
   const [localRoomCount, setLocalRoomCount] = useState(defaultCount);
   const [localRoomNames, setLocalRoomNames] = useState(
     Array.isArray(roomNames) && roomNames.length >= defaultCount
@@ -25,7 +26,7 @@ export default function Step2({
   );
   const [composingIdx, setComposingIdx] = useState(null);
 
-  // 2) props가 바뀔 때마다 local 상태 동기화
+  // ── Effect 동기화 로직 (기존 그대로) ──
   useEffect(() => {
     const count = Number(roomCount) >= 3 ? roomCount : 4;
     setLocalRoomCount(count);
@@ -36,7 +37,6 @@ export default function Step2({
     );
   }, [roomCount, roomNames]);
 
-  // 3) localRoomCount가 바뀔 때마다 localRoomNames 길이 맞춤
   useEffect(() => {
     const count = Number(localRoomCount) || 0;
     if (count < 1) return;
@@ -51,10 +51,8 @@ export default function Step2({
     });
   }, [localRoomCount]);
 
-  // 4) IME 조합 추적용
-  const handleNameCompositionStart = idx => {
-    setComposingIdx(idx);
-  };
+  // ── 핸들러들 (기존 그대로) ──
+  const handleNameCompositionStart = idx => setComposingIdx(idx);
   const handleNameCompositionEnd = (e, idx) => {
     setComposingIdx(null);
     const newNames = [...localRoomNames];
@@ -62,23 +60,18 @@ export default function Step2({
     setLocalRoomNames(newNames);
   };
 
-  // 5) 방 개수 onBlur 시 Firestore 쓰기
   const handleRoomCountBlur = () => {
     let finalCount = Number(localRoomCount);
     if (isNaN(finalCount) || finalCount < 3) finalCount = 3;
     if (finalCount > 20) finalCount = 20;
     setLocalRoomCount(finalCount);
-
-    // Firestore에 방 개수 저장
     setRoomCount(finalCount);
 
-    // 방 이름 배열도 초기화
-    const resizedNames = Array(finalCount).fill("");
-    setLocalRoomNames(resizedNames);
-    setRoomNames(resizedNames);
+    const resized = Array(finalCount).fill("");
+    setLocalRoomNames(resized);
+    setRoomNames(resized);
   };
 
-  // 6) 방 이름 onBlur 시 Firestore 쓰기
   const handleRoomNameBlur = (idx, e) => {
     if (composingIdx !== idx) {
       const tmp = [...localRoomNames];
@@ -89,69 +82,58 @@ export default function Step2({
   };
 
   return (
-    <div className={`${styles.step} ${styles.step2}`}>
-      {/* stepBody 클래스로 변경 */}
-      <div className={styles.stepBody}>
-        {/* ─── 방 개수 선택 영역 ─── */}
-        <div className={styles.roomCountSelector}>
+    <div className={styles.step}>
+      {/* 방 개수 설정 */}
+      <div className={styles.roomCountSelector}>
+        <button
+          className={styles.rpBtn}
+          onClick={() => setLocalRoomCount(c => Math.max(3, c - 1))}
+          onBlur={handleRoomCountBlur}
+        >
+          –
+        </button>
+        {[3, 4, 5, 6, 7, 8].map(n => (
           <button
-            className={styles.rpBtn}
-            onClick={() => setLocalRoomCount(c => Math.max(3, c - 1))}
-          >
-            –
-          </button>
-          {[3, 4, 5, 6, 7, 8].map(n => (
-            <button
-              key={n}
-              className={localRoomCount === n ? styles.active : undefined}
-              onClick={() => setLocalRoomCount(n)}
-            >
-              {n}개
-            </button>
-          ))}
-          <button
-            className={styles.rpBtn}
-            onClick={() => setLocalRoomCount(c => c + 1)}
-          >
-            ＋
-          </button>
-
-          <input
-            type="number"
-            value={localRoomCount}
-            onChange={e => {
-              const v = Number(e.target.value);
-              setLocalRoomCount(isNaN(v) ? 3 : v);
-            }}
+            key={n}
+            className={localRoomCount === n ? styles.active : undefined}
+            onClick={() => setLocalRoomCount(n)}
             onBlur={handleRoomCountBlur}
-            min={3}
-            max={20}
-          />
-        </div>
-
-        {/* ─── 방 이름 입력 영역 (스크롤 가능) ─── */}
-        <div className={`${styles.roomNames} ${styles.scrollArea}`}>
-          {(localRoomNames || []).map((name, i) => (
-            <div key={i} className={styles.roomNameRow}>
-              <label>{i + 1}번 방:</label>
-              <input
-                type="text"
-                value={name}
-                onChange={e => {
-                  const tmp = [...localRoomNames];
-                  tmp[i] = e.target.value;
-                  setLocalRoomNames(tmp);
-                }}
-                onCompositionStart={() => handleNameCompositionStart(i)}
-                onCompositionEnd={e => handleNameCompositionEnd(e, i)}
-                onBlur={e => handleRoomNameBlur(i, e)}
-              />
-            </div>
-          ))}
-        </div>
+          >
+            {n}개
+          </button>
+        ))}
+        <button
+          className={styles.rpBtn}
+          onClick={() => setLocalRoomCount(c => c + 1)}
+          onBlur={handleRoomCountBlur}
+        >
+          ＋
+        </button>
+        {/* 숫자 입력 박스는 CSS로 숨김 처리 */}
       </div>
 
-      {/* stepFooter는 CSS에서 정의된 styles.stepFooter */}
+      {/* 방 이름 입력 */}
+      <div className={styles.roomNames}>
+        {localRoomNames.map((name, i) => (
+          <div key={i} className={styles.roomNameRow}>
+            <label>{i + 1}번 방:</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => {
+                const tmp = [...localRoomNames];
+                tmp[i] = e.target.value;
+                setLocalRoomNames(tmp);
+              }}
+              onCompositionStart={() => handleNameCompositionStart(i)}
+              onCompositionEnd={e => handleNameCompositionEnd(e, i)}
+              onBlur={e => handleRoomNameBlur(i, e)}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* 이전/다음 버튼 */}
       <div className={styles.stepFooter}>
         <button onClick={() => navigate("/step/1")}>← 이전</button>
         <button onClick={() => navigate("/step/3")}>다음 →</button>

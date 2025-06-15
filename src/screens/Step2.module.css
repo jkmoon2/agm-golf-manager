@@ -4,6 +4,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow-x: hidden; /* 가로 스크롤 방지 */
 }
 
 .step2 {
@@ -26,17 +27,24 @@
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+  align-items: center;
+}
+
+/* 숫자 입력 박스 숨김 */
+.roomCountSelector input[type="number"] {
+  display: none;
 }
 
 .rpBtn {
   flex: 0 0 auto;
+  width: 40px;       /* 버튼을 정사각형으로 */
+  height: 40px;
   padding: 8px;
   font-size: 14px;
   background: #fff;
   border: 1px solid #ccc;
   cursor: pointer;
   color: #007bff;
-  height: 40px;
   transition: background 0.2s ease;
   white-space: nowrap;
 }
