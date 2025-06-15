@@ -1,31 +1,22 @@
-/* src/components/StepPage.module.css */
-
-/* StepPage 레이아웃 */
 .container {
   display: flex;
   flex-direction: column;
-  /* 전체 높이에서 탭바(56px)와 메인 헤더(48px)를 제외 */
-  height: calc(100vh - 56px - 48px);
-  overflow: hidden;
+  height: 100%;
 }
-
-.header {
-  flex: 0 0 auto;
-  background: #ffffff;
-  padding: 8px 16px;
-  border-bottom: 1px solid #dddddd;
+.stepHeader {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: #f9f9f9;
+  border-bottom: 1px solid #ddd;
 }
-
-.header .title {
+.stepTitle {
+  font-size: 1.125rem;
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #333333;
 }
-
-.content {
-  flex: 1 1 auto;
+.stepContent {
+  flex: 1;
   overflow-y: auto;
-  background: #f5f5f5;
-  padding: 6px 16px 14px;
+  padding: 16px;
 }
