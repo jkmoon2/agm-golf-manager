@@ -7,10 +7,6 @@
   overflow-x: hidden; /* 가로 스크롤 방지 */
 }
 
-.step2 {
-  /* Step2 전용 스타일 공간 */
-}
-
 .stepHeader {
   margin-bottom: 8px;
 }

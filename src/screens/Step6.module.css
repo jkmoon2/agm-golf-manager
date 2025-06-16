@@ -7,6 +7,7 @@
   height: 100%;
   position: relative;
   overflow: visible;
+  padding-top: 0;
 }
 
 /* ───────── 헤더 ───────── */
@@ -18,15 +19,19 @@
   margin: 0;
   font-size: 18px;
   text-align: center;
-  padding-bottom: 4px;
-  border-bottom: 1px solid #ccc;
+  padding-bottom: 0;   /* 아래 패딩 제거 */
+  border-bottom: none; /* 기본 border-bottom 제거 */
+  margin-bottom: 0;    /* 아래 여백 제거 */
 }
 
 /* ───────── 선택 버튼 + 드롭다운 래퍼 ───────── */
 .selectWrapper {
-  position: relative;
+  position: absolute !important;
   margin: 2px 16px 2px; /* 상/하 2px로 줄여서 헤더–표 간격 최소화 */
   text-align: right;
+  top: 0;   /* 상단 여백을 약간 두고 싶으면 8px, 아니면 0 */
+  right: 0; /* 우측 끝에서 8px 띄움 */
+  z-index: 10;
 }
 .selectWrapper .selectButton {
   display: inline-block;
@@ -156,15 +161,17 @@
 /* ───────── 하단 버튼 ───────── */
 .stepFooter {
   display: flex;
-  gap: 8px;
-  margin-top: auto;
-  padding: 6px;
+  gap: 8px;              /* 버튼 사이 좌/우 간격을 8px → 12px 로 키움 */
+  margin-top: auto;      /* 본문 아래로 밀어내기 */
+  padding: 0 0;          /* 좌우 여백 추가 */
+  margin-bottom:0;       /* 하단 네비 바로 위에 작은 여백 */
   background: transparent;
 }
 .stepFooter button {
   flex: 1;
-  height: 40px;
-  line-height: 40px;
+  height: 40px;           /* 40px → 48px 로 키워서 터치 영역 확보 */
+  line-height: 40px;      /* 텍스트 수직 중앙 정렬 */
+  padding: 0;             /* 수직 여백 제거 (height 로 통제) */
   font-size: 14px;
   text-align: center;
   border: 1px solid #ccc;
