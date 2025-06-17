@@ -1,7 +1,6 @@
 // src/screens/Step6.jsx
 
 import React, { useState, useRef, useMemo, useContext } from 'react';
-import { useSwipeable } from 'react-swipeable';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step6.module.css';
@@ -16,14 +15,6 @@ export default function Step6() {
     goPrev,            // 이전 단계로 돌아가는 함수
     setStep            // 특정 단계로 이동 (홈은 1)
   } = useContext(StepContext);
-
-  // Swipeable 핸들러: 좌 스와이프 무시, 아래로 드래그 시 홈(1) 이동
-  const handlers = useSwipeable({
-    onSwipedLeft: () => {},       // 좌로 밀어도 반응 없음
-    onSwipedDown: () => setStep(1), // 아래로 끌면 1페이지(홈)
-    preventScrollOnSwipe: true,
-    trackMouse: true
-  });
 
   const maxRows = 4; // 한 방당 최대 4명
 
@@ -217,7 +208,7 @@ export default function Step6() {
       </div>
 
       {/* ─── 방배정표 ─── */}
-      <div {...handlers} ref={allocRef} className={styles.tableContainer}>
+      <div ref={allocRef} className={styles.tableContainer}>
         <h4 className={styles.tableTitle}>🏠 방배정표</h4>
         <table className={styles.table}>
           <thead>
@@ -279,7 +270,7 @@ export default function Step6() {
       </div>
 
       {/* ─── 최종결과표 ─── */}
-      <div {...handlers} ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
+      <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
         <h4 className={styles.tableTitle}>📊 최종결과표</h4>
         <table className={styles.table}>
           <thead>

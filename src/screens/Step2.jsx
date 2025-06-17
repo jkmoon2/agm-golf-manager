@@ -1,19 +1,19 @@
 // src/screens/Step2.jsx
 
 import React, { useState, useEffect, useContext } from "react";
-import { useNavigate } from "react-router-dom";
 import styles from "./Step2.module.css";
 import { StepContext } from "../flows/StepFlow";
 
 export default function Step2() {
-  const navigate = useNavigate();
 
   // ── Context에서만 꺼내세요 ──
   const {
     roomCount,
     setRoomCount,
     roomNames,
-    setRoomNames
+    setRoomNames,
+    goPrev,
+    goNext
   } = useContext(StepContext);
 
   // ── 로컬 상태 ──
@@ -135,8 +135,8 @@ export default function Step2() {
 
       {/* 이전/다음 버튼 */}
       <div className={styles.stepFooter}>
-        <button onClick={() => navigate("/step/1")}>← 이전</button>
-        <button onClick={() => navigate("/step/3")}>다음 →</button>
+        <button onClick={goPrev}>← 이전</button>
+        <button onClick={goNext}>다음 →</button>
       </div>
     </div>
   );

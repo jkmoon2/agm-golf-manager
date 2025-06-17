@@ -2,12 +2,10 @@
 
 import React, { useState, useEffect, useRef, useContext } from "react";
 import styles from "./Step1.module.css";
-import { useNavigate } from "react-router-dom";
 import { StepContext } from "../flows/StepFlow";
 
 export default function Step1() {
-  const { mode, setMode, title, setTitle, resetAll } = useContext(StepContext);
-  const navigate = useNavigate();
+  const { mode, setMode, title, setTitle, resetAll, goNext } = useContext(StepContext);
 
   const [localTitle, setLocalTitle] = useState(title || "");
   useEffect(() => {
@@ -34,13 +32,13 @@ export default function Step1() {
         <div className={styles.btnGroup}>
           <button
             className={mode === "stroke" ? styles.active : undefined}
-            onClick={() => setMode("stroke")}
+            onClick={() => setMode('stroke')}
           >
             스트로크 모드
           </button>
           <button
             className={mode === "agm" ? styles.active : undefined}
-            onClick={() => setMode("agm")}
+            onClick={() => setMode('agm')}
           >
             AGM 포볼 모드
           </button>
@@ -53,10 +51,10 @@ export default function Step1() {
           className={styles.fullWidthInput}
           placeholder="대회 제목을 입력하세요"
           value={localTitle}
-          onChange={(e) => setLocalTitle(e.target.value)}
+          onChange={e => setLocalTitle(e.target.value)}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
-          onBlur={(e) => {
+          onBlur={e => {
             if (!composing) {
               const final = e.target.value.trim();
               setLocalTitle(final);
@@ -68,16 +66,24 @@ export default function Step1() {
 
       {/* 하단 버튼 */}
       <div className={styles.stepFooter}>
+        {/* 전체 초기화 */}
         <button
           style={{ background: "#d32f2f", color: "#fff", marginRight: 8 }}
-          onClick={resetAll}
+          onClick={() => {
+            if (window.confirm("정말 전체 초기화하시겠습니까?\n(모든 설정이 삭제됩니다)")) {
+              resetAll();
+              setLocalTitle("");
+              setTitle("");
+            }
+          }}
         >
           전체 초기화
         </button>
+
+        {/* 다음으로 (대회명 입력 후에만 활성화) */}
         <button
           disabled={!canNext}
-          onClick={() => navigate("/step/2")}
-        >
+          onClick={goNext}>
           시작 →
         </button>
       </div>

@@ -1,20 +1,20 @@
 // src/screens/Step8.jsx
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useContext } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';
-import { useNavigate } from 'react-router-dom';
+import { StepContext } from '../flows/StepFlow';
 
-export default function Step8({
-  participants = [], // [{id,…},…] → undefined 보호
-  roomCount,
-  roomNames = [],
-  onPrev,
-  onNext,
-  goToStep        // 네비게이션용: App.js에서 반드시 전달해주세요.
-}) {
-  const navigate = useNavigate();
+export default function Step8() {
+  const {
+    participants = [],
+    roomCount,
+    roomNames = [],
+    goPrev: onPrev,
+    goNext: onNext
+  } = useContext(StepContext);
+
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
   // ── 1) UI 상태 ───────────────────────────────────────────
@@ -782,8 +782,8 @@ export default function Step8({
 
       {/* ─── 하단 버튼 ─── */}
       <div className={styles.stepFooter}>
-        <button onClick={() => navigate('/step/7')}>← 이전</button>
-        <button onClick={() => navigate('/')}>홈</button>
+        <button onClick={onPrev}>← 이전</button>
+        <button onClick={onNext}>홈</button>
       </div>
     </div>
   );

@@ -8,12 +8,15 @@
   position: relative;
   overflow: visible;
   padding-top: 0;
+  margin-top: 0;
 }
 
 /* ───────── 헤더 ───────── */
 .stepHeader {
-  margin: 0 0 4px 0;
+  
   position: relative;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 .stepHeader h3 {
   margin: 0;
@@ -90,6 +93,7 @@
   background: #fff;
   border: 2px solid #ccc; /* 외곽선 두께 강화 */
   position: relative;
+  margin-bottom: 4px;
 }
 .tableContainer .tableTitle {
   position: sticky;

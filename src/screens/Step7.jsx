@@ -1,22 +1,21 @@
 // src/screens/Step7.jsx
 
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
+import { StepContext } from '../flows/StepFlow';
 
-export default function Step7({
-  participants,    // [{ id, group, nickname, handicap, score, room, partner }, …]
-  rooms,           // [1,2,…N]
-  roomNames,       // [“첫번째방이름”, “두번째방이름”, …]
-  onScoreChange,   // (id, value) => void
-  onManualAssign,  // (id) => void       (App.js 의 handleAgmManualAssign)
-  onCancel,        // (id) => void       (App.js 의 handleAgmCancel)
-  onAutoAssign,    // () => void         (App.js 의 handleAgmAutoAssign)
-  onReset,         // () => void         (App.js 의 handleAgmReset)
-  onPrev,          // () => void (이전)
-  onNext           // () => void (다음)
-}) {
-  const navigate = useNavigate();
+export default function Step7() {
+  const {
+    participants,      // [{ id, group, nickname, handicap, score, room, partner }, …]
+    onScoreChange,     // (id, value) => void
+    handleAgmManualAssign: onManualAssign,
+    handleAgmCancel:      onCancel,
+    handleAgmAutoAssign:  onAutoAssign,
+    handleAgmReset:       onReset,
+    goPrev:               onPrev,
+    goNext:               onNext
+  } = useContext(StepContext);
+
   const half = (participants || []).length / 2;  // 보호 추가
   const [loadingId, setLoadingId] = useState(null);
 
@@ -111,10 +110,10 @@ export default function Step7({
 
       {/* 하단 버튼 */}
       <div className={styles.stepFooter}>
-        <button onClick={() => navigate('/step/6')}>← 이전</button>
+        <button onClick={onPrev}>← 이전</button>
         <button onClick={onAutoAssign} className={styles.textOnly}>자동배정</button>
         <button onClick={onReset}     className={styles.textOnly}>초기화</button>
-        <button onClick={() => navigate('/step/8')}>다음 →</button>
+        <button onClick={onNext}>다음 →</button>
       </div>
     </div>
   );

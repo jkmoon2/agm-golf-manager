@@ -3,17 +3,17 @@
 import React, { useContext } from "react";
 import styles from "./Step4.module.css";
 import { db, firebase } from "../firebase";
-import { useNavigate } from "react-router-dom";
 import { StepContext } from "../flows/StepFlow";
 
 export default function Step4(props) {
-  const navigate = useNavigate();
   const {
     uploadMethod,
     participants,
     setParticipants,
     roomCount,
-    handleFile
+    handleFile,
+    goPrev,
+    goNext
   } = useContext(StepContext);
 
   // ─────────────────────────────────────────────────────────
@@ -198,10 +198,10 @@ export default function Step4(props) {
 
       {/* 하단 버튼 (이전/추가/삭제/다음) */}
       <div className={styles.stepFooter}>
-        <button onClick={() => navigate("/step/3")}>← 이전</button>
+        <button onClick={goPrev}>← 이전</button>
         <button onClick={() => addParticipant()}>추가</button>
         <button onClick={() => delSelected()}>삭제</button>
-        <button onClick={() => navigate("/step/5")}>다음 →</button>
+        <button onClick={goNext}>다음 →</button>
       </div>
     </div>
   );
