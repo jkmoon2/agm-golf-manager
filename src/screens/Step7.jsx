@@ -1,46 +1,59 @@
-// src/screens/Step7.jsx
-
 import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
 
 export default function Step7() {
   const {
-    participants,      // [{ id, group, nickname, handicap, score, room, partner }, …]
-    onScoreChange,     // (id, value) => void
+    participants,
+    onScoreChange,
     handleAgmManualAssign: onManualAssign,
-    handleAgmCancel:      onCancel,
-    handleAgmAutoAssign:  onAutoAssign,
-    handleAgmReset:       onReset,
-    goPrev:               onPrev,
-    goNext:               onNext
+    handleAgmCancel: onCancel,
+    handleAgmAutoAssign: onAutoAssign,
+    handleAgmReset: onReset,
+    goPrev: onPrev,
+    goNext: onNext
   } = useContext(StepContext);
 
-  const half = (participants || []).length / 2;  // 보호 추가
+  const half = (participants || []).length / 2;
   const [loadingId, setLoadingId] = useState(null);
 
-  // “이미 partner가 있는 1조인지 확인” (partner 짝이 이미 있는 상태라면 disable)
+  // 이미 파트너가 있으면 disable
   const isCompleted = id => {
-    const p1 = (participants || []).find(p => p.id === id);
-    if (!p1 || p1.room == null) return false;
-    return (participants || []).some(
-      p => p.id >= half && p.room === p1.room
-    );
+    const me = participants.find(p => p.id === id);
+    return !me || me.room == null
+      ? false
+      : participants.some(p => p.room === me.room && p.id !== id);
   };
 
-  function handleAgmAssign(id) {
+  // 수동 클릭: 한 번만 호출, 로딩 스피너만 관리
+  const handleManualClick = id => {
     if (isCompleted(id)) return;
     setLoadingId(id);
+    onManualAssign(id);
     setTimeout(() => {
-      onManualAssign(id);
       setLoadingId(null);
-    }, 500);
-  }
+    }, 300);
+  };
+
+  // 취소 클릭: 파트너가 있을 때만 활성화
+  const handleCancelClick = id => {
+    onCancel(id);
+  };
+
+  // 자동 클릭: 알림 없음
+  const handleAutoClick = () => {
+    onAutoAssign();
+  };
+
+  // 초기화 클릭
+  const handleResetClick = () => {
+    onReset();
+  };
 
   return (
     <div className={styles.step}>
 
-      {/* 테이블 헤더 */}
+      {/* …헤더는 원본 그대로… */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
@@ -50,7 +63,7 @@ export default function Step7() {
         <div className={`${styles.cell} ${styles.force}`}>취소</div>
       </div>
 
-      {/* 참가자 리스트 */}
+      {/* …테이블도 원본 그대로… */}
       <div className={styles.participantTable}>
         {(participants || []).map(p => {
           const isGroup1 = p.id < half;
@@ -58,16 +71,16 @@ export default function Step7() {
 
           return (
             <div className={styles.participantRow} key={p.id}>
-              <div className={`${styles.cell} ${styles.group}`}>  
+              <div className={`${styles.cell} ${styles.group}`}>
                 <input type="text" value={isGroup1 ? '1조' : '2조'} disabled />
               </div>
-              <div className={`${styles.cell} ${styles.nickname}`}>  
+              <div className={`${styles.cell} ${styles.nickname}`}>
                 <input type="text" value={p.nickname} disabled />
               </div>
-              <div className={`${styles.cell} ${styles.handicap}`}>  
+              <div className={`${styles.cell} ${styles.handicap}`}>
                 <input type="text" value={p.handicap} disabled />
               </div>
-              <div className={`${styles.cell} ${styles.score}`}>  
+              <div className={`${styles.cell} ${styles.score}`}>
                 <input
                   type="number"
                   value={p.score ?? ''}
@@ -75,15 +88,16 @@ export default function Step7() {
                 />
               </div>
 
-              <div className={`${styles.cell} ${styles.manual}`}>  
+              {/* 수동 버튼: handleManualClick 단 한 번만 호출 */}
+              <div className={`${styles.cell} ${styles.manual}`}>
                 {isGroup1 ? (
                   <button
                     className={styles.smallBtn}
-                    onClick={() => handleAgmAssign(p.id)}
+                    onClick={() => handleManualClick(p.id)}
                     disabled={done || loadingId === p.id}
                   >
                     {loadingId === p.id
-                      ? <span className={styles.spinner}/> 
+                      ? <span className={styles.spinner}/>
                       : done ? '완료' : '수동'}
                   </button>
                 ) : (
@@ -91,11 +105,13 @@ export default function Step7() {
                 )}
               </div>
 
-              <div className={`${styles.cell} ${styles.force}`}>  
+              {/* 취소 버튼: partner가 있을 때만 활성화, 클릭 시 한 번만 alert */}
+              <div className={`${styles.cell} ${styles.force}`}>
                 {isGroup1 ? (
                   <button
                     className={styles.smallBtn}
-                    onClick={() => { if (!p.room) return; onCancel(p.id); }}
+                    onClick={() => handleCancelClick(p.id)}
+                    disabled={!p.partner}
                   >
                     취소
                   </button>
@@ -108,11 +124,15 @@ export default function Step7() {
         })}
       </div>
 
-      {/* 하단 버튼 */}
+      {/* 하단 네비게이션 (원본 그대로) */}
       <div className={styles.stepFooter}>
         <button onClick={onPrev}>← 이전</button>
-        <button onClick={onAutoAssign} className={styles.textOnly}>자동배정</button>
-        <button onClick={onReset}     className={styles.textOnly}>초기화</button>
+        <button onClick={handleAutoClick} className={styles.textOnly}>
+          자동배정
+        </button>
+        <button onClick={handleResetClick} className={styles.textOnly}>
+          초기화
+        </button>
         <button onClick={onNext}>다음 →</button>
       </div>
     </div>

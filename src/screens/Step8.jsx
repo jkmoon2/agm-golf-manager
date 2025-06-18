@@ -7,13 +7,13 @@ import styles from './Step8.module.css';
 import { StepContext } from '../flows/StepFlow';
 
 export default function Step8() {
-  const {
-    participants = [],
-    roomCount,
-    roomNames = [],
-    goPrev: onPrev,
-    goNext: onNext
-  } = useContext(StepContext);
+const {
+  participants,
+  roomCount,
+  roomNames,
+  goPrev,
+  goNext
+} = useContext(StepContext);
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
@@ -782,8 +782,8 @@ export default function Step8() {
 
       {/* ─── 하단 버튼 ─── */}
       <div className={styles.stepFooter}>
-        <button onClick={onPrev}>← 이전</button>
-        <button onClick={onNext}>홈</button>
+        <button onClick={goPrev}>← 이전</button>
+        <button onClick={goNext}>홈</button>
       </div>
     </div>
   );
