@@ -19,7 +19,7 @@ export const StepContext = createContext();
 export default function StepFlow() {
   const navigate = useNavigate();
 
-  // ── 1. 상태 선언 ─────────────────────────────────────────────
+  // ── 1. 상태 선언 ───────────────────────────────────────────
   const [mode, setMode]                 = useState('stroke');
   const [title, setTitle]               = useState('');
   const [roomCount, setRoomCount]       = useState(4);
@@ -27,7 +27,7 @@ export default function StepFlow() {
   const [uploadMethod, setUploadMethod] = useState('');
   const [participants, setParticipants] = useState([]);
 
-  // ── Firestore 문서 맵 ───────────────────────────────────────
+  // ── 문서 맵 ─────────────────────────────────────────────────
   const docsMap = {
     'stroke-1': doc(db, 'events', 'stroke-1'),
     'stroke-2': doc(db, 'events', 'stroke-2'),
@@ -51,7 +51,7 @@ export default function StepFlow() {
     setParticipants([]);
   };
 
-  // ── 3. 수동 초기화 (Step5) ───────────────────────────────────
+  // ── 3. 수동 초기화 (Step5) ─────────────────────────────────
   const initManual = () => {
     setParticipants(
       Array.from({ length: roomCount * 4 }, (_, idx) => ({
@@ -67,17 +67,15 @@ export default function StepFlow() {
     );
   };
 
-  // ── 4. AGM 포볼 수동 배정 ───────────────────────────────────
+  // ── 4. AGM 포볼 수동 배정 (한 번만 alert) ───────────────────
   const handleAgmManualAssign = id => {
     setParticipants(ps => {
       const half   = ps.length / 2;
       const target = ps.find(p => p.id === id);
       if (!target || target.id >= half) return ps;
 
-      // 1) 이미 방이 있으면 그대로 partner 찾기
+      // (1) 이미 방 있으면 reuse, 없으면 랜덤 선택
       let roomNo = target.room;
-
-      // 2) 방이 없으면 빈 1조 슬롯 중 랜덤 선택 (최대 2명)
       if (roomNo == null) {
         const countByRoom = ps
           .filter(p => p.id < half && p.room != null)
@@ -90,17 +88,17 @@ export default function StepFlow() {
         roomNo = candidates[Math.floor(Math.random() * candidates.length)];
       }
 
-      // 3) 방 세팅
+      // (2) 방 세팅
       let updated = ps.map(p =>
         p.id === id ? { ...p, room: roomNo } : p
       );
 
-      // 4) 파트너 찾기 (2조, same room, partner == null)
+      // (3) 파트너 찾기
       const partner = updated.find(
         p => p.id >= half && p.room === roomNo && p.partner == null
       );
 
-      // 5) partner 있으면 서로 partner 필드 설정
+      // (4) partner 필드 동기화
       if (partner) {
         updated = updated.map(p => {
           if (p.id === id)         return { ...p, partner: partner.id };
@@ -109,7 +107,13 @@ export default function StepFlow() {
         });
       }
 
-      // ▶ 기존 alert 블록은 전부 제거했습니다 ◀
+      // ── 5. 한 번만 alert 띄우기 ───────────────────────────────
+      const label = roomNames[roomNo - 1]?.trim() || `${roomNo}번 방`;
+      const msg = partner
+        ? `${target.nickname}님은 ${label}에 배정되었습니다.\n팀원으로 ${partner.nickname}님을 선택했습니다.`
+        : `${target.nickname}님은 ${label}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`;
+      alert(msg);
+
       return updated;
     });
   };
@@ -129,25 +133,25 @@ export default function StepFlow() {
     });
   };
 
-  // ── 6. AGM 포볼 자동 배정 ─────────────────────────────────
+  // ── 6. AGM 포볼 자동 배정 (alert 제거) ───────────────────────
   const handleAgmAutoAssign = () => {
     setParticipants(ps => {
       const half     = ps.length / 2;
       const roomsArr = Array.from({ length: roomCount }, (_, i) => i + 1);
       let updated    = [...ps];
 
-      // (a) 수동 배정된 건은 유지 → 남은 1조 무작위 배정
+      // (a) 수동 유지 후 1조 랜덤
       const pool1 = shuffle(
         updated.filter(p => p.id < half && p.room == null).map(p => p.id)
       );
       roomsArr.forEach(roomNo => {
-        const existing1 = updated.filter(p => p.id < half && p.room === roomNo);
-        while (existing1.length < 2 && pool1.length) {
+        const g1 = updated.filter(p => p.id < half && p.room === roomNo);
+        while (g1.length < 2 && pool1.length) {
           const pid1 = pool1.shift();
           updated = updated.map(p =>
             p.id === pid1 ? { ...p, room: roomNo, partner: null } : p
           );
-          existing1.push({ id: pid1 });
+          g1.push({ id: pid1 });
         }
       });
 
@@ -168,7 +172,6 @@ export default function StepFlow() {
         });
       });
 
-      // ▶ 자동배정 시 alert 제거했습니다 ◀
       return updated;
     });
   };
@@ -180,7 +183,7 @@ export default function StepFlow() {
     );
   };
 
-  // ── 8. 나머지 흐름·네비게이션·파일업로드 등은 100% 원본 그대로 ───────
+  // ── 8. 나머지 흐름·네비·파일업로드 등은 “원본 그대로” ─────────
   const strokeFlow = [1,2,3,4,5,6];
   const agmFlow    = [1,2,3,4,7,8];
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
@@ -251,7 +254,7 @@ export default function StepFlow() {
   );
 }
 
-// Helper: shuffle
+// shuffle helper
 function shuffle(arr) {
   return [...arr].sort(() => Math.random() - 0.5);
 }
