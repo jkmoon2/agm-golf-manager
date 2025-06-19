@@ -19,7 +19,7 @@ export const StepContext = createContext();
 export default function StepFlow() {
   const navigate = useNavigate();
 
-  // ── 1. 상태 선언 (원본 그대로) ───────────────────────────────
+  // ── 1. 상태 선언 ─────────────────────────────────────────────
   const [mode, setMode]                 = useState('stroke');
   const [title, setTitle]               = useState('');
   const [roomCount, setRoomCount]       = useState(4);
@@ -27,7 +27,7 @@ export default function StepFlow() {
   const [uploadMethod, setUploadMethod] = useState('');
   const [participants, setParticipants] = useState([]);
 
-  // ── Firestore 문서 맵 (원본 그대로) ─────────────────────────
+  // ── Firestore 문서 맵 ───────────────────────────────────────
   const docsMap = {
     'stroke-1': doc(db, 'events', 'stroke-1'),
     'stroke-2': doc(db, 'events', 'stroke-2'),
@@ -35,7 +35,7 @@ export default function StepFlow() {
     'agm-2':    doc(db, 'events', 'agm-2'),
   };
 
-  // ── 2. 전체 초기화 (원본 그대로) ─────────────────────────────
+  // ── 2. 전체 초기화 ───────────────────────────────────────────
   const resetAll = async () => {
     const key = mode === 'stroke' ? 'stroke-1' : 'agm-1';
     await setDoc(docsMap[key], {
@@ -51,7 +51,7 @@ export default function StepFlow() {
     setParticipants([]);
   };
 
-  // ── 3. 수동 초기화 (Step5) (원본 그대로) ─────────────────────────
+  // ── 3. 수동 초기화 (Step5) ───────────────────────────────────
   const initManual = () => {
     setParticipants(
       Array.from({ length: roomCount * 4 }, (_, idx) => ({
@@ -67,10 +67,10 @@ export default function StepFlow() {
     );
   };
 
-  // ── 4. AGM 포볼 수동 배정 완전 이식·보완 ─────────────────────────
+  // ── 4. AGM 포볼 수동 배정 ───────────────────────────────────
   const handleAgmManualAssign = id => {
     setParticipants(ps => {
-      const half = ps.length / 2;
+      const half   = ps.length / 2;
       const target = ps.find(p => p.id === id);
       if (!target || target.id >= half) return ps;
 
@@ -109,20 +109,12 @@ export default function StepFlow() {
         });
       }
 
-      // 6) 알림 메시지 (한 번만, 방번호·방이름 우선순위 반영)
-      const nickname = target.nickname;
-      const label = roomNames[roomNo - 1]?.trim() || `${roomNo}번 방`;
-      if (partner) {
-        alert(`${nickname}님은 ${label}에 배정되었습니다.\n팀원으로 ${partner.nickname}님을 선택했습니다.`);
-      } else {
-        alert(`${nickname}님은 ${label}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
-      }
-
+      // ▶ 기존 alert 블록은 전부 제거했습니다 ◀
       return updated;
     });
   };
 
-  // ── 5. AGM 포볼 파트너 취소 이식 ───────────────────────────────
+  // ── 5. AGM 포볼 파트너 취소 ─────────────────────────────────
   const handleAgmCancel = id => {
     setParticipants(ps => {
       const target = ps.find(p => p.id === id);
@@ -137,61 +129,63 @@ export default function StepFlow() {
     });
   };
 
-  // ── 6. AGM 포볼 자동 배정 이식 ─────────────────────────────────
+  // ── 6. AGM 포볼 자동 배정 ─────────────────────────────────
   const handleAgmAutoAssign = () => {
     setParticipants(ps => {
-      const half = ps.length / 2;
+      const half     = ps.length / 2;
       const roomsArr = Array.from({ length: roomCount }, (_, i) => i + 1);
-      let updated = [...ps];
+      let updated    = [...ps];
 
-      // (수동 배정 유지) → 미배정 1조 배정 → 2조 파트너 매칭
-      const unassigned1 = updated.filter(p => p.id < half && p.room == null).map(p => p.id);
-      const shuffled1 = unassigned1.sort(() => Math.random() - 0.5);
-
-      // 각 방마다 1조 최대 2명, 파트너 연결
+      // (a) 수동 배정된 건은 유지 → 남은 1조 무작위 배정
+      const pool1 = shuffle(
+        updated.filter(p => p.id < half && p.room == null).map(p => p.id)
+      );
       roomsArr.forEach(roomNo => {
-        const existingG1 = updated.filter(p => p.id < half && p.room === roomNo);
-        for (let i = 0; i < 2 - existingG1.length && shuffled1.length; i++) {
-          const pid1 = shuffled1.shift();
+        const existing1 = updated.filter(p => p.id < half && p.room === roomNo);
+        while (existing1.length < 2 && pool1.length) {
+          const pid1 = pool1.shift();
           updated = updated.map(p =>
             p.id === pid1 ? { ...p, room: roomNo, partner: null } : p
           );
+          existing1.push({ id: pid1 });
         }
       });
 
-      // 2조 파트너 매칭
+      // (b) 2조 파트너 매칭
       roomsArr.forEach(roomNo => {
-        const freeG1 = updated.filter(p => p.id < half && p.room === roomNo && p.partner == null);
+        const freeG1 = updated.filter(
+          p => p.id < half && p.room === roomNo && p.partner == null
+        );
         freeG1.forEach(p1 => {
-          const candidates2 = updated.filter(p => p.id >= half && p.room == null);
-          if (!candidates2.length) return;
-          const pick = candidates2[Math.floor(Math.random() * candidates2.length)];
+          const c2 = updated.filter(p => p.id >= half && p.room == null);
+          if (!c2.length) return;
+          const pick = c2[Math.floor(Math.random() * c2.length)];
           updated = updated.map(p => {
-            if (p.id === p1.id)     return { ...p, partner: pick.id };
-            if (p.id === pick.id)   return { ...p, room: roomNo, partner: p1.id };
+            if (p.id === p1.id)    return { ...p, partner: pick.id };
+            if (p.id === pick.id)  return { ...p, room: roomNo, partner: p1.id };
             return p;
           });
         });
       });
 
-      // — alert 제거: 자동배정 시 더 이상 팝업이 뜨지 않습니다 —
+      // ▶ 자동배정 시 alert 제거했습니다 ◀
       return updated;
     });
   };
 
-  // ── 7. AGM 포볼 초기화 이식 ─────────────────────────────────
+  // ── 7. AGM 포볼 초기화 ─────────────────────────────────────
   const handleAgmReset = () => {
     setParticipants(ps =>
       ps.map(p => ({ ...p, room: null, partner: null }))
     );
   };
 
-  // ── 나머지 단계 흐름, 네비게이션, 파일업로드 등은 100% 원본 그대로 ────────────────
+  // ── 8. 나머지 흐름·네비게이션·파일업로드 등은 100% 원본 그대로 ───────
   const strokeFlow = [1,2,3,4,5,6];
   const agmFlow    = [1,2,3,4,7,8];
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
-  const parts = window.location.pathname.split('/');
-  const curr  = parseInt(parts[parts.length - 1], 10) || 1;
+  const parts      = window.location.pathname.split('/');
+  const curr       = parseInt(parts[parts.length - 1], 10) || 1;
 
   const goNext = () => {
     const idx  = flow.indexOf(curr);
@@ -225,7 +219,7 @@ export default function StepFlow() {
     setParticipants(data);
   };
 
-  // ── Context 제공 ───────────────────────────────────────────
+  // ── 9. Context 제공 ─────────────────────────────────────────
   const ctxValue = {
     mode, setMode,
     title, setTitle,
@@ -239,7 +233,7 @@ export default function StepFlow() {
     handleAgmAutoAssign, handleAgmReset
   };
 
-  // ── 라우팅 (원본 그대로) ──────────────────────────────────
+  // ── 10. 라우팅 ────────────────────────────────────────────
   return (
     <StepContext.Provider value={ctxValue}>
       <Routes>
@@ -255,4 +249,9 @@ export default function StepFlow() {
       </Routes>
     </StepContext.Provider>
   );
+}
+
+// Helper: shuffle
+function shuffle(arr) {
+  return [...arr].sort(() => Math.random() - 0.5);
 }

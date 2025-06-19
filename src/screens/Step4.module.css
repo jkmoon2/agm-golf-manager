@@ -6,10 +6,6 @@
   height: 100%;
 }
 
-.step4 {
-  /* 추가 전용 스타일 없음 */
-}
-
 /* 1차 헤더: 제목 */
 .stepHeader {
   margin: 0 0 4px 0;             /* ↓ margin-bottom: 8px → 4px */
