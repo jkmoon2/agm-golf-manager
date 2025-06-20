@@ -5,42 +5,66 @@ import { StepContext } from '../flows/StepFlow';
 export default function Step7() {
   const {
     participants,
+    roomNames,
     onScoreChange,
     handleAgmManualAssign: onManualAssign,
-    handleAgmCancel:       onCancel,
-    handleAgmAutoAssign:   onAutoAssign,
-    handleAgmReset:        onReset,
-    goPrev:                onPrev,
-    goNext:                onNext
+    handleAgmCancel: onCancel,
+    handleAgmAutoAssign: onAutoAssign,
+    handleAgmReset: onReset,
+    goPrev: onPrev,
+    goNext: onNext
   } = useContext(StepContext);
 
   const half = (participants || []).length / 2;
   const [loadingId, setLoadingId] = useState(null);
 
-  // 이미 파트너가 있으면 disable
+  // partner까지 있으면 완료
   const isCompleted = id => {
     const me = participants.find(p => p.id === id);
-    return !me || me.room == null
-      ? false
-      : participants.some(p => p.room === me.room && p.id !== id);
+    return !!me && me.room != null && me.partner != null;
   };
 
-  // 수동 클릭: spinner + delay, alert는 StepFlow에서 한 번만
+  // 수동 클릭
   const handleManualClick = id => {
     if (isCompleted(id)) return;
+
     setLoadingId(id);
-    onManualAssign(id);
+
+    // 바로 배정 로직 호출해서 결과 얻기
+    const { roomNo, nickname, partnerNickname } = onManualAssign(id);
+
+    // 0.5초 뒤 알림 띄우고 스피너 끄기
     setTimeout(() => {
+      const label = roomNames[roomNo - 1]?.trim() || `${roomNo}번 방`;
+
+      if (partnerNickname) {
+        // 방+파트너 한 번에
+        alert(
+          `${nickname}님은 ${label}에 배정되었습니다.\n` +
+          `팀원으로 ${partnerNickname}님을 선택했습니다.`
+        );
+      } else {
+        // 방만
+        alert(
+          `${nickname}님은 ${label}에 배정되었습니다.\n` +
+          `팀원을 선택하려면 확인을 눌러주세요.`
+        );
+      }
+
       setLoadingId(null);
-    }, 600);
+    }, 500);
   };
 
-  // 취소 클릭: alert은 StepFlow.handleAgmCancel에서 한 번만
+  // 취소 클릭
   const handleCancelClick = id => {
+    const me = participants.find(p => p.id === id);
     onCancel(id);
+    if (me) {
+      alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
+    }
   };
 
-  // 자동 클릭: alert 제거
+  // 자동 클릭 (alert 없음)
   const handleAutoClick = () => {
     onAutoAssign();
   };
@@ -63,7 +87,7 @@ export default function Step7() {
         <div className={`${styles.cell} ${styles.force}`}>취소</div>
       </div>
 
-      {/* 리스트 */}
+      {/* 참가자 리스트 */}
       <div className={styles.participantTable}>
         {(participants || []).map(p => {
           const isGroup1 = p.id < half;
@@ -123,11 +147,15 @@ export default function Step7() {
         })}
       </div>
 
-      {/* 하단 네비 */}
+      {/* 하단 네비게이션 */}
       <div className={styles.stepFooter}>
         <button onClick={onPrev}>← 이전</button>
-        <button onClick={handleAutoClick} className={styles.textOnly}>자동배정</button>
-        <button onClick={handleResetClick} className={styles.textOnly}>초기화</button>
+        <button onClick={handleAutoClick} className={styles.textOnly}>
+          자동배정
+        </button>
+        <button onClick={handleResetClick} className={styles.textOnly}>
+          초기화
+        </button>
         <button onClick={onNext}>다음 →</button>
       </div>
     </div>
