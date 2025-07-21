@@ -6,10 +6,6 @@
   height: 100%;
 }
 
-.step1 {
-  /* Step1 전용 추가 스타일 */
-}
-
 .stepHeader {
   margin-bottom: 8px;
 }
@@ -94,4 +90,11 @@
 
 .stepFooter button:active {
   background: #d0d0d0; /* 클릭 시 더 진한 회색 */
+}
+
+.stepBody ul li span {
+  font-size: 0.9rem;   /* 기존 카드 desc와 비슷한 크기 */
+}
+.stepBody ul li {
+  padding: 0.5rem 0.75rem;  /* 위아래 패딩 살짝 줄이기 */
 }

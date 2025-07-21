@@ -1,65 +1,97 @@
-/* **src/screens/LoginScreen.module.css** */
+/* src/screens/LoginScreen.module.css */
 
-.container {
-  height: 100vh;
+.fullscreen {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: #f5f5f5;
+  height: 100vh;
+  background-color: #f5f7fa;
 }
 
 .card {
-  width: 320px;
-  padding: 0;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.cardInner {
+  width: 100%;
+  max-width: 360px;
   padding: 24px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
 }
 
 .title {
   margin: 0 0 16px;
-  font-size: 1.25rem;
+  font-size: 22px;
+  font-weight: bold;
   text-align: center;
-  color: #333;
+  color: #222;
 }
 
-.label {
-  display: block;
-  margin: 8px 0 4px;
+.tabContainer {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 24px;
+}
+
+.tab, .tabActive {
+  flex: 1;
+  padding: 10px 0;
+  font-size: 16px;
+  text-align: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.2s, border-bottom 0.2s;
+}
+
+.tab {
   color: #555;
-  font-size: 0.9rem;
+}
+
+.tabActive {
+  color: #0969da;
+  border-bottom: 2px solid #0969da;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .input {
   width: 100%;
-  padding: 8px;
+  padding: 12px 16px;
+  font-size: 14px;
   border: 1px solid #ccc;
-  border-radius: 4px;
-  margin-bottom: 12px;
+  border-radius: 8px;
+  outline: none;
   box-sizing: border-box;
+  transition: border-color 0.2s;
 }
 
-.button {
+.input:focus {
+  border-color: #0969da;
+}
+
+.error {
+  color: #d32f2f;
+  font-size: 13px;
+  text-align: center;
+}
+
+.submit {
   width: 100%;
-  /* 입력창과 동일한 간격(12px)만큼 아래로 이동 */
-  margin-top: 12px;
-  padding: 12px;
-  background: #007bff;
+  padding: 12px 0;
+  font-size: 16px;
+  font-weight: 500;
   color: #fff;
+  background-color: #0969da;
   border: none;
-  border-radius: 4px;
-  font-size: 1rem;
+  border-radius: 8px;
   cursor: pointer;
-  box-sizing: border-box;
+  transition: background-color 0.2s;
 }
 
-.button:hover {
-  background: #0069d9;
+.submit:disabled {
+  background-color: #c0c4c8;
+  cursor: not-allowed;
 }

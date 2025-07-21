@@ -3,10 +3,12 @@
 import React, { useState, useEffect, useContext } from "react";
 import styles from "./Step2.module.css";
 import { StepContext } from "../flows/StepFlow";
+import { EventContext } from "../contexts/EventContext";
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 export default function Step2() {
-
-  // ── Context에서만 꺼내세요 ──
+  // Context에서 방 정보와 네비게이션 함수 가져오기
   const {
     roomCount,
     setRoomCount,
@@ -16,7 +18,10 @@ export default function Step2() {
     goNext
   } = useContext(StepContext);
 
-  // ── 로컬 상태 ──
+  // EventContext에서 현재 eventId 가져오기
+  const { eventId } = useContext(EventContext);
+
+  // 로컬 상태: 방 개수, 방 이름 목록
   const defaultCount = Number(roomCount) >= 3 ? roomCount : 4;
   const [localRoomCount, setLocalRoomCount] = useState(defaultCount);
   const [localRoomNames, setLocalRoomNames] = useState(
@@ -26,7 +31,7 @@ export default function Step2() {
   );
   const [composingIdx, setComposingIdx] = useState(null);
 
-  // ── Effect 동기화 로직 (기존 그대로) ──
+  // Context 변경 시 로컬 상태 동기화
   useEffect(() => {
     const count = Number(roomCount) >= 3 ? roomCount : 4;
     setLocalRoomCount(count);
@@ -37,6 +42,7 @@ export default function Step2() {
     );
   }, [roomCount, roomNames]);
 
+  // 로컬 개수 변경 시 이름 배열 크기 조정
   useEffect(() => {
     const count = Number(localRoomCount) || 0;
     if (count < 1) return;
@@ -51,7 +57,7 @@ export default function Step2() {
     });
   }, [localRoomCount]);
 
-  // ── 핸들러들 (기존 그대로) ──
+  // 방 이름 입력 중 한글 조합 방지
   const handleNameCompositionStart = idx => setComposingIdx(idx);
   const handleNameCompositionEnd = (e, idx) => {
     setComposingIdx(null);
@@ -60,8 +66,9 @@ export default function Step2() {
     setLocalRoomNames(newNames);
   };
 
-  const handleRoomCountBlur = () => {
-    let finalCount = Number(localRoomCount);
+  // 로컬 개수 변경 시 즉시 blur 핸들러 호출
+  const applyRoomCount = count => {
+    let finalCount = Number(count);
     if (isNaN(finalCount) || finalCount < 3) finalCount = 3;
     if (finalCount > 20) finalCount = 20;
     setLocalRoomCount(finalCount);
@@ -72,6 +79,7 @@ export default function Step2() {
     setRoomNames(resized);
   };
 
+  // 방 이름 blur 시 최종값 Context 저장
   const handleRoomNameBlur = (idx, e) => {
     if (composingIdx !== idx) {
       const tmp = [...localRoomNames];
@@ -81,38 +89,46 @@ export default function Step2() {
     }
   };
 
+  // Firestore에 방 정보 저장 후 Context 업데이트, 다음 스텝 이동
+  const handleNext = async () => {
+    if (!eventId) {
+      alert('이벤트 ID가 없습니다. 다시 시작해주세요.');
+      return;
+    }
+    // 1) Firestore 업데이트
+    await updateDoc(doc(db, 'events', eventId), {
+      roomCount: localRoomCount,
+      roomNames: localRoomNames
+    });
+    // 2) Context 업데이트
+    setRoomCount(localRoomCount);
+    setRoomNames(localRoomNames);
+    // 3) 다음 STEP
+    goNext();
+  };
+
   return (
     <div className={styles.step}>
-      {/* 방 개수 설정 */}
+      {/* 방 개수 설정 UI */}
       <div className={styles.roomCountSelector}>
         <button
           className={styles.rpBtn}
-          onClick={() => setLocalRoomCount(c => Math.max(3, c - 1))}
-          onBlur={handleRoomCountBlur}
-        >
-          –
-        </button>
+          onClick={() => applyRoomCount(localRoomCount - 1)}
+        >−</button>
         {[3, 4, 5, 6, 7, 8].map(n => (
           <button
             key={n}
             className={localRoomCount === n ? styles.active : undefined}
-            onClick={() => setLocalRoomCount(n)}
-            onBlur={handleRoomCountBlur}
-          >
-            {n}개
-          </button>
+            onClick={() => applyRoomCount(n)}
+          >{n}개</button>
         ))}
         <button
           className={styles.rpBtn}
-          onClick={() => setLocalRoomCount(c => c + 1)}
-          onBlur={handleRoomCountBlur}
-        >
-          ＋
-        </button>
-        {/* 숫자 입력 박스는 CSS로 숨김 처리 */}
+          onClick={() => applyRoomCount(localRoomCount + 1)}
+        >＋</button>
       </div>
 
-      {/* 방 이름 입력 */}
+      {/* 방 이름 입력 UI */}
       <div className={styles.roomNames}>
         {localRoomNames.map((name, i) => (
           <div key={i} className={styles.roomNameRow}>
@@ -136,7 +152,7 @@ export default function Step2() {
       {/* 이전/다음 버튼 */}
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={goNext}>다음 →</button>
+        <button onClick={handleNext}>다음 →</button>
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+// src/screens/Step7.jsx
+
 import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
@@ -24,37 +26,44 @@ export default function Step7() {
     return !!(me && me.room != null && me.partner != null);
   };
 
-  // 수동 클릭: 1) 수동 로직 호출 → 2) 500ms 뒤 alert 두 번 → 3) 스피너 종료
+  // 수동 클릭: ① onManualAssign → ② 500ms 뒤 첫 alert → ③ 스피너 재가동 → ④ 500ms 뒤 두 번째 alert → ⑤ 스피너 종료
   const handleManualClick = id => {
     if (isCompleted(id)) return;
 
+    // ① spinner on & 로직 호출
     setLoadingId(id);
     const { roomNo, nickname, partnerNickname } = onManualAssign(id);
 
+    // ② 500ms 뒤 첫 alert
     setTimeout(() => {
       const label = roomNames[roomNo - 1]?.trim() || `${roomNo}번 방`;
-
-      // ① 방배정 안내
       alert(
         `${nickname}님은 ${label}에 배정되었습니다.\n` +
         `팀원을 선택하려면 확인을 눌러주세요.`
       );
 
-      // ② partner 있으면
-      if (partnerNickname) {
-        alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
-      }
+      // ③ spinner 재가동
+      setLoadingId(id);
 
-      // ③ 스피너 끄고 “완료” 상태로
-      setLoadingId(null);
-    }, 500);
+      // ④ 500ms 뒤 두 번째 alert (파트너 있으면)
+      setTimeout(() => {
+        if (partnerNickname) {
+          alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+        }
+        // ⑤ spinner off
+        setLoadingId(null);
+      }, 900);
+
+    }, 900);
   };
 
   // 취소 클릭
   const handleCancelClick = id => {
     const me = participants.find(p => p.id === id);
     onCancel(id);
-    if (me) alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
+    if (me) {
+      alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
+    }
   };
 
   // 자동 클릭

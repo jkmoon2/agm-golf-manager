@@ -1,8 +1,10 @@
 // src/firebase.js
 
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/firestore';
-import "firebase/compat/auth";
+// Firebase SDK v9 모듈식 초기화로 전환
+// 기존 compat import 대신 @firebase/app 및 @firebase/firestore, auth 모듈 사용
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: "AIzaSyD_9AmDInzzn45aAzfNcjXIHRx27aDO0QY",
@@ -14,11 +16,11 @@ const firebaseConfig = {
   measurementId: "G-XHPZ2W4RPQ"
 };
 
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
+// 앱 초기화
+const app = initializeApp(firebaseConfig);
 
-const db = firebase.firestore();
-const auth = firebase.auth();
+// Firestore 인스턴스
+export const db = getFirestore(app);
 
-export { db, auth, firebase };
+// Auth 인스턴스
+export const auth = getAuth(app);

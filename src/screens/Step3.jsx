@@ -23,9 +23,7 @@ export default function Step3() {
         <div className={styles.uploadTypeBtns}>
           <button
             className={uploadMethod === "auto" ? styles.active : undefined}
-            onClick={() => {
-              setUploadMethod("auto");
-            }}
+            onClick={() => setUploadMethod("auto")}
           >
             자동(엑셀) 업로드
           </button>

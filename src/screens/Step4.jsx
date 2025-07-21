@@ -2,8 +2,17 @@
 
 import React, { useContext } from "react";
 import styles from "./Step4.module.css";
-import { db, firebase } from "../firebase";
 import { StepContext } from "../flows/StepFlow";
+import { EventContext } from "../contexts/EventContext";                 // 추가 import
+import {
+  doc,
+  collection,
+  setDoc,
+  updateDoc,
+  writeBatch,
+  serverTimestamp
+} from 'firebase/firestore';                                                      // 모듈식 Firestore
+import { db } from '../firebase';
 
 export default function Step4(props) {
   const {
@@ -16,19 +25,18 @@ export default function Step4(props) {
     goNext
   } = useContext(StepContext);
 
-  // ─────────────────────────────────────────────────────────
-  // 1) 참가자 목록 로컬 토글 선택 (체크박스)
-  // ─────────────────────────────────────────────────────────
+  const { eventId } = useContext(EventContext);                                  // 추가 컨텍스트
+
+  // 1) 참가자 선택 토글
   const toggleSelect = (i) => {
     const c = [...participants];
     c[i].selected = !c[i].selected;
     setParticipants(c);
   };
 
-  // ─────────────────────────────────────────────────────────
-  // 2) 참가자 추가: 로컬 state에도 추가하고 Firestore에도 신규 문서 생성
-  // ─────────────────────────────────────────────────────────
+  // 2) 참가자 추가
   const addParticipant = async () => {
+    if (!eventId) return alert('이벤트가 설정되지 않았습니다.');
     const newId = participants.length;
     const newObj = {
       id:       newId,
@@ -39,95 +47,73 @@ export default function Step4(props) {
       room:     null,
       partner:  null,
       selected: false,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
-    const docRef = db
-      .collection("events")
-      .doc("golf-2023-spring")
-      .collection("participants")
-      .doc(String(newId));
-    await docRef.set(newObj);
+    const docRef = doc(db, 'events', eventId, 'participants', String(newId));   // eventId 사용
+    await setDoc(docRef, newObj);
     setParticipants((p) => [...p, newObj]);
   };
 
-  // ─────────────────────────────────────────────────────────
   // 3) 선택된 참가자 삭제
-  // ─────────────────────────────────────────────────────────
   const delSelected = async () => {
+    if (!eventId) return alert('이벤트가 설정되지 않았습니다.');
     const toDeleteIds = participants
       .filter((x) => x.selected)
       .map((x) => x.id);
 
-    const batch = db.batch();
-    const collRef = db
-      .collection("events")
-      .doc("golf-2023-spring")
-      .collection("participants");
+    const batch = writeBatch(db);
+    const collRef = collection(db, 'events', eventId, 'participants');            // eventId 사용
     toDeleteIds.forEach((id) => {
-      batch.delete(collRef.doc(String(id)));
+      batch.delete(doc(collRef, String(id)));
     });
     await batch.commit();
     setParticipants((p) => p.filter((x) => !x.selected));
   };
 
-  // ─────────────────────────────────────────────────────────
-  // 4) “조” 변경
-  // ─────────────────────────────────────────────────────────
+  // 4) 그룹 변경
   const changeGroup = async (i, newGroup) => {
+    if (!eventId) return;
     const c = [...participants];
     c[i].group = newGroup;
     setParticipants(c);
-    const docRef = db
-      .collection("events")
-      .doc("golf-2023-spring")
-      .collection("participants")
-      .doc(String(c[i].id));
-    await docRef.update({
-      group:    newGroup,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    const docRef = doc(db, 'events', eventId, 'participants', String(c[i].id));
+    await updateDoc(docRef, {
+      group: newGroup,
+      updatedAt: serverTimestamp(),
     });
   };
 
-  // ─────────────────────────────────────────────────────────
-  // 5) “닉네임/핸디” 입력
-  // ─────────────────────────────────────────────────────────
+  // 5) 닉네임/핸디 입력
   const changeNickname = async (i, newName) => {
+    if (!eventId) return;
     const c = [...participants];
     c[i].nickname = newName;
     setParticipants(c);
-    const docRef = db
-      .collection("events")
-      .doc("golf-2023-spring")
-      .collection("participants")
-      .doc(String(c[i].id));
-    await docRef.update({
+    const docRef = doc(db, 'events', eventId, 'participants', String(c[i].id));
+    await updateDoc(docRef, {
       nickname: newName,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
   };
 
   const changeHandicap = async (i, newHd) => {
+    if (!eventId) return;
     const c = [...participants];
     c[i].handicap = newHd;
     setParticipants(c);
-    const docRef = db
-      .collection("events")
-      .doc("golf-2023-spring")
-      .collection("participants")
-      .doc(String(c[i].id));
-    await docRef.update({
+    const docRef = doc(db, 'events', eventId, 'participants', String(c[i].id));
+    await updateDoc(docRef, {
       handicap: newHd,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
   };
 
   return (
-    <div className={`${styles.step} ${styles.step4}`}>
+    <div className={`${styles.step} ${styles.step4}`}>  
 
       {/* 2차 헤더: 파일 선택 / 총 슬롯 */}
-      <div
-        className={`${styles.excelHeader} ${
+      <div className={`${styles.excelHeader} ${
           uploadMethod === "manual" ? styles.manual : ""
         }`}
       >
@@ -153,7 +139,7 @@ export default function Step4(props) {
       <div className={styles.participantTable}>
         {participants.map((p, i) => (
           <div key={p.id} className={styles.participantRow}>
-            <div className={`${styles.cell} ${styles.group}`}>
+            <div className={`${styles.cell} ${styles.group}`}>  
               <select
                 className={styles.groupSelect}
                 value={p.group}
@@ -168,7 +154,7 @@ export default function Step4(props) {
                 )}
               </select>
             </div>
-            <div className={`${styles.cell} ${styles.nickname}`}>
+            <div className={`${styles.cell} ${styles.nickname}`}>  
               <input
                 type="text"
                 placeholder="닉네임"
@@ -176,16 +162,14 @@ export default function Step4(props) {
                 onChange={(e) => changeNickname(i, e.target.value)}
               />
             </div>
-            <div className={`${styles.cell} ${styles.handicap}`}>
+            <div className={`${styles.cell} ${styles.handicap}`}>  
               <input
                 type="number"
                 value={p.handicap}
-                onChange={(e) =>
-                  changeHandicap(i, Number(e.target.value))
-                }
+                onChange={(e) => changeHandicap(i, Number(e.target.value))}
               />
             </div>
-            <div className={`${styles.cell} ${styles.delete}`}>
+            <div className={`${styles.cell} ${styles.delete}`}>  
               <input
                 type="checkbox"
                 checked={p.selected || false}
@@ -199,8 +183,8 @@ export default function Step4(props) {
       {/* 하단 버튼 (이전/추가/삭제/다음) */}
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={() => addParticipant()}>추가</button>
-        <button onClick={() => delSelected()}>삭제</button>
+        <button onClick={addParticipant}>추가</button>
+        <button onClick={delSelected}>삭제</button>
         <button onClick={goNext}>다음 →</button>
       </div>
     </div>

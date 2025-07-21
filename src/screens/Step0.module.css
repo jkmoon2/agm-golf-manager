@@ -1,0 +1,114 @@
+/* src/screens/Step0.module.css */
+
+.container {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 12px 6px;       /* 좌/우 여백 축소 */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.tabContainer {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tabBtn {
+  flex: 1;
+  padding: 10px 0;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #fafafa;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+.tabBtn:hover {
+  background-color: #f0f0f0;
+}
+.active {
+  border-color: #1976d2;
+  background-color: #e3f2fd;
+}
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 6px;   /* 좌/우 패딩 축소 */
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.item:hover {
+  background-color: #f9f9f9;
+}
+.selected {
+  background-color: #f0f8ff;
+}
+.title {
+  flex: 1;
+  font-size: 16px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 8px;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+}
+.iconBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.footerBtns {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.primaryBtn {
+  flex: 1;
+  padding: 10px 0;   /* 상단 탭과 동일 */
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  background-color: #388e3c;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.primaryBtn:hover {
+  opacity: 0.9;
+}
+.secondaryBtn {
+  flex: 1;
+  padding: 10px 0;
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  background-color: #1976d2;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.secondaryBtn:hover {
+  opacity: 0.9;
+}
