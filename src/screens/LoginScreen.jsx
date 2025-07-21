@@ -87,6 +87,7 @@ export default function LoginScreen() {
                 className={styles.input}
                 value={email}
                 onChange={e => setEmail(e.target.value)}
+                onInput={e => setEmail(e.target.value)}
                 required
               />
               <input
@@ -95,6 +96,7 @@ export default function LoginScreen() {
                 className={styles.input}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
+                onInput={e => setPassword(e.target.value)}
                 required
               />
             </>
@@ -105,6 +107,7 @@ export default function LoginScreen() {
               className={styles.input}
               value={code}
               onChange={e => setCode(e.target.value)}
+              onInput={e => setCode(e.target.value)}
               required
             />
           )}
@@ -121,5 +124,5 @@ export default function LoginScreen() {
         </form>
       </div>
     </div>
-  );
+);
 }
