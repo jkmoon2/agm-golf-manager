@@ -114,6 +114,13 @@ export default function LoginScreen() {
 
           {error && <div className={styles.error}>{error}</div>}
 
+          {/* 디버깅용 출력 */}
+          <div style={{ fontSize:12, color:'#999', marginBottom:8 }}>
+            email: “{email}”<br/>
+            ADMIN_EMAIL: “{ADMIN_EMAIL}”<br/>
+            validAdmin: {String(validAdmin)}
+          </div>
+
           <button
             type="submit"
             className={styles.submit}
