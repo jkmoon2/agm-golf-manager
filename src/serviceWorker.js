@@ -1,11 +1,11 @@
-// src/serviceWorker.js
+/* eslint-disable no-restricted-globals */
 
-// 설치 단계에서 기존 서비스워커를 바로 활성화
+// 서비스 워커 install 단계: 바로 활성화
 self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// 활성화 단계에서 클라이언트 페이지를 바로 새 SW에 연결
+// 서비스 워커 activate 단계: 클라이언트 장악
 self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
 });
