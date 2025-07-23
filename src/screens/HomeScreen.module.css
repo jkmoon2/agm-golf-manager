@@ -1,4 +1,5 @@
 /* src/screens/HomeScreen.module.css */
+
 .container {
   padding: 1rem;
   max-width: 360px;
@@ -55,6 +56,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+
+  /* ─── 여기에 메인 타이틀 검정색을 추가 ─── */
+  color: #000 !important;
 }
 
 .desc {
