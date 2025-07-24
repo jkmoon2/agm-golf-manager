@@ -271,20 +271,11 @@ export default function StepFlow() {
   const Current = pages[curr] || <Step1 />;
 
   return (
-    <>
-      {/* 타이틀 색상 강제 오버라이드 */}
-      <style>{`
-        .override-step h2 { color: #000 !important; }
-        .override-step h3 { color: #007bff !important; }
-      `}</style>
-      <StepContext.Provider value={ctxValue}>
-        <div className="override-step">
-          <StepPage step={curr} setStep={setStep}>
-            {Current}
-          </StepPage>
-        </div>
-      </StepContext.Provider>
-    </>
+    <StepContext.Provider value={ctxValue}>
+      <StepPage step={curr} setStep={setStep}>
+        {Current}
+      </StepPage>
+    </StepContext.Provider>
   );
 }
 
