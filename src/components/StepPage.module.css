@@ -5,7 +5,6 @@
   flex-direction: column;
   height: 100%;
 }
-
 .stepHeader {
   height: 48px;
   display: flex;
@@ -14,14 +13,10 @@
   background: #f9f9f9;
   border-bottom: 1px solid #ddd;
 }
-
 .stepTitle {
   font-size: 1.125rem;
   margin: 0;
-  /* 메인 타이틀을 검정색으로 강제 지정 */
-  color: #000;
 }
-
 .stepContent {
   flex: 1;
   overflow-y: auto;
