@@ -6,8 +6,8 @@ import AppRouter from './AppRouter';
 import { EventProvider } from './contexts/EventContext';
 import './index.css';
 
-// 서비스 워커 등록을 위한 모듈 불러오기
-import * as serviceWorkerRegistration from './serviceWorker';
+// 위에서 만든 serviceWorker.js 불러오기
+import * as serviceWorker from './serviceWorker';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
@@ -18,11 +18,17 @@ root.render(
   </React.StrictMode>
 );
 
-// PWA: 새 버전을 즉시 활성화하고 클라이언트를 업데이트합니다.
-serviceWorkerRegistration.register({
+// 서비스워커 등록 → 업데이트 시 자동 skipWaiting → reload
+serviceWorker.register({
   onUpdate: registration => {
-    // 필요하면 사용자에게 새 버전이 준비됐음을 알리고
-    // registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-    console.log('New service worker version available');
+    // 대기 중인 워커에게 SKIP_WAITING 명령
+    if (registration.waiting) {
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    }
   }
+});
+
+// 워커가 활성화되어 컨트롤러가 교체되면 페이지를 강제 새로고침
+navigator.serviceWorker.addEventListener('controllerchange', () => {
+  window.location.reload();
 });
