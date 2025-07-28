@@ -8,17 +8,17 @@ import styles from './ParticipantLayout.module.css';
 export default function ParticipantLayout() {
   return (
     <div className={styles.page}>
-      {/* 상단 헤더 (운영자 MainLayout.header 와 동일) */}
+      {/* ── 상단 헤더 (운영자 MainLayout.header와 완전 동일) ── */}
       <header className={styles.header}>
         AGM Golf Manager
       </header>
 
-      {/* 메인 컨텐츠 */}
-      <div className={styles.content}>
+      {/* ── 본문 ── */}
+      <main className={styles.content}>
         <Outlet />
-      </div>
+      </main>
 
-      {/* 하단 탭바 (운영자 BottomTabBar.module.css와 동일) */}
+      {/* ── 하단 탭바 (운영자 BottomTabBar.module.css와 완전 동일) ── */}
       <nav className={styles.tabbar}>
         <NavLink to="/admin/home" className={({isActive})=> isActive ? styles.tabActive : styles.tab}>
           <Home />
