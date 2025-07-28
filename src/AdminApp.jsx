@@ -3,7 +3,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout  from './layouts/MainLayout';
-import HomeScreen  from './screens/HomeScreen';
+import HomeScreen  from './screens/HomeScreen';  // 10버튼 홈 (헤더 없음)
 import Step0       from './screens/Step0';
 import StepFlow    from './flows/StepFlow';
 import Dashboard   from './screens/Dashboard';
@@ -13,10 +13,10 @@ export default function AdminApp() {
   return (
     <Routes>
       <Route element={<MainLayout />}>
-        {/* 홈(10버튼) */}
+        {/* /admin/home → HomeScreen (헤더는 MainLayout에서만) */}
         <Route index element={<HomeScreen />} />
 
-        {/* STEP0~ */}
+        {/* STEP0~8 */}
         <Route path="0"     element={<Step0 />} />
         <Route path=":step" element={<StepFlow />} />
 
@@ -24,7 +24,7 @@ export default function AdminApp() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="settings"  element={<Settings />} />
 
-        {/* 그 외 → 홈 */}
+        {/* 기타 → 홈 */}
         <Route path="*" element={<Navigate to="" replace />} />
       </Route>
     </Routes>

@@ -33,18 +33,27 @@ export default function HomeScreen() {
   return (
     <div className={styles.container}>
       <div className={styles.grid}>
+        {/* STEP 0 버튼 */}
         <button className={styles.card} onClick={() => handleClick(0)}>
           <div className={styles.step}>STEP 0</div>
           <div className={styles.title}>대회 관리</div>
           <div className={styles.desc}>대회 관리, 생성/불러오기</div>
         </button>
+
+        {/* STEP 1~8 버튼 */}
         {STEPS.map(({ num, title, desc }) => (
-          <button key={num} className={styles.card} onClick={() => handleClick(num)}>
+          <button
+            key={num}
+            className={styles.card}
+            onClick={() => handleClick(num)}
+          >
             <div className={styles.step}>STEP {num}</div>
             <div className={styles.title}>{title}</div>
             <div className={styles.desc}>{desc}</div>
           </button>
         ))}
+
+        {/* 임시 버튼 */}
         <button className={styles.card} onClick={() => handleClick(9)}>
           <div className={styles.step}>#TEMP</div>
           <div className={styles.title}>임시</div>
