@@ -18,18 +18,24 @@ const menu = [
 export default function PlayerHome() {
   const nav = useNavigate();
   return (
-    <div className={styles.grid}>
-      {menu.map(item => (
-        <button
-          key={item.step}
-          className={styles.card}
-          onClick={() => nav(item.path)}
-        >
-          <div className={styles.step}>STEP {item.step}</div>
-          <h2 className={styles.title}>{item.title}</h2>
-          <p className={styles.desc}>{item.sub}</p>
-        </button>
-      ))}
+    <div className={styles.container}>
+      {/* 상단 타이틀(운영자와 완전 동일) */}
+      <div className={styles.header}>AGM Golf Manager</div>
+
+      {/* 2열 그리드 */}
+      <div className={styles.grid}>
+        {menu.map(item => (
+          <button
+            key={item.step}
+            className={styles.card}
+            onClick={() => nav(item.path)}
+          >
+            <div className={styles.step}>STEP {item.step}</div>
+            <div className={styles.title}>{item.title}</div>
+            <div className={styles.desc}>{item.sub}</div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
