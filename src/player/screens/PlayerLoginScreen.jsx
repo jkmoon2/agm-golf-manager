@@ -1,22 +1,22 @@
-// src/screens/PlayerLoginScreen.jsx
+// src/player/screens/PlayerLoginScreen.jsx
 
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { doc, getDoc }               from 'firebase/firestore';
-import { db }                         from '../firebase';
-import { PlayerContext }             from '../contexts/PlayerContext';
-import { useNavigate, useParams }    from 'react-router-dom';
-import styles from './PlayerLoginScreen.module.css';
+import { db }                         from '../../firebase';
+import { useParticipant }             from '../../contexts/ParticipantContext';
+import { useNavigate, useParams }     from 'react-router-dom';
+import styles                         from './PlayerLoginScreen.module.css';
 
 export default function PlayerLoginScreen() {
   const [inputCode, setInputCode] = useState('');
-  const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext);
+  const { setEventId, setAuthCode, setParticipant } = useParticipant();
   const nav = useNavigate();
   const { eventId: routeEventId } = useParams();
 
   const handleSubmit = async e => {
     e.preventDefault();
-    // 1) 인증(익명) 로그인
+    // 1) 익명 로그인
     const auth = getAuth();
     if (!auth.currentUser) {
       try {
