@@ -4,17 +4,13 @@
   height: 100vh;
 }
 .header {
-  position: fixed;
-  top: 0;
-  width: 100%;
-  height: 56px;
+  position: static;  /* 화면 흐름대로 */
   background: #fff;
   border-bottom: 1px solid #eee;
   display: flex;
   align-items: center;
   justify-content: space-between; /* 좌우 끝 배치 */
   padding-left: 16px;
-  z-index: 10;
 }
 .title {
   font-family: 'Noto Sans KR', sans-serif;
@@ -23,7 +19,7 @@
 }
 .content {
   flex: 1;
-  padding-top: 56px;
+  padding-top: 0;       /* 헤더 바로 아래부터 시작 */
   padding-bottom: 64px;
   overflow-y: auto;
 }

@@ -9,62 +9,45 @@ import { useNavigate, useParams }     from 'react-router-dom';
 import styles                         from './PlayerLoginScreen.module.css';
 
 export default function PlayerLoginScreen() {
-  const [inputCode, setInputCode] = useState('');
+  const [code, setCode] = useState('');
   const { setEventId, setAuthCode, setParticipant } = useParticipant();
   const nav = useNavigate();
-  const { eventId: routeEventId } = useParams();
+  const { eventId } = useParams();
 
   const handleSubmit = async e => {
     e.preventDefault();
-    // 1) 익명 로그인
     const auth = getAuth();
     if (!auth.currentUser) {
-      try {
-        await signInAnonymously(auth);
-      } catch (err) {
-        alert('익명 로그인 실패: ' + err.message);
-        return;
-      }
+      try { await signInAnonymously(auth); }
+      catch (err) { return alert('로그인 실패: '+err.message); }
     }
-
-    // 2) 이벤트 문서 불러오기
-    const evtSnap = await getDoc(doc(db, 'events', routeEventId));
-    if (!evtSnap.exists()) {
-      alert('존재하지 않는 대회 ID입니다.');
-      return;
-    }
-    const data = evtSnap.data();
-
-    // 3) 참가자 인증코드 검사
-    const part = data.participants?.find(p => p.authCode === inputCode);
-    if (!part) {
-      alert('인증 코드가 일치하지 않습니다.');
-      return;
-    }
-
-    // 4) context 저장 후 홈으로
-    setEventId(routeEventId);
-    setAuthCode(inputCode);
+    const snap = await getDoc(doc(db, 'events', eventId));
+    if (!snap.exists()) return alert('존재하지 않는 이벤트');
+    const part = snap.data().participants.find(p => p.authCode === code);
+    if (!part) return alert('인증 코드가 일치하지 않습니다.');
+    setEventId(eventId);
+    setAuthCode(code);
     setParticipant(part);
     nav('/player/home');
   };
 
   return (
-    <div className={styles.container}>
-      <h2>참가자 입장</h2>
-      <p>대회 ID: <strong>{routeEventId}</strong></p>
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <label>
-          인증 코드
+    <div className={styles.fullscreen}>
+      <div className={styles.card}>
+        <h2 className={styles.title}>참가자 입장</h2>
+        <p className={styles.subtitle}>대회 ID: {eventId}</p>
+        <form onSubmit={handleSubmit} className={styles.form}>
           <input
-            value={inputCode}
-            onChange={e => setInputCode(e.target.value)}
+            type="text"
+            className={styles.input}
             placeholder="인증 코드를 입력하세요"
+            value={code}
+            onChange={e => setCode(e.target.value)}
             required
           />
-        </label>
-        <button type="submit">입장하기</button>
-      </form>
+          <button type="submit" className={styles.submit}>입장하기</button>
+        </form>
+      </div>
     </div>
   );
 }

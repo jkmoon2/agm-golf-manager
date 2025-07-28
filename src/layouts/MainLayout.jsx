@@ -61,7 +61,6 @@ export default function MainLayout() {
         {/* 참가자 */}
         <NavLink
           to="/player/home"
-          end
           className={({ isActive }) =>
             isActive ? styles.navItemActive : styles.navItem
           }
@@ -72,7 +71,7 @@ export default function MainLayout() {
 
         {/* 대시보드 */}
         <NavLink
-          to="/admin/home/dashboard"
+          to="/admin/dashboard"
           end
           className={({ isActive }) =>
             isActive ? styles.navItemActive : styles.navItem
@@ -84,7 +83,7 @@ export default function MainLayout() {
 
         {/* 설정 */}
         <NavLink
-          to="/admin/home/settings"
+          to="/admin/settings"
           end
           className={({ isActive }) =>
             isActive ? styles.navItemActive : styles.navItem

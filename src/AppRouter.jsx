@@ -25,44 +25,43 @@ export default function AppRouter() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-
-          {/* 1) 공통 로그인 화면 (헤더·탭바 없음) */}
+          
+          {/* 1) 관리자 로그인 */}
           <Route path="/login" element={<LoginScreen />} />
 
-          {/* 2) 참가자 전용 로그인 (탭바·헤더 제외) */}
+          {/* 2) 참가자 로그인(탭바 제외) */}
           <Route
             path="/player/login"
             element={
               <Protected roles={['player','admin']}>
                 <ParticipantProvider>
-                  <PlayerLoginScreen />
+                  <PlayerLoginScreen/>
                 </ParticipantProvider>
               </Protected>
             }
           />
 
-          {/* 3) MainLayout 적용 구역 (헤더+탭바 활성화) */}
+          {/* 3) 헤더+탭바 공통 레이아웃 */}
           <Route element={<Protected roles={['admin','player']}><MainLayout/></Protected>}>
-            
-            {/* ── 관리자 섹션 ── */}
-            <Route path="/admin" element={<Navigate to="/admin/home" replace />} />
-            <Route path="/admin/home/*" element={<AdminApp />} />
-            <Route path="/admin/dashboard" element={<Dashboard />} />
-            <Route path="/admin/settings"  element={<Settings />} />
 
-            {/* ── 참가자 섹션 ── */}
-            <Route path="/player" element={<Navigate to="/player/login" replace />} />
+            {/* ── 운영자 ── */}
+            <Route path="/admin" element={<Navigate to="/admin/home" replace/>} />
+            <Route path="/admin/home/*" element={<AdminApp/>} />
+            <Route path="/admin/dashboard" element={<Dashboard/>} />
+            <Route path="/admin/settings"  element={<Settings/>} />
+
+            {/* ── 참가자 ── */}
+            <Route path="/player" element={<Navigate to="/player/login" replace/>} />
             <Route path="/player/home/*" element={
               <ParticipantProvider>
-                <PlayerApp />
+                <PlayerApp/>
               </ParticipantProvider>
             }/>
 
           </Route>
 
-          {/* 4) 기타는 로그인으로 */}
-          <Route path="*" element={<Navigate to="/login" replace />} />
-
+          {/* 4) 그 외 전부 → /login */}
+          <Route path="*" element={<Navigate to="/login" replace/>}/>
         </Routes>
       </AuthProvider>
     </BrowserRouter>

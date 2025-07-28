@@ -1,66 +1,37 @@
-/* src/player/layouts/ParticipantLayout.module.css */
+/* src/player/screens/PlayerLoginScreen.module.css */
 
-.page {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
+.fullscreen {
+  display: flex; align-items: center; justify-content: center;
+  height: 100vh; background: #f4f5f7;
 }
 
-/* 운영자 MainLayout.module.css.header 내용 복사 */
-.header {
-  position: fixed;
-  top: 0;
-  width: 100%;
-  height: 56px;
-  background: #fff;
-  border-bottom: 1px solid #eee;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding-left: 16px;
-  font-size: 1.25rem;
-  font-weight: bold;
-  z-index: 10;
+.card {
+  background: #fff; border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  padding: 24px; width: 320px;
 }
 
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding-top: 56px;   /* header 높이 만큼 패딩 */
-  padding-bottom: 56px;/* 탭바 높이 만큼 패딩 */
+.title {
+  margin-bottom: 8px; font-size: 1.25rem; font-weight: bold;
+  text-align: center;
 }
 
-/* 운영자 BottomTabBar.module.css 내용 복사 */
-.tabbar {
-  position: fixed;
-  bottom: 0;
-  width: 100%;
-  height: 56px;
-  background: #fff;
-  border-top: 1px solid #ddd;
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  z-index: 10;
+.subtitle {
+  margin: 0 0 16px; color: #555; text-align: center;
 }
 
-.tab {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-decoration: none;
-  color: #666;
+.form {
+  display: flex; flex-direction: column;
 }
 
-.tab svg {
-  margin-bottom: 2px;
+.input {
+  padding: .75rem; margin-bottom: 12px;
+  border: 1px solid #ddd; border-radius: 6px;
+  font-size: 1rem;
 }
 
-.label {
-  font-size: 10px;
-  line-height: 1;
-}
-
-.tabActive {
-  color: #007bff;
+.submit {
+  padding: .75rem; background: #007bff; color: #fff;
+  border: none; border-radius: 6px; font-size: 1rem;
+  cursor: pointer;
 }
