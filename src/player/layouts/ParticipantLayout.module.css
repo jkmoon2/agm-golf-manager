@@ -6,7 +6,7 @@
   height: 100vh;
 }
 
-/* 운영자 MainLayout.header 와 동일 */
+/* ── 상단 헤더 (운영자와 동일하되, 왼쪽 정렬) ── */
 .header {
   position: fixed;
   top: 0;
@@ -16,21 +16,22 @@
   border-bottom: 1px solid #eee;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;   /* center → flex-start */
+  padding: 0 16px;               /* 왼쪽 여백 확보 */
   font-size: 1.25rem;
   font-weight: bold;
   z-index: 10;
 }
 
-/* 본문: header 높이, tabbar 높이만큼 패딩 */
+/* ── 본문 ── */
 .content {
   flex: 1;
   overflow-y: auto;
-  padding-top: 56px;
-  padding-bottom: 56px;
+  padding-top: 56px;   /* header 높이 만큼 */
+  padding-bottom: 56px;/* tabbar 높이 만큼 */
 }
 
-/* 운영자 BottomTabBar.module.css 와 동일 */
+/* ── 하단 탭바 (운영자 BottomTabBar.module.css과 완전히 동일) ── */
 .tabbar {
   position: fixed;
   bottom: 0;
@@ -52,7 +53,11 @@
   color: #666;
 }
 
-.tab svg {
+.tabActive {
+  color: #007bff;
+}
+
+.icon {
   width: 24px;
   height: 24px;
   margin-bottom: 2px;
@@ -61,8 +66,4 @@
 .label {
   font-size: 10px;
   line-height: 1;
-}
-
-.tabActive {
-  color: #007bff;
 }

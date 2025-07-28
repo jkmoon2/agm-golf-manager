@@ -2,23 +2,21 @@
 
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthProvider, useAuth }            from './contexts/AuthContext';
+import { ParticipantProvider }              from './contexts/ParticipantContext';
 
-import LoginScreen from './screens/LoginScreen';
-import AdminApp    from './AdminApp';
-import PlayerApp   from './PlayerApp';
+import LoginScreen          from './screens/LoginScreen';
+import AdminApp             from './AdminApp';
+import Dashboard            from './screens/Dashboard';
+import Settings             from './screens/Settings';
+import PlayerLoginScreen    from './player/screens/PlayerLoginScreen';
+import PlayerApp            from './player/PlayerApp';
+import MainLayout           from './layouts/MainLayout';
 
 function Protected({ children, roles }) {
   const { firebaseUser, appRole } = useAuth();
-
-  // 로그인되지 않았으면 로그인 페이지로
-  if (!firebaseUser) {
-    return <Navigate to="/login" replace />;
-  }
-  // 역할이 맞지 않으면 로그인 페이지로
-  if (roles && !roles.includes(appRole)) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!firebaseUser)                     return <Navigate to="/login" replace />;
+  if (roles && !roles.includes(appRole)) return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -27,41 +25,44 @@ export default function AppRouter() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          {/* 1) 로그인 페이지 */}
+
+          {/* 1) 공통 로그인 화면 (헤더·탭바 없음) */}
           <Route path="/login" element={<LoginScreen />} />
 
-          {/* 2) 관리자 영역: /admin → /admin/home 리다이렉트 */}
+          {/* 2) 참가자 전용 로그인 (탭바·헤더 제외) */}
           <Route
-            path="/admin"
+            path="/player/login"
             element={
-              <Protected roles={[ 'admin' ]}>
-                <Navigate to="/admin/home" replace />
+              <Protected roles={['player','admin']}>
+                <ParticipantProvider>
+                  <PlayerLoginScreen />
+                </ParticipantProvider>
               </Protected>
             }
           />
 
-          {/* 3) 관리자 앱: /admin/home 하위 라우팅 */}
-          <Route
-            path="/admin/home/*"
-            element={
-              <Protected roles={[ 'admin' ]}>
-                <AdminApp />
-              </Protected>
-            }
-          />
+          {/* 3) MainLayout 적용 구역 (헤더+탭바 활성화) */}
+          <Route element={<Protected roles={['admin','player']}><MainLayout/></Protected>}>
+            
+            {/* ── 관리자 섹션 ── */}
+            <Route path="/admin" element={<Navigate to="/admin/home" replace />} />
+            <Route path="/admin/home/*" element={<AdminApp />} />
+            <Route path="/admin/dashboard" element={<Dashboard />} />
+            <Route path="/admin/settings"  element={<Settings />} />
 
-          {/* 4) 참가자 영역 (/player/*) */}
-          <Route
-            path="/player/*"
-            element={
-              <Protected roles={[ 'player', 'admin' ]}>
+            {/* ── 참가자 섹션 ── */}
+            <Route path="/player" element={<Navigate to="/player/login" replace />} />
+            <Route path="/player/home/*" element={
+              <ParticipantProvider>
                 <PlayerApp />
-              </Protected>
-            }
-          />
+              </ParticipantProvider>
+            }/>
 
-          {/* 5) 그 외 → 로그인 */}
+          </Route>
+
+          {/* 4) 기타는 로그인으로 */}
           <Route path="*" element={<Navigate to="/login" replace />} />
+
         </Routes>
       </AuthProvider>
     </BrowserRouter>

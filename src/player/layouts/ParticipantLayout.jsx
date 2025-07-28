@@ -8,7 +8,7 @@ import styles from './ParticipantLayout.module.css';
 export default function ParticipantLayout() {
   return (
     <div className={styles.page}>
-      {/* ── 상단 헤더 (운영자 MainLayout.header와 완전 동일) ── */}
+      {/* ── 상단 헤더 ── */}
       <header className={styles.header}>
         AGM Golf Manager
       </header>
@@ -18,22 +18,22 @@ export default function ParticipantLayout() {
         <Outlet />
       </main>
 
-      {/* ── 하단 탭바 (운영자 BottomTabBar.module.css와 완전 동일) ── */}
+      {/* ── 하단 탭바 (운영자와 동일) ── */}
       <nav className={styles.tabbar}>
         <NavLink to="/admin/home" className={({isActive})=> isActive ? styles.tabActive : styles.tab}>
-          <Home />
+          <Home className={styles.icon}/>
           <span className={styles.label}>홈</span>
         </NavLink>
         <NavLink to="/player/home" className={({isActive})=> isActive ? styles.tabActive : styles.tab}>
-          <Users />
+          <Users className={styles.icon}/>
           <span className={styles.label}>참가자</span>
         </NavLink>
         <NavLink to="/admin/dashboard" className={({isActive})=> isActive ? styles.tabActive : styles.tab}>
-          <BarChart2 />
+          <BarChart2 className={styles.icon}/>
           <span className={styles.label}>대시보드</span>
         </NavLink>
         <NavLink to="/admin/settings" className={({isActive})=> isActive ? styles.tabActive : styles.tab}>
-          <Settings />
+          <Settings className={styles.icon}/>
           <span className={styles.label}>설정</span>
         </NavLink>
       </nav>
