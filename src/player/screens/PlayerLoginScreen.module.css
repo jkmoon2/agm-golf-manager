@@ -1,71 +1,88 @@
 /* src/player/screens/PlayerLoginScreen.module.css */
 
-.container {
-  flex: 1;                            /* flex:1로 부모 영역 꽉 채움 */
+/* 0) 페이지 전체 래핑: 상단 헤더 + 컨테이너 */
+.page {
+  position: absolute;
+  top: 0; bottom: 0; left: 0; right: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;               /* 수평 중앙 정렬 */
-  justify-content: center;           /* 수직 중앙 정렬 */
-  background: #f7f8fa;
-  padding: 0 16px;
-  box-sizing: border-box;
+  background: #f0f2f5;
 }
 
-.cardWrapper {
-  width: 100%;
-  max-width: 360px;                  /* 기존 포맷 유지 */
+/* 1) 상단 헤더 */
+.header {
+  height: 56px;              /* MainLayout과 동일 높이 */
   background: #fff;
-  padding: 24px;                     /* 기존 여백 유지 */
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  z-index: 1;
+}
+.title {
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+/* 2) 카드 컨테이너 */
+.container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 3) 카드 자체 */
+.card {
+  width: 360px;
+  max-width: 90%;
+  background: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  box-sizing: border-box;
+  padding: 24px;
 }
 
+/* 4) 카드 내 타이틀 */
 .heading {
-  margin: 0;
-  font-size: 1.25rem;                /* 운영자 로그인과 동일 */
+  margin: 0 0 16px;
+  font-size: 1.25rem;
   font-weight: 600;
   text-align: center;
 }
 
+/* 5) 폼 레이아웃 */
 .form {
   display: flex;
   flex-direction: column;
-  gap: 12px;                         /* 기존 양식 그대로 */
+  gap: 12px;
 }
 
+/* 6) 입력 필드 */
 .input {
-  width: 100%;
-  padding: 12px;
-  font-size: 1rem;
+  height: 44px;
+  padding: 0 12px;
   border: 1px solid #ccc;
   border-radius: 8px;
-  box-sizing: border-box;
-  transition: border-color .2s ease, box-shadow .2s ease;
-}
-
-.input:focus {
+  font-size: 1rem;
   outline: none;
-  border-color: #007bff;             /* 포커스 시 파란 테두리 */
-  box-shadow: 0 0 0 3px rgba(0,123,255,0.2);
+}
+.input:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
 }
 
+/* 7) 버튼 */
 .button {
-  width: 100%;
-  padding: 12px;
+  height: 44px;
+  background: #007bff;
+  color: #fff;
   font-size: 1rem;
   font-weight: 500;
-  background-color: #007bff;
-  color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  transition: background-color .2s ease;
 }
-
 .button:hover {
-  background-color: #0056d4;
+  background: #0069d9;
 }
