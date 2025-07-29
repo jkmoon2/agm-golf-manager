@@ -1,37 +1,66 @@
 /* src/player/screens/PlayerLoginScreen.module.css */
 
-.fullscreen {
-  display: flex; align-items: center; justify-content: center;
-  height: 100vh; background: #f4f5f7;
+/* 탭바·헤더 사이 영역을 꽉 채우고 중앙 정렬 */
+.container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7f8fa;
+  padding: 0 16px;
 }
 
-.card {
-  background: #fff; border-radius: 12px;
+/* 카드 래퍼: 중앙에 고정 너비, 내부 여백, 그림자 */
+.cardWrapper {
+  width: 100%;
+  max-width: 360px;
+  background: #fff;
+  padding: 24px;
+  border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  padding: 24px; width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-sizing: border-box;
 }
 
-.title {
-  margin-bottom: 8px; font-size: 1.25rem; font-weight: bold;
+/* 제목: 운영자 “로그인” 버튼 크기와 동일하게 */
+.heading {
+  margin: 0;
+  font-size: 1.25rem;      /* 로그인 버튼 텍스트 크기와 매칭 */
+  font-weight: 600;
   text-align: center;
 }
 
-.subtitle {
-  margin: 0 0 16px; color: #555; text-align: center;
-}
-
+/* 폼: 세로 스택 */
 .form {
-  display: flex; flex-direction: column;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
+/* 입력 */
 .input {
-  padding: .75rem; margin-bottom: 12px;
-  border: 1px solid #ddd; border-radius: 6px;
+  padding: 12px;
   font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-sizing: border-box;
 }
 
-.submit {
-  padding: .75rem; background: #007bff; color: #fff;
-  border: none; border-radius: 6px; font-size: 1rem;
+/* 버튼 */
+.button {
+  padding: 12px;
+  font-size: 1rem;
+  font-weight: 500;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
   cursor: pointer;
+  transition: background-color .2s ease;
+}
+
+.button:hover {
+  background-color: #0056b3;
 }
