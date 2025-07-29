@@ -25,18 +25,21 @@ const STEP_TITLES = {
 export default function MainLayout() {
   const { pathname } = useLocation();
 
-  // "/admin/home/0" ~ "/admin/home/8" 경로를 모두 잡아냅니다
+  // STEP 페이지 인지
   const stepMatch = pathname.match(/^\/admin\/home\/(\d+)(?:\/.*)?$/);
   const stepNum   = stepMatch ? Number(stepMatch[1]) : null;
   const isStep    = stepNum !== null && STEP_TITLES.hasOwnProperty(stepNum);
 
-  // 헤더: STEP 페이지면 "STEP X. 제목", 아니면 앱 메인 타이틀
+  // 헤더에 뿌릴 문자열
   const header = isStep
     ? `STEP ${stepNum}. ${STEP_TITLES[stepNum]}`
     : 'AGM Golf Manager';
 
-  // 홈 아이콘 활성: '/admin/home' 및 STEP0~STEP8 모두 파란색 유지
+  // 홈 아이콘 활성화 여부
   const isHomeActive = pathname === '/admin/home' || isStep;
+
+  // **플레이어 로그인** 경로인지 체크해서 메인센터 클래스 토글
+  const isPlayerLogin = pathname === '/player/login';
 
   return (
     <div className={styles.app}>
@@ -44,24 +47,24 @@ export default function MainLayout() {
         <h1 className={styles.title}>{header}</h1>
       </header>
 
-      <main className={styles.content}>
+      {/* 로그인일 때만 centeredContent 추가 */}
+      <main
+        className={
+          styles.content +
+          (isPlayerLogin ? ` ${styles.centeredContent}` : '')
+        }
+      >
         <Outlet />
       </main>
 
       <footer className={styles.tabbar}>
-        {/* 홈 */}
-        <Link
-          to="/admin/home"
-          className={isHomeActive ? styles.navItemActive : styles.navItem}
-        >
+        <Link to="/admin/home" className={isHomeActive ? styles.navItemActive : styles.navItem}>
           <HomeIcon className={styles.icon} />
           <span className={styles.label}>홈</span>
         </Link>
 
-        {/* 참가자 */}
         <NavLink
           to="/player/home"
-          end
           className={({ isActive }) =>
             isActive ? styles.navItemActive : styles.navItem
           }
@@ -70,7 +73,6 @@ export default function MainLayout() {
           <span className={styles.label}>참가자</span>
         </NavLink>
 
-        {/* 대시보드 */}
         <NavLink
           to="/admin/home/dashboard"
           end
@@ -82,7 +84,6 @@ export default function MainLayout() {
           <span className={styles.label}>대시보드</span>
         </NavLink>
 
-        {/* 설정 */}
         <NavLink
           to="/admin/home/settings"
           end

@@ -1,38 +1,69 @@
 /* src/player/screens/PlayerHome.module.css */
 
+/* 운영자 HomeScreen.module.css 에서 그대로 복사한 container */
+.container {
+  padding: 1rem;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+/* 운영자 HomeScreen.module.css 에서 그대로 복사한 grid */
 .grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
-  padding: 1rem;
 }
 
+/* 운영자 HomeScreen.module.css 에서 그대로 복사한 card */
 .card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 0.85;
   background: #fff;
   border: 1px solid #ddd;
-  border-radius: 0.75rem;
-  padding: 1rem;
-  text-align: center;
+  border-radius: 1.25rem;
+  overflow: hidden;
   cursor: pointer;
-  transition: box-shadow .2s;
+  transition: transform .1s ease, box-shadow .2s ease;
 }
 .card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 
+/* 운영자 HomeScreen.module.css 에서 그대로 복사한 step/title/desc */
 .step {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.75rem;
   font-size: 0.75rem;
   color: #555;
-  margin-bottom: 0.5rem;
 }
+
 .title {
-  font-size: 1.25rem;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-size: 1.6rem;
   font-weight: 600;
-  margin: 0.5rem 0;
-  /* 메인 타이틀을 검정색으로 강제 */
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: #000 !important;
 }
+
 .desc {
-  font-size: 0.875rem;
-  color: #007bff;
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 0.8rem;
+  color: #0074e8; /* 운영자보다 조금 더 선명한 파랑이라면 #0074e8, 기본은 #007bff */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

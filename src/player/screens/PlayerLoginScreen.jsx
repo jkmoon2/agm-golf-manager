@@ -1,70 +1,67 @@
-// src/screens/PlayerLoginScreen.jsx
+// src/player/screens/PlayerLoginScreen.jsx
 
 import React, { useState, useContext } from 'react';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { doc, getDoc }               from 'firebase/firestore';
-import { db }                         from '../firebase';
-import { PlayerContext }             from '../contexts/PlayerContext';
-import { useNavigate, useParams }    from 'react-router-dom';
-import styles from './PlayerLoginScreen.module.css';
+import { db }                         from '../../firebase';
+import { PlayerContext }             from '../../contexts/PlayerContext';
+import styles                         from './PlayerLoginScreen.module.css';
 
 export default function PlayerLoginScreen() {
   const [inputCode, setInputCode] = useState('');
   const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext);
-  const nav = useNavigate();
-  const { eventId: routeEventId } = useParams();
 
   const handleSubmit = async e => {
     e.preventDefault();
-    // 1) 인증(익명) 로그인
     const auth = getAuth();
     if (!auth.currentUser) {
-      try {
-        await signInAnonymously(auth);
-      } catch (err) {
-        alert('익명 로그인 실패: ' + err.message);
-        return;
-      }
+      try { await signInAnonymously(auth); }
+      catch (err) { alert('익명 로그인 실패: ' + err.message); return; }
     }
-
-    // 2) 이벤트 문서 불러오기
+    const routeEventId = new URLSearchParams(window.location.search).get('eventId') || '';
     const evtSnap = await getDoc(doc(db, 'events', routeEventId));
     if (!evtSnap.exists()) {
       alert('존재하지 않는 대회 ID입니다.');
       return;
     }
     const data = evtSnap.data();
-
-    // 3) 참가자 인증코드 검사
-    const part = data.participants?.find(p => p.authCode === inputCode);
+    const part = data.participants?.find(p => p.authCode === inputCode.trim());
     if (!part) {
       alert('인증 코드가 일치하지 않습니다.');
       return;
     }
-
-    // 4) context 저장 후 홈으로
     setEventId(routeEventId);
-    setAuthCode(inputCode);
+    setAuthCode(inputCode.trim());
     setParticipant(part);
-    nav('/player/home');
+    window.location.href = '/player/home';
   };
 
   return (
-    <div className={styles.container}>
-      <h2>참가자 입장</h2>
-      <p>대회 ID: <strong>{routeEventId}</strong></p>
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <label>
-          인증 코드
-          <input
-            value={inputCode}
-            onChange={e => setInputCode(e.target.value)}
-            placeholder="인증 코드를 입력하세요"
-            required
-          />
-        </label>
-        <button type="submit">입장하기</button>
-      </form>
+    <div className={styles.page}>
+      {/* 1) 상단 헤더 */}
+      <header className={styles.header}>
+        <h1 className={styles.title}>AGM Golf Manager</h1>
+      </header>
+
+      {/* 2) 남은 화면 전체를 컨테이너로 잡아 중앙 정렬 */}
+      <div className={styles.container}>
+        <div className={styles.card}>
+          <h2 className={styles.heading}>참가자</h2>
+          <form onSubmit={handleSubmit} className={styles.form}>
+            <input
+              type="text"
+              className={styles.input}
+              value={inputCode}
+              onChange={e => setInputCode(e.target.value)}
+              placeholder="인증 코드를 입력하세요"
+              required
+            />
+            <button type="submit" className={styles.button}>
+              입장하기
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

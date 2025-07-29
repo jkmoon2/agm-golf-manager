@@ -3,24 +3,67 @@
 .page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh;
 }
+
+/* ── 상단 헤더 (운영자와 동일하되, 왼쪽 정렬) ── */
+.header {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  height: 56px;
+  background: #fff;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;   /* center → flex-start */
+  padding: 0 16px;               /* 왼쪽 여백 확보 */
+  font-size: 1.25rem;
+  font-weight: bold;
+  z-index: 10;
+}
+
+/* ── 본문 ── */
 .content {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  padding-top: 56px;   /* header 높이 만큼 */
+  padding-bottom: 56px;/* tabbar 높이 만큼 */
 }
+
+/* ── 하단 탭바 (운영자 BottomTabBar.module.css과 완전히 동일) ── */
 .tabbar {
-  display: flex;
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  height: 56px;
+  background: #fff;
   border-top: 1px solid #ddd;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 10;
 }
+
 .tab {
-  flex: 1;
-  text-align: center;
-  padding: 0.75rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-decoration: none;
   color: #666;
 }
-.active {
+
+.tabActive {
   color: #007bff;
-  font-weight: bold;
+}
+
+.icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 2px;
+}
+
+.label {
+  font-size: 10px;
+  line-height: 1;
 }

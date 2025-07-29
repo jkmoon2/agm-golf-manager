@@ -1,32 +1,43 @@
+/* src/layouts/MainLayout.module.css */
+
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
 }
+
 .header {
-  position: fixed;
-  top: 0;
-  width: 100%;
-  height: 56px;
+  position: static;         /* 화면 흐름대로 */
+  height: 56px;             /* ← 여기 높이를 조정합니다 (예: 64px→56px) */
   background: #fff;
   border-bottom: 1px solid #eee;
   display: flex;
   align-items: center;
   justify-content: space-between; /* 좌우 끝 배치 */
   padding-left: 16px;
-  z-index: 10;
 }
+
 .title {
   font-family: 'Noto Sans KR', sans-serif;
   font-size: 1.25rem;
   margin: 0;
 }
+
 .content {
   flex: 1;
-  padding-top: 56px;
+  padding-top: 0;       /* 헤더 바로 아래부터 시작 */
   padding-bottom: 64px;
   overflow-y: auto;
 }
+
+/* 플레이어 로그인 화면에서만 주 콘텐츠를 중앙 배치할 때 사용 */
+.centeredContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
 .tabbar {
   position: fixed;
   bottom: 0;
@@ -37,6 +48,7 @@
   display: flex;
   z-index: 10;
 }
+
 .navItem,
 .navItemActive {
   flex: 1;
@@ -46,15 +58,18 @@
   align-items: center;
   justify-content: center;
 }
+
 .icon {
   width: 24px;
   height: 24px;
   color: #888;
 }
+
 .label {
   font-size: 0.75rem;
   color: #888;
 }
+
 .navItemActive .icon,
 .navItemActive .label {
   color: #007bff;
@@ -98,7 +113,7 @@
 .eventList {
   position: absolute;
   top: 100%;               /* 부모 높이(버튼) 바로 밑에 */
-  right: 0;                 /* 부모 왼쪽에 딱 맞춤 */
+  right: 0;                /* 부모 왼쪽에 딱 맞춤 */
   margin: 0;               /* ul 기본 margin 제거 */
   padding: 0;              /* ul 기본 padding 제거 */
   list-style: none;        /* 불릿(•) 제거 */

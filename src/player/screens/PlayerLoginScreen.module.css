@@ -1,0 +1,93 @@
+/* src/player/screens/PlayerLoginScreen.module.css */
+
+/* 0) 페이지 전체 래핑: 상단 헤더 + 컨테이너 */
+.page {
+  position: absolute;
+  top: 0; bottom: 0; left: 0; right: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f0f2f5;
+}
+
+/* 1) 상단 헤더 */
+.header {
+  height: 56px;               /* MainLayout과 동일 높이 */
+  background: #fff;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  z-index: 1;
+}
+.title {
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+/* 2) 카드 컨테이너: 헤더(56px) 아래~탭바(64px) 위까지 정확히 중앙에 배치 */
+.container {
+  /* 뷰포트 전체 높이에서 헤더(56px)와 탭바(64px) 높이를 뺀 만큼만 */
+  height: calc(100vh - 56px - 64px);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* 혹시 내부 패딩이 박스 크기에 포함되게 하고 싶다면 추가 */
+  box-sizing: border-box;
+}
+
+/* 3) 카드 자체 */
+.card {
+  width: 360px;
+  max-width: 90%;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  padding: 24px;
+}
+
+/* 4) 카드 내 타이틀 */
+.heading {
+  margin: 0 0 16px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* 5) 폼 레이아웃 */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 6) 입력 필드 */
+.input {
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+.input:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+  outline: none;
+}
+
+/* 7) 버튼 */
+.button {
+  height: 44px;
+  background: #007bff;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.button:hover {
+  background: #0069d9;
+}
