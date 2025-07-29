@@ -28,7 +28,7 @@ export default function PlayerApp() {
       <Route path="home/4" element={<PlayerScoreInput />} />
       <Route path="home/5" element={<PlayerResults />} />
 
-      {/* 그 외전부 다시 로그인 */}
+      {/* 그 외 전부 다시 로그인 */}
       <Route path="*" element={<Navigate to="login" replace />} />
     </Routes>
   );

@@ -21,8 +21,8 @@ export default function HomeScreen() {
   const { eventId } = useContext(EventContext);
 
   const handleClick = num => {
-    if (num === 0) return nav('0');
-    if (num === 9) return nav('dashboard');
+    if (num === 0)        return nav('0');
+    if (num === 9)        return nav('dashboard');
     if (!eventId) {
       alert('먼저 대회를 선택하거나 새 대회를 시작해주세요.');
       return;
