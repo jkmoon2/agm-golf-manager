@@ -18,9 +18,7 @@ export default function PlayerLoginScreen() {
       try { await signInAnonymously(auth); }
       catch (err) { alert('익명 로그인 실패: ' + err.message); return; }
     }
-    // URLSearchParams 혹은 useParams() 로 이벤트 ID 받아오기
     const routeEventId = new URLSearchParams(window.location.search).get('eventId') || '';
-
     const evtSnap = await getDoc(doc(db, 'events', routeEventId));
     if (!evtSnap.exists()) {
       alert('존재하지 않는 대회 ID입니다.');
@@ -45,7 +43,7 @@ export default function PlayerLoginScreen() {
         <h1 className={styles.title}>AGM Golf Manager</h1>
       </header>
 
-      {/* 2) 로그인 카드 */}
+      {/* 2) 남은 화면 전체를 컨테이너로 잡아 중앙 정렬 */}
       <div className={styles.container}>
         <div className={styles.card}>
           <h2 className={styles.heading}>참가자</h2>
