@@ -8,7 +8,7 @@
 
 .header {
   position: static;         /* 화면 흐름대로 */
-  height: 64px;             /* ← 수정: 기존보다 높이를 늘려 두께 복구 */
+  height: 56px;             /* ← 조정: 기존 64px 에서 56px 로 줄여서 헤더 두께를 약간 낮춤 */
   background: #fff;
   border-bottom: 1px solid #eee;
   display: flex;

@@ -1,21 +1,21 @@
 /* src/player/screens/PlayerLoginScreen.module.css */
 
-/* 탭바·헤더 사이 영역을 꽉 채우고 중앙 정렬 */
 .container {
-  flex: 1;
+  flex: 1;                            /* flex:1로 부모 영역 꽉 채움 */
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;               /* 수평 중앙 정렬 */
+  justify-content: center;           /* 수직 중앙 정렬 */
   background: #f7f8fa;
   padding: 0 16px;
+  box-sizing: border-box;
 }
 
-/* 카드 래퍼: 중앙에 고정 너비, 내부 여백, 그림자 */
 .cardWrapper {
   width: 100%;
-  max-width: 360px;
+  max-width: 360px;                  /* 기존 포맷 유지 */
   background: #fff;
-  padding: 24px;
+  padding: 24px;                     /* 기존 여백 유지 */
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
   display: flex;
@@ -24,32 +24,37 @@
   box-sizing: border-box;
 }
 
-/* 제목: 운영자 “로그인” 버튼 크기와 동일하게 */
 .heading {
   margin: 0;
-  font-size: 1.25rem;      /* 로그인 버튼 텍스트 크기와 매칭 */
+  font-size: 1.25rem;                /* 운영자 로그인과 동일 */
   font-weight: 600;
   text-align: center;
 }
 
-/* 폼: 세로 스택 */
 .form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 12px;                         /* 기존 양식 그대로 */
 }
 
-/* 입력 */
 .input {
+  width: 100%;
   padding: 12px;
   font-size: 1rem;
   border: 1px solid #ccc;
   border-radius: 8px;
   box-sizing: border-box;
+  transition: border-color .2s ease, box-shadow .2s ease;
 }
 
-/* 버튼 */
+.input:focus {
+  outline: none;
+  border-color: #007bff;             /* 포커스 시 파란 테두리 */
+  box-shadow: 0 0 0 3px rgba(0,123,255,0.2);
+}
+
 .button {
+  width: 100%;
   padding: 12px;
   font-size: 1rem;
   font-weight: 500;
@@ -62,5 +67,5 @@
 }
 
 .button:hover {
-  background-color: #0056b3;
+  background-color: #0056d4;
 }
