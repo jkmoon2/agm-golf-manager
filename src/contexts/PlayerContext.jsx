@@ -8,21 +8,21 @@ export const PlayerContext = createContext({
   eventId:          null,
   authCode:         '',
   participant:      null,
-  availableEvents:  [],       // ── 새로 추가
+  availableEvents:  [],             // ── 새로 추가
   setEventId:       () => {},
   setAuthCode:      () => {},
   setParticipant:   () => {},
-  setAvailableEvents: () => {} // ── 새로 추가
+  setAvailableEvents: () => {}      // ── 새로 추가
 });
 
 export function PlayerProvider({ children }) {
-  const [eventId, setEventId]           = useState(null);
-  const [authCode, setAuthCode]         = useState('');
-  const [participant, setParticipant]   = useState(null);
+  const [eventId, setEventId]             = useState(null);
+  const [authCode, setAuthCode]           = useState('');
+  const [participant, setParticipant]     = useState(null);
   const [availableEvents, setAvailableEvents] = useState([]); // ── 새로 추가
 
-  // ── 마운트 시점에 Firestore에서 대회 리스트 조회 ──
   useEffect(() => {
+    // ── 마운트 시에 Firestore에서 대회 목록 조회
     (async () => {
       try {
         const snap = await getDocs(collection(db, 'events'));
@@ -39,11 +39,11 @@ export function PlayerProvider({ children }) {
       eventId,
       authCode,
       participant,
-      availableEvents,      // ── 새로 추가
+      availableEvents,         // ── 새로 추가
       setEventId,
       setAuthCode,
       setParticipant,
-      setAvailableEvents    // ── 새로 추가
+      setAvailableEvents       // ── 새로 추가
     }}>
       {children}
     </PlayerContext.Provider>

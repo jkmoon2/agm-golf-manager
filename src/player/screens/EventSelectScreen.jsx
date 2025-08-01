@@ -1,33 +1,34 @@
 // src/player/screens/EventSelectScreen.jsx
 
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './EventSelectScreen.module.css';
 
 export default function EventSelectScreen() {
-  const [events, setEvents] = useState([]);
-  const { setEventId } = useContext(PlayerContext);
+  const {
+    availableEvents,
+    eventId: currentEventId,
+    participant,
+    setEventId    // ← 수정: setEventId 추가
+  } = useContext(PlayerContext);
+
   const nav = useNavigate();
 
-  useEffect(() => {
-    // Firestore에서 이벤트 목록 가져오기
-    (async () => {
-      const snap = await getDocs(collection(db, 'events'));
-      setEvents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    })();
-  }, []);
-
   const handleSelect = id => {
-    setEventId(id);
-    nav(`/player/login?eventId=${id}`);
+    if (id === currentEventId && participant) {
+      // 이미 인증된 대회면 바로 8버튼 메뉴로 이동
+      nav('/player/home');
+    } else {
+      // 처음 선택하거나 새로운 대회면, ID 설정 후 로그인 화면으로
+      setEventId(id);
+      nav(`/player/login?eventId=${id}`);
+    }
   };
 
   return (
     <div className={styles.container}>
-      {events.map(evt => (
+      {availableEvents.map(evt => (
         <div
           key={evt.id}
           className={styles.card}
@@ -42,7 +43,9 @@ export default function EventSelectScreen() {
           </p>
         </div>
       ))}
-      {events.length === 0 && <p className={styles.empty}>운영 중인 대회가 없습니다.</p>}
+      {availableEvents.length === 0 && (
+        <p className={styles.empty}>운영 중인 대회가 없습니다.</p>
+      )}
     </div>
   );
 }
