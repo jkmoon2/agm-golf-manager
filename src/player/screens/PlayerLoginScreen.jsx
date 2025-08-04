@@ -51,6 +51,8 @@ export default function PlayerLoginScreen() {
     setEventId(routeEventId);
     setAuthCode(inputCode.trim());
     setParticipant(part);
+    // 인증 성공 시 로컬스토리지에 인증 기록 저장
+    localStorage.setItem(`auth_${routeEventId}`, 'true');
     nav(`/player/home/${routeEventId}`, { replace: true });      // ← 수정
   };
 

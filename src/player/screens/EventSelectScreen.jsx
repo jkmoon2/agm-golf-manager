@@ -10,19 +10,24 @@ export default function EventSelectScreen() {
     availableEvents,
     eventId: currentEventId,
     participant,
-    setEventId    // ← 수정: setEventId 사용
+    setEventId,    // ← 수정
+    setParticipant, // ← 수정: 이전 인증 정보 초기화
+    setAuthCode     // ← 수정: 인증 코드 초기화
   } = useContext(PlayerContext);
 
   const nav = useNavigate();
 
   const handleSelect = id => {
-    if (id === currentEventId && participant) {
-      // 이미 인증된 대회면 바로 8버튼 메뉴로 이동
+    // 모든 대회마다 최초 한 번만 로그인 후, 이후 다시 인증 없이 진입
+    const key = `auth_${id}`;
+    const isAuthenticated = localStorage.getItem(key) === 'true';
+    setEventId(id);
+    if (isAuthenticated) {
       nav(`/player/home/${id}`);
     } else {
-      // 처음 선택하거나 새로운 대회면, ID 설정 후 중첩된 로그인 경로로
-      setEventId(id);
-      nav(`/player/home/${id}/login`);    // ← 수정: 로그인 URL 변경
+      setParticipant(null);  // 이전 인증 데이터 초기화
+      setAuthCode('');       // 이전 인증 코드 초기화
+      nav(`/player/home/${id}/login`);
     }
   };
 
