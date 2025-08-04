@@ -1,41 +1,34 @@
 // src/player/PlayerApp.jsx
 
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 
-import EventSelectScreen  from './screens/EventSelectScreen';
-import PlayerLoginScreen  from './screens/PlayerLoginScreen';
-import PlayerHome         from './screens/PlayerHome';
-import PlayerRoomSelect   from './screens/PlayerRoomSelect';
-import PlayerRoomTable    from './screens/PlayerRoomTable';
-import PlayerEventInput   from './screens/PlayerEventInput';
-import PlayerScoreInput   from './screens/PlayerScoreInput';
-import PlayerResults      from './screens/PlayerResults';
+import PlayerHome        from './screens/PlayerHome';
+import PlayerRoomSelect  from './screens/PlayerRoomSelect';
+import PlayerRoomTable   from './screens/PlayerRoomTable';
+import PlayerEventInput  from './screens/PlayerEventInput';
+import PlayerScoreInput  from './screens/PlayerScoreInput';
+import PlayerResults     from './screens/PlayerResults';
 
 export default function PlayerApp() {
+  const { eventId } = useParams();
+
   return (
     <Routes>
-      {/* 1) /player/home → 대회 리스트 (EventSelectScreen) */}
-      <Route index element={<EventSelectScreen />} />
+      {/* STEP 메뉴 최초 진입 → 8버튼 메뉴(PlayerHome) */}
+      <Route index element={<PlayerHome />} />
 
-      {/* 2) /player/home/:eventId/login → 인증 코드 입력 */}
-      <Route path=":eventId/login" element={<PlayerLoginScreen />} />
+      {/* STEP1: 방 선택 */}
+      <Route path="1" element={<PlayerRoomSelect />} />
 
-      {/* 3) /player/home/:eventId → 8버튼 메뉴 */}
-      <Route path=":eventId" element={<PlayerHome />} />
+      {/* STEP2~STEP5 */}
+      <Route path="2" element={<PlayerRoomTable />} />
+      <Route path="3" element={<PlayerEventInput />} />
+      <Route path="4" element={<PlayerScoreInput />} />
+      <Route path="5" element={<PlayerResults />} />
 
-      {/* 4) /player/home/:eventId/1~5 → 단계별 화면 */}
-      <Route path=":eventId/1" element={<PlayerRoomSelect />} />
-      <Route path=":eventId/2" element={<PlayerRoomTable />} />
-      <Route path=":eventId/3" element={<PlayerEventInput />} />
-      <Route path=":eventId/4" element={<PlayerScoreInput />} />
-      <Route path=":eventId/5" element={<PlayerResults />} />
-
-      {/* 5) 그 외는 다시 대회 리스트로 */}
-      <Route
-        path="*"
-        element={<Navigate to="/player/home" replace />}    // ← 수정: 절대 경로로 목록으로
-      />
+      {/* 기타 STEP → STEP1으로 리다이렉트 */}
+      <Route path="*" element={<Navigate to="1" replace />} />
     </Routes>
   );
 }
