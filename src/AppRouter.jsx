@@ -58,7 +58,7 @@ export default function AppRouter() {
             />
             {/* 2-b) 대회 클릭 후 인증코드 로그인 */}
             <Route
-              path="/player/login"
+              path="/player/home/:eventId/login"            // ← 수정: 중첩된 로그인 경로로 변경
               element={
                 <Protected roles={['player','admin']}>
                   <PlayerProvider>

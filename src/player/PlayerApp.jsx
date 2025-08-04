@@ -32,7 +32,10 @@ export default function PlayerApp() {
       <Route path=":eventId/5" element={<PlayerResults />} />
 
       {/* 5) 그 외는 다시 대회 리스트로 */}
-      <Route path="*" element={<Navigate to="" replace />} />
+      <Route
+        path="*"
+        element={<Navigate to="/player/home" replace />}    // ← 수정: 절대 경로로 목록으로
+      />
     </Routes>
   );
 }

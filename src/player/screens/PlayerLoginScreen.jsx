@@ -6,7 +6,7 @@ import { doc, getDoc }                from 'firebase/firestore';
 import { db }                          from '../../firebase';
 import { PlayerContext }              from '../../contexts/PlayerContext';
 import styles                          from './PlayerLoginScreen.module.css';
-import { useNavigate, useLocation }    from 'react-router-dom';
+import { useNavigate, useParams }      from 'react-router-dom';  // ← 수정: useParams 사용
 
 export default function PlayerLoginScreen() {
   const [inputCode, setInputCode] = useState('');
@@ -18,14 +18,13 @@ export default function PlayerLoginScreen() {
     setParticipant
   } = useContext(PlayerContext);
 
-  const nav       = useNavigate();
-  const { search } = useLocation();
-  const routeEventId = new URLSearchParams(search).get('eventId') || '';
+  const nav         = useNavigate();
+  const { eventId: routeEventId } = useParams();               // ← 수정: path param 사용
 
-  // ── 수정: 이미 이 대회에 인증된 상태면, 바로 8버튼 메뉴로 이동
+  // 이미 이 대회에 인증된 상태면, 바로 8버튼 메뉴로 이동
   useEffect(() => {
     if (ctxEventId === routeEventId && participant) {
-      nav('/player/home', { replace: true });
+      nav(`/player/home/${routeEventId}`, { replace: true });   // ← 수정: 중첩된 8버튼 URL
     }
   }, [ctxEventId, participant, routeEventId, nav]);
 
@@ -52,7 +51,7 @@ export default function PlayerLoginScreen() {
     setEventId(routeEventId);
     setAuthCode(inputCode.trim());
     setParticipant(part);
-    nav('/player/home', { replace: true });
+    nav(`/player/home/${routeEventId}`, { replace: true });      // ← 수정
   };
 
   return (
@@ -65,7 +64,7 @@ export default function PlayerLoginScreen() {
       {/* 2) 헤더 아래~탭바 위 전체를 컨테이너로 잡아 카드 중앙 배치 */}
       <div className={styles.container}>
         <div className={styles.card}>
-          <h2 className={styles.heading}>참가자</h2>
+          <h2 className={styles.heading}>참가자 로그인</h2>
           <form onSubmit={handleSubmit} className={styles.form}>
             <input
               type="text"

@@ -10,7 +10,7 @@ export default function EventSelectScreen() {
     availableEvents,
     eventId: currentEventId,
     participant,
-    setEventId    // ← 수정: setEventId 추가
+    setEventId    // ← 수정: setEventId 사용
   } = useContext(PlayerContext);
 
   const nav = useNavigate();
@@ -18,11 +18,11 @@ export default function EventSelectScreen() {
   const handleSelect = id => {
     if (id === currentEventId && participant) {
       // 이미 인증된 대회면 바로 8버튼 메뉴로 이동
-      nav('/player/home');
+      nav(`/player/home/${id}`);
     } else {
-      // 처음 선택하거나 새로운 대회면, ID 설정 후 로그인 화면으로
+      // 처음 선택하거나 새로운 대회면, ID 설정 후 중첩된 로그인 경로로
       setEventId(id);
-      nav(`/player/login?eventId=${id}`);
+      nav(`/player/home/${id}/login`);    // ← 수정: 로그인 URL 변경
     }
   };
 
