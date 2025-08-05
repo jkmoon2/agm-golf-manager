@@ -1,7 +1,7 @@
 // src/player/screens/PlayerHome.jsx
 
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom'; // ← 수정: useParams 추가
+import { useNavigate } from 'react-router-dom';  // useParams 제거
 import styles from './PlayerHome.module.css';
 
 const menu = [
@@ -17,20 +17,18 @@ const menu = [
 
 export default function PlayerHome() {
   const nav = useNavigate();
-  const { eventId } = useParams(); // ← 수정: params에서 eventId 추출
 
   return (
     <div className={styles.container}>
-
       <div className={styles.grid}>
         {menu.map(item => (
           <button
             key={item.step}
             className={styles.card}
-            onClick={() => nav(`${item.step}`)} // ← 수정: 상대 경로로 STEP 번호 이동
+            onClick={() => nav(`${item.step}`)}  // 상대 경로로 STEP 번호 이동
           >
             <div className={styles.step}>STEP {item.step}</div>
-            <h3 className={styles.title}>{item.title}</h3>
+            <h2 className={styles.title}>{item.title}</h2>
             <p className={styles.desc}>{item.sub}</p>
           </button>
         ))}
