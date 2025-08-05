@@ -1,7 +1,6 @@
 // src/player/screens/PlayerRoomSelect.jsx
 
 import React, { useState, useContext } from 'react';
-import { useParams } from 'react-router-dom';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './PlayerRoomSelect.module.css';
 
@@ -15,7 +14,6 @@ export default function PlayerRoomSelect() {
 // 스트로크 모드: 방 선택 후 바로 배정
 function StrokeRoomSelect() {
   const { rooms = [], participant, joinRoom } = useContext(PlayerContext);
-  const { eventId } = useParams();
   const [assignedRoom, setAssignedRoom] = useState(null);
 
   const handleSelect = roomNumber => {
@@ -25,14 +23,12 @@ function StrokeRoomSelect() {
 
   return (
     <div className={styles.container}>
-      {/* 참가자 인사말 */}
       {participant?.nickname && (
         <p className={styles.greeting}>
           {participant.nickname}님, 안녕하세요!
         </p>
       )}
 
-      {/* 방 선택 버튼 */}
       {rooms.length === 0 ? (
         <p className={styles.empty}>등록된 방이 없습니다.</p>
       ) : (
@@ -49,7 +45,6 @@ function StrokeRoomSelect() {
         </div>
       )}
 
-      {/* 배정 결과 테이블 */}
       {assignedRoom != null && (
         <table className={styles.resultTable}>
           <thead>
@@ -75,7 +70,6 @@ function StrokeRoomSelect() {
 // 포볼 모드: 방 + 팀원 선택
 function FourBallRoomSelect() {
   const { rooms = [], participants = [], participant, joinFourBall } = useContext(PlayerContext);
-  const { eventId } = useParams();
   const [selRoom, setSelRoom] = useState(null);
   const [selMate, setSelMate] = useState(null);
   const [assignedTeam, setAssignedTeam] = useState(null);
@@ -109,7 +103,6 @@ function FourBallRoomSelect() {
               </button>
             ))}
           </div>
-
           {selRoom != null && (
             <div className={styles.grid}>
               {participants
@@ -125,7 +118,6 @@ function FourBallRoomSelect() {
                 ))}
             </div>
           )}
-
           {selRoom != null && selMate != null && (
             <button className={styles.confirm} onClick={handleConfirm}>
               팀 구성 완료
@@ -153,5 +145,5 @@ function FourBallRoomSelect() {
         </table>
       )}
     </div>
-  );
+);
 }
