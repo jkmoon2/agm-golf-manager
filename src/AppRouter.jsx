@@ -1,7 +1,7 @@
 // src/AppRouter.jsx
 
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'; // ← Outlet 추가
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PlayerProvider }        from './contexts/PlayerContext';
 
@@ -27,50 +27,45 @@ export default function AppRouter() {
       <AuthProvider>
         <Routes>
 
-          {/* 1) 관리자 로그인 (탭바 없음) */}
+          {/* 1) 로그인 화면 */}
           <Route path="/login" element={<LoginScreen />} />
 
-          {/* 2) 헤더+탭바 레이아웃 */}
-          <Route
-            element={
-              <Protected roles={['admin','player']}>
-                <MainLayout />
-              </Protected>
-            }
-          >
-            {/* 운영자 영역 */}
+          {/* 2) 공통 레이아웃 (헤더+탭바) */}
+          <Route element={
+            <Protected roles={['admin','player']}>
+              <MainLayout />
+            </Protected>
+          }>
+
+            {/* ── 운영자 ── */}
             <Route path="/admin"           element={<Navigate to="/admin/home" replace />} />
             <Route path="/admin/home/*"    element={<AdminApp />} />
             <Route path="/admin/dashboard" element={<Dashboard />} />
             <Route path="/admin/settings"  element={<Settings />} />
 
-            {/* 참가자 영역: 단 한 번만 PlayerProvider로 감싸기 */}
-            <Route
-              path="/player/*"
-              element={
-                <Protected roles={['player','admin']}>
-                  <PlayerProvider>       {/* ← 여기 딱 한 번만 Provider */}
-                    <Outlet />
-                  </PlayerProvider>
-                </Protected>
-              }
-            >
-              {/* 2-a) 대회 목록 */}
-              <Route path="home" element={<EventSelectScreen />} />
-
-              {/* 2-b) 인증코드 로그인 */}
-              <Route path="home/:eventId/login" element={<PlayerLoginScreen />} />
-
-              {/* 2-c) STEP1~8 메뉴 */}
-              <Route path="home/:eventId/*" element={<PlayerApp />} />
-
-              {/* 나머지 전부 → 대회 목록 */}
+            {/* ── 참가자 ── */}
+            <Route path="/player/*" element={
+              <Protected roles={['player','admin']}>
+                <PlayerProvider>
+                  <Outlet />
+                </PlayerProvider>
+              </Protected>
+            }>
+              {/* 대회 목록 */}
+              <Route path="home"                    element={<EventSelectScreen />} />
+              {/* 로그인 */}
+              <Route path="home/:eventId/login"     element={<PlayerLoginScreen />} />
+              {/* 8버튼 메뉴 + STEP */}
+              <Route path="home/:eventId/*"         element={<PlayerApp />} />
+              {/* 그 외 → 목록 */}
               <Route path="*" element={<Navigate to="home" replace />} />
             </Route>
+
           </Route>
 
-          {/* 3) 그 외 → 로그인 */}
+          {/* 3) 나머지 모두 → 로그인 */}
           <Route path="*" element={<Navigate to="/login" replace />} />
+
         </Routes>
       </AuthProvider>
     </BrowserRouter>

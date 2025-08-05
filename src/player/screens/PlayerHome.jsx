@@ -21,8 +21,6 @@ export default function PlayerHome() {
 
   return (
     <div className={styles.container}>
-      {/* ← 수정: 동적 페이지 타이틀 */}
-      <h2 className={styles.header}>STEP {eventId} 참가 메뉴</h2>
 
       <div className={styles.grid}>
         {menu.map(item => (

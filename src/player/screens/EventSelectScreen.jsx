@@ -2,24 +2,27 @@
 
 import React, { useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, getDocs } from 'firebase/firestore';  // ← getDoc 제거
+import { collection, getDocs } from 'firebase/firestore';
+import { getAuth, signInAnonymously } from 'firebase/auth';   // ← 추가
 import { db } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './EventSelectScreen.module.css';
 
 export default function EventSelectScreen() {
-  const {
-    setEventId,
-    setParticipant,
-    setAuthCode
-  } = useContext(PlayerContext);                  // ← currentEventId·participant 제거
+  const { setEventId, setParticipant, setAuthCode } = useContext(PlayerContext);
   const [availableEvents, setAvailableEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const nav = useNavigate();
 
   useEffect(() => {
+    const auth = getAuth();
     (async () => {
       try {
+        // 1) 파이어스토어 읽기 전 익명 로그인
+        if (!auth.currentUser) {
+          await signInAnonymously(auth);
+        }
+        // 2) 이벤트 목록 조회
         const snap = await getDocs(collection(db, 'events'));
         setAvailableEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (err) {
@@ -34,9 +37,7 @@ export default function EventSelectScreen() {
     setEventId(id);
     setParticipant(null);
     setAuthCode('');
-    const key = `auth_${id}`;
-    const isAuth = localStorage.getItem(key) === 'true';
-    nav(isAuth ? `/player/home/${id}` : `/player/home/${id}/login`);
+    nav(`/player/home/${id}/login`);
   };
 
   if (loading) {
