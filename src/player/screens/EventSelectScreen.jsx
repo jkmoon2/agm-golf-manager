@@ -3,7 +3,7 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { collection, getDocs } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';   // ← 추가
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { db } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './EventSelectScreen.module.css';
@@ -17,16 +17,15 @@ export default function EventSelectScreen() {
   useEffect(() => {
     const auth = getAuth();
     (async () => {
+      if (!auth.currentUser) {
+        try { await signInAnonymously(auth); }
+        catch (e) { console.error('익명 로그인 실패', e); }
+      }
       try {
-        // 1) 파이어스토어 읽기 전 익명 로그인
-        if (!auth.currentUser) {
-          await signInAnonymously(auth);
-        }
-        // 2) 이벤트 목록 조회
         const snap = await getDocs(collection(db, 'events'));
         setAvailableEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch (err) {
-        console.error(err);
+      } catch (e) {
+        console.error('이벤트 목록 조회 실패', e);
       } finally {
         setLoading(false);
       }
@@ -34,15 +33,18 @@ export default function EventSelectScreen() {
   }, []);
 
   const handleSelect = id => {
+    // 대회 컨텍스트 복원 또는 초기화
     setEventId(id);
-    setParticipant(null);
-    setAuthCode('');
-    nav(`/player/home/${id}/login`);
+    const savedPart = JSON.parse(sessionStorage.getItem(`participant_${id}`) || 'null');
+    setParticipant(savedPart);
+    setAuthCode(sessionStorage.getItem(`authcode_${id}`) || '');
+
+    // 인증 여부 검사
+    const isAuth = sessionStorage.getItem(`auth_${id}`) === 'true';
+    nav(isAuth ? `/player/home/${id}` : `/player/home/${id}/login`);
   };
 
-  if (loading) {
-    return <p className={styles.loading}>대회 목록을 불러오는 중...</p>;
-  }
+  if (loading) return <p className={styles.loading}>대회 목록을 불러오는 중...</p>;
 
   return (
     <div className={styles.container}>
