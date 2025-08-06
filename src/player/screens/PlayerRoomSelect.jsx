@@ -1,6 +1,7 @@
 // src/player/screens/PlayerRoomSelect.jsx
 
 import React, { useState, useContext } from 'react';
+import { useParams } from 'react-router-dom';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './PlayerRoomSelect.module.css';
 
@@ -11,24 +12,29 @@ export default function PlayerRoomSelect() {
     : <FourBallRoomSelect />;
 }
 
-// 스트로크 모드: 방 선택 후 바로 배정
+// ───────── 스트로크 모드 ─────────
 function StrokeRoomSelect() {
   const { rooms = [], participant, joinRoom } = useContext(PlayerContext);
-  const [assignedRoom, setAssignedRoom] = useState(null);
+  const { eventId } = useParams();
+  const [selectedRoom, setSelectedRoom]   = useState(null);
+  const [assignedRoom, setAssignedRoom]   = useState(null);
 
-  const handleSelect = roomNumber => {
-    joinRoom(roomNumber, participant.id);
-    setAssignedRoom(roomNumber);
+  const handleConfirm = () => {
+    if (selectedRoom == null) return;
+    joinRoom(selectedRoom, participant.id);
+    setAssignedRoom(selectedRoom);
   };
 
   return (
     <div className={styles.container}>
+      {/* 참가자 인사말 */}
       {participant?.nickname && (
         <p className={styles.greeting}>
           {participant.nickname}님, 안녕하세요!
         </p>
       )}
 
+      {/* 방 선택 그리드 */}
       {rooms.length === 0 ? (
         <p className={styles.empty}>등록된 방이 없습니다.</p>
       ) : (
@@ -36,8 +42,8 @@ function StrokeRoomSelect() {
           {rooms.map(r => (
             <button
               key={r.number}
-              className={styles.card}
-              onClick={() => handleSelect(r.number)}
+              className={`${styles.card} ${selectedRoom === r.number ? styles.selected : ''}`}
+              onClick={() => setSelectedRoom(r.number)}
             >
               방 {r.number}
             </button>
@@ -45,6 +51,14 @@ function StrokeRoomSelect() {
         </div>
       )}
 
+      {/* 방배정 버튼 */}
+      {selectedRoom != null && (
+        <button className={styles.confirm} onClick={handleConfirm}>
+          방 배정
+        </button>
+      )}
+
+      {/* 배정 결과 테이블 */}
       {assignedRoom != null && (
         <table className={styles.resultTable}>
           <thead>
@@ -67,19 +81,19 @@ function StrokeRoomSelect() {
   );
 }
 
-// 포볼 모드: 방 + 팀원 선택
+// ───────── 포볼 모드 ─────────
 function FourBallRoomSelect() {
   const { rooms = [], participants = [], participant, joinFourBall } = useContext(PlayerContext);
-  const [selRoom, setSelRoom] = useState(null);
-  const [selMate, setSelMate] = useState(null);
+  const { eventId } = useParams();
+  const [selRoom, setSelRoom]       = useState(null);
+  const [selMate, setSelMate]       = useState(null);
   const [assignedTeam, setAssignedTeam] = useState(null);
 
   const handleConfirm = () => {
+    if (selRoom == null || selMate == null) return;
     joinFourBall(selRoom, participant.id, selMate);
-    setAssignedTeam({
-      room: selRoom,
-      mate: participants.find(p => p.id === selMate)
-    });
+    const mate = participants.find(p => p.id === selMate);
+    setAssignedTeam({ room: selRoom, mate });
   };
 
   return (
@@ -103,6 +117,7 @@ function FourBallRoomSelect() {
               </button>
             ))}
           </div>
+
           {selRoom != null && (
             <div className={styles.grid}>
               {participants
@@ -118,6 +133,7 @@ function FourBallRoomSelect() {
                 ))}
             </div>
           )}
+
           {selRoom != null && selMate != null && (
             <button className={styles.confirm} onClick={handleConfirm}>
               팀 구성 완료
@@ -145,5 +161,5 @@ function FourBallRoomSelect() {
         </table>
       )}
     </div>
-);
+  );
 }
