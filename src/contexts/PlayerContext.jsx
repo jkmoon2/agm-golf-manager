@@ -72,7 +72,7 @@ export function PlayerProvider({ children }) {
         setRoomNames([]);
       }
     })();
-  }, [eventId]);
+  }, [eventId, participant]);    // ← participant 추가!
 
 
   // ── 2) participants 배열이 바뀔 때, 로그인된 participant 도 최신 정보로 동기화 ───

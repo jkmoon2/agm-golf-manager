@@ -18,7 +18,6 @@ function StrokeRoomSelect() {
     participants,
     participant,
     joinRoom,
-    allowTeamView
   } = useContext(PlayerContext);
 
   const [done, setDone]                 = useState(false);
