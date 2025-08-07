@@ -1,20 +1,17 @@
 /* src/player/screens/PlayerHome.module.css */
 
-/* 운영자 HomeScreen.module.css 에서 그대로 복사한 container */
 .container {
   padding: 1rem;
   max-width: 360px;
   margin: 0 auto;
 }
 
-/* 운영자 HomeScreen.module.css 에서 그대로 복사한 grid */
 .grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
 }
 
-/* 운영자 HomeScreen.module.css 에서 그대로 복사한 card */
 .card {
   position: relative;
   width: 100%;
@@ -31,7 +28,6 @@
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 
-/* 운영자 HomeScreen.module.css 에서 그대로 복사한 step/title/desc */
 .step {
   position: absolute;
   top: 0.5rem;
@@ -62,7 +58,7 @@
   transform: translateX(-50%);
   margin: 0;
   font-size: 0.8rem;
-  color: #0074e8; /* 운영자보다 조금 더 선명한 파랑이라면 #0074e8, 기본은 #007bff */
+  color: #0074e8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

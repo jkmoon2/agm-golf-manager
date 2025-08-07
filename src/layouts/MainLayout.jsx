@@ -10,7 +10,20 @@ import {
 } from '@heroicons/react/24/outline';
 import styles from './MainLayout.module.css';
 
-const STEP_TITLES = {
+// 참가자 STEP 제목 매핑
+const PLAYER_STEP_TITLES = {
+  1: 'STEP 1. 방 선택',
+  2: 'STEP 2. 방배정표',
+  3: 'STEP 3. 이벤트 입력',
+  4: 'STEP 4. 접수 입력',
+  5: 'STEP 5. 결과 확인',
+  6: 'STEP 6. 이벤트 확인',
+  7: 'STEP 7. #TEMP',
+  8: 'STEP 8. #TEMP',
+};
+
+// 운영자 STEP 제목 매핑 (0~8)
+const ADMIN_STEP_TITLES = {
   0: '대회 관리',
   1: '모드, 대회명',
   2: '방개수, 방이름',
@@ -25,18 +38,27 @@ const STEP_TITLES = {
 export default function MainLayout() {
   const { pathname } = useLocation();
 
-  // "/admin/home/0" ~ "/admin/home/8" 경로를 모두 잡아냅니다
-  const stepMatch = pathname.match(/^\/admin\/home\/(\d+)(?:\/.*)?$/);
-  const stepNum   = stepMatch ? Number(stepMatch[1]) : null;
-  const isStep    = stepNum !== null && STEP_TITLES.hasOwnProperty(stepNum);
+  // 참가자 STEP 경로: /player/home/:eventId/:step
+  const playerMatch = pathname.match(/^\/player\/home\/[^/]+\/(\d+)/);
+  const playerStep  = playerMatch ? Number(playerMatch[1]) : null;
+  const isPlayerStep = playerStep !== null && PLAYER_STEP_TITLES.hasOwnProperty(playerStep);
 
-  // 헤더: STEP 페이지면 "STEP X. 제목", 아니면 앱 메인 타이틀
-  const header = isStep
-    ? `STEP ${stepNum}. ${STEP_TITLES[stepNum]}`
-    : 'AGM Golf Manager';
+  // 운영자 STEP 경로: /admin/home or /admin/home/:step
+  const adminMatch = pathname.match(/^\/admin\/home(?:\/(\d+))?/);
+  const adminStep  = adminMatch && adminMatch[1] != null ? Number(adminMatch[1]) : null;
+  const isAdminStep = adminStep !== null && ADMIN_STEP_TITLES.hasOwnProperty(adminStep);
 
-  // 홈 아이콘 활성: '/admin/home' 및 STEP0~STEP8 모두 파란색 유지
-  const isHomeActive = pathname === '/admin/home' || isStep;
+  // 헤더: STEP 화면이면 STEP 타이틀, 아니면 기본
+  let header = 'AGM Golf Manager';
+  if (isPlayerStep) {
+    header = PLAYER_STEP_TITLES[playerStep];
+  } else if (isAdminStep) {
+    header = `STEP ${adminStep}. ${ADMIN_STEP_TITLES[adminStep]}`;
+  }
+
+  // 탭바 활성화 로직
+  const isHomeActive    = pathname === '/admin/home' || isAdminStep;
+  const isPlayerActive  = pathname.startsWith('/player');
 
   return (
     <div className={styles.app}>
@@ -49,7 +71,7 @@ export default function MainLayout() {
       </main>
 
       <footer className={styles.tabbar}>
-        {/* ── 홈 ── */}
+        {/* 홈 */}
         <Link
           to="/admin/home"
           className={isHomeActive ? styles.navItemActive : styles.navItem}
@@ -58,12 +80,11 @@ export default function MainLayout() {
           <span className={styles.label}>홈</span>
         </Link>
 
-        {/* ── 참가자 ── */}
+        {/* 참가자 */}
         <NavLink
           to="/player/home"
           className={({ isActive }) =>
-            // 기존 isActive 에 더해, /player 로 시작하는 모든 경로를 활성으로 간주
-            ( isActive || pathname.startsWith('/player') )
+            (isActive || isPlayerActive)
               ? styles.navItemActive
               : styles.navItem
           }
@@ -72,7 +93,7 @@ export default function MainLayout() {
           <span className={styles.label}>참가자</span>
         </NavLink>
 
-        {/* ── 대시보드 ── */}
+        {/* 대시보드 */}
         <NavLink
           to="/admin/dashboard"
           className={({ isActive }) =>
@@ -83,7 +104,7 @@ export default function MainLayout() {
           <span className={styles.label}>대시보드</span>
         </NavLink>
 
-        {/* ── 설정 ── */}
+        {/* 설정 */}
         <NavLink
           to="/admin/settings"
           className={({ isActive }) =>

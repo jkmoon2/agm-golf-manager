@@ -1,0 +1,128 @@
+/* src/player/screens/PlayerRoomStatus.module.css */
+
+.container {
+  padding: 1rem;
+}
+
+.greeting {
+  margin-bottom: 1rem;
+  font-size: 1rem;       /* 기본 크기 */
+  color: #333;
+}
+
+.nickname {
+  font-size: 1.125rem;   /* 닉네임만 키우고 */
+  font-weight: bold;     /* 닉네임만 굵게 */
+}
+
+.subHeader {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 1rem 0;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.assignBtn {
+  flex: 1;
+  padding: 0.75rem;
+  background-color: #00a99d;
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.assignBtn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.teamBtn {
+  flex: 1;
+  padding: 0.75rem;
+  background-color: #f0f0f0;
+  color: #666;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.teamBtn:disabled {
+  background-color: #eee;
+  cursor: not-allowed;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.card {
+  padding: 0.75rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 0.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.2s;
+}
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+}
+.selected {
+  border-color: #0074e8;
+  background: #e6f4ff;
+}
+
+.confirm {
+  display: block;
+  margin: 1rem auto;
+  padding: 0.75rem 1.5rem;
+  background-color: #00a99d;
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.confirm:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.resultTable,
+.teamTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.resultTable caption,
+.teamTable caption {
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.resultTable th,
+.resultTable td,
+.teamTable th,
+.teamTable td {
+  border: 1px solid #ddd;
+  padding: 0.5rem;
+  text-align: center;
+}
+
+.resultTable tfoot td {
+  font-weight: 600;
+}

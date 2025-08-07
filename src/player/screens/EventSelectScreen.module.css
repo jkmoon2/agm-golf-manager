@@ -1,41 +1,46 @@
 /* src/player/screens/EventSelectScreen.module.css */
 
 .container {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.heading {
-  margin-bottom: 24px;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-.grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  width: 100%;
-  max-width: 400px;
+  gap: 1rem;
+  grid-template-columns: repeat(2, 1fr);
+  padding: 1rem;
 }
+@media (max-width: 480px) {
+  .container {
+    grid-template-columns: 1fr;
+  }
+}
+
 .card {
   background: #fff;
-  border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
   cursor: pointer;
-  text-align: center;
-  transition: box-shadow .2s;
+  transition: transform .15s, box-shadow .15s;
 }
 .card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
+
 .title {
-  font-size: 1rem;
-  font-weight: 500;
-  margin-bottom: 4px;
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
 }
+
 .meta {
-  font-size: 0.85rem;
-  color: #555;
+  margin: 4px 0;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #999;
+  margin-top: 2rem;
 }
