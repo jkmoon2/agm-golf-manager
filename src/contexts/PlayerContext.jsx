@@ -82,7 +82,7 @@ export function PlayerProvider({ children }) {
     if (me) {
       setParticipant(me);
     }
-  }, [participants]);
+  }, [participants, participant]);  // ← 여기에 participant 추가!
 
 
   // ── 스트로크 방 배정 ────────────────────────────────────
