@@ -5,98 +5,121 @@
 }
 
 .greeting {
-  font-size: 1rem;
+  font-size: 0.95rem;   /* 전체 인사 메시지 크기 */
   color: #333;
   margin-bottom: 1rem;
 }
 
+/* 닉네임 부분 */
 .nickname {
-  font-size: 1.125rem;
+  font-size: 1.05rem;   /* 강조된 닉네임 크기 */
   font-weight: bold;
 }
 
 .buttonRow {
   display: flex;
-  gap: 0.5rem;
+  gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
 .assignBtn,
 .teamBtn {
   flex: 1;
-  padding: 0.5rem 0;
-  font-size: 0.9rem;
-  border-radius: 0.375rem;
+  padding: 0.5rem;      /* 버튼 높이 축소 */
+  font-size: 0.9rem;    /* 버튼 글자 약간 축소 */
+  border: none;
+  border-radius: 0.5rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 0.2s;
 }
 
-/* 방배정 버튼 */
 .assignBtn {
   background-color: #00a99d;
   color: #fff;
-  border: 1px solid #00a99d;
 }
-
-/* 완료 상태 */
 .assignBtn:disabled {
   background-color: #ccc;
-  color: #888;
-  border: 1px solid #ccc;
+  cursor: not-allowed;
 }
 
-/* 팀확인 버튼 */
 .teamBtn {
+  background-color: #eee;
+  color: #555;
+  border: 2px solid transparent;
+}
+.teamBtn:enabled {
   background-color: #fff;
+  border-color: #00a99d;
   color: #00a99d;
-  border: 1px solid #00a99d;
 }
-
-/* 비활성화 상태 */
 .teamBtn:disabled {
-  background-color: #f5f5f5;
-  color: #bbb;
-  border: 1px solid #f5f5f5;
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-.tableCaption {
-  text-align: left;
-  font-size: 1.125rem;  /* 닉네임과 동일 크기 */
-  font-weight: bold;
-  margin-bottom: 0.5rem;
-}
-
+/* 표 공통 */
 .resultTable,
 .teamTable {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 1rem;
+  margin: 1rem 0;
+  /* font-size 삭제 → 기본 크기(≈1rem) 사용 */
 }
 
+/* 팀원 목록과 배정 결과 사이에 여유 추가 */
+.teamTable {
+  margin-top: 2rem;
+}
+
+/* 캡션 (제목) */
+.tableCaption {
+  text-align: left;
+  font-size: 0.95rem;   /* 인사말(.greeting)과 동일 크기 */
+  font-weight: normal;  /* 일반 속성 */
+  margin-bottom: 0.5rem;
+}
+
+/* 방 번호만 강조 */
+.roomTitle {
+  font-size: 1.05rem;   /* 닉네임(.nickname)과 동일 크기 */
+  font-weight: bold;
+}
+
+/* 헤더 셀 */
+.resultTable thead th,
+.teamTable thead th {
+  background-color: #f7f7f7;
+  font-weight: 600;
+  padding: 0.4rem;
+  border: 1px solid #ddd;
+  text-align: center;
+}
+
+/* 본문 셀 */
 .resultTable th,
 .resultTable td,
 .teamTable th,
 .teamTable td {
   border: 1px solid #ddd;
-  padding: 0.5rem;
+  padding: 0.4rem;
   text-align: center;
+  font-weight: normal;
 }
 
-.resultTable thead th,
-.teamTable thead th {
-  background-color: #f7f7f7;
-  font-weight: 600;
-}
-
+/* 합계 행 */
 .summaryRow td {
   background-color: #fafafa;
-  font-weight: bold;
+  font-weight: bold;    /* 합계 글자 굵게 */
+}
+.summaryRow td:last-child {
+  color: blue;          /* 합계 숫자 파란색 */
 }
 
+/* 포볼용 그리드/카드 스타일 (변경 없음) */
 .subHeader {
-  font-size: 1.125rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  margin-bottom: 1rem;
+  margin: 1rem 0;
 }
 
 .grid {
@@ -110,10 +133,8 @@
   padding: 0.75rem;
   background: #fff;
   border: 1px solid #ddd;
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
   text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
 .card:hover:not(.selected) {
@@ -121,24 +142,23 @@
 }
 
 .selected {
-  background: #e6f4f2;
   border-color: #00a99d;
+  background-color: #e6f4f2;
 }
 
 .confirmBtn {
-  padding: 0.6rem 1.2rem;
-  font-size: 1rem;
+  display: block;
+  margin: 0 auto 1rem;
+  padding: 0.75rem 1.5rem;
   background-color: #00a99d;
   color: #fff;
-  border: 1px solid #00a99d;
-  border-radius: 0.375rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
   cursor: pointer;
-  transition: all 0.2s;
 }
 
 .confirmBtn:disabled {
   background-color: #ccc;
-  color: #888;
-  border: 1px solid #ccc;
   cursor: not-allowed;
 }

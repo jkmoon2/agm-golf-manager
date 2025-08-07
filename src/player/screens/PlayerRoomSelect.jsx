@@ -11,10 +11,10 @@ export default function PlayerRoomSelect() {
     : <FourBallRoomSelect />;
 }
 
-// ── 스트로크 모드 ─────────────────────────────────────────────────────
 function StrokeRoomSelect() {
   const {
     rooms,
+    roomNames,
     participants,
     participant,
     joinRoom,
@@ -26,7 +26,6 @@ function StrokeRoomSelect() {
   const [showTeam, setShowTeam]         = useState(false);
   const [teamMembers, setTeamMembers]   = useState([]);
 
-  // 이미 배정된 방이 있으면 한 번만 처리
   useEffect(() => {
     if (participant?.room != null && !done) {
       setAssignedRoom(participant.room);
@@ -34,12 +33,9 @@ function StrokeRoomSelect() {
     }
   }, [participant, done]);
 
-  // 팀원 목록 갱신
   useEffect(() => {
     if (done && assignedRoom != null) {
-      setTeamMembers(
-        participants.filter(p => p.room === assignedRoom)
-      );
+      setTeamMembers(participants.filter(p => p.room === assignedRoom));
     }
   }, [done, assignedRoom, participants]);
 
@@ -51,10 +47,17 @@ function StrokeRoomSelect() {
       await joinRoom(roomNum, participant.id);
       setAssignedRoom(roomNum);
       setDone(true);
-    } catch (err) {
-      console.error(err);
+    } catch {
       alert('방 배정 중 오류가 발생했습니다.');
     }
+  };
+
+  const getLabel = num => {
+    // 배열 범위 밖 접근 방지
+    if (Array.isArray(roomNames) && roomNames[num - 1]?.trim()) {
+      return roomNames[num - 1].trim();
+    }
+    return `${num}번 방`;
   };
 
   return (
@@ -85,7 +88,7 @@ function StrokeRoomSelect() {
       {done && (
         <table className={styles.resultTable}>
           <caption className={styles.tableCaption}>
-            {assignedRoom}번 방 배정 결과
+            <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 배정 결과
           </caption>
           <thead>
             <tr><th>닉네임</th><th>G핸디</th></tr>
@@ -106,7 +109,7 @@ function StrokeRoomSelect() {
       {showTeam && done && (
         <table className={styles.teamTable}>
           <caption className={styles.tableCaption}>
-            {assignedRoom}번 방 팀원 목록
+            <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 팀원 목록
           </caption>
           <thead>
             <tr><th>닉네임</th><th>G핸디</th></tr>
@@ -123,9 +126,7 @@ function StrokeRoomSelect() {
             })}
             <tr className={styles.summaryRow}>
               <td>합계</td>
-              <td>
-                {teamMembers.reduce((sum, p) => sum + (p?.handicap||0), 0)}
-              </td>
+              <td>{teamMembers.reduce((sum, p) => sum + (p?.handicap || 0), 0)}</td>
             </tr>
           </tbody>
         </table>
@@ -134,10 +135,10 @@ function StrokeRoomSelect() {
   );
 }
 
-// ── 포볼 모드 ─────────────────────────────────────────────────────────
 function FourBallRoomSelect() {
   const {
     rooms,
+    roomNames,
     participants,
     participant,
     joinFourBall
@@ -160,10 +161,16 @@ function FourBallRoomSelect() {
     try {
       await joinFourBall(selRoom, participant.id, selMate);
       setDone(true);
-    } catch (err) {
-      console.error(err);
+    } catch {
       alert('팀 구성 중 오류가 발생했습니다.');
     }
+  };
+
+  const getLabel = num => {
+    if (Array.isArray(roomNames) && roomNames[num - 1]?.trim()) {
+      return roomNames[num - 1].trim();
+    }
+    return `${num}번 방`;
   };
 
   const mateData = participants.find(p => p.id === selMate);
@@ -175,7 +182,10 @@ function FourBallRoomSelect() {
           <span className={styles.nickname}>{participant.nickname}</span>님, 안녕하세요!
         </p>
       )}
-      <h2 className={styles.subHeader}>STEP 1. 방 및 팀원 선택 (포볼)</h2>
+
+      <h2 className={styles.subHeader}>
+        STEP 1. {selRoom != null ? getLabel(selRoom) : '방 선택'} 팀원 선택 (포볼)
+      </h2>
 
       <div className={styles.grid}>
         {rooms.map(r => (
@@ -185,7 +195,7 @@ function FourBallRoomSelect() {
             onClick={() => setSelRoom(r.number)}
             disabled={done}
           >
-            방 {r.number}
+            {getLabel(r.number)}
           </button>
         ))}
       </div>
@@ -216,17 +226,19 @@ function FourBallRoomSelect() {
       {done && (
         <table className={styles.resultTable}>
           <caption className={styles.tableCaption}>
-            {selRoom}번 방 구성 완료
+            {getLabel(selRoom)} 구성 완료
           </caption>
           <thead>
             <tr><th>닉네임</th><th>G핸디</th></tr>
           </thead>
           <tbody>
             <tr><td>{participant.nickname}</td><td>{participant.handicap}</td></tr>
-            {mateData && <tr><td>{mateData.nickname}</td><td>{mateData.handicap}</td></tr>}
+            {mateData && (
+              <tr><td>{mateData.nickname}</td><td>{mateData.handicap}</td></tr>
+            )}
             <tr className={styles.summaryRow}>
               <td>합계</td>
-              <td>{(participant.handicap||0) + (mateData?.handicap||0)}</td>
+              <td>{(participant.handicap || 0) + (mateData?.handicap || 0)}</td>
             </tr>
           </tbody>
         </table>
