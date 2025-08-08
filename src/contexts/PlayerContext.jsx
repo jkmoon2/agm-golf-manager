@@ -2,15 +2,11 @@
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
-  doc,
-  getDoc,
-  updateDoc,
-  setDoc,
-  arrayUnion,
+  doc, getDoc, updateDoc, setDoc, arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
-// (NEW) 참가자 로직 유틸
+// 참가자 전용 자동 배정 유틸
 import { pickRoomForStroke } from '../player/logic/assignStroke';
 import { pickRoomForFourball } from '../player/logic/assignFourball';
 
@@ -20,22 +16,22 @@ export function PlayerProvider({ children }) {
   const [eventId, setEventId]             = useState('');
   const [participant, setParticipant]     = useState(null);
   const [authCode, setAuthCode]           = useState('');
-  const [mode, setMode]                   = useState('stroke');
-  const [rooms, setRooms]                 = useState([]); // 유지
+  const [mode, setMode]                   = useState('stroke'); // 'stroke' | 'fourball'
+  const [rooms, setRooms]                 = useState([]);
   const [participants, setParticipants]   = useState([]);
   const [allowTeamView, setAllowTeamView] = useState(false);
 
-  // (NEW) Admin STEP2 연동용 메타
+  // Admin STEP2 연동 값
   const [roomCount, setRoomCount] = useState(4);
   const [roomNames, setRoomNames] = useState([]);
 
-  // ── 이벤트 로드 및 컨텍스트 초기화 ────────────────────────────────
+  // 이벤트 정보 로드
   useEffect(() => {
     if (!eventId) return;
 
     (async () => {
       try {
-        const ref  = doc(db, 'events', eventId);
+        const ref = doc(db, 'events', eventId);
         const snap = await getDoc(ref);
         if (!snap.exists()) {
           setParticipants([]);
@@ -45,38 +41,40 @@ export function PlayerProvider({ children }) {
           setMode('stroke');
           return;
         }
+
         const data = snap.data();
 
-        // participants 배열 보정
+        // 참가자 배열 보정
         const partArr = (data.participants || []).map((p, i) => ({
           id:       String(p.id ?? i),
-          nickname: p.nickname  ?? '',
-          handicap: p.handicap  ?? 0,
-          group:    p.group     ?? 0,
-          authCode: p.authCode  ?? '',
-          room:     p.room      ?? null,
-          partner:  p.partner   ?? null,
-          score:    p.score     ?? null,
-          selected: p.selected  ?? false,
+          nickname: p.nickname ?? '',
+          handicap: p.handicap ?? 0,
+          group:    p.group ?? 0,
+          authCode: p.authCode ?? '',
+          room:     p.room ?? null,
+          partner:  p.partner ?? null,
+          score:    p.score ?? null,
+          selected: p.selected ?? false,
         }));
         setParticipants(partArr);
 
-        // 모드 정규화: "agm"도 fourball로 처리
-        const m = String(data.mode || 'stroke').toLowerCase();
-        setMode(m === 'fourball' || m === 'agm' ? 'fourball' : 'stroke');
+        // 모드: 'agm' 도 fourball로 동일 취급
+        setMode((data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke');
 
-        // (NEW) Admin STEP2: 방 수/방 이름 로드
+        // 방수/방이름
         const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
-        const rc = Number.isInteger(data.roomCount)
-          ? data.roomCount
-          : (rn.length > 0 ? rn.length : 4);
+        const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
         setRoomCount(rc);
-        // 길이 보정
-        const fixedNames = Array.from({ length: rc }, (_, i) => rn[i]?.trim() || '');
-        setRoomNames(fixedNames);
+        setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
 
-        // (유지) rooms — 기존 코드 호환: 1..roomCount로 구성
+        // rooms 호환(1..N)
         setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1 })));
+
+        // 로그인된 본인 최신화
+        if (participant) {
+          const me = partArr.find(p => p.id === participant.id);
+          if (me) setParticipant(me);
+        }
       } catch (err) {
         console.error('[PlayerContext] 로드 오류', err);
         setParticipants([]);
@@ -86,26 +84,25 @@ export function PlayerProvider({ children }) {
         setMode('stroke');
       }
     })();
-    // ⚠️ 의존성은 eventId만 — participant를 넣으면 재귀 갱신 루프 가능성
-  }, [eventId]);
+  }, [eventId]); // participant를 넣으면 루프 위험
 
-  // (NEW) participants가 바뀔 때 로그인된 participant 최신화
-  // → ESLint의 "missing dependency" 경고 없이 안전
+  // participants가 바뀌면 내 정보만 동기화(무한루프 방지)
   useEffect(() => {
     if (!participant) return;
     const me = participants.find(p => p.id === participant.id);
-    if (me) setParticipant(me);
-  }, [participants, participant?.id]); // id만 의존하도록 안정화
+    if (me && (me.room !== participant.room || me.partner !== participant.partner || me.score !== participant.score)) {
+      setParticipant(me);
+    }
+  }, [participants]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 헬퍼: 안전한 setDoc(merge)로 배열 union 쓰기 ─────────────────
+  // setDoc merge + arrayUnion 사용 도우미
   const mergeArrayUnion = async (ref, payload) => {
     await setDoc(ref, payload, { merge: true });
   };
 
-  // ── 스트로크: 한 명 자동 배정(관리자 STEP5 룰 호환) ───────────────
+  // ─────────────────────────  스트로크 (STEP5 룰) ─────────────────────────
   const assignStrokeForOne = async (participantId) => {
     if (!eventId) throw new Error('Missing eventId');
-
     const me = participants.find(p => p.id === participantId);
     if (!me) throw new Error('Participant not found');
 
@@ -115,25 +112,17 @@ export function PlayerProvider({ children }) {
       target: me,
     });
 
-    // participants 업데이트(로컬)
-    const updatedArr = participants.map(p =>
+    const updated = participants.map(p =>
       p.id === participantId ? { ...p, room: chosenRoom } : p
-    ).map(p => ({
-      id: p.id, nickname: p.nickname, handicap: p.handicap, group: p.group,
-      authCode: p.authCode, room: p.room, partner: p.partner,
-      score: p.score, selected: p.selected,
-    }));
+    );
 
-    // Firestore 업데이트
-    const eventRef = doc(db, 'events', eventId);
-    await updateDoc(eventRef, { participants: updatedArr });
+    // Firestore
+    await updateDoc(doc(db, 'events', eventId), { participants: updated });
+    await mergeArrayUnion(doc(db, 'events', eventId, 'rooms', String(chosenRoom)), {
+      players: arrayUnion(participantId),
+    });
 
-    // rooms 서브컬렉션: 문서 없어도 병합되게 setDoc 사용
-    const roomRef = doc(db, 'events', eventId, 'rooms', String(chosenRoom));
-    await mergeArrayUnion(roomRef, { players: arrayUnion(participantId) });
-
-    // 로컬 컨텍스트 반영
-    setParticipants(updatedArr);
+    setParticipants(updated);
     if (participant?.id === participantId) {
       setParticipant(prev => prev && ({ ...prev, room: chosenRoom }));
     }
@@ -141,100 +130,107 @@ export function PlayerProvider({ children }) {
     return { roomNumber: chosenRoom };
   };
 
-  // ── 포볼: 한 명 "방만" 자동 배정(관리자 STEP7 룰 중 방 선택) ─────
-  // 팀원 선택은 나중에 joinFourBall 호출 시 partner 저장
-  const assignFourballRoomForOne = async (participantId) => {
+  // ─────────────────────────  포볼 (STEP7 룰) ─────────────────────────
+  // 방 자동선택 + 파트너 자동선택까지 한 번에 처리
+  const assignFourballForOneAndPartner = async (participantId) => {
     if (!eventId) throw new Error('Missing eventId');
-
     const me = participants.find(p => p.id === participantId);
     if (!me) throw new Error('Participant not found');
 
-    const chosenRoom = pickRoomForFourball({
+    // 1) 방 자동선택
+    const roomNumber = pickRoomForFourball({
       participants,
       roomCount,
       target: me,
     });
 
-    // 방만 먼저 기록
-    const updatedArr = participants.map(p =>
-      p.id === participantId ? { ...p, room: chosenRoom } : p
-    ).map(p => ({
-      id: p.id, nickname: p.nickname, handicap: p.handicap, group: p.group,
-      authCode: p.authCode, room: p.room, partner: p.partner,
-      score: p.score, selected: p.selected,
-    }));
+    // 2) 파트너 자동선택: 반대 그룹에서 아직 파트너 없는 사람 우선
+    const half = Math.floor(participants.length / 2);
+    const isGroup1 = Number(me.id) < half;
+    const isFree   = (p) => p.partner == null;
 
-    const eventRef = doc(db, 'events', eventId);
-    await updateDoc(eventRef, { participants: updatedArr });
+    // 2-1) 같은 방에 이미 들어와 있는 반대그룹 '미배정 파트너' 우선
+    let mate = participants.find(p =>
+      p.id !== me.id &&
+      (Number(p.id) < half) !== isGroup1 &&
+      p.room === roomNumber &&
+      isFree(p)
+    );
 
-    // fourballRooms에도 자리 확보(선택 사항이지만 Admin 연동상 안전)
-    const fbRoomRef = doc(db, 'events', eventId, 'fourballRooms', String(chosenRoom));
-    await mergeArrayUnion(fbRoomRef, {
-      // teams는 partner 확정 시 arrayUnion으로 추가하므로 여기선 placeholder
-      placeholders: arrayUnion(participantId),
-    });
-
-    setParticipants(updatedArr);
-    if (participant?.id === participantId) {
-      setParticipant(prev => prev && ({ ...prev, room: chosenRoom }));
+    // 2-2) 그게 없다면, 반대그룹 중 아직 파트너 없는 사람 아무나
+    if (!mate) {
+      mate = participants.find(p =>
+        p.id !== me.id &&
+        (Number(p.id) < half) !== isGroup1 &&
+        isFree(p)
+      );
     }
 
-    return { roomNumber: chosenRoom };
+    // 3) participants 배열 갱신
+    let updated = participants.map(p => {
+      if (mate && p.id === mate.id) return { ...p, room: roomNumber, partner: me.id };
+      if (p.id === me.id)           return { ...p, room: roomNumber, partner: mate ? mate.id : null };
+      return p;
+    });
+
+    // 4) Firestore 반영
+    await updateDoc(doc(db, 'events', eventId), { participants: updated });
+
+    // fourballRooms 컬렉션 업데이트
+    const fbRef = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
+    if (mate) {
+      await mergeArrayUnion(fbRef, {
+        teams: arrayUnion({ player1: me.id, player2: mate.id }),
+      });
+    } else {
+      // 파트너가 아직 없으면 자리만 표시(옵션)
+      await mergeArrayUnion(fbRef, {
+        placeholders: arrayUnion(me.id),
+      });
+    }
+
+    // 5) 로컬 반영
+    setParticipants(updated);
+    if (participant?.id === me.id) {
+      setParticipant(prev => prev && ({ ...prev, room: roomNumber, partner: mate ? mate.id : null }));
+    }
+
+    return { roomNumber, partnerNickname: mate?.nickname || null };
   };
 
-  // ── 기존 joinRoom (수정: setDoc 사용), 유지 ───────────────────────
+  // ─────────────────────────  기존 API (유지) ─────────────────────────
   const joinRoom = async (roomNumber, participantId) => {
     if (!eventId) throw new Error('Missing eventId');
 
-    const updatedArr = participants.map(p =>
+    const updated = participants.map(p =>
       p.id === participantId ? { ...p, room: roomNumber } : p
-    ).map(p => ({
-      id: p.id, nickname: p.nickname, handicap: p.handicap, group: p.group,
-      authCode: p.authCode, room: p.room, partner: p.partner,
-      score: p.score, selected: p.selected,
-    }));
-
-    const eventRef = doc(db, 'events', eventId);
-    await updateDoc(eventRef, { participants: updatedArr });
-
-    const roomRef = doc(db, 'events', eventId, 'rooms', String(roomNumber));
-    await mergeArrayUnion(roomRef, { players: arrayUnion(participantId) });
-
-    setParticipants(updatedArr);
+    );
+    await updateDoc(doc(db, 'events', eventId), { participants: updated });
+    await mergeArrayUnion(doc(db, 'events', eventId, 'rooms', String(roomNumber)), {
+      players: arrayUnion(participantId),
+    });
+    setParticipants(updated);
     if (participant?.id === participantId) {
       setParticipant(prev => prev && ({ ...prev, room: roomNumber }));
     }
   };
 
-  // ── 기존 joinFourBall (수정: setDoc 사용), 유지 ────────────────────
   const joinFourBall = async (roomNumber, p1, p2) => {
     if (!eventId) throw new Error('Missing eventId');
 
-    const updatedArr = participants.map(p => {
+    const updated = participants.map(p => {
       if (p.id === p1) return { ...p, room: roomNumber, partner: p2 };
       if (p.id === p2) return { ...p, room: roomNumber, partner: p1 };
       return p;
-    }).map(p => ({
-      id: p.id, nickname: p.nickname, handicap: p.handicap, group: p.group,
-      authCode: p.authCode, room: p.room, partner: p.partner,
-      score: p.score, selected: p.selected,
-    }));
-
-    const eventRef = doc(db, 'events', eventId);
-    await updateDoc(eventRef, { participants: updatedArr });
-
-    const fbRoomRef = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
-    await mergeArrayUnion(fbRoomRef, {
+    });
+    await updateDoc(doc(db, 'events', eventId), { participants: updated });
+    await mergeArrayUnion(doc(db, 'events', eventId, 'fourballRooms', String(roomNumber)), {
       teams: arrayUnion({ player1: p1, player2: p2 }),
     });
 
-    setParticipants(updatedArr);
-    if (participant?.id === p1) {
-      setParticipant(prev => prev && ({ ...prev, room: roomNumber, partner: p2 }));
-    }
-    if (participant?.id === p2) {
-      setParticipant(prev => prev && ({ ...prev, room: roomNumber, partner: p1 }));
-    }
+    setParticipants(updated);
+    if (participant?.id === p1) setParticipant(prev => prev && ({ ...prev, room: roomNumber, partner: p2 }));
+    if (participant?.id === p2) setParticipant(prev => prev && ({ ...prev, room: roomNumber, partner: p1 }));
   };
 
   return (
@@ -244,15 +240,13 @@ export function PlayerProvider({ children }) {
       authCode, setAuthCode,
       mode, setMode,
       rooms,
-      roomCount,
-      roomNames,
+      roomCount, roomNames,
       participants,
       // 기존
-      joinRoom,
-      joinFourBall,
-      // NEW
+      joinRoom, joinFourBall,
+      // 신규
       assignStrokeForOne,
-      assignFourballRoomForOne,
+      assignFourballForOneAndPartner,
       allowTeamView, setAllowTeamView,
     }}>
       {children}

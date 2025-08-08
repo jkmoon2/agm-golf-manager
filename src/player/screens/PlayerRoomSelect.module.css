@@ -15,16 +15,16 @@
   font-weight: bold;
 }
 
-/* 버튼 */
+/* 버튼 두 개 */
 .buttonRow {
   display: flex;
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.2rem;
 }
 .assignBtn,
 .teamBtn {
   flex: 1;
-  padding: 0.5rem;         /* 슬림 */
+  padding: 0.5rem;
   font-size: 0.9rem;
   border: none;
   border-radius: 0.5rem;
@@ -59,96 +59,52 @@
 .teamTable {
   width: 100%;
   border-collapse: collapse;
-  margin: 1rem 0;
+  margin: 0.9rem 0;
 }
 
-/* 팀원 목록과 배정 결과 사이 여유 */
-.teamTable { margin-top: 2rem; }
-
-/* 제목: 인사말과 같은 크기/일반, 방이름만 강조 */
+/* 제목(캡션): “2번방”만 굵게 */
 .tableCaption {
   text-align: left;
-  font-size: 0.95rem;
+  font-size: 0.95rem;   /* 인사말 본문과 동일 */
   font-weight: normal;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.45rem;
 }
 .roomTitle {
-  font-size: 1.05rem;
+  font-size: 1.05rem;   /* 닉네임 굵기/크기와 동일 */
   font-weight: bold;
 }
 
-/* 헤더 */
+/* 닉네임 열을 넓게 */
+.colNick { width: 64%; }
+.colHd   { width: 36%; }
+
+/* 셀 높이(헤더/본문 동일) + 빈칸도 같은 높이 */
+.resultTable thead th,
+.teamTable thead th,
+.resultTable td,
+.teamTable td {
+  border: 1px solid #ddd;
+  padding: 0.35rem 0.5rem;   /* 타이틀과 동일한 낮은 높이 */
+  height: 36px;              /* 빈칸도 동일하게 보이도록 고정 */
+  line-height: 1.2;
+  text-align: center;
+  font-weight: normal;
+}
 .resultTable thead th,
 .teamTable thead th {
   background-color: #f7f7f7;
   font-weight: 600;
-  padding: 0.4rem;
-  border: 1px solid #ddd;
-  text-align: center;
 }
 
-/* 본문 셀(기본) */
-.resultTable th, .resultTable td,
-.teamTable th, .teamTable td {
-  border: 1px solid #ddd;
-  padding: 0.4rem;
-  text-align: center;
-  font-weight: normal;
-}
-
-/* 행 높이 고정 — 빈칸도 동일 높이 */
-:root { --row-h: 42px; } /* 필요 시 40~44px 사이 조정 */
-.fixedRow td,
-.resultTable td,
-.teamTable td {
-  height: var(--row-h);
-  line-height: calc(var(--row-h) - 12px);
-}
-.fixedCell { height: var(--row-h); line-height: calc(var(--row-h) - 12px); }
-.leftCell  { text-align: left; padding-left: 0.8rem; }
+/* 팀 목록 표는 거리 조금 띄움 */
+.teamTable { margin-top: 1.6rem; }
 
 /* 합계 행 */
 .summaryRow td {
   background-color: #fafafa;
   font-weight: bold;
 }
-.summaryRow td:last-child { color: blue; }
+.sumBlue { color: blue; }
 
-/* 닉네임 열을 조금 더 넓게 유지 */
-.colNick { width: 64%; }
-.colHd   { width: 36%; }
+/* 포볼용 카드/그리드는 제거(이제 사용 안함) */
 
-/* 포볼용 카드/그리드 */
-.subHeader {
-  font-size: 1.05rem;
-  font-weight: 600;
-  margin: 1rem 0;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-.card {
-  padding: 0.75rem;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 0.5rem;
-  text-align: center;
-}
-.card:hover:not(.selected) { border-color: #00a99d; }
-.selected { border-color: #00a99d; background-color: #e6f4f2; }
-
-.confirmBtn {
-  display: block;
-  margin: 0 auto 1rem;
-  padding: 0.75rem 1.5rem;
-  background-color: #00a99d;
-  color: #fff;
-  border: none;
-  border-radius: 0.5rem;
-  font-size: 1rem;
-  cursor: pointer;
-}
-.confirmBtn:disabled { background-color: #ccc; cursor: not-allowed; }
