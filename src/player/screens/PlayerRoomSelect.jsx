@@ -6,9 +6,7 @@ import styles from './PlayerRoomSelect.module.css';
 
 export default function PlayerRoomSelect() {
   const { mode } = useContext(PlayerContext);
-  return mode === 'stroke'
-    ? <StrokeRoomSelect />
-    : <FourBallRoomSelect />;
+  return mode === 'stroke' ? <StrokeRoomSelect /> : <FourBallRoomSelect />;
 }
 
 function StrokeRoomSelect() {
@@ -52,7 +50,6 @@ function StrokeRoomSelect() {
   };
 
   const getLabel = num => {
-    // 배열 범위 밖 접근 방지
     if (Array.isArray(roomNames) && roomNames[num - 1]?.trim()) {
       return roomNames[num - 1].trim();
     }
@@ -86,6 +83,12 @@ function StrokeRoomSelect() {
 
       {done && (
         <table className={styles.resultTable}>
+          {/* 열 폭을 고정해서 닉네임 열을 넓힘 */}
+          <colgroup>
+            <col className={styles.colNick} />
+            <col className={styles.colHd} />
+          </colgroup>
+
           <caption className={styles.tableCaption}>
             <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 배정 결과
           </caption>
@@ -93,7 +96,8 @@ function StrokeRoomSelect() {
             <tr><th>닉네임</th><th>G핸디</th></tr>
           </thead>
           <tbody>
-            <tr>
+            {/* 본인 행도 고정 높이 */}
+            <tr className={styles.rowFixed}>
               <td>{participant.nickname}</td>
               <td>{participant.handicap}</td>
             </tr>
@@ -107,6 +111,11 @@ function StrokeRoomSelect() {
 
       {showTeam && done && (
         <table className={styles.teamTable}>
+          <colgroup>
+            <col className={styles.colNick} />
+            <col className={styles.colHd} />
+          </colgroup>
+
           <caption className={styles.tableCaption}>
             <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 팀원 목록
           </caption>
@@ -117,7 +126,7 @@ function StrokeRoomSelect() {
             {Array.from({ length: 4 }).map((_, i) => {
               const p = teamMembers[i];
               return (
-                <tr key={i}>
+                <tr className={styles.rowFixed} key={i}>
                   <td>{p?.nickname || ''}</td>
                   <td>{p?.handicap != null ? p.handicap : ''}</td>
                 </tr>
@@ -224,6 +233,11 @@ function FourBallRoomSelect() {
 
       {done && (
         <table className={styles.resultTable}>
+          <colgroup>
+            <col className={styles.colNick} />
+            <col className={styles.colHd} />
+          </colgroup>
+
           <caption className={styles.tableCaption}>
             {getLabel(selRoom)} 구성 완료
           </caption>
@@ -231,9 +245,15 @@ function FourBallRoomSelect() {
             <tr><th>닉네임</th><th>G핸디</th></tr>
           </thead>
           <tbody>
-            <tr><td>{participant.nickname}</td><td>{participant.handicap}</td></tr>
+            <tr className={styles.rowFixed}>
+              <td>{participant.nickname}</td>
+              <td>{participant.handicap}</td>
+            </tr>
             {mateData && (
-              <tr><td>{mateData.nickname}</td><td>{mateData.handicap}</td></tr>
+              <tr className={styles.rowFixed}>
+                <td>{mateData.nickname}</td>
+                <td>{mateData.handicap}</td>
+              </tr>
             )}
             <tr className={styles.summaryRow}>
               <td>합계</td>

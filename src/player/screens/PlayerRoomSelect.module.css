@@ -62,14 +62,17 @@
 .teamTable {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;          /* ← 열 너비 고정 */
   margin: 1rem 0;
-  /* font-size 삭제 → 기본 크기(≈1rem) 사용 */
+  /* 기본 글자 크기(≈1rem) 유지 */
 }
 
-/* 팀원 목록과 배정 결과 사이에 여유 추가 */
-.teamTable {
-  margin-top: 2rem;
-}
+/* 닉네임 열을 더 넓게 */
+.colNick { width: 68%; }         /* ← 필요시 65~72% 사이로 조정 가능 */
+.colHd   { width: 32%; }
+
+/* 팀원 목록과 배정 결과 사이에 여유 */
+.teamTable { margin-top: 2rem; }
 
 /* 캡션 (제목) */
 .tableCaption {
@@ -90,7 +93,7 @@
 .teamTable thead th {
   background-color: #f7f7f7;
   font-weight: 600;
-  padding: 0.4rem;
+  padding: 0.36rem 0.6rem;    /* ← 행 높이(헤더) */
   border: 1px solid #ddd;
   text-align: center;
 }
@@ -101,21 +104,32 @@
 .teamTable th,
 .teamTable td {
   border: 1px solid #ddd;
-  padding: 0.4rem;
+  padding: 0.36rem 0.6rem;    /* ← 기본 행 높이 */
   text-align: center;
   font-weight: normal;
+  line-height: 1.25;
+}
+
+/* 모든 데이터 행을 동일 높이로 */
+.rowFixed td {
+  height: 1.65rem;            /* ← 현재보다 약간만 높게 */
+}
+
+/* 셀 내용이 비어도 높이가 유지되도록 공백 삽입 */
+.rowFixed td:empty::after {
+  content: "\00a0";
 }
 
 /* 합계 행 */
 .summaryRow td {
   background-color: #fafafa;
-  font-weight: bold;    /* 합계 글자 굵게 */
+  font-weight: bold;          /* 합계 글자 굵게 */
 }
 .summaryRow td:last-child {
-  color: blue;          /* 합계 숫자 파란색 */
+  color: blue;                /* 합계 숫자 파란색 */
 }
 
-/* 포볼용 그리드/카드 스타일 (변경 없음) */
+/* 포볼용 그리드/카드 스타일 */
 .subHeader {
   font-size: 1.05rem;
   font-weight: 600;
@@ -137,14 +151,8 @@
   text-align: center;
 }
 
-.card:hover:not(.selected) {
-  border-color: #00a99d;
-}
-
-.selected {
-  border-color: #00a99d;
-  background-color: #e6f4f2;
-}
+.card:hover:not(.selected) { border-color: #00a99d; }
+.selected { border-color: #00a99d; background-color: #e6f4f2; }
 
 .confirmBtn {
   display: block;
@@ -157,8 +165,4 @@
   font-size: 1rem;
   cursor: pointer;
 }
-
-.confirmBtn:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
+.confirmBtn:disabled { background-color: #ccc; cursor: not-allowed; }
