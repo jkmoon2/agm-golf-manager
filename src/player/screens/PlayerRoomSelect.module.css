@@ -4,35 +4,33 @@
   padding: 1rem;
 }
 
+/* 인사말 */
 .greeting {
-  font-size: 0.95rem;   /* 전체 인사 메시지 크기 */
+  font-size: 0.95rem;
   color: #333;
   margin-bottom: 1rem;
 }
-
-/* 닉네임 부분 */
 .nickname {
-  font-size: 1.05rem;   /* 강조된 닉네임 크기 */
+  font-size: 1.05rem;
   font-weight: bold;
 }
 
+/* 버튼 */
 .buttonRow {
   display: flex;
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
-
 .assignBtn,
 .teamBtn {
   flex: 1;
-  padding: 0.5rem;      /* 버튼 높이 축소 */
-  font-size: 0.9rem;    /* 버튼 글자 약간 축소 */
+  padding: 0.5rem;         /* 슬림 */
+  font-size: 0.9rem;
   border: none;
   border-radius: 0.5rem;
   cursor: pointer;
   transition: background-color 0.2s;
 }
-
 .assignBtn {
   background-color: #00a99d;
   color: #fff;
@@ -41,7 +39,6 @@
   background-color: #ccc;
   cursor: not-allowed;
 }
-
 .teamBtn {
   background-color: #eee;
   color: #555;
@@ -62,87 +59,77 @@
 .teamTable {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;          /* ← 열 너비 고정 */
   margin: 1rem 0;
-  /* 기본 글자 크기(≈1rem) 유지 */
 }
 
-/* 닉네임 열을 더 넓게 */
-.colNick { width: 68%; }         /* ← 필요시 65~72% 사이로 조정 가능 */
-.colHd   { width: 32%; }
-
-/* 팀원 목록과 배정 결과 사이에 여유 */
+/* 팀원 목록과 배정 결과 사이 여유 */
 .teamTable { margin-top: 2rem; }
 
-/* 캡션 (제목) */
+/* 제목: 인사말과 같은 크기/일반, 방이름만 강조 */
 .tableCaption {
   text-align: left;
-  font-size: 0.95rem;   /* 인사말(.greeting)과 동일 크기 */
-  font-weight: normal;  /* 일반 속성 */
+  font-size: 0.95rem;
+  font-weight: normal;
   margin-bottom: 0.5rem;
 }
-
-/* 방 번호만 강조 */
 .roomTitle {
-  font-size: 1.05rem;   /* 닉네임(.nickname)과 동일 크기 */
+  font-size: 1.05rem;
   font-weight: bold;
 }
 
-/* 헤더 셀 */
+/* 헤더 */
 .resultTable thead th,
 .teamTable thead th {
   background-color: #f7f7f7;
   font-weight: 600;
-  padding: 0.36rem 0.6rem;    /* ← 행 높이(헤더) */
+  padding: 0.4rem;
   border: 1px solid #ddd;
   text-align: center;
 }
 
-/* 본문 셀 */
-.resultTable th,
-.resultTable td,
-.teamTable th,
-.teamTable td {
+/* 본문 셀(기본) */
+.resultTable th, .resultTable td,
+.teamTable th, .teamTable td {
   border: 1px solid #ddd;
-  padding: 0.36rem 0.6rem;    /* ← 기본 행 높이 */
+  padding: 0.4rem;
   text-align: center;
   font-weight: normal;
-  line-height: 1.25;
 }
 
-/* 모든 데이터 행을 동일 높이로 */
-.rowFixed td {
-  height: 1.65rem;            /* ← 현재보다 약간만 높게 */
+/* 행 높이 고정 — 빈칸도 동일 높이 */
+:root { --row-h: 42px; } /* 필요 시 40~44px 사이 조정 */
+.fixedRow td,
+.resultTable td,
+.teamTable td {
+  height: var(--row-h);
+  line-height: calc(var(--row-h) - 12px);
 }
-
-/* 셀 내용이 비어도 높이가 유지되도록 공백 삽입 */
-.rowFixed td:empty::after {
-  content: "\00a0";
-}
+.fixedCell { height: var(--row-h); line-height: calc(var(--row-h) - 12px); }
+.leftCell  { text-align: left; padding-left: 0.8rem; }
 
 /* 합계 행 */
 .summaryRow td {
   background-color: #fafafa;
-  font-weight: bold;          /* 합계 글자 굵게 */
+  font-weight: bold;
 }
-.summaryRow td:last-child {
-  color: blue;                /* 합계 숫자 파란색 */
-}
+.summaryRow td:last-child { color: blue; }
 
-/* 포볼용 그리드/카드 스타일 */
+/* 닉네임 열을 조금 더 넓게 유지 */
+.colNick { width: 64%; }
+.colHd   { width: 36%; }
+
+/* 포볼용 카드/그리드 */
 .subHeader {
   font-size: 1.05rem;
   font-weight: 600;
   margin: 1rem 0;
 }
-
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
-
 .card {
   padding: 0.75rem;
   background: #fff;
@@ -150,7 +137,6 @@
   border-radius: 0.5rem;
   text-align: center;
 }
-
 .card:hover:not(.selected) { border-color: #00a99d; }
 .selected { border-color: #00a99d; background-color: #e6f4f2; }
 
