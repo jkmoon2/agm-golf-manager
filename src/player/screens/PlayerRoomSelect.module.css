@@ -1,109 +1,86 @@
 /* src/player/screens/PlayerRoomSelect.module.css */
 
-.container {
-  padding: 1rem;
+:root {
+  --row-h: 34px;
+  --c-primary: #1e63c6;
+  --c-primary-soft: #eaf3ff;
+  --c-primary-border: #8db8ff;
+  --c-gray-border: #ddd;
+  --c-muted: #9aa3ad;
+  --c-gray-soft: #f2f4f7;
 }
 
-.greeting {
-  font-size: 0.95rem;
-  color: #333;
-  margin-bottom: 1rem;
-}
-
-/* 닉네임 부분 */
-.nickname {
-  font-size: 1.05rem;
-  font-weight: bold;
-}
+.container { padding: 1rem; }
+.greeting  { font-size: 0.95rem; color: #333; margin-bottom: 0.7rem; }
+.nickname  { font-size: 1.05rem; font-weight: 700; }
 
 .buttonRow {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
+  gap: 0.6rem;
+  margin-bottom: 1.35rem; /* 버튼과 표 사이 간격 */
 }
 
-.assignBtn,
-.teamBtn {
+.btn {
   flex: 1;
-  padding: 0.5rem;
-  font-size: 0.9rem;
-  border: none;
-  border-radius: 0.5rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  padding: 0.56rem 0.8rem;
+  border: 1px solid var(--c-gray-border);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 0.98rem;
+  color: #222;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  transition: background 120ms, border-color 120ms, color 120ms, opacity 120ms;
 }
+.btn:disabled { opacity: 0.55; color: var(--c-muted); cursor: not-allowed; }
 
-.assignBtn {
-  background-color: #00a99d;
-  color: #fff;
-}
-.assignBtn:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
+.btnBlue { background: var(--c-primary-soft); border-color: var(--c-primary-border); color: var(--c-primary); }
+.btnGray { background: var(--c-gray-soft);   border-color: var(--c-gray-border);   color: #364152; }
 
-.teamBtn {
-  background-color: #eee;
-  color: #555;
-  border: 2px solid transparent;
+.spinner {
+  width: 14px; height: 14px; border: 2px solid #c6d6ff; border-top-color: var(--c-primary);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
 }
-.teamBtn:enabled {
-  background-color: #fff;
-  border-color: #00a99d;
-  color: #00a99d;
-}
-.teamBtn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
-/* 표 공통: 전전 스타일로 높이 통일(헤더/본문/빈칸 모두) */
+.tables { display: grid; gap: 1.25rem; }
+.tableBlock { margin-top: 0.25rem; }
+
+/* 구분선 위치 고정 */
+.colName { width: 64%; }
+.colHd   { width: 36%; }
+
 .table {
   width: 100%;
   border-collapse: collapse;
-  margin: 0.75rem 0;
-  font-size: 0.95rem;
+  margin: 0.55rem 0 0.42rem;
+  font-size: 1rem;
 }
+.table thead th { background-color: #fafafa; font-weight: 700; }
 
-.table thead th {
-  background-color: #fafafa;          /* 타이틀 라인 색상을 합계 라인과 동일하게 */
-}
-
-.table th,
-.table td {
+.table th, .table td {
   border: 1px solid #ddd;
   text-align: center;
-  font-weight: normal;
-  padding: 0.35rem 0.5rem;            /* 헤더/본문 동일 패딩 */
-  line-height: 1.1;
-  height: 36px;                       /* 빈칸도 동일한 높이 확보 */
+  font-weight: 400;
+  padding: 0;
+  line-height: var(--row-h);
+  height: var(--row-h);
   vertical-align: middle;
 }
 
-/* 캡션(제목) */
 .tableCaption {
   text-align: left;
-  font-size: 0.95rem;                 /* 인사말(.greeting)과 동일 크기 */
-  font-weight: normal;
-  margin-bottom: 0.4rem;
+  font-size: 0.98rem;
+  font-weight: 400;
+  margin-bottom: 0.42rem;
+  color: #222;
 }
 
-/* 방 번호만 강조 */
-.roomTitle {
-  font-size: 1.05rem;                 /* 닉네임(.nickname)과 동일 크기 */
-  font-weight: bold;
-}
+.roomTitle { font-size: 1.05rem; font-weight: 700; } /* 인사말 닉네임과 동일 크기/강조 */
 
-/* 합계 행 */
-.summaryRow td {
-  background-color: #fafafa;
-  font-weight: bold;
-}
-.sumValue {
-  color: blue;
-}
+.summaryRow td { background-color: #fafafa; font-weight: 600; }
+.sumValue { color: blue; }
 
-/* 팀원 목록과 배정 결과 사이에 더 여유 */
-.teamTable {
-  margin-top: 1.25rem;
-}
+.teamTable { margin-top: 1.05rem; }
