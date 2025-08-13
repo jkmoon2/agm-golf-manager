@@ -1,63 +1,229 @@
 // src/player/screens/PlayerRoomSelect.jsx
 
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './PlayerRoomSelect.module.css';
 
 export default function PlayerRoomSelect() {
   const { mode } = useContext(PlayerContext);
-  return mode === 'stroke'
-    ? <StrokeRoomSelect />
-    : <FourBallRoomSelect />;
+  const isFourball = mode === 'fourball' || mode === 'agm'; // 'agm'은 포볼로 취급
+  return isFourball ? <FourballLikeSelect /> : <StrokeLikeSelect />;
 }
 
-function StrokeRoomSelect() {
-  const {
-    rooms,
-    roomNames,
-    participants,
-    participant,
-    joinRoom,
-  } = useContext(PlayerContext);
+/* 스트로크: 관리자 STEP5 규칙으로 1명 자동 배정 */
+function StrokeLikeSelect() {
+  const { roomNames, participants, participant, assignStrokeForOne } = useContext(PlayerContext);
 
-  const [done, setDone]                 = useState(false);
+  return (
+    <BaseRoomSelect
+      variant="stroke"
+      roomNames={roomNames}
+      participants={participants}
+      participant={participant}
+      onAssign={async (myId) => {
+        const { roomNumber } = await assignStrokeForOne(myId);
+        return { roomNumber };
+      }}
+    />
+  );
+}
+
+/* 포볼(=agm): 관리자 STEP7의 '방+파트너 자동선택' */
+function FourballLikeSelect() {
+  const { roomNames, participants, participant, assignFourballForOneAndPartner } =
+    useContext(PlayerContext);
+
+  return (
+    <BaseRoomSelect
+      variant="fourball"
+      roomNames={roomNames}
+      participants={participants}
+      participant={participant}
+      onAssign={async (myId) => {
+        const { roomNumber, partnerNickname } = await assignFourballForOneAndPartner(myId);
+        return { roomNumber, partnerNickname };
+      }}
+    />
+  );
+}
+
+/* 공통 UI */
+function BaseRoomSelect({
+  variant,            // 'stroke' | 'fourball'
+  roomNames,
+  participants,
+  participant,
+  onAssign,           // (myId) => Promise<{roomNumber, partnerNickname?}>
+}) {
+  const [done, setDone] = useState(false);
   const [assignedRoom, setAssignedRoom] = useState(null);
-  const [showTeam, setShowTeam]         = useState(false);
-  const [teamMembers, setTeamMembers]   = useState([]);
+  const [showTeam, setShowTeam] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
 
+  // flowStep: 'idle' | 'assigning' | 'afterAssign' | 'show'
+  const [flowStep, setFlowStep] = useState('idle');
+
+  // 새로고침 등으로 이미 배정된 경우만 자동 노출 (진행 중엔 억제)
   useEffect(() => {
-    if (participant?.room != null && !done) {
+    if (participant?.room != null && flowStep === 'idle' && !done) {
       setAssignedRoom(participant.room);
       setDone(true);
+      setShowTeam(false);
+      setFlowStep('show');
     }
-  }, [participant, done]);
+  }, [participant?.room, flowStep, done]);
 
-  useEffect(() => {
-    if (done && assignedRoom != null) {
-      setTeamMembers(participants.filter(p => p.room === assignedRoom));
+  const getLabel = (num) => {
+    if (Array.isArray(roomNames) && roomNames[num - 1]?.trim()) {
+      return roomNames[num - 1].trim();
     }
+    return `${num}번방`;
+  };
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // 배정 결과(표1): 스트로크는 본인만, 포볼은 본인+파트너 2명만
+  const compactMembers = useMemo(() => {
+    if (!done || assignedRoom == null || !participant) return [];
+    if (variant === 'fourball') {
+      const mine = participants.find(p => String(p.id) === String(participant.id));
+      const mate = participants.find(p => String(p.id) === String(mine?.partner));
+      return [mine, mate].filter(Boolean);
+    }
+    const me = participants.find(p => String(p.id) === String(participant.id));
+    return [me].filter(Boolean);
+  }, [done, assignedRoom, participants, participant, variant]);
+
+  // 같은 방 전체 구성(표2: 팀확인에서 사용)
+  const teamMembersRaw = useMemo(() => {
+    if (!done || assignedRoom == null) return [];
+    return participants.filter((p) => Number(p.room) === Number(assignedRoom));
   }, [done, assignedRoom, participants]);
 
+  // 팀원 목록 정렬: 1조 선택자 → 파트너가 나란히
+  const teamMembers = useMemo(() => {
+    const list = teamMembersRaw || [];
+    const byId = new Map(list.map(p => [String(p.id), p]));
+    const seen = new Set();
+    const ordered = [];
+
+    const firstGroup = list.filter(p => Number(p?.group) === 1);
+    firstGroup.sort((a, b) => {
+      const na = Number(a?.id), nb = Number(b?.id);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
+    });
+
+    const pushPair = (a, b) => {
+      if (a && !seen.has(String(a.id))) { ordered.push(a); seen.add(String(a.id)); }
+      if (b && !seen.has(String(b.id))) { ordered.push(b); seen.add(String(b.id)); }
+    };
+
+    firstGroup.forEach(p => {
+      if (seen.has(String(p.id))) return;
+      const mate = p?.partner ? byId.get(String(p.partner)) : null;
+      pushPair(p, mate);
+    });
+
+    list.forEach(p => {
+      if (seen.has(String(p.id))) return;
+      const mate = p?.partner ? byId.get(String(p.partner)) : null;
+      if (mate && !seen.has(String(mate.id))) {
+        const a = Number(p.id), b = Number(mate.id);
+        if (!isNaN(a) && !isNaN(b) && a > b) pushPair(mate, p);
+        else pushPair(p, mate);
+      } else {
+        pushPair(p, null);
+      }
+    });
+
+    return ordered;
+  }, [teamMembersRaw]);
+
+  // 팀원 목록은 항상 4행(2×2)으로 표시: 부족분은 공란으로 패딩
+  const teamMembersPadded = useMemo(() => {
+    const arr = [...teamMembers];
+    while (arr.length < 4) arr.push(null);
+    return arr.slice(0, 4);
+  }, [teamMembers]);
+
+  const isFourballGroup2 = variant === 'fourball' && Number(participant?.group) === 2;
+
   const handleAssign = async () => {
-    if (!participant || done) return;
-    const idx = Math.floor(Math.random() * rooms.length);
-    const roomNum = rooms[idx].number;
+    if (!participant?.id) return;
+    if (done || isAssigning) return;
+
+    // 포볼 2조는 독자 선택 불가 → 상태 확인만
+    if (isFourballGroup2) {
+      setIsAssigning(true);
+      await sleep(500);
+      setIsAssigning(false);
+      if (participant?.room != null) {
+        const roomLabel = getLabel(participant.room);
+        setAssignedRoom(participant.room);
+        setDone(true);
+        setShowTeam(false);
+        setFlowStep('show');
+        alert(`${participant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
+      } else {
+        alert('아직 방배정이 진행되지 않았습니다.\n1조 참가자가 방/팀원을 선택하면 확인 가능합니다.');
+      }
+      return;
+    }
+
     try {
-      await joinRoom(roomNum, participant.id);
-      setAssignedRoom(roomNum);
+      setIsAssigning(true);
+      setFlowStep('assigning');
+      await sleep(600); // 스핀 가시성
+
+      const { roomNumber, partnerNickname } = await onAssign(participant.id);
+
+      // Firestore 업데이트가 먼저 와도 표는 아직 감춤
+      setFlowStep('afterAssign');
+      await sleep(150);
+      setIsAssigning(false);
+
+      const roomLabel = getLabel(roomNumber);
+
+      // 모드별 알림 순서
+      if (variant === 'fourball') {
+        // 알림1
+        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
+        // 알림2
+        if (partnerNickname) {
+          alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+        } else {
+          alert('아직 팀원이 정해지지 않았습니다.');
+        }
+      } else {
+        // 스트로크는 한 줄만
+        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
+      }
+
+      // 이제 표를 노출
+      setAssignedRoom(roomNumber);
       setDone(true);
-    } catch {
+      setShowTeam(false);
+      setFlowStep('show');
+    } catch (e) {
+      console.error('[assign] error:', e);
+      setIsAssigning(false);
+      setFlowStep('idle');
       alert('방 배정 중 오류가 발생했습니다.');
     }
   };
 
-  const getLabel = num => {
-    // 배열 범위 밖 접근 방지
-    if (Array.isArray(roomNames) && roomNames[num - 1]?.trim()) {
-      return roomNames[num - 1].trim();
-    }
-    return `${num}번 방`;
+  const handleTeamButton = () => {
+    if (done && flowStep === 'show') setShowTeam((v) => !v);
   };
+
+  const sumHd = (list) => list.reduce((s, p) => s + (Number(p?.handicap) || 0), 0);
+
+  const assignBtnLabel =
+    isFourballGroup2 ? '방확인'
+    : (isAssigning ? '배정 중…' : (done ? '배정 완료' : '방배정'));
+
+  const teamBtnDisabled = !(done && flowStep === 'show') || isAssigning;
 
   return (
     <div className={styles.container}>
@@ -69,178 +235,87 @@ function StrokeRoomSelect() {
 
       <div className={styles.buttonRow}>
         <button
-          className={styles.assignBtn}
+          className={`${styles.btn} ${styles.btnBlue} ${isAssigning ? styles.loading : ''}`}
           onClick={handleAssign}
-          disabled={done}
+          disabled={(!isFourballGroup2 && (done || isAssigning))}
         >
-          {done ? '배정 완료' : '방배정'}
+          {isAssigning && <span className={styles.spinner} aria-hidden="true" />}
+          <span>{assignBtnLabel}</span>
         </button>
         <button
-          className={styles.teamBtn}
-          onClick={() => setShowTeam(v => !v)}
-          disabled={!done}
+          className={`${styles.btn} ${styles.btnGray}`}
+          onClick={handleTeamButton}
+          disabled={teamBtnDisabled}
         >
           팀확인
         </button>
       </div>
 
-      {done && (
-        <table className={styles.resultTable}>
-          <caption className={styles.tableCaption}>
-            <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 배정 결과
-          </caption>
-          <thead>
-            <tr><th>닉네임</th><th>G핸디</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>{participant.nickname}</td>
-              <td>{participant.handicap}</td>
-            </tr>
-            <tr className={styles.summaryRow}>
-              <td>합계</td>
-              <td>{participant.handicap}</td>
-            </tr>
-          </tbody>
-        </table>
-      )}
-
-      {showTeam && done && (
-        <table className={styles.teamTable}>
-          <caption className={styles.tableCaption}>
-            <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 팀원 목록
-          </caption>
-          <thead>
-            <tr><th>닉네임</th><th>G핸디</th></tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: 4 }).map((_, i) => {
-              const p = teamMembers[i];
-              return (
-                <tr key={i}>
-                  <td>{p?.nickname || ''}</td>
-                  <td>{p?.handicap != null ? p.handicap : ''}</td>
+      {/* 배정 결과 - 스트로크: 본인만 / 포볼: 본인+파트너 */}
+      {done && flowStep === 'show' && (
+        <div className={styles.tables}>
+          <div className={styles.tableBlock}>
+            <div className={styles.tableCaption}>
+              <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 배정 결과
+            </div>
+            <table className={styles.table}>
+              <colgroup>
+                <col className={styles.colName} />
+                <col className={styles.colHd} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>닉네임</th>
+                  <th>G핸디</th>
                 </tr>
-              );
-            })}
-            <tr className={styles.summaryRow}>
-              <td>합계</td>
-              <td>{teamMembers.reduce((sum, p) => sum + (p?.handicap || 0), 0)}</td>
-            </tr>
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
-}
+              </thead>
+              <tbody>
+                {compactMembers.map((p, idx) => (
+                  <tr key={p?.id ?? `c-${idx}`}>
+                    <td>{p?.nickname ?? '\u00A0'}</td>
+                    <td>{p?.handicap ?? '\u00A0'}</td>
+                  </tr>
+                ))}
+                <tr className={styles.summaryRow}>
+                  <td>합계</td>
+                  <td className={styles.sumValue}>{sumHd(compactMembers)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-function FourBallRoomSelect() {
-  const {
-    rooms,
-    roomNames,
-    participants,
-    participant,
-    joinFourBall
-  } = useContext(PlayerContext);
-
-  const [selRoom, setSelRoom] = useState(null);
-  const [selMate, setSelMate] = useState(null);
-  const [done, setDone]       = useState(false);
-
-  useEffect(() => {
-    if (participant?.room != null && participant?.partner != null) {
-      setSelRoom(participant.room);
-      setSelMate(participant.partner);
-      setDone(true);
-    }
-  }, [participant]);
-
-  const handleConfirm = async () => {
-    if (done || selRoom == null || !selMate) return;
-    try {
-      await joinFourBall(selRoom, participant.id, selMate);
-      setDone(true);
-    } catch {
-      alert('팀 구성 중 오류가 발생했습니다.');
-    }
-  };
-
-  const getLabel = num => {
-    if (Array.isArray(roomNames) && roomNames[num - 1]?.trim()) {
-      return roomNames[num - 1].trim();
-    }
-    return `${num}번 방`;
-  };
-
-  const mateData = participants.find(p => p.id === selMate);
-
-  return (
-    <div className={styles.container}>
-      {participant?.nickname && (
-        <p className={styles.greeting}>
-          <span className={styles.nickname}>{participant.nickname}</span>님, 안녕하세요!
-        </p>
-      )}
-
-      <h2 className={styles.subHeader}>
-        STEP 1. {selRoom != null ? getLabel(selRoom) : '방 선택'} 팀원 선택 (포볼)
-      </h2>
-
-      <div className={styles.grid}>
-        {rooms.map(r => (
-          <button
-            key={r.number}
-            className={`${styles.card} ${selRoom === r.number ? styles.selected : ''}`}
-            onClick={() => setSelRoom(r.number)}
-            disabled={done}
-          >
-            {getLabel(r.number)}
-          </button>
-        ))}
-      </div>
-
-      {selRoom != null && !done && (
-        <div className={styles.grid}>
-          {participants
-            .filter(p => p.id !== participant.id)
-            .map(p => (
-              <button
-                key={p.id}
-                className={`${styles.card} ${selMate === p.id ? styles.selected : ''}`}
-                onClick={() => setSelMate(p.id)}
-                disabled={done}
-              >
-                {p.nickname} ({p.handicap})
-              </button>
-            ))}
+          {showTeam && (
+            <div className={styles.tableBlock}>
+              <div className={styles.tableCaption}>
+                <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 팀원 목록
+              </div>
+              <table className={`${styles.table} ${styles.teamTable}`}>
+                <colgroup>
+                  <col className={styles.colName} />
+                  <col className={styles.colHd} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>닉네임</th>
+                    <th>G핸디</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamMembersPadded.map((p, idx) => (
+                    <tr key={p?.id ?? `t-${idx}`}>
+                      <td>{p?.nickname ?? '\u00A0'}</td>
+                      <td>{p?.handicap ?? '\u00A0'}</td>
+                    </tr>
+                  ))}
+                  <tr className={styles.summaryRow}>
+                    <td>합계</td>
+                    <td className={styles.sumValue}>{sumHd(teamMembers)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      )}
-
-      {!done && selRoom != null && selMate != null && (
-        <button className={styles.confirmBtn} onClick={handleConfirm}>
-          팀 구성 완료
-        </button>
-      )}
-
-      {done && (
-        <table className={styles.resultTable}>
-          <caption className={styles.tableCaption}>
-            {getLabel(selRoom)} 구성 완료
-          </caption>
-          <thead>
-            <tr><th>닉네임</th><th>G핸디</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>{participant.nickname}</td><td>{participant.handicap}</td></tr>
-            {mateData && (
-              <tr><td>{mateData.nickname}</td><td>{mateData.handicap}</td></tr>
-            )}
-            <tr className={styles.summaryRow}>
-              <td>합계</td>
-              <td>{(participant.handicap || 0) + (mateData?.handicap || 0)}</td>
-            </tr>
-          </tbody>
-        </table>
       )}
     </div>
   );
