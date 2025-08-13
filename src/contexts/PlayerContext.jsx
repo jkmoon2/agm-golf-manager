@@ -23,6 +23,9 @@ export function PlayerProvider({ children }) {
   const [roomCount, setRoomCount] = useState(4);
   const [roomNames, setRoomNames] = useState([]);
 
+  // ✅ deps에 participant 전체를 넣지 않고, 실제로 사용하는 스칼라만 의존
+  const myId = participant?.id ?? null;
+
   // 이벤트 로드
   useEffect(() => {
     if (!eventId) return;
@@ -58,8 +61,9 @@ export function PlayerProvider({ children }) {
         setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
         setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1 })));
 
-        if (participant) {
-          const me = partArr.find(p => p.id === participant.id);
+        // ✅ 내 정보 동기화: participant 전체 대신 myId로 탐색
+        if (myId != null) {
+          const me = partArr.find(p => p.id === String(myId));
           if (me) setParticipant(me);
         }
       } catch (err) {
@@ -68,7 +72,7 @@ export function PlayerProvider({ children }) {
         setMode('stroke');
       }
     })();
-  }, [eventId]); // participant 포함 금지(루프 위험)
+  }, [eventId, myId]); // ✅ participant 대신 myId만 의존(루프/경고 방지)
 
   // participants 변경 시 내 정보 동기화(루프 방지)
   useEffect(() => {
