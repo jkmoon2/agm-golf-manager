@@ -9,9 +9,13 @@ export default function Step5() {
     participants,
     setParticipants,
     roomCount,
-    roomNames,   // ★ 여기를 반드시 꺼내오셔야 합니다!
+    roomNames,   // ★ 반드시 꺼내오기
     goPrev,
-    goNext
+    goNext,
+
+    // 🔧 (옵션) 컨텍스트에 이미 존재한다면 실시간 저장에 사용
+    updateParticipant,        // (id, patch) => Promise<void> | void
+    updateParticipantsBulk,   // (changes: Array<{id, fields}>) => Promise<void> | void
   } = useContext(StepContext);
 
   const [loadingId, setLoadingId] = useState(null);
@@ -20,90 +24,124 @@ export default function Step5() {
   // 방 번호 1~roomCount 배열
   const rooms = Array.from({ length: roomCount }, (_, i) => i + 1);
 
-  // ── 1) 점수 변경 ──
-  const onScoreChange = (id, value) => {
-    setParticipants(ps =>
-      ps.map(p =>
-        p.id === id
-          ? { ...p, score: value === '' ? null : Number(value) }
-          : p
-      )
-    );
-  };
-
-  // ── 2) 수동 배정 ──
-  const onManualAssign = id => {
-    setLoadingId(id);
-    setTimeout(() => {
-      const target = participants.find(p => p.id === id);
-      if (!target) {
-        setLoadingId(null);
-        return;
-      }
-
-      // 같은 조에서 이미 배정된 방
-      const usedRooms = participants
-        .filter(p => p.group === target.group && p.room != null)
-        .map(p => p.room);
-
-      // 남은 방 무작위 선택
-      const available = rooms.filter(r => !usedRooms.includes(r));
-      const choice = available.length
-        ? available[Math.floor(Math.random() * available.length)]
-        : null;
-
-      // 상태 반영
-      setParticipants(ps =>
-        ps.map(p =>
-          p.id === id ? { ...p, room: choice } : p
-        )
-      );
-      setLoadingId(null);
-
-      if (choice != null) {
-        // 변경된 방이름 우선, 없으면 “N번 방”
-        const displayName =
-          roomNames[choice - 1]?.trim() || `${choice}번 방`;
-        alert(`${target.nickname}님은 ${displayName}에 배정되었습니다.`);
-      } else {
-        alert('남은 방이 없습니다.');
-      }
-    }, 600);   // ← 이 숫자를 늘리면 딜레이 시간이 길어집니다.
-  };
-
-  // ── 3) 강제 배정 ──
-  const onForceAssign = (id, room) => {
-    const target = participants.find(p => p.id === id);
-    const prevRoom = target?.room ?? null;
-
-    // 해당 조에서 이미 그 방에 있는 참가자 인덱스
-    const swapIdx = participants.findIndex(
-      p => p.group === target.group && p.room === room
-    );
-
-    // 교환 로직: 본인→room, 기존 occupant→prevRoom
-    setParticipants(ps =>
-      ps.map(p => {
-        if (p.id === id) {
-          return { ...p, room };
+  // ===== Firestore 동기화(있으면 사용, 없으면 no-op) =====
+  const canBulk = typeof updateParticipantsBulk === 'function';
+  const canOne  = typeof updateParticipant === 'function';
+  const syncChanges = async (changes) => {
+    try {
+      if (canBulk) {
+        await updateParticipantsBulk(changes);
+      } else if (canOne) {
+        for (const ch of changes) {
+          // ch: { id, fields }
+          await updateParticipant(ch.id, ch.fields);
         }
-        if (swapIdx >= 0 && p.id === participants[swapIdx].id) {
-          return { ...p, room: prevRoom };
-        }
-        return p;
-      })
-    );
-    setForceSelectingId(null);
-
-    if (room != null && target) {
-      const displayName =
-        roomNames[room - 1]?.trim() || `${room}번 방`;
-      alert(`${target.nickname}님은 ${displayName}에 강제 배정되었습니다.`);
+      }
+      // else: 컨텍스트에 동기화 함수가 없으면 조용히 패스(기존 코드 유지)
+    } catch (e) {
+      console.warn('[Step5] syncChanges failed:', e);
     }
   };
 
+  // ── 1) 점수 변경 ──
+  const onScoreChange = (id, value) => {
+    const v = value === '' ? null : Number(value);
+    setParticipants(ps =>
+      ps.map(p => (p.id === id ? { ...p, score: v } : p))
+    );
+    // 점수도 실시간 저장(있다면)
+    syncChanges([{ id, fields: { score: v } }]);
+  };
+
+  // ── 2) 수동 배정 ──
+  const onManualAssign = (id) => {
+    setLoadingId(id);
+    setTimeout(async () => {
+      let chosen = null;
+      let targetNickname = null;
+
+      setParticipants(ps => {
+        const target = ps.find(p => p.id === id);
+        if (!target) return ps;
+        targetNickname = target.nickname;
+
+        // 같은 조에서 이미 배정된 방(최신 상태 기준)
+        const usedRooms = ps
+          .filter(p => p.group === target.group && p.room != null)
+          .map(p => p.room);
+
+        // 남은 방 무작위 선택
+        const available = rooms.filter(r => !usedRooms.includes(r));
+        chosen = available.length
+          ? available[Math.floor(Math.random() * available.length)]
+          : null;
+
+        return ps.map(p => (p.id === id ? { ...p, room: chosen } : p));
+      });
+
+      setLoadingId(null);
+
+      if (chosen != null) {
+        const displayName = roomNames[chosen - 1]?.trim() || `${chosen}번 방`;
+        alert(`${targetNickname}님은 ${displayName}에 배정되었습니다.`);
+        // 실시간 저장(있다면)
+        await syncChanges([{ id, fields: { room: chosen } }]);
+      } else {
+        alert('남은 방이 없습니다.');
+        await syncChanges([{ id, fields: { room: null } }]);
+      }
+    }, 600); // 기존 딜레이 유지
+  };
+
+  // ── 3) 강제 배정/취소 ──
+  const onForceAssign = async (id, room) => {
+    let targetNickname = null;
+    let prevRoom = null;
+    const changes = [];
+
+    setParticipants(ps => {
+      const target = ps.find(p => p.id === id);
+      if (!target) return ps;
+      targetNickname = target.nickname;
+      prevRoom = target.room ?? null;
+
+      let next = ps.map(p => (p.id === id ? { ...p, room } : p));
+      changes.push({ id, fields: { room } });
+
+      // ✅ room이 null(취소)일 때는 절대 스왑하지 않음
+      if (room == null) {
+        return next;
+      }
+
+      // room이 숫자인 경우에만, 같은 조의 기존 occupant를 prevRoom으로 이동
+      const occupant = ps.find(
+        p => p.group === target.group && p.room === room && p.id !== id
+      );
+      if (occupant) {
+        next = next.map(p =>
+          p.id === occupant.id ? { ...p, room: prevRoom } : p
+        );
+        changes.push({ id: occupant.id, fields: { room: prevRoom } });
+      }
+      return next;
+    });
+
+    setForceSelectingId(null);
+
+    if (room != null) {
+      const displayName = roomNames[room - 1]?.trim() || `${room}번 방`;
+      alert(`${targetNickname}님은 ${displayName}에 강제 배정되었습니다.`);
+    } else {
+      alert(`${targetNickname}님의 방 배정이 취소되었습니다.`);
+    }
+
+    // 실시간 저장(있다면)
+    await syncChanges(changes);
+  };
+
   // ── 4) 자동 배정 ──
-  const onAutoAssign = () => {
+  const onAutoAssign = async () => {
+    let nextSnapshot = null;
     setParticipants(ps => {
       let updated = [...ps];
       const groups = Array.from(new Set(updated.map(p => p.group)));
@@ -116,25 +154,42 @@ export default function Step5() {
           p => p.group === group && p.room == null
         );
         const slots = rooms.filter(r => !assigned.includes(r));
-        const shuffled = slots.sort(() => Math.random() - 0.5);
+        const shuffled = [...slots].sort(() => Math.random() - 0.5);
 
         unassigned.forEach((p, idx) => {
           const r = shuffled[idx] ?? null;
-          updated = updated.map(x =>
-            x.id === p.id ? { ...x, room: r } : x
-          );
+          updated = updated.map(x => (x.id === p.id ? { ...x, room: r } : x));
         });
       });
 
+      nextSnapshot = updated;
       return updated;
     });
+
+    // 변경분만 동기화(있다면)
+    if (nextSnapshot) {
+      const changes = [];
+      nextSnapshot.forEach((p, i) => {
+        const old = participants[i];
+        if (!old || old.room !== p.room) {
+          changes.push({ id: p.id, fields: { room: p.room ?? null } });
+        }
+      });
+      await syncChanges(changes);
+    }
   };
 
   // ── 5) 초기화 ──
-  const onReset = () => {
+  const onReset = async () => {
     setParticipants(ps =>
       ps.map(p => ({ ...p, room: null, score: null, selected: false }))
     );
+    // 실시간 저장(있다면)
+    const changes = participants.map(p => ({
+      id: p.id,
+      fields: { room: null, score: null, selected: false },
+    }));
+    await syncChanges(changes);
   };
 
   useEffect(() => {
@@ -184,9 +239,7 @@ export default function Step5() {
                   disabled={isDisabled}
                   onClick={() => onManualAssign(p.id)}
                 >
-                  {loadingId === p.id
-                    ? <span className={styles.spinner} />
-                    : '수동'}
+                  {loadingId === p.id ? <span className={styles.spinner} /> : '수동'}
                 </button>
               </div>
 

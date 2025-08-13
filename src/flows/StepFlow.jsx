@@ -249,6 +249,31 @@ export default function StepFlow() {
     save({ participants: ps });
   };
 
+  // ─────────────────────────────────────────────
+  // ★★★ STEP5 실시간 저장용 보완 함수 (기존 코드 유지 + 추가만)
+  //  - 취소/배정/스코어 변경을 즉시 Firestore에 반영하기 위해 사용
+  //  - Step5에서 존재 여부 체크 후 사용 가능(없으면 무시해도 기존 동작 유지)
+  // ─────────────────────────────────────────────
+  const updateParticipantNow = (id, fields) => {
+    setParticipants(prev => {
+      const next = prev.map(p => (p.id === id ? { ...p, ...fields } : p));
+      save({ participants: next });
+      return next;
+    });
+  };
+
+  const updateParticipantsBulkNow = (changes) => {
+    // changes: Array<{ id, fields }>
+    setParticipants(prev => {
+      const map = new Map(changes.map(c => [String(c.id), c.fields]));
+      const next = prev.map(p =>
+        map.has(String(p.id)) ? { ...p, ...map.get(String(p.id)) } : p
+      );
+      save({ participants: next });
+      return next;
+    });
+  };
+
   // Context 공급
   const ctxValue = {
     onManualAssign: handleAgmManualAssign,
@@ -264,7 +289,11 @@ export default function StepFlow() {
     roomNames, setRoomNames,
     uploadMethod, setUploadMethod,
     participants, setParticipants,
-    resetAll, handleFile, initManual
+    resetAll, handleFile, initManual,
+
+    // ▼ 추가: STEP5에서 쓸 수 있는 즉시 저장 헬퍼(선택 사용)
+    updateParticipant:      updateParticipantNow,
+    updateParticipantsBulk: updateParticipantsBulkNow,
   };
 
   const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
