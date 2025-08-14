@@ -10,7 +10,7 @@ export default function PlayerRoomSelect() {
   return isFourball ? <FourballLikeSelect /> : <StrokeLikeSelect />;
 }
 
-/* 스트로크: 관리자 STEP5 규칙으로 1명 자동 배정 */
+/* 스트로크 */
 function StrokeLikeSelect() {
   const { roomNames, participants, participant, assignStrokeForOne } = useContext(PlayerContext);
 
@@ -28,7 +28,7 @@ function StrokeLikeSelect() {
   );
 }
 
-/* 포볼(=agm): 관리자 STEP7의 '방+파트너 자동선택' */
+/* 포볼(=agm) */
 function FourballLikeSelect() {
   const { roomNames, participants, participant, assignFourballForOneAndPartner } =
     useContext(PlayerContext);
@@ -49,21 +49,21 @@ function FourballLikeSelect() {
 
 /* 공통 UI */
 function BaseRoomSelect({
-  variant,            // 'stroke' | 'fourball'
+  variant,
   roomNames,
   participants,
   participant,
-  onAssign,           // (myId) => Promise<{roomNumber, partnerNickname?}>
+  onAssign,
 }) {
+  const { isEventClosed } = useContext(PlayerContext); // ✅ 종료 여부
   const [done, setDone] = useState(false);
   const [assignedRoom, setAssignedRoom] = useState(null);
   const [showTeam, setShowTeam] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
 
-  // flowStep: 'idle' | 'assigning' | 'afterAssign' | 'show'
   const [flowStep, setFlowStep] = useState('idle');
 
-  // 새로고침 등으로 이미 배정된 경우만 자동 노출 (진행 중엔 억제)
+  // 새로고침 등으로 이미 배정된 경우만 자동 노출
   useEffect(() => {
     if (participant?.room != null && flowStep === 'idle' && !done) {
       setAssignedRoom(participant.room);
@@ -82,7 +82,7 @@ function BaseRoomSelect({
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // 배정 결과(표1): 스트로크는 본인만, 포볼은 본인+파트너 2명만
+  // 배정 결과(표1)
   const compactMembers = useMemo(() => {
     if (!done || assignedRoom == null || !participant) return [];
     if (variant === 'fourball') {
@@ -94,13 +94,13 @@ function BaseRoomSelect({
     return [me].filter(Boolean);
   }, [done, assignedRoom, participants, participant, variant]);
 
-  // 같은 방 전체 구성(표2: 팀확인에서 사용)
+  // 같은 방 전체 구성(표2)
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
     return participants.filter((p) => Number(p.room) === Number(assignedRoom));
   }, [done, assignedRoom, participants]);
 
-  // 팀원 목록 정렬: 1조 선택자 → 파트너가 나란히
+  // 팀원 정렬
   const teamMembers = useMemo(() => {
     const list = teamMembersRaw || [];
     const byId = new Map(list.map(p => [String(p.id), p]));
@@ -140,7 +140,7 @@ function BaseRoomSelect({
     return ordered;
   }, [teamMembersRaw]);
 
-  // 팀원 목록은 항상 4행(2×2)으로 표시: 부족분은 공란으로 패딩
+  // 부족분은 4행으로 패딩
   const teamMembersPadded = useMemo(() => {
     const arr = [...teamMembers];
     while (arr.length < 4) arr.push(null);
@@ -152,6 +152,12 @@ function BaseRoomSelect({
   const handleAssign = async () => {
     if (!participant?.id) return;
     if (done || isAssigning) return;
+
+    // ✅ 대회 종료 시 배정 금지
+    if (isEventClosed) {
+      alert('대회가 종료되어 더 이상 참여할 수 없습니다.');
+      return;
+    }
 
     // 포볼 2조는 독자 선택 불가 → 상태 확인만
     if (isFourballGroup2) {
@@ -174,33 +180,24 @@ function BaseRoomSelect({
     try {
       setIsAssigning(true);
       setFlowStep('assigning');
-      await sleep(600); // 스핀 가시성
+      await sleep(600);
 
       const { roomNumber, partnerNickname } = await onAssign(participant.id);
 
-      // Firestore 업데이트가 먼저 와도 표는 아직 감춤
       setFlowStep('afterAssign');
       await sleep(150);
       setIsAssigning(false);
 
       const roomLabel = getLabel(roomNumber);
 
-      // 모드별 알림 순서
       if (variant === 'fourball') {
-        // 알림1
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
-        // 알림2
-        if (partnerNickname) {
-          alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
-        } else {
-          alert('아직 팀원이 정해지지 않았습니다.');
-        }
+        if (partnerNickname) alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+        else alert('아직 팀원이 정해지지 않았습니다.');
       } else {
-        // 스트로크는 한 줄만
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
       }
 
-      // 이제 표를 노출
       setAssignedRoom(roomNumber);
       setDone(true);
       setShowTeam(false);
@@ -223,7 +220,7 @@ function BaseRoomSelect({
     isFourballGroup2 ? '방확인'
     : (isAssigning ? '배정 중…' : (done ? '배정 완료' : '방배정'));
 
-  const teamBtnDisabled = !(done && flowStep === 'show') || isAssigning;
+  const teamBtnDisabled = !(done && flowStep === 'show') || isAssigning || isEventClosed; // 종료 시 팀확인도 비활성화(정책에 따라 풀 수 있음)
 
   return (
     <div className={styles.container}>
@@ -233,11 +230,15 @@ function BaseRoomSelect({
         </p>
       )}
 
+      {isEventClosed && (
+        <div className={styles.notice}>대회가 종료되어 더 이상 참여할 수 없습니다.</div>
+      )}
+
       <div className={styles.buttonRow}>
         <button
           className={`${styles.btn} ${styles.btnBlue} ${isAssigning ? styles.loading : ''}`}
           onClick={handleAssign}
-          disabled={(!isFourballGroup2 && (done || isAssigning))}
+          disabled={isEventClosed || (!isFourballGroup2 && (done || isAssigning))}
         >
           {isAssigning && <span className={styles.spinner} aria-hidden="true" />}
           <span>{assignBtnLabel}</span>
@@ -251,7 +252,7 @@ function BaseRoomSelect({
         </button>
       </div>
 
-      {/* 배정 결과 - 스트로크: 본인만 / 포볼: 본인+파트너 */}
+      {/* 표들 */}
       {done && flowStep === 'show' && (
         <div className={styles.tables}>
           <div className={styles.tableBlock}>
@@ -264,10 +265,7 @@ function BaseRoomSelect({
                 <col className={styles.colHd} />
               </colgroup>
               <thead>
-                <tr>
-                  <th>닉네임</th>
-                  <th>G핸디</th>
-                </tr>
+                <tr><th>닉네임</th><th>G핸디</th></tr>
               </thead>
               <tbody>
                 {compactMembers.map((p, idx) => (
@@ -295,10 +293,7 @@ function BaseRoomSelect({
                   <col className={styles.colHd} />
                 </colgroup>
                 <thead>
-                  <tr>
-                    <th>닉네임</th>
-                    <th>G핸디</th>
-                  </tr>
+                  <tr><th>닉네임</th><th>G핸디</th></tr>
                 </thead>
                 <tbody>
                   {teamMembersPadded.map((p, idx) => (

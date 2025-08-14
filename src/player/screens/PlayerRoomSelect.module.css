@@ -14,6 +14,17 @@
 .greeting  { font-size: 0.95rem; color: #333; margin-bottom: 0.7rem; }
 .nickname  { font-size: 1.05rem; font-weight: 700; }
 
+/* ✅ 종료 안내 */
+.notice {
+  background: #fff2f2;
+  border: 1px solid #ffcccc;
+  color: #a40000;
+  border-radius: 10px;
+  padding: .6rem .8rem;
+  font-size: .9rem;
+  margin-bottom: .8rem;
+}
+
 .buttonRow {
   display: flex;
   gap: 0.6rem;

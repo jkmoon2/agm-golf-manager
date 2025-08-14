@@ -210,7 +210,8 @@ export default function Step6() {
       {/* ─── 방배정표 ─── */}
       <div ref={allocRef} className={styles.tableContainer}>
         <h4 className={styles.tableTitle}>🏠 방배정표</h4>
-        <table className={styles.table}>
+        {/* ✅ 고정 행높이 & 빈칸 NBSP 주입을 위한 클래스 추가 */}
+        <table className={`${styles.table} ${styles.fixedRows}`}>
           <thead>
             <tr>
               {headers.map((h, i) => 
@@ -272,7 +273,8 @@ export default function Step6() {
       {/* ─── 최종결과표 ─── */}
       <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
         <h4 className={styles.tableTitle}>📊 최종결과표</h4>
-        <table className={styles.table}>
+        {/* ✅ 동일 클래스 부여로 두 표의 행높이 완전 동일 */}
+        <table className={`${styles.table} ${styles.fixedRows}`}>
           <thead>
             <tr>
               {headers.map((h, i) => 
