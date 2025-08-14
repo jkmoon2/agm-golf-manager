@@ -5,28 +5,29 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './PlayerRoomSelect.module.css';
 
 /* =========================================================
- * 알림/스피너 타이밍 (원하는 만큼 느리게 조정하세요)
+ * 알림/스피너 타이밍 (숫자만 바꿔서 원하는 속도로 조정)
  * ---------------------------------------------------------
- * spinBeforeAssign        : 버튼 클릭 → 배정 호출 전 스피너 유지
- * preAlertStroke          : (스트로크) 배정 완료 직후 → 알림1 뜨기 전
- * preAlertFourball        : (포볼)    배정 완료 직후 → 알림1 뜨기 전
- * betweenAlertsFourball   : (포볼)    알림1 닫은 뒤 → 알림2 띄우기 전
+ * spinBeforeAssign          : 버튼 클릭 → 배정 호출 전 스피너 유지
+ * preAlertStroke            : (스트로크) 배정 완료 직후 → 알림1 전
+ * preAlertFourball          : (포볼)    배정 완료 직후 → 알림1 전
+ * spinDuringPartnerPick     : (포볼)    알림1 닫은 직후 ~ 알림2 전(팀원 선택 중 스핀)
  * =======================================================*/
 const TIMINGS = {
-  spinBeforeAssign: 1000,   // 기본 600ms → 1000ms로 느리게
-  preAlertStroke: 300,      // 기본 150ms → 300ms로 느리게
-  preAlertFourball: 300,    // 기본 150ms → 300ms로 느리게
-  betweenAlertsFourball: 1500, // 기본 0ms → 200ms로 느리게
+  spinBeforeAssign: 1000,
+  preAlertStroke: 300,
+  preAlertFourball: 300,
+  spinDuringPartnerPick: 1800, // ⬅️ 새로 추가: 알림1 확인 후 스핀 보여줄 시간
 };
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default function PlayerRoomSelect() {
   const { mode } = useContext(PlayerContext);
-  const isFourball = mode === 'fourball' || mode === 'agm'; // 'agm'은 포볼로 취급
+  const isFourball = mode === 'fourball' || mode === 'agm';
   return isFourball ? <FourballLikeSelect /> : <StrokeLikeSelect />;
 }
 
-/* ───────────────── 스트로크 ───────────────── */
+/* ───────── 스트로크 ───────── */
 function StrokeLikeSelect() {
   const { roomNames, participants, participant, assignStrokeForOne } = useContext(PlayerContext);
 
@@ -44,7 +45,7 @@ function StrokeLikeSelect() {
   );
 }
 
-/* ───────────────── 포볼(=agm) ───────────────── */
+/* ───────── 포볼(=agm) ───────── */
 function FourballLikeSelect() {
   const { roomNames, participants, participant, assignFourballForOneAndPartner } =
     useContext(PlayerContext);
@@ -63,7 +64,7 @@ function FourballLikeSelect() {
   );
 }
 
-/* ───────────────── 공통 UI ───────────────── */
+/* ───────── 공통 UI ───────── */
 function BaseRoomSelect({
   variant,
   roomNames,
@@ -71,21 +72,21 @@ function BaseRoomSelect({
   participant,
   onAssign,
 }) {
-  const { isEventClosed } = useContext(PlayerContext); // 종료 여부
+  const { isEventClosed } = useContext(PlayerContext);
   const [done, setDone] = useState(false);
   const [assignedRoom, setAssignedRoom] = useState(null);
   const [showTeam, setShowTeam] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [flowStep, setFlowStep] = useState('idle');
 
-  // 내 참가자 정보가 participants에 로드되었는지 확인(없으면 배정 버튼 비활성화)
+  // 내 정보가 participants에 로딩됐는지
   const isMeReady = useMemo(() => {
     if (!participant?.id) return false;
     if (!Array.isArray(participants) || participants.length === 0) return false;
     return participants.some((p) => String(p.id) === String(participant.id));
   }, [participants, participant?.id]);
 
-  // 새로고침 등으로 이미 배정된 경우 상태 복구
+  // 새로고침으로 이미 배정된 경우 복구
   useEffect(() => {
     if (participant?.room != null && flowStep === 'idle' && !done) {
       setAssignedRoom(participant.room);
@@ -114,13 +115,13 @@ function BaseRoomSelect({
     return [me].filter(Boolean);
   }, [done, assignedRoom, participants, participant, variant]);
 
-  // 같은 방 전체 구성(표2)
+  // 같은 방 전체(표2)
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
     return participants.filter((p) => Number(p.room) === Number(assignedRoom));
   }, [done, assignedRoom, participants]);
 
-  // 팀원 정렬(1조 페어 먼저)
+  // 팀 정렬(1조 페어 먼저)
   const teamMembers = useMemo(() => {
     const list = teamMembersRaw || [];
     const byId = new Map(list.map((p) => [String(p.id), p]));
@@ -129,21 +130,14 @@ function BaseRoomSelect({
 
     const firstGroup = list.filter((p) => Number(p?.group) === 1);
     firstGroup.sort((a, b) => {
-      const na = Number(a?.id);
-      const nb = Number(b?.id);
+      const na = Number(a?.id), nb = Number(b?.id);
       if (!isNaN(na) && !isNaN(nb)) return na - nb;
       return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
     });
 
     const pushPair = (a, b) => {
-      if (a && !seen.has(String(a.id))) {
-        ordered.push(a);
-        seen.add(String(a.id));
-      }
-      if (b && !seen.has(String(b.id))) {
-        ordered.push(b);
-        seen.add(String(b.id));
-      }
+      if (a && !seen.has(String(a.id))) { ordered.push(a); seen.add(String(a.id)); }
+      if (b && !seen.has(String(b.id))) { ordered.push(b); seen.add(String(b.id)); }
     };
 
     firstGroup.forEach((p) => {
@@ -156,8 +150,7 @@ function BaseRoomSelect({
       if (seen.has(String(p.id))) return;
       const mate = p?.partner ? byId.get(String(p.partner)) : null;
       if (mate && !seen.has(String(mate.id))) {
-        const a = Number(p.id);
-        const b = Number(mate.id);
+        const a = Number(p.id), b = Number(mate.id);
         if (!isNaN(a) && !isNaN(b) && a > b) pushPair(mate, p);
         else pushPair(p, mate);
       } else {
@@ -168,7 +161,7 @@ function BaseRoomSelect({
     return ordered;
   }, [teamMembersRaw]);
 
-  // 부족분은 4행으로 패딩
+  // 4행까지 패딩
   const teamMembersPadded = useMemo(() => {
     const arr = [...teamMembers];
     while (arr.length < 4) arr.push(null);
@@ -181,7 +174,7 @@ function BaseRoomSelect({
     if (!participant?.id) return;
     if (done || isAssigning) return;
 
-    // 데이터가 아직 동기화되지 않은 경우 가드
+    // 아직 동기화 전이면 대기
     if (!isMeReady) {
       setIsAssigning(true);
       await sleep(400);
@@ -190,13 +183,12 @@ function BaseRoomSelect({
       return;
     }
 
-    // 대회 종료 시 배정 금지
     if (isEventClosed) {
       alert('대회가 종료되어 더 이상 참여할 수 없습니다.');
       return;
     }
 
-    // 포볼 2조는 독자 선택 불가 → 상태 확인만
+    // 포볼 2조는 확인만
     if (isFourballGroup2) {
       setIsAssigning(true);
       await sleep(500);
@@ -218,28 +210,42 @@ function BaseRoomSelect({
       setIsAssigning(true);
       setFlowStep('assigning');
 
-      // ✅ 버튼 클릭 직후, 배정 호출 전 스피너 유지 시간
+      // 1) 클릭 직후 스피너
       await sleep(TIMINGS.spinBeforeAssign);
 
       const { roomNumber, partnerNickname } = await onAssign(participant.id);
 
       setFlowStep('afterAssign');
 
-      // ✅ 배정 완료 직후 알림 뜨기 전 대기
+      // 2) 알림1 전 짧은 대기
       await sleep(variant === 'fourball' ? TIMINGS.preAlertFourball : TIMINGS.preAlertStroke);
 
+      // ─── 스트로크: 알림1 → 완료 ───
+      if (variant !== 'fourball') {
+        setIsAssigning(false);
+        const roomLabel = getLabel(roomNumber);
+        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
+        setAssignedRoom(roomNumber);
+        setDone(true);
+        setShowTeam(false);
+        setFlowStep('show');
+        return;
+      }
+
+      // ─── 포볼: 알림1 → (스피너) → 알림2 → 완료 ───
+      const roomLabel = getLabel(roomNumber);
+      setIsAssigning(false); // 알림1 직전에는 스피너 off
+      alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
+
+      // 알림1을 닫은 "직후" 스피너 ON (팀원 선택 중)
+      setIsAssigning(true);
+      await sleep(TIMINGS.spinDuringPartnerPick);
       setIsAssigning(false);
 
-      const roomLabel = getLabel(roomNumber);
-
-      if (variant === 'fourball') {
-        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
-        // ✅ 알림1 닫은 뒤 알림2까지의 간격
-        await sleep(TIMINGS.betweenAlertsFourball);
-        if (partnerNickname) alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
-        else alert('아직 팀원이 정해지지 않았습니다.');
+      if (partnerNickname) {
+        alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
       } else {
-        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
+        alert('아직 팀원이 정해지지 않았습니다.');
       }
 
       setAssignedRoom(roomNumber);
@@ -316,10 +322,7 @@ function BaseRoomSelect({
                 <col className={styles.colHd} />
               </colgroup>
               <thead>
-                <tr>
-                  <th>닉네임</th>
-                  <th>G핸디</th>
-                </tr>
+                <tr><th>닉네임</th><th>G핸디</th></tr>
               </thead>
               <tbody>
                 {compactMembers.map((p, idx) => (
@@ -347,10 +350,7 @@ function BaseRoomSelect({
                   <col className={styles.colHd} />
                 </colgroup>
                 <thead>
-                  <tr>
-                    <th>닉네임</th>
-                    <th>G핸디</th>
-                  </tr>
+                  <tr><th>닉네임</th><th>G핸디</th></tr>
                 </thead>
                 <tbody>
                   {teamMembersPadded.map((p, idx) => (
