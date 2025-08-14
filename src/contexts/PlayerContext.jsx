@@ -3,46 +3,39 @@
 import React, { createContext, useState, useEffect } from 'react';
 import { doc, getDoc, updateDoc, setDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '../firebase';
-
-// (기존) 자동 배정 유틸
 import { pickRoomForStroke } from '../player/logic/assignStroke';
 import { pickRoomForFourball } from '../player/logic/assignFourball';
 
 export const PlayerContext = createContext(null);
 
 export function PlayerProvider({ children }) {
-  // ───────────────── 상태 ─────────────────
   const [eventId, setEventId]             = useState('');
-  const [participant, setParticipant]     = useState(null);   // {id, nickname, room, partner, gHandi, ...}
+  const [participant, setParticipant]     = useState(null);
   const [authCode, setAuthCode]           = useState('');
-  const [mode, setMode]                   = useState('stroke'); // 'stroke' | 'fourball' | 'agm'
+  const [mode, setMode]                   = useState('stroke');
   const [rooms, setRooms]                 = useState([]);
   const [participants, setParticipants]   = useState([]);
   const [allowTeamView, setAllowTeamView] = useState(false);
 
-  // Admin STEP2
   const [roomCount, setRoomCount] = useState(0);
   const [roomNames, setRoomNames] = useState([]);
 
-  // ✅ 권장 해결: 객체 participant를 의존성에 넣지 않고 ID만 추적
   const myId = participant?.id ?? null;
 
-  // ───────────────── 유틸 ─────────────────
   const normalizeParticipant = (p) => ({
-    id: String(p?.id ?? ''),
+    id: String((p?.id ?? '')).trim(),
     nickname: p?.nickname ?? '',
     room: p?.room ?? null,
     partner: p?.partner ?? null,
+    handicap: typeof p?.handicap === 'number' ? p.handicap : (Number(p?.handicap) || 0),
     gHandi: typeof p?.gHandi === 'number' ? p.gHandi : (Number(p?.gHandi) || 0),
     ...p,
   });
 
-  // ───────────────── 데이터 로드 ─────────────────
-  // 이벤트 문서 로드: eventRef를 이펙트 안에서 생성(의존성 경고 제거)
   useEffect(() => {
     if (!eventId) return;
-
     let cancelled = false;
+
     (async () => {
       try {
         const ref  = doc(db, 'events', eventId);
@@ -64,7 +57,7 @@ export function PlayerProvider({ children }) {
         if (!cancelled) {
           setParticipants(list);
           if (myId) {
-            const me = list.find(p => p.id === myId);
+            const me = list.find(p => p.id === String(myId).trim());
             if (me) setParticipant(me);
           }
         }
@@ -74,98 +67,117 @@ export function PlayerProvider({ children }) {
     })();
 
     return () => { cancelled = true; };
-    // ✅ eventRef를 참조하지 않으므로 의존성은 eventId, myId만
   }, [eventId, myId]);
 
-  // participants 변경 시 내 정보 동기화
   useEffect(() => {
     if (!myId) return;
-    const me = participants.find(p => p.id === myId);
+    const me = participants.find(p => p.id === String(myId).trim());
     if (me) {
-      setParticipant(prev => (prev && prev.id === myId ? { ...prev, ...me } : me));
+      setParticipant(prev => (prev && prev.id === me.id ? { ...prev, ...me } : me));
     }
   }, [participants, myId]);
 
-  // ───────────────── Firestore 업데이트 공통 ─────────────────
   const writeParticipants = async (next) => {
     if (!eventId) throw new Error('No event selected');
     await updateDoc(doc(db, 'events', eventId), { participants: next });
     setParticipants(next);
   };
 
-  // rooms/fourballRooms 서브컬렉션 안전 쓰기
   const pushRoomMember = async (collectionName, roomNumber, payload) => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId, collectionName, String(roomNumber));
     await setDoc(ref, { members: arrayUnion(payload) }, { merge: true });
   };
 
-  // ───────────────── 노출 API ─────────────────
-  // 방 직접 입장(스트로크)
-  const joinRoom = async (roomNumber, id) => {
-    const pid = String(id ?? myId);
-    if (!pid) throw new Error('Missing participant id');
+  /** ────────────────────────────────────────────────────────────
+   * 내 참가자 레코드 해석(타이밍/자료형/동기화 이슈에 안전)
+   * 1) id 문자열 정규화
+   * 2) 현재 participants에서 검색
+   * 3) 실패 시 Firestore 스냅샷을 한 번 더 읽어 재시도(+participants 갱신)
+   * 4) 최후로 컨텍스트의 participant를 정규화하여 사용
+   * 반환: { me, list }  (list는 최종 participants 배열)
+   * ──────────────────────────────────────────────────────────── */
+  const resolveMy = async (idMaybe) => {
+    const idStr = String(idMaybe ?? myId ?? '').trim();
+    // 1차: 현재 메모리
+    let list = participants;
+    let me = list.find(p => String(p.id).trim() === idStr);
 
-    const next = participants.map(p =>
-      p.id === pid ? { ...p, room: Number(roomNumber) } : p
-    );
-    await writeParticipants(next);
-    await pushRoomMember('rooms', Number(roomNumber), { id: pid });
+    if (!me) {
+      try {
+        // 2차: 최신 스냅샷 1회
+        if (eventId) {
+          const ref  = doc(db, 'events', eventId);
+          const snap = await getDoc(ref);
+          const data = snap.exists() ? (snap.data() || {}) : {};
+          const fresh = Array.isArray(data.participants)
+            ? data.participants.map(normalizeParticipant)
+            : [];
+          list = fresh;
+          setParticipants(fresh);
+          me = fresh.find(p => String(p.id).trim() === idStr);
+        }
+      } catch (e) {
+        console.warn('[resolveMy] snapshot retry failed:', e);
+      }
+    }
+
+    if (!me && participant?.id && String(participant.id).trim() === idStr) {
+      // 3차: 컨텍스트의 participant를 정규화해 사용
+      me = normalizeParticipant(participant);
+    }
+
+    return { me, list, idStr };
   };
 
-  // 포볼 직접 조인
-  const joinFourBall = async (roomNumber, p1, p2) => {
-    const a = String(p1), b = String(p2);
-    const next = participants.map(p => {
-      if (p.id === a) return { ...p, room: Number(roomNumber), partner: b };
-      if (p.id === b) return { ...p, room: Number(roomNumber), partner: a };
-      return p;
-    });
-    await writeParticipants(next);
-    await pushRoomMember('fourballRooms', Number(roomNumber), { ids: [a, b] });
-  };
-
-  // 자동 배정: 스트로크(한 명)
+  // ───────── 자동 배정: 스트로크(한 명) ─────────
   const assignStrokeForOne = async (id) => {
-    const my = participants.find(p => p.id === String(id ?? myId));
-    if (!my) throw new Error('Participant not found');
+    const { me, list } = await resolveMy(id);
+    if (!me) {
+      console.warn('[assignStrokeForOne] Participant not found after retries', {
+        idTried: id, myId, total: list?.length,
+        sample: (list || []).slice(0, 5).map(p => p?.id)
+      });
+      throw new Error('Participant not found');
+    }
 
-    const roomNumber = pickRoomForStroke({ participants, roomCount, target: my });
+    const roomNumber = pickRoomForStroke({ participants: list, roomCount, target: me });
 
-    const next = participants.map(p =>
-      p.id === my.id ? { ...p, room: roomNumber } : p
+    const next = list.map(p =>
+      p.id === me.id ? { ...p, room: roomNumber } : p
     );
 
     await new Promise(r => setTimeout(r, 600));
     await writeParticipants(next);
-    await pushRoomMember('rooms', roomNumber, { id: my.id });
+    await pushRoomMember('rooms', roomNumber, { id: me.id });
 
     return { roomNumber };
   };
 
-  // 자동 배정: 포볼(본인 + 파트너)
+  // ───────── 자동 배정: 포볼(본인 + 파트너) ─────────
   const assignFourballForOneAndPartner = async (id) => {
-    const participantId = String(id ?? myId);
-    const me = participants.find(p => p.id === participantId);
-    if (!me) throw new Error('Participant not found');
+    const { me, list } = await resolveMy(id);
+    if (!me) {
+      console.warn('[assignFourballForOneAndPartner] Participant not found after retries');
+      throw new Error('Participant not found');
+    }
 
-    const roomNumber = pickRoomForFourball({ participants, roomCount, target: me });
+    const roomNumber = pickRoomForFourball({ participants: list, roomCount, target: me });
 
-    // 1조/2조 반대편 + 파트너 미배정
-    const half = Math.floor(participants.length / 2);
+    const half = Math.floor(list.length / 2);
     const isGroup1 = Number(me.id) < half;
     const isFree   = (p) => p.partner == null;
 
-    let candidates = participants.filter(p =>
+    let candidates = list.filter(p =>
       p.id !== me.id && (Number(p.id) < half) !== isGroup1 && p.room === roomNumber && isFree(p)
     );
     if (candidates.length === 0) {
-      candidates = participants.filter(p =>
+      candidates = list.filter(p =>
         p.id !== me.id && (Number(p.id) < half) !== isGroup1 && isFree(p)
       );
     }
     if (candidates.length === 0) {
-      const nextSolo = participants.map(p =>
+      const nextSolo = list.map(p =>
         p.id === me.id ? { ...p, room: roomNumber, partner: null } : p
       );
       await new Promise(r => setTimeout(r, 600));
@@ -176,7 +188,7 @@ export function PlayerProvider({ children }) {
 
     const partner = candidates[Math.floor(Math.random() * candidates.length)];
 
-    const next = participants.map(p => {
+    const next = list.map(p => {
       if (p.id === me.id)      return { ...p, room: roomNumber, partner: partner.id };
       if (p.id === partner.id) return { ...p, room: roomNumber, partner: me.id };
       return p;
@@ -189,11 +201,9 @@ export function PlayerProvider({ children }) {
     return { roomNumber, partnerNickname: partner.nickname || '' };
   };
 
-  // ───────────────── Provider ─────────────────
   return (
     <PlayerContext.Provider
       value={{
-        // 상태
         eventId, setEventId,
         participant, setParticipant,
         authCode, setAuthCode,
@@ -204,8 +214,26 @@ export function PlayerProvider({ children }) {
         participants, setParticipants,
         allowTeamView, setAllowTeamView,
 
-        // API
-        joinRoom, joinFourBall,
+        joinRoom: async (roomNumber, id) => {
+          const idStr = String(id ?? myId).trim();
+          const next = participants.map(p =>
+            p.id === idStr ? { ...p, room: Number(roomNumber) } : p
+          );
+          await writeParticipants(next);
+          await pushRoomMember('rooms', Number(roomNumber), { id: idStr });
+        },
+
+        joinFourBall: async (roomNumber, p1, p2) => {
+          const a = String(p1).trim(), b = String(p2).trim();
+          const next = participants.map(p => {
+            if (p.id === a) return { ...p, room: Number(roomNumber), partner: b };
+            if (p.id === b) return { ...p, room: Number(roomNumber), partner: a };
+            return p;
+          });
+          await writeParticipants(next);
+          await pushRoomMember('fourballRooms', Number(roomNumber), { ids: [a, b] });
+        },
+
         assignStrokeForOne,
         assignFourballForOneAndPartner,
       }}
