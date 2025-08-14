@@ -34,6 +34,9 @@ export default function StepFlow() {
   const [roomNames, setRoomNames]       = useState(Array(4).fill(''));
   const [uploadMethod, setUploadMethod] = useState('');
   const [participants, setParticipants] = useState([]);
+  // ✅ 날짜 필드 동기화 추가
+  const [dateStart, setDateStart]       = useState('');
+  const [dateEnd, setDateEnd]           = useState('');
 
   // eventData가 변경될 때마다 즉시 동기화
   useEffect(() => {
@@ -44,6 +47,8 @@ export default function StepFlow() {
     setRoomNames(eventData.roomNames);
     setUploadMethod(eventData.uploadMethod);
     setParticipants(eventData.participants);
+    setDateStart(eventData.dateStart || '');
+    setDateEnd(eventData.dateEnd || '');
   }, [eventData]);
 
   // 저장 헬퍼: 함수 값을 제거하고 순수 JSON만 전달
@@ -73,7 +78,9 @@ export default function StepFlow() {
       roomCount:    4,
       roomNames:    Array(4).fill(''),
       uploadMethod: '',
-      participants: []
+      participants: [],
+      dateStart:    '',       // ✅ 초기화
+      dateEnd:      ''        // ✅ 초기화
     };
     setMode(init.mode);
     setTitle(init.title);
@@ -81,6 +88,8 @@ export default function StepFlow() {
     setRoomNames(init.roomNames);
     setUploadMethod(init.uploadMethod);
     setParticipants(init.participants);
+    setDateStart(init.dateStart);
+    setDateEnd(init.dateEnd);
     save(init);
     navigate('/admin/home/0', { replace: true });
   };
@@ -92,14 +101,15 @@ export default function StepFlow() {
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
 
   const goNext = () => {
-    save({ mode, title, roomCount, roomNames, uploadMethod, participants });
+    // ✅ 날짜 포함 저장
+    save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
   };
 
   const goPrev = () => {
-    save({ mode, title, roomCount, roomNames, uploadMethod, participants });
+    save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
@@ -249,32 +259,25 @@ export default function StepFlow() {
     save({ participants: ps });
   };
 
-  // ─────────────────────────────────────────────
-  // ★★★ STEP5 실시간 저장용 보완 함수 (기존 코드 유지 + 추가만)
-  //  - 취소/배정/스코어 변경을 즉시 Firestore에 반영하기 위해 사용
-  //  - Step5에서 존재 여부 체크 후 사용 가능(없으면 무시해도 기존 동작 유지)
-  // ─────────────────────────────────────────────
+  // STEP5 실시간 저장용 보완 함수 (기존 유지)
   const updateParticipantNow = (id, fields) => {
     setParticipants(prev => {
       const next = prev.map(p => (p.id === id ? { ...p, ...fields } : p));
-      save({ participants: next });
+      save({ participants: next, dateStart, dateEnd });
       return next;
     });
   };
-
   const updateParticipantsBulkNow = (changes) => {
-    // changes: Array<{ id, fields }>
     setParticipants(prev => {
       const map = new Map(changes.map(c => [String(c.id), c.fields]));
       const next = prev.map(p =>
         map.has(String(p.id)) ? { ...p, ...map.get(String(p.id)) } : p
       );
-      save({ participants: next });
+      save({ participants: next, dateStart, dateEnd });
       return next;
     });
   };
 
-  // Context 공급
   const ctxValue = {
     onManualAssign: handleAgmManualAssign,
     onCancel:        handleAgmCancel,
@@ -290,10 +293,11 @@ export default function StepFlow() {
     uploadMethod, setUploadMethod,
     participants, setParticipants,
     resetAll, handleFile, initManual,
-
-    // ▼ 추가: STEP5에서 쓸 수 있는 즉시 저장 헬퍼(선택 사용)
     updateParticipant:      updateParticipantNow,
     updateParticipantsBulk: updateParticipantsBulkNow,
+    // 날짜 state를 다른 Step에서 필요 시 쓸 수 있도록 노출
+    dateStart, setDateStart,
+    dateEnd,   setDateEnd,
   };
 
   const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
@@ -308,7 +312,4 @@ export default function StepFlow() {
   );
 }
 
-// Helper: 배열을 랜덤하게 섞습니다
-function shuffle(arr) {
-  return [...arr].sort(() => Math.random() - 0.5);
-}
+function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }

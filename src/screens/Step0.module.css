@@ -1,114 +1,87 @@
 /* src/screens/Step0.module.css */
 
-.container {
-  width: 100%;
-  max-width: 360px;
-  margin: 0 auto;
-  padding: 12px 6px;       /* 좌/우 여백 축소 */
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  box-sizing: border-box;
+/* 컨테이너/탭 */
+.container { padding: 1rem; max-width: 420px; margin: 0 auto; }
+.tabContainer { display:flex; gap:.5rem; margin-bottom:.75rem; }
+.tabBtn { flex:1; height:38px; border:1px solid #d1d5db; border-radius:10px; background:#fff; }
+.active { background:#eaf3ff; border-color:#bcd7ff; }
+
+/* 리스트 / 카드 */
+.list { display:grid; gap:.75rem; padding:0; margin:0; list-style:none; }
+.item { background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.03); padding:.75rem; }
+.selected { outline:2px solid #cde5ff; }
+
+.cardRow { display:flex; align-items:stretch; justify-content:space-between; gap:.5rem; }
+.cardMain { flex:1; min-width:0; }
+
+.titleRow { display:flex; align-items:center; gap:.5rem; }
+.title { margin:0; font-size:1rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.badge { font-size:.72rem; padding:.16rem .45rem; border-radius:999px; border:1px solid #ddd; flex-shrink:0; }
+.badgeStroke { background:#eaf3ff; color:#1e63c6; }
+.badgeFour   { background:#fff7e8; color:#9a5b00; }
+
+.subline {
+  display:flex; gap:.75rem; align-items:center;
+  margin-top:.28rem; font-size:.86rem; color:#555;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.closed { color:#c00; }
+
+/* ⋮ 더보기 메뉴 */
+.moreWrap { position:relative; flex-shrink:0; display:flex; align-items:center; }
+.moreBtn {
+  width:40px; height:40px; line-height:40px;
+  border:1px solid #e5e7eb; border-radius:10px; background:#fff;
+  font-size:18px; text-align:center; cursor:pointer;
+}
+.moreMenu {
+  position:absolute; top:44px; right:0;
+  background:#fff; border:1px solid #e5e7eb; border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+  min-width:150px; padding:.3rem; z-index:20;
+}
+.moreItem, .moreItemDanger {
+  width:100%; text-align:left; padding:.55rem .7rem; border:none; background:#fff; border-radius:8px; cursor:pointer;
+  font-size:.92rem;
+}
+.moreItem:hover { background:#f3f4f6; }
+.moreItemDanger { color:#b91c1c; }
+.moreItemDanger:hover { background:#fff1f1; }
+
+/* 하단 고정 버튼: 컨테이너 폭(카드 좌우 여백과 동일) */
+.bottomDockFixed {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  width: calc(100vw - 2rem);
+  max-width: 420px;
+  z-index: 40;
+}
+.dockInner {
+  display:flex;
+  gap:.75rem;
+  /* 테두리/그림자 제거 */
+  background: transparent;
+  padding: .25rem 0;
+  border: none;
+  box-shadow: none;
 }
 
-.tabContainer {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+/* 버튼: 동일 크기, 약간 축소(44px) */
+.primaryBtn, .secondaryBtn {
+  flex:1;
+  height:40px;
+  border:none;
+  border-radius:10px;
+  font-weight:700;
+  font-size:.95rem;
 }
-.tabBtn {
-  flex: 1;
-  padding: 10px 0;
-  font-size: 14px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background-color: #fafafa;
-  cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s;
-}
-.tabBtn:hover {
-  background-color: #f0f0f0;
-}
-.active {
-  border-color: #1976d2;
-  background-color: #e3f2fd;
-}
+.primaryBtn  { background:#2e8b57; color:#fff; }
+.secondaryBtn{ background:#1e63c6; color:#fff; }
 
-.list {
-  flex: 1;
-  overflow-y: auto;
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 6px;   /* 좌/우 패딩 축소 */
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-.item:hover {
-  background-color: #f9f9f9;
-}
-.selected {
-  background-color: #f0f8ff;
-}
-.title {
-  flex: 1;
-  font-size: 16px;
-  color: #333;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-right: 8px;
-}
-.actions {
-  display: flex;
-  gap: 6px;
-}
-.iconBtn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-}
+/* 모달 내에서 버튼도 동일 폭으로 배치 */
+.btnFlex { flex: 1; }
 
-.footerBtns {
-  display: flex;
-  gap: 12px;
-  margin-top: 12px;
-}
-.primaryBtn {
-  flex: 1;
-  padding: 10px 0;   /* 상단 탭과 동일 */
-  font-size: 14px;
-  border: none;
-  border-radius: 4px;
-  background-color: #388e3c;
-  color: #fff;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-.primaryBtn:hover {
-  opacity: 0.9;
-}
-.secondaryBtn {
-  flex: 1;
-  padding: 10px 0;
-  font-size: 14px;
-  border: none;
-  border-radius: 4px;
-  background-color: #1976d2;
-  color: #fff;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-.secondaryBtn:hover {
-  opacity: 0.9;
-}
+/* 리스트가 버튼 뒤에 가려지지 않도록 여분 */
+.bottomSpacer { height: 96px; }
