@@ -132,7 +132,9 @@ export default function usePersistRoomTableSelection(opt = {}) {
     saveToFirestore,
     setHiddenRooms,
     setShowScore,
-    setShowHalved
+    setShowHalved,
+    debouncedSaveRemote,  // ★ ESLint: missing dependency 해결
+    lsKey                 // ★ ESLint: missing dependency 해결
   ]);
 
   // (선택) 마운트 시 로컬에서 복원 – 원래 코드가 이미 하고 있다면 이 블록은 생략해도 됩니다.
@@ -158,5 +160,5 @@ export default function usePersistRoomTableSelection(opt = {}) {
       // noop
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId]); // 이벤트 변경 시에만 복원
+  }, [eventId, lsKey]); // ★ 로컬키 변경에도 복원
 }

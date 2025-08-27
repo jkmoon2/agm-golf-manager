@@ -20,6 +20,7 @@ export default function Step6() {
 
   // ★ 추가: 이벤트 문서 / 업데이트 함수
   const { eventId, eventData, updateEvent } = useContext(EventContext);
+  void updateEvent; // keep for future use & silence ESLint(no-unused-vars)
 
   // ★ patch: Step6는 편집 직후에도 최신 참가자 목록을 표시해야 함.
   // participants(컨텍스트)가 비어있으면 Firestore eventData.participants를 폴백으로 사용
@@ -141,7 +142,7 @@ export default function Step6() {
       }
     });
     return arr;
-  }, [participants, eventData, roomCount]);
+  }, [srcParticipants, roomCount]); // ★ 실제로 사용하는 소스만
 
   // ───── 배정표 row 생성 ─────
   const allocRows = Array.from({ length: maxRows }, (_, ri) =>

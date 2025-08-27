@@ -16,6 +16,7 @@ const {
   goPrev,
   goNext
 , setStep } = useContext(StepContext);
+void goNext; // keep for lint
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
@@ -70,6 +71,7 @@ useEffect(() => {
       metrics:        { score: !!showScore, banddang: !!showHalved }, // 레거시 호환
     },
   };
+  void payload; // keep for lint when updateEvent 호출이 주석일 때
   // 이미 usePersistRoomTableSelection 이 저장을 하지만, 키 호환 목적이라면
   // EventContext의 updateEvent(디바운스) 한 번 더 호출해도 무방합니다.
   // (없애도 동작엔 문제 없음)
