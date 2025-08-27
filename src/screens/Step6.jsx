@@ -142,7 +142,7 @@ export default function Step6() {
       }
     });
     return arr;
-  }, [srcParticipants, roomCount]); // ★ 실제로 사용하는 소스만
+  }, [srcParticipants, roomCount]); // ✅ 핵심: srcParticipants를 직접 의존
 
   // ───── 배정표 row 생성 ─────
   const allocRows = Array.from({ length: maxRows }, (_, ri) =>

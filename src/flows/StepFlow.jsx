@@ -1,6 +1,6 @@
 // src/flows/StepFlow.jsx
 
-import React, { useState, createContext, useEffect, useContext } from 'react';
+import React, { useState, createContext, useMemo, useEffect, useContext } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 
@@ -312,7 +312,7 @@ export default function StepFlow() {
   };
 
   const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
-  const Current = pages[curr] || <Step1 />;
+  const Current = useMemo(() => pages[curr] || <Step1/>, [curr]);
 
   // ---- Lint only: 훅 의존성 경고 해소용(런타임 영향 없음) ----
   React.useMemo(() => [goNext, goPrev, setStep], [goNext, goPrev, setStep]);
