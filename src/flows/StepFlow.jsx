@@ -1,5 +1,4 @@
 // src/flows/StepFlow.jsx
-/* eslint-disable react-hooks/exhaustive-deps */
 
 import React, { useState, createContext, useEffect, useContext } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -48,60 +47,52 @@ export default function StepFlow() {
     setDateEnd(eventData.dateEnd || '');
   }, [eventData]);
 
-// 저장 헬퍼(기존 로직 유지) – 즉시 저장 가능하면 우선 사용
-const save = async (updates) => {
-  // --- Firestore 안전 정규화 유틸 ---
-  const normalize = (v) => {
-    if (v === undefined) return null;                // undefined → null
-    if (typeof v === 'number' && Number.isNaN(v)) return null;
-    return v;
-  };
-
-  const cleanObj = (obj) => {
-    if (Array.isArray(obj)) {
-      // 배열은 빈 슬롯/undefined를 제거하고, 각 원소도 정규화
-      return obj
-        .filter((x) => x != null)                    // null/undefined 원소 제거
-        .map((x) => (typeof x === 'object' ? cleanObj(x) : normalize(x)));
-    }
-    if (obj && typeof obj === 'object') {
-      const out = {};
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof v === 'function') continue;       // 함수 제거
-        if (v === undefined) continue;               // undefined 필드 자체를 제거
-        if (v && typeof v === 'object') out[k] = cleanObj(v);
-        else out[k] = normalize(v);
+  // 저장 헬퍼(기존 로직 유지)
+  const save = async (updates) => {
+    const normalize = (v) => {
+      if (v === undefined) return null;
+      if (typeof v === 'number' && Number.isNaN(v)) return null;
+      return v;
+    };
+    const cleanObj = (obj) => {
+      if (Array.isArray(obj)) {
+        return obj
+          .filter((x) => x != null)
+          .map((x) => (typeof x === 'object' ? cleanObj(x) : normalize(x)));
       }
-      return out;
+      if (obj && typeof obj === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(obj)) {
+          if (typeof v === 'function') continue;
+          if (v === undefined) continue;
+          if (v && typeof v === 'object') out[k] = cleanObj(v);
+          else out[k] = normalize(v);
+        }
+        return out;
+      }
+      return normalize(obj);
+    };
+    const clean = cleanObj(updates);
+
+    if (Array.isArray(clean.participants)) {
+      clean.participants = clean.participants.map((p) => ({
+        id:        normalize(p.id),
+        group:     normalize(p.group),
+        nickname:  p.nickname ?? '',
+        handicap:  normalize(p.handicap),
+        score:     p.score == null ? null : normalize(Number(p.score)),
+        room:      p.room == null ? null : normalize(p.room),
+        partner:   p.partner == null ? null : normalize(p.partner),
+        authCode:  p.authCode ?? '',
+        selected:  !!p.selected,
+      }));
     }
-    return normalize(obj);
+    const force = Object.prototype.hasOwnProperty.call(clean, 'participants');
+
+    await (updateEventImmediate
+      ? updateEventImmediate(clean, force ? false : true)
+      : updateEvent(clean, { ifChanged: force ? false : true }));
   };
-
-  // --- updates 전체 클린 ---
-  const clean = cleanObj(updates);
-
-  // participants가 배열이면 각 항목의 필수 키만 남기고 undefined 제거(안전망)
-  if (Array.isArray(clean.participants)) {
-    clean.participants = clean.participants.map((p) => ({
-      id:        normalize(p.id),
-      group:     normalize(p.group),
-      nickname:  p.nickname ?? '',
-      handicap:  normalize(p.handicap),
-      score:     p.score == null ? null : normalize(Number(p.score)),
-      room:      p.room == null ? null : normalize(p.room),
-      partner:   p.partner == null ? null : normalize(p.partner),
-      authCode:  p.authCode ?? '',
-      selected:  !!p.selected,
-    }));
-  }
-
-  // participants가 포함돼 있으면 ifChanged 검사 생략(강제 기록)
-  const force = Object.prototype.hasOwnProperty.call(clean, 'participants');
-
-  await (updateEventImmediate
-    ? updateEventImmediate(clean, force ? false : true)
-    : updateEvent(clean, { ifChanged: force ? false : true }));
-};
 
   // ★ 변경: async로 바꾸고 저장을 await 한 뒤 라우팅
   const resetAll = async () => {
@@ -123,7 +114,7 @@ const save = async (updates) => {
     setParticipants(init.participants);
     setDateStart(init.dateStart);
     setDateEnd(init.dateEnd);
-    await save(init);            // ★ 여기
+    await save(init);
     navigate('/admin/home/0', { replace: true });
   };
 
@@ -134,7 +125,7 @@ const save = async (updates) => {
 
   // ★ 변경: async + await save
   const goNext = async () => {
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd }); // ★
+    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
@@ -142,7 +133,7 @@ const save = async (updates) => {
 
   // ★ 변경: async + await save
   const goPrev = async () => {
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd }); // ★
+    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
@@ -176,10 +167,11 @@ const save = async (updates) => {
       score:    null,
       room:     null,
       partner:  null,
+      authCode2: undefined, // 기존 구조 유지(있다면)
       selected: false
     }));
     setParticipants(data);
-    await save({ participants: data }); // 안전
+    await save({ participants: data });
   };
 
   const initManual = async () => {
@@ -195,10 +187,9 @@ const save = async (updates) => {
       selected: false
     }));
     setParticipants(data);
-    await save({ participants: data }); // 안전
+    await save({ participants: data });
   };
 
-  // 두 사람을 한 번에 같은 방/파트너로 확정
   const assignPairToRoom = (id1, id2, roomNo) => {
     updateParticipantsBulkNow([
       { id: id1, fields: { room: roomNo, partner: id2 } },
@@ -206,7 +197,6 @@ const save = async (updates) => {
     ]);
   };
 
-  // Step7: AGM 수동 할당
   const handleAgmManualAssign = async (id) => {
     let ps = [...participants];
     const half = ps.length / 2;
@@ -224,9 +214,7 @@ const save = async (updates) => {
       }
       ps = ps.map(p => p.id === id ? { ...p, room: roomNo } : p);
       const pool2 = ps.filter(p => p.id >= half && p.room == null);
-      partner = pool2.length
-        ? pool2[Math.floor(Math.random() * pool2.length)]
-        : null;
+      partner = pool2.length ? pool2[Math.floor(Math.random() * pool2.length)] : null;
       if (partner) {
         assignPairToRoom(id, partner.id, roomNo);
         return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
@@ -326,8 +314,8 @@ const save = async (updates) => {
   const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
   const Current = pages[curr] || <Step1 />;
 
-  // --- Lint only: 훅 의존성 경고 해소용(동작 영향 없음)
-  React.useMemo(() => [goHome, goNext, goPrev, goTo], [goHome, goNext, goPrev, goTo]);
+  // ---- Lint only: 훅 의존성 경고 해소용(런타임 영향 없음) ----
+  React.useMemo(() => [goNext, goPrev, setStep], [goNext, goPrev, setStep]);
 
   return (
     <StepContext.Provider value={ctxValue}>
