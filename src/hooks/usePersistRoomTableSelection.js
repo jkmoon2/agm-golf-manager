@@ -160,5 +160,5 @@ export default function usePersistRoomTableSelection(opt = {}) {
       // noop
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId, lsKey]); // ★ 로컬키 변경에도 복원
+  }, [lsKey, setHiddenRooms, setShowScore, setShowHalved]); // ★ 로컬키 변경에도 복원
 }
