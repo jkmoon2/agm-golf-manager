@@ -72,8 +72,8 @@ export default function Step1() {
             onClick={() => setMode("stroke")}
           >스트로크 모드</button>
           <button
-            className={mode === "agm" ? styles.active : undefined}
-            onClick={() => setMode("agm")}
+            className={mode === "fourball" ? styles.active : undefined}
+            onClick={() => setMode("fourball")}
           >AGM 포볼 모드</button>
         </div>
 

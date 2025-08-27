@@ -1,8 +1,8 @@
-// src/screens/Step7.jsx
-
 import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
+
+if (process.env.NODE_ENV!=='production') console.log('[AGM] Step7 render');
 
 export default function Step7() {
   const {
@@ -16,25 +16,21 @@ export default function Step7() {
     goPrev,
     goNext
   } = useContext(StepContext);
-
-  const half = participants.length / 2;
   const [loadingId, setLoadingId] = useState(null);
 
-  // “파트너까지 붙어 있으면 완료” 판단
   const isCompleted = id => {
     const me = participants.find(p => p.id === id);
     return !!(me && me.room != null && me.partner != null);
   };
 
-  // 수동 클릭: ① onManualAssign → ② 500ms 뒤 첫 alert → ③ 스피너 재가동 → ④ 500ms 뒤 두 번째 alert → ⑤ 스피너 종료
-  const handleManualClick = id => {
+  // ★ 변경: async + await onManualAssign(id)
+  const handleManualClick = async (id) => {
     if (isCompleted(id)) return;
-
-    // ① spinner on & 로직 호출
     setLoadingId(id);
-    const { roomNo, nickname, partnerNickname } = onManualAssign(id);
 
-    // ② 500ms 뒤 첫 alert
+    // 수동 배정 결과를 확실히 받아온다.
+    const { roomNo, nickname, partnerNickname } = await onManualAssign(id); // ★
+
     setTimeout(() => {
       const label = roomNames[roomNo - 1]?.trim() || `${roomNo}번 방`;
       alert(
@@ -42,22 +38,18 @@ export default function Step7() {
         `팀원을 선택하려면 확인을 눌러주세요.`
       );
 
-      // ③ spinner 재가동
       setLoadingId(id);
 
-      // ④ 500ms 뒤 두 번째 alert (파트너 있으면)
       setTimeout(() => {
         if (partnerNickname) {
           alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
         }
-        // ⑤ spinner off
         setLoadingId(null);
       }, 900);
 
     }, 900);
   };
 
-  // 취소 클릭
   const handleCancelClick = id => {
     const me = participants.find(p => p.id === id);
     onCancel(id);
@@ -66,20 +58,16 @@ export default function Step7() {
     }
   };
 
-  // 자동 클릭
   const handleAutoClick = () => {
     onAutoAssign();
   };
 
-  // 초기화 클릭
   const handleResetClick = () => {
     onReset();
   };
 
   return (
     <div className={styles.step}>
-
-      {/* 헤더 (변경なし) */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
@@ -89,27 +77,22 @@ export default function Step7() {
         <div className={`${styles.cell} ${styles.force}`}>취소</div>
       </div>
 
-      {/* 리스트 (변경なし) */}
       <div className={styles.participantTable}>
         {participants.map(p => {
-          const isGroup1 = p.id < half;
+          const isGroup1 = Number.isFinite(Number(p?.group)) ? (Number(p.group) % 2 === 1) : (p.id % 2 === 1);
           const done     = isGroup1 && isCompleted(p.id);
 
           return (
             <div key={p.id} className={styles.participantRow}>
-              {/* 조 */}
               <div className={`${styles.cell} ${styles.group}`}>
                 <input type="text" value={isGroup1 ? '1조' : '2조'} disabled />
               </div>
-              {/* 닉네임 */}
               <div className={`${styles.cell} ${styles.nickname}`}>
                 <input type="text" value={p.nickname} disabled />
               </div>
-              {/* G핸디 */}
               <div className={`${styles.cell} ${styles.handicap}`}>
                 <input type="text" value={p.handicap} disabled />
               </div>
-              {/* 점수 */}
               <div className={`${styles.cell} ${styles.score}`}>
                 <input
                   type="number"
@@ -118,7 +101,6 @@ export default function Step7() {
                 />
               </div>
 
-              {/* 수동 버튼 */}
               <div className={`${styles.cell} ${styles.manual}`}>
                 {isGroup1 ? (
                   <button
@@ -137,7 +119,6 @@ export default function Step7() {
                 )}
               </div>
 
-              {/* 취소 버튼 */}
               <div className={`${styles.cell} ${styles.force}`}>
                 {isGroup1 ? (
                   <button
@@ -155,7 +136,6 @@ export default function Step7() {
         })}
       </div>
 
-      {/* 하단 네비게이션 (변경なし) */}
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
         <button onClick={handleAutoClick} className={styles.textOnly}>

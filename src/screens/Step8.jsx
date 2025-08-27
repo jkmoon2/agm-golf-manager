@@ -1,9 +1,11 @@
 // src/screens/Step8.jsx
 
-import React, { useState, useRef, useMemo, useContext } from 'react';
+import React, { useState, useRef, useMemo, useContext, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';
+import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
+import { EventContext } from '../contexts/EventContext';
 import { StepContext } from '../flows/StepFlow';
 
 export default function Step8() {
@@ -13,7 +15,7 @@ const {
   roomNames,
   goPrev,
   goNext
-} = useContext(StepContext);
+, setStep } = useContext(StepContext);
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
@@ -24,6 +26,58 @@ const {
     score: true,
     banddang: true
   });
+const showScore = visibleMetrics.score;
+  const setShowScore = (v) => setVisibleMetrics((m) => ({ ...m, score: v }));
+  const showHalved = visibleMetrics.banddang;
+  const setShowHalved = (v) => setVisibleMetrics((m) => ({ ...m, banddang: v }));
+
+  const { eventId, eventData } = useContext(EventContext) || {};
+  usePersistRoomTableSelection({
+    eventId,
+    hiddenRooms,
+    setHiddenRooms,
+    showScore,
+    setShowScore,
+    showHalved,
+    setShowHalved,
+    syncToFirestore: true,
+  });
+
+// ① Firestore → 로컬 상태로 “읽기”(publicView가 바뀌면 반영)
+useEffect(() => {
+  if (!eventData?.publicView) return;
+  const { hiddenRooms: hr = [], visibleMetrics = {}, metrics = {} } = eventData.publicView;
+
+  // hiddenRooms
+  try { setHiddenRooms(new Set((hr || []).map(Number))); } catch {}
+
+  // score / banddang (visibleMetrics 우선, 없으면 metrics 키 사용)
+  const vm = { score: false, banddang: false, ...metrics, ...visibleMetrics };
+  setShowScore(!!vm.score);
+  setShowHalved(!!vm.banddang);
+}, [eventData?.publicView]);
+
+// ② 로컬 상태 → Firestore로 “쓰기”(선택: 이미 훅에서 저장하지만,
+//    키 이름 호환 위해 visibleMetrics + legacy metrics 둘 다 업데이트)
+useEffect(() => {
+  if (!eventId) return;
+  const payload = {
+    publicView: {
+      hiddenRooms: Array.from(hiddenRooms ?? []),
+      visibleMetrics: { score: !!showScore, banddang: !!showHalved },
+      metrics:        { score: !!showScore, banddang: !!showHalved }, // 레거시 호환
+    },
+  };
+  // 이미 usePersistRoomTableSelection 이 저장을 하지만, 키 호환 목적이라면
+  // EventContext의 updateEvent(디바운스) 한 번 더 호출해도 무방합니다.
+  // (없애도 동작엔 문제 없음)
+  try { 
+    // updateEvent 가 컨텍스트에 있다면 사용, 아니면 생략 가능
+    // updateEvent(payload, { debounceMs: 300, ifChanged: true });
+  } catch {}
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [eventId, hiddenRooms, showScore, showHalved]);
+
 
   const toggleRoom = idx => {
     const s = new Set(hiddenRooms);
@@ -97,16 +151,20 @@ const {
     roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`
   );
 
-  // ── 5) participants를 방별로 묶은 2차원 배열 ─────────────────────
+  // ── 5) participants를 방별로 묶은 2차원 배열 — “최신 소스” 우선순위 ─────────────────────
+  //    (로컬 participants가 있으면 그것을, 없으면 eventData.participants를 사용)
+  const sourceParticipants =
+   (participants?.length ? participants : eventData?.participants) || [];
+
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
-    (participants || []).forEach(p => {
-      if (p.room != null && p.room >= 1 && p.room <= roomCount) {
+    (sourceParticipants || []).forEach(p => {
+      if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
         arr[p.room - 1].push(p);
       }
     });
     return arr;
-  }, [participants, roomCount]);
+  }, [sourceParticipants, roomCount]);
 
   // ── 6) “1조=slot[0,2], 2조=slot[1,3]” 규칙 → 4칸 확보 ─────────────
   //      + 콘솔 로그로 순서 확인 가능
@@ -783,7 +841,7 @@ const {
       {/* ─── 하단 버튼 ─── */}
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={goNext}>홈</button>
+        <button onClick={() => { try{localStorage.setItem('homeViewMode','fourball')}catch{}; setStep(0); }}>홈</button>
       </div>
     </div>
   );

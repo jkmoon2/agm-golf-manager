@@ -1,8 +1,10 @@
 // src/screens/Step5.jsx
-
 import React, { useState, useEffect, useContext } from 'react';
 import { StepContext } from '../flows/StepFlow';
+import { EventContext } from '../contexts/EventContext'; // ★ patch
 import styles from './Step5.module.css';
+
+if (process.env.NODE_ENV!=='production') console.log('[AGM] Step5 render');
 
 export default function Step5() {
   const {
@@ -18,7 +20,25 @@ export default function Step5() {
     updateParticipantsBulk,   // (changes: Array<{id, fields}>) => Promise<void> | void
   } = useContext(StepContext);
 
-  const [loadingId, setLoadingId] = useState(null);
+  
+
+// ★ patch: Firestore(events/{eventId})에 participants[] 즉시 커밋을 위한 컨텍스트 + 헬퍼
+const { eventId, updateEventImmediate } = useContext(EventContext) || {};
+const buildNextFromChanges = (baseList, changes) => {
+  try {
+    const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
+    (changes || []).forEach(({ id, fields }) => {
+      const key = String(id);
+      const cur = map.get(key) || {};
+      map.set(key, { ...cur, ...(fields || {}) });
+    });
+    return Array.from(map.values());
+  } catch (e) {
+    console.warn('[Step5] buildNextFromChanges error:', e);
+    return baseList || [];
+  }
+};
+const [loadingId, setLoadingId] = useState(null);
   const [forceSelectingId, setForceSelectingId] = useState(null);
 
   // 방 번호 1~roomCount 배열
@@ -40,6 +60,16 @@ export default function Step5() {
       // else: 컨텍스트에 동기화 함수가 없으면 조용히 패스(기존 코드 유지)
     } catch (e) {
       console.warn('[Step5] syncChanges failed:', e);
+    }
+    // ★ patch: 이벤트 문서 participants[]를 단일 소스로 즉시 커밋
+    try {
+      if (typeof updateEventImmediate === 'function' && eventId) {
+        const base = participants || [];
+        const next = buildNextFromChanges(base, changes);
+        await updateEventImmediate({ participants: next });
+      }
+    } catch (e) {
+      console.warn('[Step5] updateEventImmediate(participants) failed:', e);
     }
   };
 

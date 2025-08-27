@@ -15,7 +15,7 @@ const PLAYER_STEP_TITLES = {
   1: 'STEP 1. 방 선택',
   2: 'STEP 2. 방배정표',
   3: 'STEP 3. 이벤트 입력',
-  4: 'STEP 4. 접수 입력',
+  4: 'STEP 4. 점수 입력',
   5: 'STEP 5. 결과 확인',
   6: 'STEP 6. 이벤트 확인',
   7: 'STEP 7. #TEMP',
