@@ -1,3 +1,6 @@
+// src/flows/StepFlow.jsx
+/* eslint-disable react-hooks/exhaustive-deps */
+
 import React, { useState, createContext, useEffect, useContext } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';

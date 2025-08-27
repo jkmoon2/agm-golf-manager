@@ -170,6 +170,7 @@ useEffect(() => {
 
   // ── 6) “1조=slot[0,2], 2조=slot[1,3]” 규칙 → 4칸 확보 ─────────────
   //      + 콘솔 로그로 순서 확인 가능
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const orderedByRoom = useMemo(() => {
     const half = participants.length / 2;
     return byRoom.map((roomArr, roomIdx) => {

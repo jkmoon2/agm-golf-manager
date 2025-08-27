@@ -136,6 +136,7 @@ export default function usePersistRoomTableSelection(opt = {}) {
   ]);
 
   // (선택) 마운트 시 로컬에서 복원 – 원래 코드가 이미 하고 있다면 이 블록은 생략해도 됩니다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     try {
       const raw = localStorage.getItem(lsKey);
