@@ -246,6 +246,7 @@ export default function PlayerRoomTable() {
 
           {/* —— 실선 그리드 테이블 —— */}
           <div ref={tableRef} className={styles.tableWrap}>
+            {/* eslint-disable-next-line no-useless-computed-key */}
             <table
               className={styles.roomTable}
               // ▼ 닉 최장 길이와 보이는 방 수를 CSS 변수로 전달(폭/최소폭 계산에 사용)

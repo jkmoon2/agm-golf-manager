@@ -1,4 +1,4 @@
-// hooks/usePersistRoomTableSelection.js
+// src/hooks/usePersistRoomTableSelection.js
 // 기존 코드를 최대한 유지하며, 'eventId is not defined' 오류를 유발하던
 // 파일 상단 전역 참조(=함수 바깥의 eventId 사용)를 전부 제거했습니다.
 // 이제 반드시 훅 인자로 eventId를 받아 사용합니다. eventId가 없으면

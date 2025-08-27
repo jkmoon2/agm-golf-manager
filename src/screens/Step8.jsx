@@ -307,6 +307,7 @@ useEffect(() => {
   }, [orderedByRoom, headers]);
 
   // ── 11) 모든 팀 중 “낮은 합산점수=1등” 순위 계산 ─────────────────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const teamRankMap = useMemo(() => {
     const mapWithIdx   = teamsByRoom.map((t, idx) => ({ ...t, idxInOriginal: idx }));
     const visibleTeams = mapWithIdx.filter(t => !hiddenRooms.has(t.roomIdx));

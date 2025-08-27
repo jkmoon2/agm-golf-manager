@@ -149,6 +149,7 @@ export default function Step6() {
   );
 
   // ───── 최종결과 계산 (반땅 로직 포함) ─────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const resultByRoom = useMemo(() => {
     return byRoom.map(roomArr => {
       // (1) 빈칸 포함
@@ -198,6 +199,7 @@ export default function Step6() {
   }, [byRoom, visibleMetrics]);
 
   // ───── 등수 재계산 ─────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
