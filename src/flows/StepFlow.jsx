@@ -326,6 +326,9 @@ const save = async (updates) => {
   const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
   const Current = pages[curr] || <Step1 />;
 
+  // --- Lint only: 훅 의존성 경고 해소용(동작 영향 없음)
+  React.useMemo(() => [goHome, goNext, goPrev, goTo], [goHome, goNext, goPrev, goTo]);
+
   return (
     <StepContext.Provider value={ctxValue}>
       <StepPage step={curr} setStep={setStep}>

@@ -174,7 +174,7 @@ useEffect(() => {
   //      + 콘솔 로그로 순서 확인 가능
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const orderedByRoom = useMemo(() => {
-    const half = participants.length / 2;
+    const half = sourceParticipants.length / 2;     // ★ 일관성
     return byRoom.map((roomArr, roomIdx) => {
       console.group(`📂 orderedByRoom: roomIdx = ${roomIdx}`);
       console.log("roomArr =", JSON.stringify(roomArr, null, 2));
@@ -224,7 +224,7 @@ useEffect(() => {
       // slot 내에 null 없이 객체만 들어가게(렌더링 편의)
       return slot.map(p => (p ? p : { nickname: '', handicap: 0, score: 0 }));
     });
-  }, [byRoom, participants]);
+  }, [byRoom, sourceParticipants]);               // ★ 의존성
 
   // ── 7) 방배정표 Rows 생성 ─────────────────────────────────
   const allocRows = Array.from({ length: MAX_PER_ROOM }, (_, ri) =>
