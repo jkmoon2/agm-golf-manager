@@ -83,6 +83,7 @@ export default function usePersistRoomTableSelection(opt = {}) {
   }, 300);
 
   // 외부에서 상태를 바꿀 때마다 로컬/원격 저장
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!setHiddenRooms || !setShowScore || !setShowHalved) {
       // 필수 세터가 없으면 아무 것도 하지 않음

@@ -44,6 +44,7 @@ const showScore = visibleMetrics.score;
   });
 
 // ① Firestore → 로컬 상태로 “읽기”(publicView가 바뀌면 반영)
+// eslint-disable-next-line react-hooks/exhaustive-deps
 useEffect(() => {
   if (!eventData?.publicView) return;
   const { hiddenRooms: hr = [], visibleMetrics = {}, metrics = {} } = eventData.publicView;
@@ -58,7 +59,8 @@ useEffect(() => {
 }, [eventData?.publicView]);
 
 // ② 로컬 상태 → Firestore로 “쓰기”(선택: 이미 훅에서 저장하지만,
-//    키 이름 호환 위해 visibleMetrics + legacy metrics 둘 다 업데이트)
+// 키 이름 호환 위해 visibleMetrics + legacy metrics 둘 다 업데이트)
+// eslint-disable-next-line react-hooks/exhaustive-deps
 useEffect(() => {
   if (!eventId) return;
   const payload = {

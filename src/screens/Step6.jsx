@@ -132,6 +132,7 @@ export default function Step6() {
   );
 
   // ───── participants → 방별로 묶기 ─────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     srcParticipants.forEach(p => {
