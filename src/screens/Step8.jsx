@@ -14,9 +14,7 @@ const {
   roomCount,
   roomNames,
   goPrev,
-  goNext
-, setStep } = useContext(StepContext);
-void goNext; // keep for lint
+  setStep } = useContext(StepContext);
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
@@ -58,30 +56,6 @@ useEffect(() => {
   setShowScore(!!vm.score);
   setShowHalved(!!vm.banddang);
 }, [eventData?.publicView]);
-
-// ② 로컬 상태 → Firestore로 “쓰기”(선택: 이미 훅에서 저장하지만,
-// 키 이름 호환 위해 visibleMetrics + legacy metrics 둘 다 업데이트)
-// eslint-disable-next-line react-hooks/exhaustive-deps
-useEffect(() => {
-  if (!eventId) return;
-  const payload = {
-    publicView: {
-      hiddenRooms: Array.from(hiddenRooms ?? []),
-      visibleMetrics: { score: !!showScore, banddang: !!showHalved },
-      metrics:        { score: !!showScore, banddang: !!showHalved }, // 레거시 호환
-    },
-  };
-  void payload; // keep for lint when updateEvent 호출이 주석일 때
-  // 이미 usePersistRoomTableSelection 이 저장을 하지만, 키 호환 목적이라면
-  // EventContext의 updateEvent(디바운스) 한 번 더 호출해도 무방합니다.
-  // (없애도 동작엔 문제 없음)
-  try { 
-    // updateEvent 가 컨텍스트에 있다면 사용, 아니면 생략 가능
-    // updateEvent(payload, { debounceMs: 300, ifChanged: true });
-  } catch {}
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [eventId, hiddenRooms, showScore, showHalved]);
-
 
   const toggleRoom = idx => {
     const s = new Set(hiddenRooms);

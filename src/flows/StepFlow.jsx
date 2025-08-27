@@ -312,6 +312,7 @@ export default function StepFlow() {
   };
 
   const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
+  // curr 값이 바뀔 때만 재계산되도록 메모이즈 (런타임 동작 동일)
   const Current = useMemo(() => pages[curr] || <Step1/>, [curr]);
 
   // ---- Lint only: 훅 의존성 경고 해소용(런타임 영향 없음) ----
