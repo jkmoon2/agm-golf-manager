@@ -213,6 +213,10 @@ export default function PlayerRoomTable() {
     }
   }
 
+  // ★★★ 여기서 cssVars를 명시적으로 선언합니다. (ESLint/Netlify 에러 해결)
+  // eslint-disable-next-line no-useless-computed-key
+  const cssVars = { ['--nick-ch']: maxNick, ['--cols']: visibleCols };
+
   if (!roomNames.length) {
     return (
       <div className={styles.page}>
@@ -246,8 +250,11 @@ export default function PlayerRoomTable() {
 
           {/* —— 실선 그리드 테이블 —— */}
           <div ref={tableRef} className={styles.tableWrap}>
-            {/* eslint-disable-next-line no-useless-computed-key */}
-            <table className={styles.roomTable} style={cssVars}>
+            <table
+              className={styles.roomTable}
+              // ▼ 닉 최장 길이와 보이는 방 수를 CSS 변수로 전달(폭/최소폭 계산에 사용)
+              style={cssVars}
+            >
               <thead>
                 <tr>
                   {roomNames.map(
