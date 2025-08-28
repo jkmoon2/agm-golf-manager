@@ -130,11 +130,14 @@ useEffect(() => {
   );
 
   // ── 5) participants를 방별로 묶은 2차원 배열 — “최신 소스” 우선순위 ─────────────────────
-  //    (로컬 participants가 있으면 그것을, 없으면 eventData.participants를 사용)
-  const sourceParticipants =
-   (participants?.length ? participants : eventData?.participants) || [];
+  // ① 소스 참가자 배열을 useMemo 로 고정
+  const sourceParticipants = React.useMemo(() => {
+    if (participants && participants.length) return participants;
+    return Array.isArray(eventData?.participants) ? eventData.participants : [];
+  }, [participants, eventData]);
 
-  const byRoom = useMemo(() => {
+  // ② 의존성은 sourceParticipants, roomCount
+  const byRoom = React.useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (sourceParticipants || []).forEach(p => {
       if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
@@ -146,8 +149,8 @@ useEffect(() => {
 
   // ── 6) “1조=slot[0,2], 2조=slot[1,3]” 규칙 → 4칸 확보 ─────────────
   //      + 콘솔 로그로 순서 확인 가능
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const orderedByRoom = useMemo(() => {
+  // ③ orderedByRoom 은 byRoom 만 보면 충분합니다.
+  const orderedByRoom = React.useMemo(() => {
     const half = sourceParticipants.length / 2;     // ★ 일관성
     return byRoom.map((roomArr) => {
 
@@ -196,7 +199,7 @@ useEffect(() => {
       // slot 내에 null 없이 객체만 들어가게(렌더링 편의)
       return slot.map(p => (p ? p : { nickname: '', handicap: 0, score: 0 }));
     });
-  }, [byRoom, participants.length]);         // 길이만 참조 → 불필요한 재계산 방지
+  }, [byRoom]);
 
   // ── 7) 방배정표 Rows 생성 ─────────────────────────────────
   const allocRows = Array.from({ length: MAX_PER_ROOM }, (_, ri) =>

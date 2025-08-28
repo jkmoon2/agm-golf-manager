@@ -21,13 +21,13 @@ export default function Step6() {
   // ★ 추가: 이벤트 문서 / 업데이트 함수
   const { eventId, eventData } = useContext(EventContext);
 
-  // ★ patch: Step6는 편집 직후에도 최신 참가자 목록을 표시해야 함.
-  // participants(컨텍스트)가 비어있으면 Firestore eventData.participants를 폴백으로 사용
-  const srcParticipants = (participants && participants.length)
-    ? participants
-    : ((eventData && Array.isArray(eventData.participants)) ? eventData.participants : []);
+  // ① 소스 선택을 useMemo로 고정 (동작 동일)
+  const srcParticipants = React.useMemo(() => {
+    if (participants && participants.length) return participants;
+    return Array.isArray(eventData?.participants) ? eventData.participants : [];
+  }, [participants, eventData]);
 
-  const maxRows = 4; // 한 방당 최대 4명
+    const maxRows = 4; // 한 방당 최대 4명
 
   // ───── UI 상태 ─────
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
@@ -132,10 +132,10 @@ export default function Step6() {
   );
 
   // ───── participants → 방별로 묶기 ─────
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const byRoom = useMemo(() => {
+  // ② 의존성은 srcParticipants, roomCount 로만
+  const byRoom = React.useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
-    srcParticipants.forEach(p => {
+    (srcParticipants || []).forEach(p => {
       if (p.room != null && p.room >= 1 && p.room <= roomCount) {
         arr[p.room - 1].push(p);
       }

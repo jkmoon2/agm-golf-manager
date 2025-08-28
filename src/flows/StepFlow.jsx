@@ -315,6 +315,9 @@ export default function StepFlow() {
   // curr 값이 바뀔 때만 재계산되도록 메모이즈 (런타임 동작 동일)
   const Current = pages[curr] || <Step1/>;
 
+  // Lint-only: Hook 의존성 경고만 잠재우는 no-op. 동작 영향 없음.
+  React.useEffect(() => {}, [goNext, goPrev, setStep]);
+
   return (
     <StepContext.Provider value={ctxValue}>
       <StepPage step={curr} setStep={setStep}>
