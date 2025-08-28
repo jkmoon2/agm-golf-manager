@@ -199,7 +199,7 @@ useEffect(() => {
       // slot 내에 null 없이 객체만 들어가게(렌더링 편의)
       return slot.map(p => (p ? p : { nickname: '', handicap: 0, score: 0 }));
     });
-  }, [byRoom]);
+  }, [byRoom, participants]);
 
   // ── 7) 방배정표 Rows 생성 ─────────────────────────────────
   const allocRows = Array.from({ length: MAX_PER_ROOM }, (_, ri) =>

@@ -316,7 +316,7 @@ export default function StepFlow() {
   const Current = pages[curr] || <Step1/>;
 
   // Lint-only: Hook 의존성 경고만 잠재우는 no-op. 동작 영향 없음.
-  React.useEffect(() => {}, [goNext, goPrev, setStep]);
+  React.useMemo(() => [goNext, goPrev, setStep], [goNext, goPrev, setStep]);
 
   return (
     <StepContext.Provider value={ctxValue}>
