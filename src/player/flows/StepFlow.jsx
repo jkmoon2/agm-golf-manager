@@ -1,10 +1,9 @@
 // /src/player/flows/StepFlow.jsx
 //
-// 새로 추가되는 공용 흐름 컨텍스트입니다.
-// - URL의 eventId와 현재 step(1~6)을 읽어서 goPrev/goNext/goHome 제공
-// - 기존 화면 로직은 그대로 두고, 하단 버튼 등에서 네비게이션만 재사용할 수 있게 설계
+// URL의 eventId와 현재 step(1~6)을 읽어서 goPrev/goNext/goHome 제공
+// 기존 화면 로직은 그대로, 네비게이션만 재사용
 //
-import React, { createContext, useMemo } from 'react';
+import React, { createContext, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 export const StepContext = createContext(null);
@@ -24,30 +23,27 @@ export default function StepFlowProvider({ children }) {
 
   const step = getCurrentStepFromPath(location.pathname);
 
-  const goTo = (n) => {
-    if (!eventId) return;
-    const target = Math.min(6, Math.max(1, Number(n) || 1));
-    navigate(`/player/home/${eventId}/${target}`);
-  };
+  // ⬇⬇⬇ 함수 참조를 안정화 (ESLint 경고 해소)
+  const goTo = useCallback(
+    (n) => {
+      if (!eventId) return;
+      const target = Math.min(6, Math.max(1, Number(n) || 1));
+      navigate(`/player/home/${eventId}/${target}`);
+    },
+    [eventId, navigate]
+  );
 
-  const goPrev = () => goTo(step - 1);
-  const goNext = () => goTo(step + 1);
-  const goHome = () => {
-    // 참가자 홈으로 이동 (대회 리스트가 아닌, 해당 대회의 참가자 홈)
+  const goPrev = useCallback(() => { goTo(step - 1); }, [goTo, step]);
+  const goNext = useCallback(() => { goTo(step + 1); }, [goTo, step]);
+
+  const goHome = useCallback(() => {
     if (!eventId) return;
     navigate(`/player/home/${eventId}`);
-  };
+  }, [eventId, navigate]);
 
-  // ⚠️ ESLint(useMemo deps) 대응: goHome/goNext/goPrev/goTo를 의존성에 포함
+  // ⬇⬇⬇ 이제 deps에 함수들을 안전하게 포함 가능
   const value = useMemo(
-    () => ({
-      eventId,
-      step,
-      goTo,
-      goPrev,
-      goNext,
-      goHome,
-    }),
+    () => ({ eventId, step, goTo, goPrev, goNext, goHome }),
     [eventId, step, goTo, goPrev, goNext, goHome]
   );
 
