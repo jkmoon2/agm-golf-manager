@@ -149,9 +149,7 @@ useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const orderedByRoom = useMemo(() => {
     const half = sourceParticipants.length / 2;     // ★ 일관성
-    return byRoom.map((roomArr, roomIdx) => {
-      console.group(`📂 orderedByRoom: roomIdx = ${roomIdx}`);
-      console.log("roomArr =", JSON.stringify(roomArr, null, 2));
+    return byRoom.map((roomArr) => {
 
       // 네 칸 slot 초기화
       const slot = [null, null, null, null];

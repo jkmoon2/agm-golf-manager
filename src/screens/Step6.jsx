@@ -19,8 +19,7 @@ export default function Step6() {
   } = useContext(StepContext);
 
   // ★ 추가: 이벤트 문서 / 업데이트 함수
-  const { eventId, eventData, updateEvent } = useContext(EventContext);
-  void updateEvent; // keep for future use & silence ESLint(no-unused-vars)
+  const { eventId, eventData } = useContext(EventContext);
 
   // ★ patch: Step6는 편집 직후에도 최신 참가자 목록을 표시해야 함.
   // participants(컨텍스트)가 비어있으면 Firestore eventData.participants를 폴백으로 사용
