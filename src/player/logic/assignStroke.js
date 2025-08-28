@@ -1,20 +1,51 @@
 // src/player/logic/assignStroke.js
 
-/**
- * 관리자 STEP5 "같은 조는 같은 방 금지" 규칙 그대로:
- * - 대상 참가자의 group 내에서 이미 사용된 방 제외
- * - 남은 방 중 무작위 선택
- */
-export function pickRoomForStroke({ participants, roomCount, target }) {
-  const rooms = Array.from({ length: roomCount }, (_, i) => i + 1);
-  const usedInGroup = participants
-    .filter(p => p.group === target.group && p.room != null)
-    .map(p => p.room);
+// 스트로크 방 선택 유틸
+// 규칙: 같은 방에 같은 group(조)은 금지. 그 안에서 "순수 랜덤" (옵션으로 균형랜덤도 지원)
+export function pickRoomForStroke({
+  me,            // { id, group, room, ... }
+  participants,  // 전체 참가자 배열
+  roomCount,     // 방 개수 (정수)
+  strategy = 'pure', // 'pure' | 'balanced'
+}) {
+  const myGroup = Number(me.group) || 0;
 
-  const available = rooms.filter(r => !usedInGroup.includes(r));
-  if (available.length === 0) {
-    // 모든 방이 이미 같은 조에 점유되었다면(이상 케이스) 전체에서 랜덤
-    return rooms[Math.floor(Math.random() * rooms.length)];
+  // 방별 인원/그룹 집합
+  const byRoom = new Map();
+  for (let r = 1; r <= roomCount; r++) {
+    byRoom.set(r, { people: [], groups: new Set() });
   }
-  return available[Math.floor(Math.random() * available.length)];
+  for (const p of participants) {
+    const r = Number(p.room);
+    if (r && byRoom.has(r)) {
+      const slot = byRoom.get(r);
+      slot.people.push(p);
+      if (p.group != null) slot.groups.add(Number(p.group));
+    }
+  }
+
+  // 같은 group이 이미 있으면 제외
+  let candidates = [];
+  for (let r = 1; r <= roomCount; r++) {
+    const slot = byRoom.get(r);
+    if (!slot.groups.has(myGroup)) {
+      candidates.push({ r, cnt: slot.people.length });
+    }
+  }
+
+  // 모두 막히는 경우(이상 케이스)는 전체 방에서 랜덤 (규칙 우선: 가능한 한 발생하지 않음)
+  if (candidates.length === 0) {
+    for (let r = 1; r <= roomCount; r++) {
+      const slot = byRoom.get(r);
+      candidates.push({ r, cnt: slot.people.length });
+    }
+  }
+
+  // 전략 적용
+  if (strategy === 'balanced') {
+    let min = Math.min(...candidates.map(c => c.cnt));
+    candidates = candidates.filter(c => c.cnt === min);
+  }
+  const picked = candidates[Math.floor(Math.random() * candidates.length)];
+  return picked?.r ?? 1;
 }

@@ -8,7 +8,15 @@ import styles from './Step0.module.css';
 export default function Step0() {
   const { createEvent, loadEvent, deleteEvent, allEvents, updateEventById } = useContext(EventContext);
   const [viewMode, setViewMode]     = useState('stroke');
-  const [selectedId, setSelectedId] = useState(null);
+  
+  // normalize historic mode values (agm -> fourball)
+  const normMode = (m) => (m === 'agm' ? 'fourball' : (m || 'stroke'));
+  // default to STROKE on first mount (ignore previous local storage to fix inconsistent state)
+  useEffect(() => {
+    setViewMode('stroke');
+    try { localStorage.setItem('homeViewMode','stroke'); } catch {}
+  }, []);
+const [selectedId, setSelectedId] = useState(null);
   const navigate = useNavigate();
 
   // 새 대회 생성 모달
@@ -34,12 +42,7 @@ export default function Step0() {
     return () => document.removeEventListener('click', onDocClick);
   }, []);
 
-  const filtered = useMemo(
-    () => allEvents.filter(e => e.mode === viewMode),
-    [allEvents, viewMode]
-  );
-
-  const fmt = (s) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s.replaceAll('-', '.') : '미정';
+  const filtered = useMemo(() => (allEvents || []).filter(e => normMode(e.mode) === viewMode), [allEvents, viewMode]);const fmt = (s) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s.replaceAll('-', '.') : '미정';
   const isClosed = (dateEnd) => {
     if (!dateEnd || !/^\d{4}-\d{2}-\d2$/.test(dateEnd)) return false;
     const end = new Date(`${dateEnd}T23:59:59`);
@@ -120,8 +123,8 @@ export default function Step0() {
     <div className={styles.container}>
       {/* 탭 */}
       <div className={styles.tabContainer}>
-        <button className={`${styles.tabBtn} ${viewMode==='stroke'?styles.active:''}`} onClick={() => setViewMode('stroke')}>스트로크</button>
-        <button className={`${styles.tabBtn} ${viewMode==='agm'?styles.active:''}`} onClick={() => setViewMode('agm')}>AGM 포볼</button>
+        <button className={`${styles.tabBtn} ${viewMode==='stroke'?styles.active:''}`} onClick={() => { setViewMode('stroke'); try{localStorage.setItem('homeViewMode','stroke')}catch{}; }}>스트로크</button>
+        <button className={`${styles.tabBtn} ${viewMode==='fourball'?styles.active:''}`} onClick={() => { setViewMode('fourball'); try{localStorage.setItem('homeViewMode','fourball')}catch{}; }}>AGM 포볼</button>
       </div>
 
       {/* 리스트 */}
@@ -141,8 +144,8 @@ export default function Step0() {
                 <div className={styles.cardMain}>
                   <div className={styles.titleRow}>
                     <h3 className={styles.title} title={evt.title}>{evt.title}</h3>
-                    <span className={`${styles.badge} ${evt.mode==='agm'?styles.badgeFour:styles.badgeStroke}`}>
-                      {evt.mode==='agm' ? 'AGM 포볼' : '스트로크'}
+                    <span className={`${styles.badge} ${(normMode(evt.mode) === 'fourball')?styles.badgeFour:styles.badgeStroke}`}>
+                      {(normMode(evt.mode) === 'fourball') ? 'AGM 포볼' : '스트로크'}
                     </span>
                   </div>
 

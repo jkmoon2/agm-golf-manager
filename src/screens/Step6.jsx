@@ -4,7 +4,9 @@ import React, { useState, useRef, useMemo, useContext } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step6.module.css';
+import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
 import { StepContext } from '../flows/StepFlow';
+import { EventContext } from '../contexts/EventContext';   // ★ 추가: 이벤트 문서 접근용
 
 export default function Step6() {
   // Context로부터 상태와 내비게이션 함수 가져오기
@@ -16,12 +18,51 @@ export default function Step6() {
     setStep            // 특정 단계로 이동 (홈은 1)
   } = useContext(StepContext);
 
-  const maxRows = 4; // 한 방당 최대 4명
+  // ★ 추가: 이벤트 문서 / 업데이트 함수
+  const { eventId, eventData } = useContext(EventContext);
+
+  // ① 소스 선택을 useMemo로 고정 (동작 동일)
+  const srcParticipants = React.useMemo(() => {
+    if (participants && participants.length) return participants;
+    return Array.isArray(eventData?.participants) ? eventData.participants : [];
+  }, [participants, eventData]);
+
+    const maxRows = 4; // 한 방당 최대 4명
 
   // ───── UI 상태 ─────
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
+  // ★ selection sync (remote-first + debounce)
+  const showScore = !!visibleMetrics.score;
+  const setShowScore = (v) => setVisibleMetrics(m => ({ ...m, score: !!v }));
+  const showHalved = !!visibleMetrics.banddang;
+  const setShowHalved = (v) => setVisibleMetrics(m => ({ ...m, banddang: !!v }));
+  usePersistRoomTableSelection({ eventId, hiddenRooms, setHiddenRooms, showScore, setShowScore, showHalved, setShowHalved, syncToFirestore: true });
+
   const [menuOpen, setMenuOpen]             = useState(false);
+
+  // ★ 추가: 관리자 페이지를 다시 왔다 갔다 해도 유지되도록, 문서의 publicView → 상태 초기화
+  React.useEffect(() => {
+    const pv = eventData?.publicView;
+    if (!pv) return;
+    if (Array.isArray(pv.hiddenRooms)) {
+      setHiddenRooms(new Set(pv.hiddenRooms.map(Number).filter(n => Number.isFinite(n))));
+    }
+    if (pv.visibleMetrics && typeof pv.visibleMetrics === 'object') {
+      setVisibleMetrics(prev => ({ ...prev, ...pv.visibleMetrics }));
+    }
+  }, [eventData]);
+
+  /* ★ hook에서 저장하므로 비활성화
+    React.useEffect(() => {
+      if (!eventId || typeof updateEvent !== 'function') return;
+      const pv = {
+        hiddenRooms: Array.from(hiddenRooms),
+        visibleMetrics,
+      };
+      updateEvent({ publicView: pv });
+    }, [eventId, hiddenRooms, visibleMetrics, updateEvent]); }
+  */
 
   // “선택” 메뉴: 방 숨기기 토글, 점수·반땅 토글
   const toggleRoom   = idx => {
@@ -91,15 +132,16 @@ export default function Step6() {
   );
 
   // ───── participants → 방별로 묶기 ─────
-  const byRoom = useMemo(() => {
+  // ② 의존성은 srcParticipants, roomCount 로만
+  const byRoom = React.useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
-    participants.forEach(p => {
+    (srcParticipants || []).forEach(p => {
       if (p.room != null && p.room >= 1 && p.room <= roomCount) {
         arr[p.room - 1].push(p);
       }
     });
     return arr;
-  }, [participants, roomCount]);
+  }, [srcParticipants, roomCount]); // ✅ 핵심: srcParticipants를 직접 의존
 
   // ───── 배정표 row 생성 ─────
   const allocRows = Array.from({ length: maxRows }, (_, ri) =>
@@ -107,6 +149,7 @@ export default function Step6() {
   );
 
   // ───── 최종결과 계산 (반땅 로직 포함) ─────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const resultByRoom = useMemo(() => {
     return byRoom.map(roomArr => {
       // (1) 빈칸 포함
@@ -156,6 +199,7 @@ export default function Step6() {
   }, [byRoom, visibleMetrics]);
 
   // ───── 등수 재계산 ─────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
@@ -362,7 +406,7 @@ export default function Step6() {
       {/* ─── 하단 버튼 ─── */}
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={() => setStep(1)}>홈</button>
+        <button onClick={() => { try { localStorage.setItem('homeViewMode','stroke'); } catch(e){}; setStep(0); }}>홈</button>
       </div>
     </div>
   );

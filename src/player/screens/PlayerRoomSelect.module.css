@@ -1,7 +1,7 @@
 /* src/player/screens/PlayerRoomSelect.module.css */
 
 :root {
-  --row-h: 34px;
+  --row-h: 32px;
   --c-primary: #1e63c6;
   --c-primary-soft: #eaf3ff;
   --c-primary-border: #8db8ff;
@@ -95,3 +95,21 @@
 .sumValue { color: blue; }
 
 .teamTable { margin-top: 1.05rem; }
+
+/* 버튼이 가리지 않도록 여유 (필요 시 140~160px로 조절) */
+.container { padding-bottom: 140px; }
+
+/* 기존 stickyBar 정의를 FIXED로 교체 */
+.stickyBar{
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom) + 64px); /* 탭바 높이에 맞게 64 조절 */
+  z-index: 20;
+  background: #fff;
+  padding: 12px 16px;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}

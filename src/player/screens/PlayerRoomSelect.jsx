@@ -1,24 +1,16 @@
 // src/player/screens/PlayerRoomSelect.jsx
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './PlayerRoomSelect.module.css';
 
-/* =========================================================
- * 알림/스피너 타이밍 (숫자만 바꿔서 원하는 속도로 조정)
- * ---------------------------------------------------------
- * spinBeforeAssign          : 버튼 클릭 → 배정 호출 전 스피너 유지
- * preAlertStroke            : (스트로크) 배정 완료 직후 → 알림1 전
- * preAlertFourball          : (포볼)    배정 완료 직후 → 알림1 전
- * spinDuringPartnerPick     : (포볼)    알림1 닫은 직후 ~ 알림2 전(팀원 선택 중 스핀)
- * =======================================================*/
 const TIMINGS = {
   spinBeforeAssign: 1000,
   preAlertStroke: 300,
   preAlertFourball: 300,
-  spinDuringPartnerPick: 1800, // ⬅️ 새로 추가: 알림1 확인 후 스핀 보여줄 시간
+  spinDuringPartnerPick: 1800,
 };
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default function PlayerRoomSelect() {
@@ -27,10 +19,8 @@ export default function PlayerRoomSelect() {
   return isFourball ? <FourballLikeSelect /> : <StrokeLikeSelect />;
 }
 
-/* ───────── 스트로크 ───────── */
 function StrokeLikeSelect() {
   const { roomNames, participants, participant, assignStrokeForOne } = useContext(PlayerContext);
-
   return (
     <BaseRoomSelect
       variant="stroke"
@@ -45,11 +35,9 @@ function StrokeLikeSelect() {
   );
 }
 
-/* ───────── 포볼(=agm) ───────── */
 function FourballLikeSelect() {
   const { roomNames, participants, participant, assignFourballForOneAndPartner } =
     useContext(PlayerContext);
-
   return (
     <BaseRoomSelect
       variant="fourball"
@@ -64,46 +52,36 @@ function FourballLikeSelect() {
   );
 }
 
-/* ───────── 공통 UI ───────── */
-function BaseRoomSelect({
-  variant,
-  roomNames,
-  participants,
-  participant,
-  onAssign,
-}) {
-  const { isEventClosed } = useContext(PlayerContext);
-  const [done, setDone] = useState(false);
-  const [assignedRoom, setAssignedRoom] = useState(null);
+function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
+  const navigate = useNavigate();
+  const { eventId, isEventClosed } = useContext(PlayerContext);
+  const done = !!participant?.room;
+  const assignedRoom = participant?.room ?? null;
+
   const [showTeam, setShowTeam] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [flowStep, setFlowStep] = useState('idle');
 
-  // 내 정보가 participants에 로딩됐는지
+  const participantsLoaded = Array.isArray(participants) && participants.length > 0;
   const isMeReady = useMemo(() => {
     if (!participant?.id) return false;
-    if (!Array.isArray(participants) || participants.length === 0) return false;
+    if (!participantsLoaded) return false;
     return participants.some((p) => String(p.id) === String(participant.id));
-  }, [participants, participant?.id]);
+  }, [participantsLoaded, participants, participant?.id]);
+  const isSyncing = participantsLoaded && !isMeReady;
 
-  // 새로고침으로 이미 배정된 경우 복구
   useEffect(() => {
-    if (participant?.room != null && flowStep === 'idle' && !done) {
-      setAssignedRoom(participant.room);
-      setDone(true);
+    if (participant?.room != null && flowStep === 'idle') {
       setShowTeam(false);
       setFlowStep('show');
     }
-  }, [participant?.room, flowStep, done]);
+  }, [participant?.room, flowStep]);
 
-  const getLabel = (num) => {
-    if (Array.isArray(roomNames) && roomNames[num - 1]?.trim()) {
-      return roomNames[num - 1].trim();
-    }
-    return `${num}번방`;
-  };
+  const getLabel = (num) =>
+    Array.isArray(roomNames) && roomNames[num - 1]?.trim()
+      ? roomNames[num - 1].trim()
+      : `${num}번방`;
 
-  // 배정 결과(표1)
   const compactMembers = useMemo(() => {
     if (!done || assignedRoom == null || !participant) return [];
     if (variant === 'fourball') {
@@ -115,53 +93,46 @@ function BaseRoomSelect({
     return [me].filter(Boolean);
   }, [done, assignedRoom, participants, participant, variant]);
 
-  // 같은 방 전체(표2)
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
     return participants.filter((p) => Number(p.room) === Number(assignedRoom));
   }, [done, assignedRoom, participants]);
 
-  // 팀 정렬(1조 페어 먼저)
   const teamMembers = useMemo(() => {
     const list = teamMembersRaw || [];
     const byId = new Map(list.map((p) => [String(p.id), p]));
     const seen = new Set();
     const ordered = [];
-
     const firstGroup = list.filter((p) => Number(p?.group) === 1);
     firstGroup.sort((a, b) => {
-      const na = Number(a?.id), nb = Number(b?.id);
+      const na = Number(a?.id);
+      const nb = Number(b?.id);
       if (!isNaN(na) && !isNaN(nb)) return na - nb;
       return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
     });
-
     const pushPair = (a, b) => {
       if (a && !seen.has(String(a.id))) { ordered.push(a); seen.add(String(a.id)); }
       if (b && !seen.has(String(b.id))) { ordered.push(b); seen.add(String(b.id)); }
     };
-
     firstGroup.forEach((p) => {
       if (seen.has(String(p.id))) return;
       const mate = p?.partner ? byId.get(String(p.partner)) : null;
       pushPair(p, mate);
     });
-
     list.forEach((p) => {
       if (seen.has(String(p.id))) return;
       const mate = p?.partner ? byId.get(String(p.partner)) : null;
       if (mate && !seen.has(String(mate.id))) {
-        const a = Number(p.id), b = Number(mate.id);
+        const a = Number(p.id); const b = Number(mate.id);
         if (!isNaN(a) && !isNaN(b) && a > b) pushPair(mate, p);
         else pushPair(p, mate);
       } else {
         pushPair(p, null);
       }
     });
-
     return ordered;
   }, [teamMembersRaw]);
 
-  // 4행까지 패딩
   const teamMembersPadded = useMemo(() => {
     const arr = [...teamMembers];
     while (arr.length < 4) arr.push(null);
@@ -174,7 +145,6 @@ function BaseRoomSelect({
     if (!participant?.id) return;
     if (done || isAssigning) return;
 
-    // 아직 동기화 전이면 대기
     if (!isMeReady) {
       setIsAssigning(true);
       await sleep(400);
@@ -182,21 +152,17 @@ function BaseRoomSelect({
       alert('참가자 데이터 동기화 중입니다. 잠시 후 다시 시도해주세요.');
       return;
     }
-
     if (isEventClosed) {
       alert('대회가 종료되어 더 이상 참여할 수 없습니다.');
       return;
     }
 
-    // 포볼 2조는 확인만
     if (isFourballGroup2) {
       setIsAssigning(true);
       await sleep(500);
       setIsAssigning(false);
       if (participant?.room != null) {
         const roomLabel = getLabel(participant.room);
-        setAssignedRoom(participant.room);
-        setDone(true);
         setShowTeam(false);
         setFlowStep('show');
         alert(`${participant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
@@ -210,46 +176,25 @@ function BaseRoomSelect({
       setIsAssigning(true);
       setFlowStep('assigning');
 
-      // 1) 클릭 직후 스피너
       await sleep(TIMINGS.spinBeforeAssign);
-
       const { roomNumber, partnerNickname } = await onAssign(participant.id);
-
       setFlowStep('afterAssign');
 
-      // 2) 알림1 전 짧은 대기
       await sleep(variant === 'fourball' ? TIMINGS.preAlertFourball : TIMINGS.preAlertStroke);
-
-      // ─── 스트로크: 알림1 → 완료 ───
-      if (variant !== 'fourball') {
-        setIsAssigning(false);
-        const roomLabel = getLabel(roomNumber);
-        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
-        setAssignedRoom(roomNumber);
-        setDone(true);
-        setShowTeam(false);
-        setFlowStep('show');
-        return;
-      }
-
-      // ─── 포볼: 알림1 → (스피너) → 알림2 → 완료 ───
-      const roomLabel = getLabel(roomNumber);
-      setIsAssigning(false); // 알림1 직전에는 스피너 off
-      alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
-
-      // 알림1을 닫은 "직후" 스피너 ON (팀원 선택 중)
-      setIsAssigning(true);
-      await sleep(TIMINGS.spinDuringPartnerPick);
       setIsAssigning(false);
 
-      if (partnerNickname) {
-        alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+      const roomLabel = getLabel(roomNumber);
+      if (variant === 'fourball') {
+        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
+        setIsAssigning(true);
+        await sleep(TIMINGS.spinDuringPartnerPick);
+        setIsAssigning(false);
+        if (partnerNickname) alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+        else alert('아직 팀원이 정해지지 않았습니다.');
       } else {
-        alert('아직 팀원이 정해지지 않았습니다.');
+        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
       }
 
-      setAssignedRoom(roomNumber);
-      setDone(true);
       setShowTeam(false);
       setFlowStep('show');
     } catch (e) {
@@ -264,25 +209,46 @@ function BaseRoomSelect({
     if (done && flowStep === 'show') setShowTeam((v) => !v);
   };
 
+  const handleNext = () => {
+    if (!eventId) return;
+    navigate(`/player/home/${eventId}/2`);
+  };
+
   const sumHd = (list) => list.reduce((s, p) => s + (Number(p?.handicap) || 0), 0);
 
   const assignBtnLabel =
-    isFourballGroup2
-      ? '방확인'
-      : isEventClosed
-      ? '종료됨'
-      : !isMeReady
-      ? '동기화 중…'
-      : isAssigning
-      ? '배정 중…'
-      : done
-      ? '배정 완료'
+    isFourballGroup2 ? '방확인'
+      : isEventClosed ? '종료됨'
+      : !isMeReady ? '동기화 중…'
+      : isAssigning ? '배정 중…'
+      : done ? '배정 완료'
       : '방배정';
 
   const teamBtnDisabled = !(done && flowStep === 'show') || isAssigning || isEventClosed;
+  const nextBtnDisabled = !done || isAssigning || isEventClosed;
+
+  // ▼▼ 하단 고정 바 (버튼 모양은 기존 클래스 그대로 사용)
+  const fixedBar = {
+    position: 'fixed',
+    left: 16,
+    right: 16,
+    bottom: 'calc(env(safe-area-inset-bottom) + 64px + 12px)', // 탭바 위에 살짝 띄움
+    zIndex: 20,
+    background: 'transparent',
+  };
 
   return (
-    <div className={styles.container}>
+    // 버튼이 가리지 않도록 여유 추가
+    <div
+      className={styles.container}
+      style={{
+        paddingBottom: 160,
+        '--row-h': '34px',                // ← 행 높이(원하시면 28~32px로 조정)
+        overflowY: 'hidden',              // ← 본문 세로 드래그 제거
+        overscrollBehaviorY: 'contain',   // ← iOS 튕김 방지
+        touchAction: 'manipulation'       // ← 모바일 스크롤 과민 방지
+      }}
+    >
       {participant?.nickname && (
         <p className={styles.greeting}>
           <span className={styles.nickname}>{participant.nickname}</span>님, 안녕하세요!
@@ -290,6 +256,9 @@ function BaseRoomSelect({
       )}
 
       {isEventClosed && <div className={styles.notice}>대회가 종료되어 더 이상 참여할 수 없습니다.</div>}
+      {!isEventClosed && !isAssigning && isSyncing && (
+        <div className={styles.notice}>내 정보 동기화 중입니다…</div>
+      )}
 
       <div className={styles.buttonRow}>
         <button
@@ -309,7 +278,6 @@ function BaseRoomSelect({
         </button>
       </div>
 
-      {/* 표들 */}
       {done && flowStep === 'show' && (
         <div className={styles.tables}>
           <div className={styles.tableBlock}>
@@ -317,13 +285,8 @@ function BaseRoomSelect({
               <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 배정 결과
             </div>
             <table className={styles.table}>
-              <colgroup>
-                <col className={styles.colName} />
-                <col className={styles.colHd} />
-              </colgroup>
-              <thead>
-                <tr><th>닉네임</th><th>G핸디</th></tr>
-              </thead>
+              <colgroup><col className={styles.colName} /><col className={styles.colHd} /></colgroup>
+              <thead><tr><th>닉네임</th><th>G핸디</th></tr></thead>
               <tbody>
                 {compactMembers.map((p, idx) => (
                   <tr key={p?.id ?? `c-${idx}`}>
@@ -331,10 +294,7 @@ function BaseRoomSelect({
                     <td>{p?.handicap ?? '\u00A0'}</td>
                   </tr>
                 ))}
-                <tr className={styles.summaryRow}>
-                  <td>합계</td>
-                  <td className={styles.sumValue}>{sumHd(compactMembers)}</td>
-                </tr>
+                <tr className={styles.summaryRow}><td>합계</td><td className={styles.sumValue}>{sumHd(compactMembers)}</td></tr>
               </tbody>
             </table>
           </div>
@@ -345,13 +305,8 @@ function BaseRoomSelect({
                 <span className={styles.roomTitle}>{getLabel(assignedRoom)}</span> 팀원 목록
               </div>
               <table className={`${styles.table} ${styles.teamTable}`}>
-                <colgroup>
-                  <col className={styles.colName} />
-                  <col className={styles.colHd} />
-                </colgroup>
-                <thead>
-                  <tr><th>닉네임</th><th>G핸디</th></tr>
-                </thead>
+                <colgroup><col className={styles.colName} /><col className={styles.colHd} /></colgroup>
+                <thead><tr><th>닉네임</th><th>G핸디</th></tr></thead>
                 <tbody>
                   {teamMembersPadded.map((p, idx) => (
                     <tr key={p?.id ?? `t-${idx}`}>
@@ -359,16 +314,25 @@ function BaseRoomSelect({
                       <td>{p?.handicap ?? '\u00A0'}</td>
                     </tr>
                   ))}
-                  <tr className={styles.summaryRow}>
-                    <td>합계</td>
-                    <td className={styles.sumValue}>{sumHd(teamMembers)}</td>
-                  </tr>
+                  <tr className={styles.summaryRow}><td>합계</td><td className={styles.sumValue}>{sumHd(teamMembers)}</td></tr>
                 </tbody>
               </table>
             </div>
           )}
         </div>
       )}
+
+      {/* 하단 고정 “다음” 버튼 — 기존 클래스 그대로 */}
+      <div style={fixedBar}>
+        <button
+          className={`${styles.btn} ${styles.btnBlue}`}
+          style={{ width: '100%' }}
+          onClick={handleNext}
+          disabled={nextBtnDisabled}
+        >
+          다음 →
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,9 +1,11 @@
 // src/screens/Step8.jsx
 
-import React, { useState, useRef, useMemo, useContext } from 'react';
+import React, { useState, useRef, useMemo, useContext, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';
+import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
+import { EventContext } from '../contexts/EventContext';
 import { StepContext } from '../flows/StepFlow';
 
 export default function Step8() {
@@ -12,8 +14,7 @@ const {
   roomCount,
   roomNames,
   goPrev,
-  goNext
-} = useContext(StepContext);
+  setStep } = useContext(StepContext);
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
@@ -24,6 +25,37 @@ const {
     score: true,
     banddang: true
   });
+const showScore = visibleMetrics.score;
+  const setShowScore = (v) => setVisibleMetrics((m) => ({ ...m, score: v }));
+  const showHalved = visibleMetrics.banddang;
+  const setShowHalved = (v) => setVisibleMetrics((m) => ({ ...m, banddang: v }));
+
+  const { eventId, eventData } = useContext(EventContext) || {};
+  usePersistRoomTableSelection({
+    eventId,
+    hiddenRooms,
+    setHiddenRooms,
+    showScore,
+    setShowScore,
+    showHalved,
+    setShowHalved,
+    syncToFirestore: true,
+  });
+
+// ① Firestore → 로컬 상태로 “읽기”(publicView가 바뀌면 반영)
+// eslint-disable-next-line react-hooks/exhaustive-deps
+useEffect(() => {
+  if (!eventData?.publicView) return;
+  const { hiddenRooms: hr = [], visibleMetrics = {}, metrics = {} } = eventData.publicView;
+
+  // hiddenRooms
+  try { setHiddenRooms(new Set((hr || []).map(Number))); } catch {}
+
+  // score / banddang (visibleMetrics 우선, 없으면 metrics 키 사용)
+  const vm = { score: false, banddang: false, ...metrics, ...visibleMetrics };
+  setShowScore(!!vm.score);
+  setShowHalved(!!vm.banddang);
+}, [eventData?.publicView]);
 
   const toggleRoom = idx => {
     const s = new Set(hiddenRooms);
@@ -97,24 +129,31 @@ const {
     roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`
   );
 
-  // ── 5) participants를 방별로 묶은 2차원 배열 ─────────────────────
-  const byRoom = useMemo(() => {
+  // ── 5) participants를 방별로 묶은 2차원 배열 — “최신 소스” 우선순위 ─────────────────────
+  // ① 소스 참가자 배열을 useMemo 로 고정
+  const sourceParticipants = React.useMemo(() => {
+    if (participants && participants.length) return participants;
+    return Array.isArray(eventData?.participants) ? eventData.participants : [];
+  }, [participants, eventData]);
+
+  // ② 의존성은 sourceParticipants, roomCount
+  const byRoom = React.useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
-    (participants || []).forEach(p => {
-      if (p.room != null && p.room >= 1 && p.room <= roomCount) {
+    (sourceParticipants || []).forEach(p => {
+      if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
         arr[p.room - 1].push(p);
       }
     });
     return arr;
-  }, [participants, roomCount]);
+  }, [sourceParticipants, roomCount]); // ✅ 정정
 
   // ── 6) “1조=slot[0,2], 2조=slot[1,3]” 규칙 → 4칸 확보 ─────────────
   //      + 콘솔 로그로 순서 확인 가능
-  const orderedByRoom = useMemo(() => {
-    const half = participants.length / 2;
-    return byRoom.map((roomArr, roomIdx) => {
-      console.group(`📂 orderedByRoom: roomIdx = ${roomIdx}`);
-      console.log("roomArr =", JSON.stringify(roomArr, null, 2));
+  // ③ orderedByRoom 은 byRoom 만 보면 충분합니다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const orderedByRoom = React.useMemo(() => {
+    const half = sourceParticipants.length / 2;     // ★ 일관성
+    return byRoom.map((roomArr) => {
 
       // 네 칸 slot 초기화
       const slot = [null, null, null, null];
@@ -161,7 +200,7 @@ const {
       // slot 내에 null 없이 객체만 들어가게(렌더링 편의)
       return slot.map(p => (p ? p : { nickname: '', handicap: 0, score: 0 }));
     });
-  }, [byRoom, participants]);
+  }, [byRoom, sourceParticipants.length]);
 
   // ── 7) 방배정표 Rows 생성 ─────────────────────────────────
   const allocRows = Array.from({ length: MAX_PER_ROOM }, (_, ri) =>
@@ -247,6 +286,7 @@ const {
   }, [orderedByRoom, headers]);
 
   // ── 11) 모든 팀 중 “낮은 합산점수=1등” 순위 계산 ─────────────────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const teamRankMap = useMemo(() => {
     const mapWithIdx   = teamsByRoom.map((t, idx) => ({ ...t, idxInOriginal: idx }));
     const visibleTeams = mapWithIdx.filter(t => !hiddenRooms.has(t.roomIdx));
@@ -783,7 +823,7 @@ const {
       {/* ─── 하단 버튼 ─── */}
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={goNext}>홈</button>
+        <button onClick={() => { try{localStorage.setItem('homeViewMode','fourball')}catch{}; setStep(0); }}>홈</button>
       </div>
     </div>
   );
