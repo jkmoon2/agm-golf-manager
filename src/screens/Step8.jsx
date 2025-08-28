@@ -150,6 +150,7 @@ useEffect(() => {
   // ── 6) “1조=slot[0,2], 2조=slot[1,3]” 규칙 → 4칸 확보 ─────────────
   //      + 콘솔 로그로 순서 확인 가능
   // ③ orderedByRoom 은 byRoom 만 보면 충분합니다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const orderedByRoom = React.useMemo(() => {
     const half = sourceParticipants.length / 2;     // ★ 일관성
     return byRoom.map((roomArr) => {
@@ -199,7 +200,7 @@ useEffect(() => {
       // slot 내에 null 없이 객체만 들어가게(렌더링 편의)
       return slot.map(p => (p ? p : { nickname: '', handicap: 0, score: 0 }));
     });
-  }, [byRoom, participants]);
+  }, [byRoom]);   // ★ 의존성은 byRoom 하나만
 
   // ── 7) 방배정표 Rows 생성 ─────────────────────────────────
   const allocRows = Array.from({ length: MAX_PER_ROOM }, (_, ri) =>
