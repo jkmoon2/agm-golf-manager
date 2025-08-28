@@ -33,11 +33,12 @@ export default function StepFlowProvider({ children }) {
   const goPrev = () => goTo(step - 1);
   const goNext = () => goTo(step + 1);
   const goHome = () => {
-    // 참가자 8버튼 홈으로 이동 (대회 리스트가 아닌, 해당 대회의 참가자 홈)
+    // 참가자 홈으로 이동 (대회 리스트가 아닌, 해당 대회의 참가자 홈)
     if (!eventId) return;
     navigate(`/player/home/${eventId}`);
   };
 
+  // ⚠️ ESLint(useMemo deps) 대응: goHome/goNext/goPrev/goTo를 의존성에 포함
   const value = useMemo(
     () => ({
       eventId,
@@ -47,7 +48,7 @@ export default function StepFlowProvider({ children }) {
       goNext,
       goHome,
     }),
-    [eventId, step]
+    [eventId, step, goTo, goPrev, goNext, goHome]
   );
 
   return <StepContext.Provider value={value}>{children}</StepContext.Provider>;
