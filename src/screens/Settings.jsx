@@ -6,15 +6,12 @@ import { EventContext } from '../contexts/EventContext';
 
 const STATUS = ['hidden', 'disabled', 'enabled'];
 
-/** playerGate 기본값 – 기존 앱을 깨지 않도록 "전부 enabled"로 시작 */
 function getDefaultGate() {
   return {
     steps: { 1:'enabled', 2:'enabled', 3:'enabled', 4:'enabled', 5:'enabled', 6:'enabled', 7:'enabled', 8:'enabled' },
     step1: { teamConfirmEnabled: true },
   };
 }
-
-/** 얕은 병합(steps, step1 하위키까지 안전하게 합치기) */
 function mergeGate(prev, next) {
   const a = prev || {};
   const b = next || {};
@@ -25,43 +22,35 @@ function mergeGate(prev, next) {
 }
 
 export default function Settings() {
-  // 🆕 updateEventImmediate 추가로 구조분해
   const { eventId, eventData, updatePlayerGate, updateEvent, updateEventImmediate } = useContext(EventContext);
   const hasEvent = !!eventId;
 
-  // 1) 초기 로드
   const initial = useMemo(() => mergeGate(getDefaultGate(), eventData?.playerGate), [eventData]);
   const [gate, setGate] = useState(initial);
   useEffect(() => { setGate(initial); }, [initial]);
 
-  // 2) 변경 → 저장
-  //    ❗ 기존: updatePlayerGate(내부에서 디바운스 가능) → 이동 시 유실 가능
-  //    ✅ 변경: updateEventImmediate 로 "즉시 커밋" (fallback 유지)
   const save = async (partial) => {
     const next = mergeGate(gate, partial);
     setGate(next);
 
     if (!hasEvent) {
-      console.warn('[Settings] save blocked: no event selected'); // 🆕
+      console.warn('[Settings] save blocked: no event selected');
       return;
     }
 
-    try { // 🆕
-      // 🆕 최우선: 즉시 저장(유실 방지)
+    try {
       if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ playerGate: next }, /* ifChanged */ true);
-        console.info('[Settings] saved playerGate for', eventId, next); // 🆕
+        await updateEventImmediate({ playerGate: next }, true);
+        console.info('[Settings] saved playerGate for', eventId, next);
         return;
       }
-
-      // 기존 경로(하위호환)
       if (typeof updatePlayerGate === 'function') {
         await updatePlayerGate(next);
       } else if (typeof updateEvent === 'function') {
         await updateEvent({ playerGate: next });
       }
-    } catch (e) { // 🆕
-      console.error('[Settings] save failed:', e); // 🆕
+    } catch (e) {
+      console.error('[Settings] save failed:', e);
     }
   };
 
@@ -70,29 +59,18 @@ export default function Settings() {
     save({ steps: { [n]: status } });
   };
 
-  // 3) 프리셋(일괄 설정)
   const applyPreset = (key) => {
     if (key === 'allHidden') {
-      save({
-        steps: { 1:'hidden',2:'hidden',3:'hidden',4:'hidden',5:'hidden',6:'hidden',7:'hidden',8:'hidden' },
-      });
+      save({ steps: { 1:'hidden',2:'hidden',3:'hidden',4:'hidden',5:'hidden',6:'hidden',7:'hidden',8:'hidden' } });
     } else if (key === 'openOnlyStep1') {
-      save({
-        steps: { 1:'enabled', 2:'disabled', 3:'hidden', 4:'hidden', 5:'hidden', 6:'hidden', 7:'hidden', 8:'hidden' },
-        step1: { teamConfirmEnabled: true },
-      });
+      save({ steps: { 1:'enabled',2:'disabled',3:'hidden',4:'hidden',5:'hidden',6:'hidden',7:'hidden',8:'hidden' }, step1: { teamConfirmEnabled: true } });
     } else if (key === 'progressFlow') {
-      // 예: 경기 진행에 따라 1→2만 열고 나머지는 비활성
-      save({
-        steps: { 1:'enabled', 2:'enabled', 3:'disabled', 4:'disabled', 5:'disabled', 6:'disabled', 7:'hidden', 8:'hidden' },
-        step1: { teamConfirmEnabled: true },
-      });
+      save({ steps: { 1:'enabled',2:'enabled',3:'disabled',4:'disabled',5:'disabled',6:'disabled',7:'hidden',8:'hidden' }, step1: { teamConfirmEnabled: true } });
     } else if (key === 'allEnabled') {
       save(getDefaultGate());
     }
   };
 
-  // 4) 가이드 텍스트
   const guideNextBlocked = gate.steps?.[2] !== 'enabled';
 
   return (
