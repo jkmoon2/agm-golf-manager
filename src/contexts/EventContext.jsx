@@ -256,7 +256,7 @@ export function EventProvider({ children }) {
 
   const addEventDef = async (def) => {
     const base = lastEventDataRef.current || {};
-    the list = Array.isArray(base.events) ? [...base.events] : [];
+    const list = Array.isArray(base.events) ? [...base.events] : []; // ← 오타 수정(빌드 에러 원인)
     list.push(def);
     await updateEventImmediate({ events: list });
   };
