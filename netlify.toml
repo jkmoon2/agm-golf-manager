@@ -1,0 +1,9 @@
+# /netlify.toml
+# 선택(옵션). 경고가 남아도 배포를 막지 않게 하려면 사용
+[build]
+  command = "CI=false npm run build"
+  publish = "build"
+
+[build.environment]
+  CI = "false"
+  EXTEND_ESLINT = "true"
