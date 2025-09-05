@@ -41,19 +41,27 @@ export default function Settings() {
     const next = mergeGate(gate, partial);
     setGate(next);
 
-    if (!hasEvent) return;
-
-    // 🆕 최우선: 즉시 저장(유실 방지)
-    if (typeof updateEventImmediate === 'function') {
-      await updateEventImmediate({ playerGate: next }, /* ifChanged */ true);
+    if (!hasEvent) {
+      console.warn('[Settings] save blocked: no event selected'); // 🆕
       return;
     }
 
-    // 기존 경로(하위호환)
-    if (typeof updatePlayerGate === 'function') {
-      await updatePlayerGate(next);
-    } else if (typeof updateEvent === 'function') {
-      await updateEvent({ playerGate: next });
+    try { // 🆕
+      // 🆕 최우선: 즉시 저장(유실 방지)
+      if (typeof updateEventImmediate === 'function') {
+        await updateEventImmediate({ playerGate: next }, /* ifChanged */ true);
+        console.info('[Settings] saved playerGate for', eventId, next); // 🆕
+        return;
+      }
+
+      // 기존 경로(하위호환)
+      if (typeof updatePlayerGate === 'function') {
+        await updatePlayerGate(next);
+      } else if (typeof updateEvent === 'function') {
+        await updateEvent({ playerGate: next });
+      }
+    } catch (e) { // 🆕
+      console.error('[Settings] save failed:', e); // 🆕
     }
   };
 

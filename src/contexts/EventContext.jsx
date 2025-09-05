@@ -1,7 +1,5 @@
 // /src/contexts/EventContext.jsx
 
-// /src/contexts/EventContext.jsx
-
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import {
   collection,
@@ -207,6 +205,8 @@ export function EventProvider({ children }) {
     try {
       const ref = doc(db, 'events', eventId);
       await setDoc(ref, updates, { merge: true });
+      // 🆕 저장 확인 로그(콘솔)
+      console.info('[EventContext] saved to events/', eventId, updates); // 🆕
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...updates };
       setEventData(prev => prev ? { ...prev, ...updates } : updates);
     } catch (e) {
