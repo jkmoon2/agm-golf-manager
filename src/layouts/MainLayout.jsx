@@ -1,4 +1,4 @@
-// src/layouts/MainLayout.jsx
+// /src/layouts/MainLayout.jsx
 
 import React from 'react';
 import { Outlet, NavLink, Link, useLocation } from 'react-router-dom';
@@ -9,6 +9,7 @@ import {
   Cog6ToothIcon
 } from '@heroicons/react/24/outline';
 import styles from './MainLayout.module.css';
+import { useAuth } from '../contexts/AuthContext';
 
 // 참가자 STEP 제목 매핑
 const PLAYER_STEP_TITLES = {
@@ -48,17 +49,30 @@ export default function MainLayout() {
   const adminStep  = adminMatch && adminMatch[1] != null ? Number(adminMatch[1]) : null;
   const isAdminStep = adminStep !== null && ADMIN_STEP_TITLES.hasOwnProperty(adminStep);
 
-  // 헤더: STEP 화면이면 STEP 타이틀, 아니면 기본
+  // ✅ 이벤트 페이지 여부(둘 다 지원: /admin/events, /admin/home/events)
+  const isEventsPage = /^\/admin(?:\/home)?\/events/.test(pathname);
+
+  // 헤더: STEP 화면이면 STEP 타이틀, 이벤트 페이지라면 '#EVENT · 이벤트 관리'
   let header = 'AGM Golf Manager';
   if (isPlayerStep) {
     header = PLAYER_STEP_TITLES[playerStep];
   } else if (isAdminStep) {
     header = `STEP ${adminStep}. ${ADMIN_STEP_TITLES[adminStep]}`;
   }
+  if (isEventsPage) {
+    header = '#EVENT · 이벤트 관리';
+  }
 
   // 탭바 활성화 로직
-  const isHomeActive    = pathname === '/admin/home' || isAdminStep;
+  const isHomeActive    = pathname === '/admin' || pathname === '/admin/home' || isAdminStep || isEventsPage;
   const isPlayerActive  = pathname.startsWith('/player');
+
+  // 🔐 현재 사용자 역할(운영자 여부)
+  const { firebaseUser, appRole } = useAuth() || {};
+  const isAdmin = !!firebaseUser && appRole === 'admin';
+
+  // ✅ 참가자 탭 목적지는 항상 "대회 리스트"
+  const participantTo = '/player/events';
 
   return (
     <div className={styles.app}>
@@ -71,18 +85,20 @@ export default function MainLayout() {
       </main>
 
       <footer className={styles.tabbar}>
-        {/* 홈 */}
-        <Link
-          to="/admin/home"
-          className={isHomeActive ? styles.navItemActive : styles.navItem}
-        >
-          <HomeIcon className={styles.icon} />
-          <span className={styles.label}>홈</span>
-        </Link>
+        {/* ── 운영자 전용: 관리자일 때만 노출 ── */}
+        {isAdmin && (
+          <Link
+            to="/admin/home"
+            className={isHomeActive ? styles.navItemActive : styles.navItem}
+          >
+            <HomeIcon className={styles.icon} />
+            <span className={styles.label}>홈</span>
+          </Link>
+        )}
 
-        {/* 참가자 */}
+        {/* ✅ 참가자: 항상 노출, 무조건 대회 리스트로 이동 */}
         <NavLink
-          to="/player/home"
+          to={participantTo}
           className={({ isActive }) =>
             (isActive || isPlayerActive)
               ? styles.navItemActive
@@ -93,27 +109,30 @@ export default function MainLayout() {
           <span className={styles.label}>참가자</span>
         </NavLink>
 
-        {/* 대시보드 */}
-        <NavLink
-          to="/admin/dashboard"
-          className={({ isActive }) =>
-            isActive ? styles.navItemActive : styles.navItem
-          }
-        >
-          <ChartBarIcon className={styles.icon} />
-          <span className={styles.label}>대시보드</span>
-        </NavLink>
+        {/* ── 운영자 전용: 관리자일 때만 노출 ── */}
+        {isAdmin && (
+          <NavLink
+            to="/admin/dashboard"
+            className={({ isActive }) =>
+              isActive ? styles.navItemActive : styles.navItem
+            }
+          >
+            <ChartBarIcon className={styles.icon} />
+            <span className={styles.label}>대시보드</span>
+          </NavLink>
+        )}
 
-        {/* 설정 */}
-        <NavLink
-          to="/admin/settings"
-          className={({ isActive }) =>
-            isActive ? styles.navItemActive : styles.navItem
-          }
-        >
-          <Cog6ToothIcon className={styles.icon} />
-          <span className={styles.label}>설정</span>
-        </NavLink>
+        {isAdmin && (
+          <NavLink
+            to="/admin/settings"
+            className={({ isActive }) =>
+              isActive ? styles.navItemActive : styles.navItem
+            }
+          >
+            <Cog6ToothIcon className={styles.icon} />
+            <span className={styles.label}>설정</span>
+          </NavLink>
+        )}
       </footer>
     </div>
   );

@@ -1,21 +1,20 @@
-// src/player/screens/PlayerRoomTable.jsx
-// ※ 기존 구조/포맷을 유지하면서 필요한 부분만 보완했습니다.
-// - URL의 :eventId로 EventContext 강제 동기화(연동 문제 해결)
-// - 슬롯 배치: 1조/2조 페어 → slot[0,1], slot[2,3] (STEP1/STEP8과 동일 규칙)
-// - 표 캡처(JPG/PDF) 유지
-// - 닉 중앙정렬: 열(td)에 폭을 부여하고 span은 width:100% + text-align:center
+// /src/player/screens/PlayerRoomTable.jsx
+
+// ※ 기존 레이아웃/스타일/버튼 문구는 100% 유지하고,
+//    Admin STEP6/8의 "선택" 값이 바로 반영되도록 publicView 복원 로직만 보완했습니다.
+//    - hiddenRooms: 루트/모드별(stroke/fourball) 어느 쪽이든 읽고, 0/1 기반 혼용도 자동 교정
+//    - 슬롯 정렬: 1조( group===1 )와 그 파트너(2조)를 (0,1)/(2,3) 슬롯에 고정
+//    - 나머지 로직/레이아웃은 기존 그대로 유지
 
 import React, { useContext, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './PlayerRoomTable.module.css';
-
 import { EventContext } from '../../contexts/EventContext';
 
 const MAX_PER_ROOM = 4;
 
-/** 안전한 G핸디 추출(프로젝트마다 키가 다를 수 있어 공용) */
 function getHandi(p) {
   if (!p || typeof p !== 'object') return 0;
   const keys = ['handicap', 'gHandicap', 'g_handicap', 'g-handicap', 'gh', 'gH', 'G핸디', 'g핸디'];
@@ -29,58 +28,61 @@ function getHandi(p) {
   return 0;
 }
 
-/** 닉네임 길이(한글 가중) → ch/폭 계산 기준치 */
 function nickLen(s) {
   const str = String(s || '');
   const hasKo = /[가-힣]/.test(str);
   return Math.max(1, Math.min(40, hasKo ? Math.ceil(str.length * 1.2) : str.length));
 }
 
-/** ★ 슬롯 배치 규칙: 1조/2조 페어를 0,1 / 2,3 슬롯에 배치(ADMIN STEP8과 동일) */
-function orderSlotsByPairs(roomArr = [], allParticipants = []) {
-  const N = Array.isArray(allParticipants) ? allParticipants.length : 0;
-  const half = Math.floor(N / 2) || 0;
+/** Admin publicView.hiddenRooms 보정(0/1 기반 자동판별 → index Set) */
+function normalizeHiddenRooms(pv, roomCount, viewKey) {
+  let arr = [];
+  if (pv && Array.isArray(pv.hiddenRooms)) {
+    arr = pv.hiddenRooms;
+  } else if (pv && pv[viewKey] && Array.isArray(pv[viewKey].hiddenRooms)) {
+    arr = pv[viewKey].hiddenRooms;
+  }
+  const nums = arr.map(Number).filter(Number.isFinite);
+  if (!nums.length) return new Set();
+
+  // 1-based로 보이는지 판별
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const looksOneBased =
+    min >= 1 && max <= roomCount || nums.some(v => v === 1 || v === roomCount);
+
+  const idxs = looksOneBased ? nums.map(v => v - 1) : nums.slice();
+  const filtered = idxs.filter(i => i >= 0 && i < roomCount);
+  return new Set(filtered);
+}
+
+/** 1조/2조 페어 슬롯 배치 (Admin STEP8과 동일 규칙: group 사용) */
+function orderSlotsByPairs(roomArr = []) {
   const slot = [null, null, null, null];
   const used = new Set();
-  const asNum = (v) => Number(v ?? NaN);
 
-  // 방 내 1조( id < half )와 그 짝(partner)을 찾아 쌍으로 보관
   const pairs = [];
   roomArr
-    .filter((p) => Number.isFinite(asNum(p?.id)) && asNum(p.id) < half)
-    .forEach((p1) => {
-      const id1 = asNum(p1.id);
-      if (used.has(id1)) return;
-      const partner = roomArr.find(
-        (x) => Number.isFinite(asNum(x?.id)) && asNum(x.id) === asNum(p1.partner)
-      );
-      if (partner && !used.has(asNum(partner.id))) {
-        pairs.push([p1, partner]); // [1조, 2조]
-        used.add(id1);
-        used.add(asNum(partner.id));
+    .filter(p => Number(p?.group) === 1)
+    .forEach(p1 => {
+      if (used.has(p1.id)) return;
+      const partner = roomArr.find(x => x.id === p1.partner);
+      if (partner && !used.has(partner.id)) {
+        pairs.push([p1, partner]);
+        used.add(p1.id);
+        used.add(partner.id);
       }
     });
 
-  // pairs[0] → slot[0],slot[1] / pairs[1] → slot[2],slot[3]
   pairs.forEach((pair, idx) => {
-    if (idx === 0) {
-      slot[0] = pair[0];
-      slot[1] = pair[1];
-    } else if (idx === 1) {
-      slot[2] = pair[0];
-      slot[3] = pair[1];
-    }
+    if (idx === 0) { slot[0] = pair[0]; slot[1] = pair[1]; }
+    else if (idx === 1) { slot[2] = pair[0]; slot[3] = pair[1]; }
   });
 
-  // 남은 인원은 빈 슬롯부터 채움
-  roomArr.forEach((p) => {
-    const pid = asNum(p?.id);
-    if (!used.has(pid)) {
-      const emptyIdx = slot.findIndex((x) => x === null);
-      if (emptyIdx >= 0) {
-        slot[emptyIdx] = p;
-        used.add(pid);
-      }
+  roomArr.forEach(p => {
+    if (!used.has(p.id)) {
+      const empty = slot.findIndex(v => v === null);
+      if (empty >= 0) { slot[empty] = p; used.add(p.id); }
     }
   });
 
@@ -88,7 +90,6 @@ function orderSlotsByPairs(roomArr = [], allParticipants = []) {
   return slot.slice(0, MAX_PER_ROOM);
 }
 
-/** 방별 4행 + 합계(정렬 제거, 슬롯 규칙 사용) */
 function buildRoomMatrix(participants, roomNames) {
   const map = new Map();
   for (let i = 1; i <= roomNames.length; i++) map.set(i, []);
@@ -100,7 +101,7 @@ function buildRoomMatrix(participants, roomNames) {
   const sums = [];
   for (let i = 0; i < roomNames.length; i++) {
     const list = map.get(i + 1) || [];
-    const ordered = orderSlotsByPairs(list, participants);
+    const ordered = orderSlotsByPairs(list);
     let sum = 0;
     for (const p of list) sum += getHandi(p);
     matrices.push(ordered);
@@ -114,14 +115,27 @@ export default function PlayerRoomTable() {
   const { eventId: paramId } = useParams();
   const { eventId: ctxId, loadEvent, eventData } = useContext(EventContext) || {};
 
-  /** ★ URL의 :eventId → 컨텍스트 강제 동기화 (연동 문제의 핵심) */
+  // URL의 :eventId -> 컨텍스트 동기화
   useEffect(() => {
     if (paramId && paramId !== ctxId && typeof loadEvent === 'function') {
       loadEvent(paramId);
     }
   }, [paramId, ctxId, loadEvent]);
 
-  /** Admin과 동일한 공통 필드만 사용 */
+  // myRoom을 항상 로컬스토리지에 반영 (STEP3에서 확실히 읽도록)
+  useEffect(() => {
+    const candidates = [
+      eventData?.myRoom,
+      eventData?.player?.room,
+      eventData?.auth?.room,
+      eventData?.currentRoom,
+    ];
+    const roomNo = candidates.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
+    if (Number.isFinite(roomNo)) {
+      try { localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo)); } catch {}
+    }
+  }, [eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
+
   const roomNames = useMemo(() => {
     if (Array.isArray(eventData?.roomNames) && eventData.roomNames.length) {
       return eventData.roomNames.map((v) => String(v ?? ''));
@@ -137,27 +151,24 @@ export default function PlayerRoomTable() {
     [eventData]
   );
 
-  /** 숨김 방 (Admin publicView와 동기화) */
+  // Admin의 선택(숨김 방) 복원 – 루트/모드별/0·1기반 혼용 모두 흡수
   const hiddenRooms = useMemo(() => {
-    const pv = eventData?.publicView;
-    const arr = Array.isArray(pv?.hiddenRooms) ? pv.hiddenRooms : [];
-    return new Set(arr.map(Number).filter(Number.isFinite));
-  }, [eventData]);
+    const pvRaw = eventData?.publicView || {};
+    const mode = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
+    return normalizeHiddenRooms(pvRaw, roomNames.length, mode);
+  }, [eventData?.publicView, eventData?.mode, roomNames.length]);
 
-  /** 방 행렬 + 합계 */
   const { matrices: byRoom, sums: roomHandiSums } = useMemo(
     () => buildRoomMatrix(participants, roomNames),
     [participants, roomNames]
   );
 
-  /** 최장 닉네임 길이 → 닉 칼럼 폭 계산용 */
   const maxNick = useMemo(() => {
     let m = 6;
     for (const arr of byRoom) for (const p of arr) if (p) m = Math.max(m, nickLen(p.nickname));
     return Math.max(6, Math.min(40, m));
   }, [byRoom]);
 
-  /** 보이는 방 수(숨김 제외) → 테이블 최소폭 계산용 */
   const visibleCols = useMemo(
     () => roomNames.reduce((acc, _, i) => acc + (hiddenRooms.has(i) ? 0 : 1), 0),
     [roomNames, hiddenRooms]
@@ -165,7 +176,6 @@ export default function PlayerRoomTable() {
 
   const tableRef = useRef(null);
 
-  /** 표만 캡처(JPG/PDF) */
   async function saveAs(kind) {
     const t = tableRef.current;
     if (!t) return;
@@ -213,7 +223,6 @@ export default function PlayerRoomTable() {
     }
   }
 
-  // ★★★ 여기서 cssVars를 명시적으로 선언합니다. (ESLint/Netlify 에러 해결)
   // eslint-disable-next-line no-useless-computed-key
   const cssVars = { ['--nick-ch']: maxNick, ['--cols']: visibleCols };
 
@@ -225,12 +234,26 @@ export default function PlayerRoomTable() {
             <div className={styles.empty}>방 정보가 아직 없습니다.</div>
           </div>
           <div className={styles.footerNav}>
-            <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={() => navigate(-1)}>
+            {/* 이전: 명시적으로 1스텝 이동 */}
+            <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={() => navigate(`/player/home/${paramId}/1`)}>
               ← 이전
             </button>
             <button
               className={`${styles.navBtn} ${styles.navNext}`}
-              onClick={() => navigate(`/player/home/${paramId}/3`)}
+              onClick={() => {
+                try {
+                  const cands = [
+                    eventData?.myRoom,
+                    localStorage.getItem(`player.currentRoom:${paramId}`),
+                    localStorage.getItem('player.currentRoom'),
+                  ];
+                  const roomNo = cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
+                  if (Number.isFinite(roomNo)) {
+                    localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo));
+                  }
+                } catch {}
+                navigate(`/player/home/${paramId}/3`);
+              }}
             >
               다음 →
             </button>
@@ -248,13 +271,8 @@ export default function PlayerRoomTable() {
             <div className={styles.cardTitle}>🏠 방배정표</div>
           </div>
 
-          {/* —— 실선 그리드 테이블 —— */}
           <div ref={tableRef} className={styles.tableWrap}>
-            <table
-              className={styles.roomTable}
-              // ▼ 닉 최장 길이와 보이는 방 수를 CSS 변수로 전달(폭/최소폭 계산에 사용)
-              style={cssVars}
-            >
+            <table className={styles.roomTable} style={cssVars}>
               <thead>
                 <tr>
                   {roomNames.map(
@@ -271,13 +289,8 @@ export default function PlayerRoomTable() {
                     (_, i) =>
                       !hiddenRooms.has(i) && (
                         <React.Fragment key={`sub-${i}`}>
-                          {/* ▼ 닉 칼럼 헤더: 열 폭은 td/th가 들고, 텍스트는 가운데 */}
-                          <th className={`${styles.subTh} ${styles.titleCell} ${styles.nickCol}`}>
-                            닉네임
-                          </th>
-                          <th className={`${styles.subTh} ${styles.titleCell} ${styles.handHead}`}>
-                            G핸디
-                          </th>
+                          <th className={`${styles.subTh} ${styles.titleCell} ${styles.nickCol}`}>닉네임</th>
+                          <th className={`${styles.subTh} ${styles.titleCell} ${styles.handHead}`}>G핸디</th>
                         </React.Fragment>
                       )
                   )}
@@ -285,13 +298,12 @@ export default function PlayerRoomTable() {
               </thead>
 
               <tbody>
-                {[0, 1, 2, 3].map((r) => (
+                {[0,1,2,3].map((r) => (
                   <tr key={`r-${r}`}>
                     {roomNames.map(
                       (_, c) =>
                         !hiddenRooms.has(c) && (
                           <React.Fragment key={`c-${c}`}>
-                            {/* ▼ 닉 칼럼: 셀(td)에 폭, span은 width:100% + text-align:center */}
                             <td className={`${styles.td} ${styles.nickCell}`}>
                               <span className={styles.nick}>
                                 {byRoom[c] && byRoom[c][r]?.nickname ? byRoom[c][r].nickname : ''}
@@ -315,9 +327,7 @@ export default function PlayerRoomTable() {
                     (_, i) =>
                       !hiddenRooms.has(i) && (
                         <React.Fragment key={`t-${i}`}>
-                          <td className={`${styles.td} ${styles.totalLabel} ${styles.nickCell}`}>
-                            합계
-                          </td>
+                          <td className={`${styles.td} ${styles.totalLabel} ${styles.nickCell}`}>합계</td>
                           <td className={`${styles.td} ${styles.totalValue}`}>
                             {Number.isFinite(roomHandiSums[i]) ? roomHandiSums[i] : 0}
                           </td>
@@ -329,26 +339,33 @@ export default function PlayerRoomTable() {
             </table>
           </div>
 
-          {/* 카드 우하단: JPG=이전톤(회색), PDF=다음톤(블루) — 네비와 독립 */}
           <div className={styles.cardFooterRight}>
-            <button className={`${styles.dlBtn} ${styles.btnPrev}`} onClick={() => saveAs('jpg')}>
-              JPG로 저장
-            </button>
-            <button className={`${styles.dlBtn} ${styles.btnNext}`} onClick={() => saveAs('pdf')}>
-              PDF로 저장
-            </button>
+            <button className={`${styles.dlBtn} ${styles.btnPrev}`} onClick={() => saveAs('jpg')}>JPG로 저장</button>
+            <button className={`${styles.dlBtn} ${styles.btnNext}`} onClick={() => saveAs('pdf')}>PDF로 저장</button>
           </div>
         </div>
       </div>
 
-      {/* 하단 고정 네비 — STEP3와 동일(좌우 꽉 차게, 아이콘 탭 위) */}
       <div className={styles.footerNav}>
-        <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={() => navigate(-1)}>
+        <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={() => navigate(`/player/home/${paramId}/1`)}>
           ← 이전
         </button>
         <button
           className={`${styles.navBtn} ${styles.navNext}`}
-          onClick={() => navigate(`/player/home/${paramId}/3`)}
+          onClick={() => {
+            try {
+              const cands = [
+                eventData?.myRoom,
+                localStorage.getItem(`player.currentRoom:${paramId}`),
+                localStorage.getItem('player.currentRoom'),
+              ];
+              const roomNo = cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
+              if (Number.isFinite(roomNo)) {
+                localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo));
+              }
+            } catch {}
+            navigate(`/player/home/${paramId}/3`);
+          }}
         >
           다음 →
         </button>

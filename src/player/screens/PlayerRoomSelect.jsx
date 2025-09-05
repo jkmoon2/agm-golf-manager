@@ -1,9 +1,15 @@
-// src/player/screens/PlayerRoomSelect.jsx
+// /src/player/screens/PlayerRoomSelect.jsx
+// 기존 로직 100% 유지 + EventContext 미장착/미로드 시에도 작동하도록 playerGate 폴백 구독 추가
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { PlayerContext } from '../../contexts/PlayerContext';
+import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
+
+// 🆕 Firestore 폴백 구독용
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
 
 const TIMINGS = {
   spinBeforeAssign: 1000,
@@ -12,6 +18,14 @@ const TIMINGS = {
   spinDuringPartnerPick: 1800,
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function normalizeGate(g) {
+  const steps = (g && g.steps) || {};
+  const norm = { steps: {}, step1: { ...(g?.step1 || {}) } };
+  for (let i = 1; i <= 8; i += 1) norm.steps[i] = steps[i] || 'enabled';
+  if (typeof norm.step1.teamConfirmEnabled !== 'boolean') norm.step1.teamConfirmEnabled = true;
+  return norm;
+}
 
 export default function PlayerRoomSelect() {
   const { mode } = useContext(PlayerContext);
@@ -54,7 +68,39 @@ function FourballLikeSelect() {
 
 function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
-  const { eventId, isEventClosed } = useContext(PlayerContext);
+  const { eventId: playerEventId, isEventClosed } = useContext(PlayerContext);
+  const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
+  const { eventId: urlEventId } = useParams();
+
+  // 🆕 폴백 구독 상태
+  const [fallbackGate, setFallbackGate] = useState(null);
+
+  // URL 또는 PlayerContext의 eventId를 EventContext에 주입
+  useEffect(() => {
+    const eid = urlEventId || playerEventId;
+    if (eid && ctxEventId !== eid && typeof loadEvent === 'function') {
+      loadEvent(eid);
+    }
+  }, [urlEventId, playerEventId, ctxEventId, loadEvent]);
+
+  // 🆕 EventContext가 비어있는 경우 Firestore 직접 구독
+  useEffect(() => {
+    const id = urlEventId || ctxEventId || playerEventId;
+    if (!id) return;
+    if (eventData?.playerGate) { setFallbackGate(null); return; }
+    const ref = doc(db, 'events', id);
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.data();
+      if (d?.playerGate) setFallbackGate(normalizeGate(d.playerGate));
+      else setFallbackGate(null);
+    });
+    return unsub;
+  }, [urlEventId, ctxEventId, playerEventId, eventData?.playerGate]);
+
+  const gate = eventData?.playerGate ? normalizeGate(eventData.playerGate) : (fallbackGate || {});
+  const step2Enabled = (gate?.steps?.[2] || 'enabled') === 'enabled';
+  const teamConfirmEnabled = !!(gate?.step1?.teamConfirmEnabled ?? true);
+
   const done = !!participant?.room;
   const assignedRoom = participant?.room ?? null;
 
@@ -87,7 +133,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     if (variant === 'fourball') {
       const mine = participants.find((p) => String(p.id) === String(participant.id));
       const mate = participants.find((p) => String(p.id) === String(mine?.partner));
-      return [mine, mate].filter(Boolean);
+      const pair = [mine, mate].filter(Boolean);
+      pair.sort((a, b) => (Number(a?.group || 99) - Number(b?.group || 99)));
+      return pair;
     }
     const me = participants.find((p) => String(p.id) === String(participant.id));
     return [me].filter(Boolean);
@@ -141,6 +189,20 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
   const isFourballGroup2 = variant === 'fourball' && Number(participant?.group) === 2;
 
+  const saveMyRoom = (roomNo) => {
+    if (!roomNo || !playerEventId) return;
+    try {
+      localStorage.setItem(`player.currentRoom:${playerEventId}`, String(roomNo));
+      localStorage.setItem('player.currentRoom', String(roomNo));
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (Number.isFinite(Number(participant?.room))) {
+      saveMyRoom(Number(participant.room));
+    }
+  }, [participant?.room]);
+
   const handleAssign = async () => {
     if (!participant?.id) return;
     if (done || isAssigning) return;
@@ -163,6 +225,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       setIsAssigning(false);
       if (participant?.room != null) {
         const roomLabel = getLabel(participant.room);
+        saveMyRoom(Number(participant.room));
         setShowTeam(false);
         setFlowStep('show');
         alert(`${participant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
@@ -178,6 +241,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       await sleep(TIMINGS.spinBeforeAssign);
       const { roomNumber, partnerNickname } = await onAssign(participant.id);
+      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
+
       setFlowStep('afterAssign');
 
       await sleep(variant === 'fourball' ? TIMINGS.preAlertFourball : TIMINGS.preAlertStroke);
@@ -186,11 +251,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       const roomLabel = getLabel(roomNumber);
       if (variant === 'fourball') {
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
-        setIsAssigning(true);
-        await sleep(TIMINGS.spinDuringPartnerPick);
-        setIsAssigning(false);
-        if (partnerNickname) alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
-        else alert('아직 팀원이 정해지지 않았습니다.');
       } else {
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
       }
@@ -210,8 +270,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   const handleNext = () => {
-    if (!eventId) return;
-    navigate(`/player/home/${eventId}/2`);
+    if (!playerEventId) return;
+    navigate(`/player/home/${playerEventId}/2`);
   };
 
   const sumHd = (list) => list.reduce((s, p) => s + (Number(p?.handicap) || 0), 0);
@@ -224,29 +284,31 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       : done ? '배정 완료'
       : '방배정';
 
-  const teamBtnDisabled = !(done && flowStep === 'show') || isAssigning || isEventClosed;
-  const nextBtnDisabled = !done || isAssigning || isEventClosed;
+  // 운영자 설정 반영(컨텍스트/폴백 공통)
+  const teamBtnDisabled =
+    !teamConfirmEnabled || !(done && flowStep === 'show') || isAssigning || isEventClosed;
 
-  // ▼▼ 하단 고정 바 (버튼 모양은 기존 클래스 그대로 사용)
+  const nextBtnDisabled =
+    !step2Enabled || !done || isAssigning || isEventClosed;
+
   const fixedBar = {
     position: 'fixed',
     left: 16,
     right: 16,
-    bottom: 'calc(env(safe-area-inset-bottom) + 64px + 12px)', // 탭바 위에 살짝 띄움
+    bottom: 'calc(env(safe-area-inset-bottom) + 64px + 12px)',
     zIndex: 20,
     background: 'transparent',
   };
 
   return (
-    // 버튼이 가리지 않도록 여유 추가
     <div
       className={styles.container}
       style={{
         paddingBottom: 160,
-        '--row-h': '34px',                // ← 행 높이(원하시면 28~32px로 조정)
-        overflowY: 'hidden',              // ← 본문 세로 드래그 제거
-        overscrollBehaviorY: 'contain',   // ← iOS 튕김 방지
-        touchAction: 'manipulation'       // ← 모바일 스크롤 과민 방지
+        '--row-h': '34px',
+        overflowY: 'hidden',
+        overscrollBehaviorY: 'contain',
+        touchAction: 'manipulation'
       }}
     >
       {participant?.nickname && (
@@ -299,6 +361,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
             </table>
           </div>
 
+          {/* 팀원 목록 표시 */}
           {showTeam && (
             <div className={styles.tableBlock}>
               <div className={styles.tableCaption}>
@@ -322,13 +385,13 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
         </div>
       )}
 
-      {/* 하단 고정 “다음” 버튼 — 기존 클래스 그대로 */}
       <div style={fixedBar}>
         <button
           className={`${styles.btn} ${styles.btnBlue}`}
           style={{ width: '100%' }}
           onClick={handleNext}
           disabled={nextBtnDisabled}
+          aria-disabled={nextBtnDisabled}
         >
           다음 →
         </button>

@@ -1,24 +1,446 @@
 // src/player/screens/PlayerResults.jsx
 
-import React, { useContext } from 'react';
-import { PlayerContext } from '../../contexts/PlayerContext';
-import StickyNavBar from '../components/StickyNavBar';
-import styles from './PlayerRoomSelect.module.css';
+import React, { useMemo, useRef, useEffect, useContext, useState } from 'react';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+
+import styles from './PlayerResults.module.css';
+
+import { StepContext as PlayerStepContext } from '../flows/StepFlow';
+import { EventContext } from '../../contexts/EventContext';
+
+const strlen = (s) => Array.from(String(s || '')).length;
+const MAX_PER_ROOM = 4;
+
+/* ★ 팀결과표 닉네임 칸 수동 폭(원하면 '200px' 등으로 바꾸세요. null이면 자동) */
+const TEAM_NICK_WIDTH = null;
+
+/** Admin publicView.hiddenRooms 보정(0/1 기반 자동판별 → index Set) */
+function normalizeHiddenRooms(pv, roomCount, viewKey) {
+  let arr = [];
+  if (pv && Array.isArray(pv.hiddenRooms)) {
+    arr = pv.hiddenRooms;
+  } else if (pv && pv[viewKey] && Array.isArray(pv[viewKey].hiddenRooms)) {
+    arr = pv[viewKey].hiddenRooms;
+  }
+  const nums = arr.map(Number).filter(Number.isFinite);
+  if (!nums.length) return new Set();
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const looksOneBased =
+    (min >= 1 && max <= roomCount) || nums.some(v => v === 1 || v === roomCount);
+  const idxs = looksOneBased ? nums.map(v => v - 1) : nums.slice();
+  const filtered = idxs.filter(i => i >= 0 && i < roomCount);
+  return new Set(filtered);
+}
+
+/** visibleMetrics 읽기(루트 우선 → 모드별 보조) */
+function readVisibleMetrics(pv, viewKey) {
+  const vmRoot = pv?.visibleMetrics || pv?.metrics;
+  if (vmRoot && (typeof vmRoot.score === 'boolean' || typeof vmRoot.banddang === 'boolean')) {
+    return {
+      score:    typeof vmRoot.score    === 'boolean' ? vmRoot.score    : true,
+      banddang: typeof vmRoot.banddang === 'boolean' ? vmRoot.banddang : true,
+    };
+  }
+  const vmMode = pv?.[viewKey]?.visibleMetrics || pv?.[viewKey]?.metrics || {};
+  return {
+    score:    typeof vmMode.score    === 'boolean' ? vmMode.score    : true,
+    banddang: typeof vmMode.banddang === 'boolean' ? vmMode.banddang : true,
+  };
+}
+
+/** AGM포볼 방 내부 정렬(0,1=A팀 / 2,3=B팀) */
+function orderRoomFourball(roomArr = []) {
+  const slot = [null, null, null, null];
+  const used = new Set();
+
+  const pairs = [];
+  roomArr
+    .filter(p => Number(p?.group) === 1)
+    .forEach(p1 => {
+      if (used.has(p1?.id)) return;
+      const partner = roomArr.find(x => String(x?.id) === String(p1?.partner));
+      if (partner && !used.has(partner?.id)) {
+        pairs.push([p1, partner]);
+        used.add(p1?.id); used.add(partner?.id);
+      }
+    });
+
+  pairs.forEach((pair, idx) => {
+    if (idx === 0) { slot[0] = pair[0]; slot[1] = pair[1]; }
+    else if (idx === 1) { slot[2] = pair[0]; slot[3] = pair[1]; }
+  });
+
+  roomArr.forEach(p => {
+    if (!used.has(p?.id)) {
+      const empty = slot.findIndex(v => v === null);
+      if (empty >= 0) slot[empty] = p;
+      used.add(p?.id);
+    }
+  });
+
+  return slot.map(p => p || { nickname: '', handicap: 0, score: 0 });
+}
 
 export default function PlayerResults() {
-  const { eventId } = useContext(PlayerContext);
+  const { goPrev, goNext } = useContext(PlayerStepContext) || {};
+  const { eventData } = useContext(EventContext) || {};
+
+  const mode         = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
+  const roomCount    = eventData?.roomCount || 0;
+  const roomNames    = eventData?.roomNames || [];
+  const participants = Array.isArray(eventData?.participants) ? eventData.participants : [];
+
+  // 관리자 선택 복원(오직 Firestore 기준)
+  const [hiddenRooms, setHiddenRooms] = useState(new Set());
+  const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
+
+  useEffect(() => {
+    const pv = eventData?.publicView || {};
+    setHiddenRooms(normalizeHiddenRooms(pv, roomCount, mode));
+    setVisibleMetrics(readVisibleMetrics(pv, mode));
+  }, [eventData?.publicView, roomCount, mode]);
+
+  /* 헤더 */
+  const headers = useMemo(() =>
+    Array.from({ length: roomCount }, (_, i) => (roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`))
+  , [roomCount, roomNames]);
+
+  /* 방별 참가자 */
+  const byRoom = useMemo(() => {
+    const arr = Array.from({ length: roomCount }, () => []);
+    (participants || []).forEach(p => {
+      if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
+        arr[p.room - 1].push(p);
+      }
+    });
+    return arr;
+  }, [participants, roomCount]);
+
+  /* 최장 닉네임 길이 → CSS 변수로 */
+  const maxNickCh = useMemo(() => {
+    let m = 0;
+    (participants || []).forEach(p => { m = Math.max(m, strlen(p.nickname)); });
+    return Math.max(6, m);
+  }, [participants]);
+
+  /* 보이는 방 개수 */
+  const visibleCols = useMemo(() => {
+    let cnt = 0;
+    for (let i = 0; i < roomCount; i++) if (!hiddenRooms.has(i)) cnt++;
+    return Math.max(1, cnt);
+  }, [roomCount, hiddenRooms]);
+
+  /* ── 방 내부 정렬 + 최종결과 계산 ── */
+  const resultByRoom = useMemo(() => {
+    return byRoom.map(roomArr => {
+      const ordered = (mode === 'fourball')
+        ? orderRoomFourball(roomArr)
+        : Array.from({ length: MAX_PER_ROOM }, (_, i) => roomArr[i] || { nickname: '', handicap: 0, score: 0 });
+
+      let maxIdx = 0, maxVal = -Infinity;
+      ordered.forEach((p, i) => {
+        const sc = Number(p.score || 0);
+        if (sc > maxVal) { maxVal = sc; maxIdx = i; }
+      });
+
+      let sumHd = 0, sumSc = 0, sumBd = 0, sumRs = 0;
+      const detail = ordered.map((p, i) => {
+        const hd = Number(p.handicap || 0);
+        const sc = Number(p.score    || 0);
+        const bd = (i === maxIdx) ? Math.floor(sc / 2) : sc;
+        const used = visibleMetrics.banddang ? bd : sc;
+        const rs = used - hd;
+        sumHd += hd; sumSc += sc; sumBd += bd; sumRs += rs;
+        return { ...p, score: sc, banddang: bd, result: rs };
+      });
+
+      return {
+        detail,
+        sumHandicap: sumHd,
+        sumScore:    sumSc,
+        sumBanddang: sumBd,
+        sumResult:   sumRs
+      };
+    });
+  }, [byRoom, visibleMetrics.banddang, mode]);
+
+  /* 방별 순위 */
+  const rankMap = useMemo(() => {
+    const arr = resultByRoom
+      .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
+      .filter(x => !hiddenRooms.has(x.idx))
+      .sort((a, b) => a.tot - b.tot || a.hd - b.hd);
+    return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
+  }, [resultByRoom, hiddenRooms]);
+
+  /* 📋 팀결과표(포볼 전용) */
+  const teamsByRoom = useMemo(() => {
+    if (mode !== 'fourball') return [];
+    const list = [];
+    resultByRoom.forEach((room, roomIdx) => {
+      const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀
+      const val = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
+      const teamA = { roomIdx, roomName: headers[roomIdx], teamIdx: 0, members: [p0, p1], sumResult: val(p0)+val(p1), sumHandicap: Number(p0?.handicap||0)+Number(p1?.handicap||0) };
+      const teamB = { roomIdx, roomName: headers[roomIdx], teamIdx: 1, members: [p2, p3], sumResult: val(p2)+val(p3), sumHandicap: Number(p2?.handicap||0)+Number(p3?.handicap||0) };
+      list.push(teamA, teamB);
+    });
+    return list;
+  }, [resultByRoom, headers, mode]);
+
+  const teamRankMap = useMemo(() => {
+    const vis = teamsByRoom.filter(t => !hiddenRooms.has(t.roomIdx));
+    vis.sort((a,b) => (a.sumResult - b.sumResult) || (a.sumHandicap - b.sumHandicap));
+    const map = {};
+    vis.forEach((t, i) => { map[`${t.roomIdx}:${t.teamIdx}`] = i + 1; });
+    return map;
+  }, [teamsByRoom, hiddenRooms]);
+
+  const resultRef = useRef(null);
+  const teamRef   = useRef(null);
+
+  /* 📸 캡처 저장(JPG/PDF)
+     - JPG: 현재 화면 캔버스를 그대로 저장
+     - PDF: 캔버스 픽셀 크기와 동일한 페이지를 만들어 "화면과 100% 동일"하게 저장  */
+  const captureAndSave = async (ref, file, type='jpg') => {
+    const el = ref.current; if (!el) return;
+    const ovr = el.style.overflow, ow = el.style.width;
+
+    // 렌더 영역을 전체로 넓혀 완전 캡처
+    el.style.overflow  = 'visible';
+    el.style.width     = `${el.scrollWidth}px`;
+    el.scrollLeft = 0; el.scrollTop = 0;
+
+    const canvas = await html2canvas(el, {
+      scrollX: 0, scrollY: 0,
+      width: el.scrollWidth, height: el.scrollHeight,
+      windowWidth: el.scrollWidth, windowHeight: el.scrollHeight,
+      backgroundColor: null,
+      scale: window.devicePixelRatio || 2
+    });
+
+    // 원래 스타일 복원
+    el.style.overflow = ovr; el.style.width = ow;
+
+    if (type === 'jpg') {
+      const a = document.createElement('a');
+      a.download = `${file}.jpg`;
+      a.href = canvas.toDataURL('image/jpeg', 0.92);
+      a.click();
+      return;
+    }
+
+    // ✅ PDF를 "JPG와 완전히 동일"하게 만들기
+    // 1) 페이지 단위를 'px'로 고정
+    // 2) 페이지 크기를 캔버스 픽셀 크기와 동일하게 설정
+    // 3) (0,0) 위치에 원본 크기로 addImage
+    const imgData = canvas.toDataURL('image/png');
+    const orientation = canvas.width >= canvas.height ? 'landscape' : 'portrait';
+    const pdf = new jsPDF({
+      orientation,
+      unit: 'px',
+      format: [canvas.width, canvas.height],
+      compress: true
+    });
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height, undefined, 'FAST');
+    pdf.save(`${file}.pdf`);
+  };
+
+  if (!roomCount) return <div className={styles.empty}>표시할 데이터가 없습니다.</div>;
+
+  const metricsPerRoom = 2 + (visibleMetrics.score ? 1 : 0) + (visibleMetrics.banddang ? 1 : 0);
 
   return (
-    <div className={styles.container} style={{ paddingBottom: 160 }}>
-      {/* 기존 본문 UI가 있다면 여기에 그대로 렌더 */}
-      <div className={styles.notice} style={{ marginTop: 12 }}>
-        결과 화면입니다. (기존 구현이 있다면 그대로 렌더)
+    <div
+      className={styles.page}
+      style={{
+        '--nick-ch': maxNickCh,
+        '--cols':    visibleCols,
+        ...(TEAM_NICK_WIDTH ? { ['--team-nick-w']: TEAM_NICK_WIDTH } : {})
+      }}
+    >
+      <div className={styles.content}>
+        {/* 📊 최종결과표 */}
+        <div className={styles.card} style={{ marginTop: 4 }}>
+          <div className={styles.cardHeader}>
+            <div className={styles.cardTitle}>📊 최종결과표</div>
+          </div>
+
+          <div ref={resultRef} className={styles.tableWrap}>
+            <table
+              className={styles.roomTable}
+              style={{ minWidth: `calc(var(--cols) * ( var(--nick-w) + ${metricsPerRoom} * var(--metric-w) + 12px ))` }}
+            >
+              <colgroup>
+                {headers.map((_, i) => !hiddenRooms.has(i) && (
+                  <React.Fragment key={`colgrp-${i}`}>
+                    <col style={{ width: 'var(--nick-w)' }} />
+                    <col style={{ width: 'var(--metric-w)' }} />
+                    {visibleMetrics.score    && <col style={{ width: 'var(--metric-w)' }} />}
+                    {visibleMetrics.banddang && <col style={{ width: 'var(--metric-w)' }} />}
+                    <col style={{ width: 'var(--metric-w)' }} />
+                  </React.Fragment>
+                ))}
+              </colgroup>
+
+              <thead>
+                <tr>
+                  {headers.map((h, i) => !hiddenRooms.has(i) && (
+                    <th key={`res-h-${i}`} colSpan={2 + (visibleMetrics.score?1:0) + (visibleMetrics.banddang?1:0) + 1} className={styles.th}>{h}</th>
+                  ))}
+                </tr>
+                <tr>
+                  {headers.map((_, i) => !hiddenRooms.has(i) && (
+                    <React.Fragment key={`res-sub-${i}`}>
+                      <th className={`${styles.subTh} ${styles.nickCol}`}>닉네임</th>
+                      {/* ⬇ G핸디만 별도 폰트 크기 조절 — --ghead-fz 로 변경하세요 */}
+                      <th className={`${styles.subTh} ${styles.metricCol} ${styles.gHead}`}>G핸디</th>
+                      <th className={`${styles.subTh} ${styles.metricCol}`}>점수</th>
+                      {visibleMetrics.banddang && <th className={`${styles.subTh} ${styles.metricCol}`}>반땅</th>}
+                      <th className={`${styles.subTh} ${styles.metricCol}`}>결과</th>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody>
+                {Array.from({ length: MAX_PER_ROOM }).map((_, ri) => (
+                  <tr key={`res-row-${ri}`}>
+                    {resultByRoom.map((roomObj, ci) => !hiddenRooms.has(ci) && (
+                      <React.Fragment key={`res-${ci}-${ri}`}>
+                        <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{roomObj.detail[ri].nickname}</span></td>
+                        <td className={`${styles.td} ${styles.metricCol}`}>{roomObj.detail[ri].handicap}</td>
+                        {visibleMetrics.score    && <td className={`${styles.td} ${styles.metricCol}`}>{roomObj.detail[ri].score}</td>}
+                        {visibleMetrics.banddang && <td className={`${styles.td} ${styles.metricCol}`} style={{ color: '#0b61da' }}>{roomObj.detail[ri].banddang}</td>}
+                        <td className={`${styles.td} ${styles.metricCol}`} style={{ color:'red', fontWeight:600 }}>{roomObj.detail[ri].result}</td>
+                      </React.Fragment>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+
+              <tfoot>
+                <tr>
+                  {resultByRoom.map((roomObj, ci) => !hiddenRooms.has(ci) && (
+                    <React.Fragment key={`res-sum-${ci}`}>
+                      <td className={`${styles.td} ${styles.totalLabel}`}>합계</td>
+                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{roomObj.sumHandicap}</td>
+                      {visibleMetrics.score    && <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{roomObj.sumScore}</td>}
+                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: visibleMetrics.banddang ? '#0b61da' : 'black' }}>
+                        {visibleMetrics.banddang ? roomObj.sumBanddang : 0}
+                      </td>
+                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color:'#cc0000' }}>{roomObj.sumResult}</td>
+                    </React.Fragment>
+                  ))}
+                </tr>
+                <tr>
+                  {headers.map((_, i) => !hiddenRooms.has(i) && (
+                    <React.Fragment key={`res-rank-${i}`}>
+                      <td colSpan={metricsPerRoom} className={styles.td} />
+                      <td className={`${styles.td} ${styles.metricCol} ${styles.rankCell}`}>{rankMap[i]}등</td>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div className={styles.cardFooterRight}>
+            <button className={`${styles.dlBtn} ${styles.btnPrev}`} onClick={() => captureAndSave(resultRef, 'results', 'jpg')}>JPG로 저장</button>
+            <button className={`${styles.dlBtn} ${styles.btnNext}`} onClick={() => captureAndSave(resultRef, 'results', 'pdf')}>PDF로 저장</button>
+          </div>
+        </div>
+
+        {/* 📋 팀결과표(포볼 전용) — 방 셀 병합(rowSpan=4) */}
+        {mode === 'fourball' && (
+          <div className={styles.card} style={{ marginTop: 12 }}>
+            <div className={styles.cardHeader}><div className={styles.cardTitle}>📋 팀결과표</div></div>
+            <div ref={teamRef} className={styles.tableWrap}>
+              <table className={`${styles.roomTable} ${styles.teamTable}`}>
+                {/* ✅ 열폭 고정 — rowSpan과 무관하게 colgroup으로만 제어 */}
+                <colgroup>
+                  <col style={{ width: 'var(--team-room-w)' }} />
+                  <col style={{ width: 'var(--team-nick-w)' }} />
+                  <col style={{ width: 'var(--team-hand-w)' }} />   {/* G핸디 */}
+                  <col style={{ width: 'var(--team-score-w)' }} />  {/* 점수 */}
+                  <col style={{ width: 'var(--team-result-w)' }} />
+                  <col style={{ width: 'var(--team-total-w)' }} />
+                  <col style={{ width: 'var(--team-rank-w)' }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th className={styles.subTh}>방</th>
+                    <th className={styles.subTh}>닉네임</th>
+                    <th className={styles.subTh}>G핸디</th>
+                    <th className={styles.subTh}>점수</th>
+                    <th className={styles.subTh}>결과</th>
+                    <th className={styles.subTh}>총점</th>
+                    <th className={styles.subTh}>순위</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: roomCount }).map((_, roomIdx) => {
+                    if (hiddenRooms.has(roomIdx)) return null;
+                    const room = resultByRoom[roomIdx];
+                    if (!room) return null;
+                    const [p0, p1, p2, p3] = room.detail;
+                    const r = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
+                    const sumA = r(p0) + r(p1);
+                    const sumB = r(p2) + r(p3);
+                    const rankA = teamRankMap[`${roomIdx}:0`] || '-';
+                    const rankB = teamRankMap[`${roomIdx}:1`] || '-';
+
+                    return (
+                      <React.Fragment key={`team-room-${roomIdx}`}>
+                        <tr>
+                          <td className={styles.td} rowSpan={4}>{headers[roomIdx]}</td>
+                          <td className={styles.td}>{p0?.nickname || ''}</td>
+                          <td className={styles.td}>{p0?.handicap || 0}</td>
+                          <td className={styles.td} style={{ color:'#0b61da' }}>{p0?.score || 0}</td>
+                          <td className={styles.td} style={{ color:'red' }}>{r(p0)}</td>
+                          <td className={styles.td} rowSpan={2} style={{ fontWeight:700 }}>{sumA}</td>
+                          <td className={styles.td} rowSpan={2} style={{ background:'#fff8d1', color:'blue', fontWeight:700 }}>{rankA}등</td>
+                        </tr>
+                        <tr>
+                          <td className={styles.td}>{p1?.nickname || ''}</td>
+                          <td className={styles.td}>{p1?.handicap || 0}</td>
+                          <td className={styles.td} style={{ color:'#0b61da' }}>{p1?.score || 0}</td>
+                          <td className={styles.td} style={{ color:'red' }}>{r(p1)}</td>
+                        </tr>
+                        <tr>
+                          <td className={styles.td}>{p2?.nickname || ''}</td>
+                          <td className={styles.td}>{p2?.handicap || 0}</td>
+                          <td className={styles.td} style={{ color:'#0b61da' }}>{p2?.score || 0}</td>
+                          <td className={styles.td} style={{ color:'red' }}>{r(p2)}</td>
+                          <td className={styles.td} rowSpan={2} style={{ fontWeight:700 }}>{sumB}</td>
+                          <td className={styles.td} rowSpan={2} style={{ background:'#fff8d1', color:'blue', fontWeight:700 }}>{rankB}등</td>
+                        </tr>
+                        <tr>
+                          <td className={styles.td}>{p3?.nickname || ''}</td>
+                          <td className={styles.td}>{p3?.handicap || 0}</td>
+                          <td className={styles.td} style={{ color:'#0b61da' }}>{p3?.score || 0}</td>
+                          <td className={styles.td} style={{ color:'red' }}>{r(p3)}</td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className={styles.cardFooterRight}>
+              <button className={`${styles.dlBtn} ${styles.btnPrev}`} onClick={() => captureAndSave(teamRef, 'team-results', 'jpg')}>JPG로 저장</button>
+              <button className={`${styles.dlBtn} ${styles.btnNext}`} onClick={() => captureAndSave(teamRef, 'team-results', 'pdf')}>PDF로 저장</button>
+            </div>
+          </div>
+        )}
       </div>
 
-      <StickyNavBar
-        left={{ label: '← 이전', to: `/player/home/${eventId}/4`, variant: 'gray' }}
-        right={{ label: '다음 →', to: `/player/home/${eventId}/6`, variant: 'blue' }}
-      />
+      <div className={styles.footerNav}>
+        <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={goPrev}>← 이전</button>
+        <button className={`${styles.navBtn} ${styles.navNext}`} onClick={goNext}>다음 →</button>
+      </div>
     </div>
   );
 }

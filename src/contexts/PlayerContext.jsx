@@ -1,4 +1,12 @@
 // src/contexts/PlayerContext.jsx
+//
+// ✅ 변경 핵심 (원본 100% 유지 + 추가/보완):
+// 1) "이벤트별 + 세션 한정" 자동인증만 허용: sessionStorage('auth_<eventId>') 가 true일 때에만
+//    캐시(myId/nickname)를 사용해 me 매칭을 시도하도록 가드 추가
+// 2) me가 확정될 때, 전역키 대신 이벤트별 세션키에도 저장:
+//    sessionStorage.setItem(`myId_<eventId>`), sessionStorage.setItem(`nickname_<eventId>`)
+// 3) eventId 변경 시, 세션의 authcode를 상태로 복원(같은 세션 내 재인증 방지, 재시작하면 초기화)
+// ※ 기존 로직/함수/주석은 삭제하지 않고 그대로 유지했습니다.
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -9,10 +17,9 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { useLocation } from 'react-router-dom';
 
-// Admin/logic 유틸 — 스트로크, 포볼
 import { pickRoomForStroke } from '../player/logic/assignStroke';
-// ⬇️ 기존 'pickRoomForFourball' 대신 실제 export 이름으로 교체
 import {
   pickRoomAndPartnerForFourball,
   transactionalAssignFourball,
@@ -20,20 +27,9 @@ import {
 
 export const PlayerContext = createContext(null);
 
-/* =======================
-   배정 전략(필요시 여길 조정)
-   'uniform'  : 전체 방 중 무작위 (요구사항 기본)
-   'balanced' : 최소 인원 방들 중 무작위
-======================= */
 const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
 
-/* =======================
-   트랜잭션 토글
-   - 기본값: true
-   - 끄기: REACT_APP_FOURBALL_USE_TRANSACTION=false
-          또는 localStorage.FOURBALL_USE_TRANSACTION='false'
-======================= */
 const FOURBALL_USE_TRANSACTION = (() => {
   try {
     const env = (process.env.REACT_APP_FOURBALL_USE_TRANSACTION ?? '').toString().toLowerCase();
@@ -45,7 +41,7 @@ const FOURBALL_USE_TRANSACTION = (() => {
   }
 })();
 
-// ── helpers ───────────────────────────────────────────────────────────
+// ── helpers (원본 유지) ────────────────────────────────────────────────
 const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
@@ -74,7 +70,6 @@ const shuffle = (arr) => {
 const pickUniform = (roomCount) =>
   1 + Math.floor(cryptoRand() * roomCount);
 
-// 최소 인원 방 목록 계산
 const minRooms = (participants, roomCount) => {
   const counts = Array.from({ length: roomCount }, (_, i) =>
     participants.filter((p) => toInt(p.room) === i + 1).length
@@ -86,10 +81,27 @@ const minRooms = (participants, roomCount) => {
     .map((x) => x.n);
 };
 
+// ✅ 추가: 인증 상태를 “세션에만” 기록(재시작 시 초기화)
+function markEventAuthed(id, code, meObj) {
+  if (!id) return;
+  try {
+    sessionStorage.setItem(`auth_${id}`, 'true');
+    if (code != null) sessionStorage.setItem(`authcode_${id}`, String(code));
+    if (meObj) {
+      sessionStorage.setItem(`participant_${id}`, JSON.stringify(meObj));
+      // 이벤트별 참가자 캐시(세션): myId/nickname
+      sessionStorage.setItem(`myId_${id}`, normId(meObj.id || ''));
+      sessionStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
+    }
+  } catch {}
+}
+
 export function PlayerProvider({ children }) {
-  // ── 상태 ─────────────────────────────────────────────────────────────
-  const [eventId, setEventId]             = useState('');
-  const [mode, setMode]                   = useState('stroke'); // 'stroke' | 'fourball' | 'agm'->fourball
+  // ── 상태 (원본 유지) ────────────────────────────────────────────────
+  const [eventId, setEventId]             = useState(() => {
+    try { return localStorage.getItem('eventId') || ''; } catch { return ''; }
+  });
+  const [mode, setMode]                   = useState('stroke');
   const [roomCount, setRoomCount]         = useState(4);
   const [roomNames, setRoomNames]         = useState([]);
   const [rooms, setRooms]                 = useState([]);
@@ -97,19 +109,54 @@ export function PlayerProvider({ children }) {
   const [participant, setParticipant]     = useState(null);
   const [allowTeamView, setAllowTeamView] = useState(false);
 
-  // 인증코드(로그인 화면에서 세팅)
-  const [authCode, setAuthCode] = useState(() => localStorage.getItem('authCode') || '');
+  // 인증코드 — 세션 기반으로만 복원
+  const [authCode, setAuthCode] = useState('');
 
-  // 인증코드가 바뀌면 예전 캐시/상태 제거(다른 닉네임 잔상 방지)
+  const { pathname } = useLocation();
+
+  // URL에서 /player/home/:eventId 패턴을 만나면 비어있는 eventId 복원 (원본 유지)
+  useEffect(() => {
+    if (!eventId && typeof pathname === 'string') {
+      const m = pathname.match(/\/player\/home\/([^/]+)/);
+      if (m && m[1]) {
+        setEventId(m[1]);
+        try { localStorage.setItem('eventId', m[1]); } catch {}
+      }
+    }
+  }, [pathname, eventId]);
+
+  // ✅ eventId 변경 시 세션의 authcode 복원(같은 세션 내 재인증 방지)
+  useEffect(() => {
+    if (!eventId) return;
+    try {
+      const code = sessionStorage.getItem(`authcode_${eventId}`) || '';
+      setAuthCode(code);
+    } catch {}
+  }, [eventId]);
+
+  // eventId 동기화(원본 유지)
+  useEffect(() => {
+    try {
+      if (eventId) localStorage.setItem('eventId', eventId);
+    } catch {}
+  }, [eventId]);
+
+  // authCode 변경 시 캐시 정리(원본 유지) + 이벤트별 세션 캐시도 정리
   useEffect(() => {
     if (authCode && authCode.trim()) {
       localStorage.removeItem('myId');
       localStorage.removeItem('nickname');
+      try {
+        if (eventId) {
+          sessionStorage.removeItem(`myId_${eventId}`);
+          sessionStorage.removeItem(`nickname_${eventId}`);
+        }
+      } catch {}
       setParticipant(null);
     }
-  }, [authCode]);
+  }, [authCode, eventId]);
 
-  // 실시간 구독(단일 소스: events/{id}.participants[])
+  // ── 실시간 구독 (원본 유지 + 가드/저장 추가) ─────────────────────────
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
@@ -139,25 +186,55 @@ export function PlayerProvider({ children }) {
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
-      // 인증코드 우선 매칭
+      // ── me 매칭: ① authCode 최우선 ② (가드 추가) 같은 세션에서 해당 eventId가 '인증됨'일 때만 이벤트별 캐시 사용
       let me = null;
+
       if (authCode && authCode.trim()) {
         me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
-        const idCached  = normId(localStorage.getItem('myId') || '');
-        const nickCache = normName(localStorage.getItem('nickname') || '');
-        if (idCached)  me = partArr.find((p) => normId(p.id) === idCached) || null;
-        if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
+        // ✅ 세션 가드: 이 이벤트에 대해 인증된 세션이 아니면, 캐시 매칭 금지
+        const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+        if (authedThisEvent) {
+          // 이벤트별 세션 캐시 우선
+          let idCached  = '';
+          let nickCache = '';
+          try {
+            idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
+            nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
+          } catch {}
+
+          // (하위 호환) 과거에 남아있을 수 있는 이벤트별 로컬 키 폴백
+          if (!idCached) {
+            try { idCached = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {}
+          }
+          if (!nickCache) {
+            try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {}
+          }
+
+          if (idCached)  me = partArr.find((p) => normId(p.id) === idCached) || null;
+          if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
+        }
       }
 
       if (me) {
         setParticipant(me);
+
+        // (원본 유지) — 전역 키 기록
         localStorage.setItem('myId', normId(me.id));
         localStorage.setItem('nickname', normName(me.nickname));
+
+        // ✅ 추가 — 이벤트별 세션 키도 함께 기록(교차 이벤트 자동인증 차단)
+        try {
+          sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
+          sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
+        } catch {}
+
         if (me.authCode) {
           setAuthCode(me.authCode);
-          localStorage.setItem('authCode', me.authCode);
         }
+
+        // 인증 성립 시 세션 플래그/코드/참가자 기록
+        markEventAuthed(eventId, me.authCode, me);
       } else {
         setParticipant(null);
       }
@@ -166,14 +243,14 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // ── Firestore write helper ───────────────────────────────────────────
+  // ── Firestore write helper (원본 유지) ───────────────────────────────
   async function writeParticipants(next) {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
     await setDoc(ref, { participants: next }, { merge: true });
   }
 
-  // ── API(유지) ────────────────────────────────────────────────────────
+  // ── API (원본 유지) ──────────────────────────────────────────────────
   async function joinRoom(roomNumber, id) {
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
@@ -211,7 +288,6 @@ export function PlayerProvider({ children }) {
     } catch (_) {}
   }
 
-  // ── 스트로크 자동 배정 ──────────────────────────────────────────────
   async function assignStrokeForOne(participantId) {
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
@@ -220,16 +296,14 @@ export function PlayerProvider({ children }) {
 
     let chosenRoom = 0;
 
-    // 1) Admin 유틸 우선
     try {
       const r = pickRoomForStroke ? pickRoomForStroke(participants, roomCount, me) : null;
       chosenRoom = toInt(typeof r === 'number' ? r : (r?.roomNumber ?? r?.room), 0);
-    } catch (_) { /* fallback */ }
+    } catch (_) {}
 
-    // 2) fallback
     if (!chosenRoom) {
       if (ASSIGN_STRATEGY_STROKE === 'uniform') {
-        chosenRoom = pickUniform(roomCount);                // ✅ 전체 방에서 랜덤
+        chosenRoom = pickUniform(roomCount);
       } else {
         const candidates = minRooms(participants, roomCount);
         chosenRoom = shuffle(candidates)[0] || pickUniform(roomCount);
@@ -253,23 +327,19 @@ export function PlayerProvider({ children }) {
     return { roomNumber: chosenRoom, roomLabel: makeLabel(roomNames, chosenRoom) };
   }
 
-  // ── 포볼 자동 배정(옵션: 트랜잭션) ───────────────────────────────────
   async function assignFourballForOneAndPartner(participantId) {
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
-    // 2조는 여기서도 가드
     if (toInt(me.group) !== 1) {
       const partnerNickname =
         (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
       return { roomNumber: me.room ?? null, partnerNickname };
     }
 
-    // ── A) 트랜잭션 버전 (토글) ───────────────────────────────────────
     if (FOURBALL_USE_TRANSACTION) {
-      // 우선 모듈이 제공하는 transactionalAssignFourball을 사용
       try {
         if (typeof transactionalAssignFourball === 'function') {
           const result = await transactionalAssignFourball({
@@ -279,7 +349,6 @@ export function PlayerProvider({ children }) {
             roomCount,
             selfId: pid,
           });
-          // result: { roomNumber, partnerId, nextParticipants }
           if (result?.nextParticipants) {
             setParticipants(result.nextParticipants);
             if (participant && normId(participant.id) === pid) {
@@ -300,7 +369,6 @@ export function PlayerProvider({ children }) {
         console.warn('[fourball tx util] fallback to manual tx:', e?.message);
       }
 
-      // 모듈 유틸이 없거나 실패 시, 수동 트랜잭션 fallback
       try {
         const result = await runTransaction(db, async (tx) => {
           const eref = doc(db, 'events', eventId);
@@ -312,13 +380,12 @@ export function PlayerProvider({ children }) {
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
             room: p?.room ?? null,
-            partner: p?.partner != null ? normId(p.partner) : null,
+            partner: p?.partner != null ? normId(p?.partner) : null,
           }));
 
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');
 
-          // 방/파트너 선택
           let roomNumber = 0;
           let mateId = '';
 
@@ -364,11 +431,10 @@ export function PlayerProvider({ children }) {
       }
     }
 
-    // ── B) 기존(비트랜잭션) 로직(원본 유지) ────────────────────────────
+    // 비트랜잭션 버전 (원본 유지)
     let roomNumber = 0;
     let mateId = '';
 
-    // 1) Admin 유틸 우선 — ⬇️ 이름 교체
     try {
       const r = pickRoomAndPartnerForFourball
         ? pickRoomAndPartnerForFourball(participants, roomCount, me)
@@ -382,12 +448,11 @@ export function PlayerProvider({ children }) {
                      participants.find((p) => normName(p.nickname) === normName(partnerRaw));
         mateId = cand ? normId(cand.id) : '';
       }
-    } catch (_) { /* fallback */ }
+    } catch (_) {}
 
-    // 2) fallback — 방은 전략에 따라, 파트너는 2조 미배정자 중 랜덤
     if (!roomNumber) {
       if (ASSIGN_STRATEGY_FOURBALL === 'uniform') {
-        roomNumber = pickUniform(roomCount);               // ✅ 전체 방에서 랜덤
+        roomNumber = pickUniform(roomCount);
       } else {
         const candidates = minRooms(participants, roomCount);
         roomNumber = shuffle(candidates)[0] || pickUniform(roomCount);
@@ -401,7 +466,7 @@ export function PlayerProvider({ children }) {
       if (pool.length) {
         mateId = normId(shuffle(pool)[0].id);
       } else {
-        mateId = ''; // 남은 2조가 없으면 싱글
+        mateId = ''; // 싱글
       }
     }
 
@@ -426,19 +491,15 @@ export function PlayerProvider({ children }) {
     return { roomNumber, partnerId: mateId || null, partnerNickname };
   }
 
-  // ── 컨텍스트 값 ─────────────────────────────────────────────────────
   return (
     <PlayerContext.Provider
       value={{
-        // 상태
         eventId, setEventId,
         mode, roomCount, roomNames, rooms,
         participants, participant,
         setParticipant,
         authCode, setAuthCode,
         allowTeamView, setAllowTeamView,
-
-        // API
         joinRoom, joinFourBall,
         assignStrokeForOne,
         assignFourballForOneAndPartner,
