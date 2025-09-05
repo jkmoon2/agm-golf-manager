@@ -68,7 +68,7 @@ export function EventProvider({ children }) {
       setAllEvents(evts);
     });
     return unsub;
-    // 🆕 ESLint: db는 import된 안정적 인스턴스라 deps 불필요
+    // ESLint: db는 import된 안정적 싱글톤이므로 deps에 넣지 않음
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -89,7 +89,7 @@ export function EventProvider({ children }) {
       }
     );
     return unsub;
-    // 🆕 ESLint: db는 안정적. eventId만 의존
+    // ESLint: db는 안정적. eventId만 의존
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
@@ -217,7 +217,7 @@ export function EventProvider({ children }) {
         console.warn('[EventContext] unmount flush error:', e);
       }
     };
-    // 🆕 ESLint: db는 안정적. eventId만 의존
+    // ESLint: db는 안정적. eventId만 의존
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
@@ -256,7 +256,7 @@ export function EventProvider({ children }) {
 
   const addEventDef = async (def) => {
     const base = lastEventDataRef.current || {};
-    const list = Array.isArray(base.events) ? [...base.events] : [];
+    the list = Array.isArray(base.events) ? [...base.events] : [];
     list.push(def);
     await updateEventImmediate({ events: list });
   };
