@@ -1,0 +1,104 @@
+/* src/player/screens/PlayerScoreInput.module.css */
+
+:root{
+  --row-h: 32px;
+  --c-gray: #ddd;
+  --c-blue: #1e40ff;
+  --c-blue-border: #99c2ff;
+
+  /* STEP2 하단 버튼과 동일 값 */
+  --nav-font: 16px;
+  --nav-btn-py: .60rem;
+  --nav-btn-px: 1.0rem;
+
+  /* 화살표 미세조정 변수(필요 시만 조절) */
+  --arrow-font-size: 17px;
+  --arrow-gap: 6px;
+  --arrow-offset-y: 1px;
+  --arrow-glyph-left: '←';
+  --arrow-glyph-right:'→';
+}
+
+/* 본문/카드/표 */
+.page{ padding:12px; padding-bottom:160px; }
+.card{ background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); padding-bottom:12px; margin-top:4px; }
+.roomTitle{ font-weight:700; font-size:1.05rem; padding:10px 12px 0; }
+
+.tableWrap{ margin:8px 12px 10px; overflow-x:hidden; }
+.table{ width:100%; border-collapse:collapse; table-layout:fixed; }
+.th,.td{
+  border:1px solid var(--c-gray);
+  text-align:center;
+  padding:0;
+  height:var(--row-h);
+  line-height:var(--row-h);
+  vertical-align:middle;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.th{ background:#fafafa; font-weight:700; }
+
+/* 닉네임 중앙 정렬 */
+.nickCell{ text-align:center; }
+.nick{ display:inline-block; width:100%; padding:0; text-align:center; }
+
+/* 점수 입력칸 */
+.scoreTd{ padding:0 6px; overflow:visible; }
+.cellInput{
+  width:100%;
+  height:calc(var(--row-h) - 2px);
+  box-sizing:border-box;
+  border:1px solid var(--c-blue-border);
+  border-radius:6px;
+  background:#fff;
+  outline:none;
+  text-align:center;
+  font-size:15px;
+  color:var(--c-blue);
+}
+.cellInput::placeholder{ color:#9aa3ad; }
+
+/* 결과/합계 */
+.resultRed{ color:#cc0000; font-weight:600; }
+.totalLabel{ background:#fafafa; font-weight:600; }
+.totalBlack{ background:#fafafa; color:#111; font-weight:700; }
+.totalBlue{ background:#fafafa; color:var(--c-blue); font-weight:700; }
+.totalRed{ background:#fafafa; color:#cc0000; font-weight:700; }
+
+/* ───────── 하단 버튼(= STEP2와 동일 폭/두께) ───────── */
+.footerNav{
+  position:fixed; left:0; right:0;
+  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  display:flex; gap:12px; justify-content:space-between; align-items:center;
+  padding:10px 16px; background:#fff; border-top:none; z-index:20;
+}
+
+/* ✅ 여기 변경: flex:1 로 폭을 균등 분할하고, flex 정렬로 수직/수평 중앙 */
+.navBtn{
+  flex: 1;                               /* ← STEP2처럼 가로폭 ‘확대’ */
+  display: flex;                         /* ← 높이도 패딩 기준으로 안정 */
+  align-items: center;                   /* 수직 중앙 */
+  justify-content: center;               /* 수평 중앙 */
+
+  text-decoration:none;
+  font-size: var(--nav-font);
+  padding: var(--nav-btn-py) var(--nav-btn-px);  /* 두께/좌우 여백 = STEP2 */
+  border:1px solid #d0d7de; border-radius:10px;
+  font-weight:400; color:inherit; text-align:center;
+}
+
+/* 화살표는 의사요소 — 크기/간격/수직위치 변수로 미세조정 가능 */
+.navPrev{ background:#f3f4f6; color:#333; position:relative; }
+.navNext{ background:#eef4ff; color:#2f6feb; border-color:#bcd0ff; position:relative; }
+
+.navPrev::before{
+  content: var(--arrow-glyph-left);
+  font-size: var(--arrow-font-size);
+  margin-right: var(--arrow-gap);
+  position: relative; top: var(--arrow-offset-y);
+}
+.navNext::after{
+  content: var(--arrow-glyph-right);
+  font-size: var(--arrow-font-size);
+  margin-left: var(--arrow-gap);
+  position: relative; top: var(--arrow-offset-y);
+}

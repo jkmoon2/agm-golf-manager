@@ -2,11 +2,12 @@
 
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import HomeScreen  from './screens/HomeScreen';  // 10버튼 홈 (헤더는 MainLayout에서만)
-import Step0       from './screens/Step0';
-import StepFlow    from './flows/StepFlow';
-import Dashboard   from './screens/Dashboard';
-import Settings    from './screens/Settings';
+import HomeScreen   from './screens/HomeScreen';  // 10버튼 홈 (헤더는 MainLayout에서만)
+import Step0        from './screens/Step0';
+import StepFlow     from './flows/StepFlow';
+import Dashboard    from './screens/Dashboard';
+import Settings     from './screens/Settings';
+import EventManager from './screens/EventManager';
 
 export default function AdminApp() {
   return (
@@ -21,6 +22,9 @@ export default function AdminApp() {
       {/* 대시보드 / 설정 */}
       <Route path="dashboard" element={<Dashboard />} />
       <Route path="settings"  element={<Settings />} />
+
+      {/* ✅ 추가: 이벤트 생성/관리 */}
+      <Route path="events" element={<EventManager />} />
 
       {/* 기타 → 홈 */}
       <Route path="*" element={<Navigate to="" replace />} />

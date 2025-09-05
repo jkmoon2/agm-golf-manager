@@ -22,7 +22,7 @@ export default function HomeScreen() {
 
   const handleClick = num => {
     if (num === 0)        return nav('0');
-    if (num === 9)        return nav('dashboard');
+    if (num === 9)        return nav('events');
     if (!eventId) {
       alert('먼저 대회를 선택하거나 새 대회를 시작해주세요.');
       return;
@@ -53,11 +53,11 @@ export default function HomeScreen() {
           </button>
         ))}
 
-        {/* 임시 버튼 */}
+        {/* 이벤트 버튼 */}
         <button className={styles.card} onClick={() => handleClick(9)}>
-          <div className={styles.step}>#TEMP</div>
-          <div className={styles.title}>임시</div>
-          <div className={styles.desc}>추가 아이템 생성</div>
+          <div className={styles.step}>#EVENT</div>
+          <div className={styles.title}>이벤트</div>
+          <div className={styles.desc}>이벤트 생성/관리</div>
         </button>
       </div>
     </div>

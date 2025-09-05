@@ -1,0 +1,159 @@
+/* src/player/screens/PlayerResults.module.css */
+
+/* ******************************************************************
+   🔧 미세 조정 가이드 — 한 곳에서 전부 제어
+   [공통 표]
+   - 행 높이:                  --row-h
+   - 닉네임 최대 길이(ch):     --nick-ch    (JS에서 최장 닉네임 길이를 주입)
+   - 수치 칼럼 폭(핸디/점수/반땅/결과): --metric-w
+   - 표 폰트:                  --tbl-title-fz / --tbl-body-fz / --tbl-sum-fz
+   - 타이틀/합계 공통 배경색:   --sum-bg
+
+   [팀결과표 전용 폭]
+   - 방 칸:    --team-room-w
+   - 닉네임:   --team-nick-w
+   - G핸디:    --team-hand-w
+   - 점수:     --team-score-w
+   - 결과:     --team-result-w
+   - 총점:     --team-total-w
+   - 순위:     --team-rank-w
+
+   [G핸디 서브타이틀 폰트 크기 조절]
+   - --ghead-fz 변수를 조절하세요. (예: .page { --ghead-fz: 0.9rem; })
+   ****************************************************************** */
+
+.page{
+  --row-h: 32px;
+  --nick-ch: 10;          /* JS에서 주입됨 */
+  --cols: 4;
+
+  --metric-w: 40px;
+
+  --tbl-title-fz: 0.95rem;
+  --tbl-body-fz:  0.95rem;
+  --tbl-sum-fz:   0.95rem;
+
+  /* 닉네임 고정 폭: (최장닉+2)*1.2ch, 최소 120px */
+  --nick-w: max(calc((var(--nick-ch) + 2) * 1.2ch), 120px);
+  --nick-pad-x: 4px;
+
+  --sum-bg: #fafafa;
+
+  /* ─ 팀결과표 전용 칼럼 폭 ─ */
+  --team-room-w:   40px;           /* 방 */
+  --team-nick-w:   var(--nick-w);  /* 닉네임(기본: 최장 닉네임 기반) */
+  --team-hand-w:   40px;           /* G핸디 ← 이 값만 바꾸면 G핸디 폭이 바뀝니다 */
+  --team-score-w:  40px;           /* 점수 */
+  --team-result-w: 40px;           /* 결과 */
+  --team-total-w:  43px;           /* 총점 */
+  --team-rank-w:   43px;           /* 순위 */
+
+  /* G핸디 서브타이틀 전용 폰트 크기 */
+  --ghead-fz: var(--tbl-title-fz);
+
+  display:flex; flex-direction:column; min-height:100vh;
+}
+
+.content{ padding:12px; padding-bottom:148px; }
+
+.card{ background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); border:1px solid #e5e7eb; }
+.cardHeader{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid #eee; }
+.cardTitle{ font-weight:700; }
+
+/* ====== 표 컨테이너 ====== */
+.tableWrap{ overflow-x:auto; margin:12px; }
+
+.roomTable{
+  border-collapse: collapse;
+  width: max-content;
+  table-layout: fixed;
+  /* 최소 가로폭(보이는 방 수 기준) */
+  min-width: calc(var(--cols) * ( var(--nick-w) + 3 * var(--metric-w) + 12px ));
+  background:#fff;
+}
+
+/* 공통 셀 */
+.th, .subTh, .td { border:1px solid #d0d7de; text-align:center; vertical-align:middle; }
+.th{
+  background:var(--sum-bg); font-weight:700; padding:.42rem 6px;
+  font-size:var(--tbl-title-fz); white-space:nowrap; line-height:1.1;
+}
+.subTh{
+  background:var(--sum-bg); font-weight:600; padding:.36rem 4px;
+  font-size:var(--tbl-title-fz); white-space:nowrap; line-height:1.1;
+}
+.td{ padding:0; height:var(--row-h); font-size:var(--tbl-body-fz); }
+
+/* 닉 칼럼 */
+.nickCol{ min-width: var(--nick-w); }
+.nickCell{ min-width: var(--nick-w); width: var(--nick-w); max-width: var(--nick-w); }
+.nick{
+  display:block; width: var(--nick-w); margin: 0 auto;
+  white-space:nowrap; overflow:visible; text-overflow:clip;
+  padding: 0 var(--nick-pad-x); text-align:center;
+}
+
+/* 수치 칼럼 공통 폭 */
+.metricCol{
+  min-width: var(--metric-w); width: var(--metric-w); max-width: var(--metric-w);
+  text-align:center; white-space:nowrap;
+}
+
+/* G핸디 서브타이틀 전용(별도 크기 조절) */
+.gHead{
+  font-size: var(--ghead-fz);
+  line-height: 1.05;
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+}
+
+/* 합계/순위 */
+.totalLabel{ background:var(--sum-bg); font-weight:600; font-size:var(--tbl-sum-fz); }
+.totalValue{ background:var(--sum-bg); font-weight:700; font-size:var(--tbl-sum-fz); color:#0f172a; }
+.rankCell{ background:#fff8d1; color:blue; font-weight:700; }
+
+/* ─ 팀결과표 전용: 열 폭 제어 ─
+   ✔ 핵심: rowSpan 때문에 tbody에서 nth-child 인덱스가 흔들립니다.
+     → tbody의 폭 지정은 제거하고, <colgroup>만으로 열 폭을 고정합니다. */
+.teamTable{
+  table-layout: fixed;
+  width: auto;          /* roomTable의 max-content 덮어쓰기 */
+  min-width: unset;     /* 최소 폭 강제 해제 (팀 전용 변수만 반영) */
+}
+.teamTable thead tr > th,
+.teamTable tbody tr > td{
+  overflow: hidden;           /* 내용이 칸을 밀어내지 못하게 */
+  text-overflow: ellipsis;
+}
+
+/* 헤더(th)에는 열폭을 명시(시각적으로도 맞추기) */
+.teamTable thead tr > th:nth-child(1){ min-width:var(--team-room-w);   width:var(--team-room-w);   max-width:var(--team-room-w); }
+.teamTable thead tr > th:nth-child(2){ min-width:var(--team-nick-w);   width:var(--team-nick-w);   max-width:var(--team-nick-w); }
+.teamTable thead tr > th:nth-child(3){ min-width:var(--team-hand-w);   width:var(--team-hand-w);   max-width:var(--team-hand-w); }
+.teamTable thead tr > th:nth-child(4){ min-width:var(--team-score-w);  width:var(--team-score-w);  max-width:var(--team-score-w); }
+.teamTable thead tr > th:nth-child(5){ min-width:var(--team-result-w); width:var(--team-result-w); max-width:var(--team-result-w); }
+.teamTable thead tr > th:nth-child(6){ min-width:var(--team-total-w);  width:var(--team-total-w);  max-width:var(--team-total-w); }
+.teamTable thead tr > th:nth-child(7){ min-width:var(--team-rank-w);   width:var(--team-rank-w);   max-width:var(--team-rank-w); }
+
+/* tbody는 폭을 colgroup에 전적으로 맡긴다(충돌 제거) */
+.teamTable tbody tr > td{ width:auto; min-width:0; max-width:none; }
+
+/* 다운로드 버튼 */
+.cardFooterRight{ display:flex; justify-content:flex-end; gap:10px; padding:8px 12px 12px; border-top:1px solid #f1f3f5; }
+.dlBtn{ padding:.52rem .9rem; font-size:14px; border-radius:10px; font-weight:400; border:1px solid #d0d7de; background:#f8fafc; color:#334155; }
+.btnPrev{ background:#f3f4f6; color:#333; }
+.btnNext{ background:#eef4ff; color:#2f6feb; border:1px solid #bcd0ff; }
+
+/* 하단 고정 네비 */
+.footerNav{
+  position:fixed; left:0; right:0;
+  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  display:flex; gap:12px; justify-content:space-between; align-items:center;
+  padding:10px 16px; background:#fff;
+}
+.navBtn{ flex:1; min-width:0; padding:.60rem 1.0rem; font-size:16px; border-radius:10px; font-weight:400; border:1px solid #d0d7de; }
+.navPrev{ background:#f3f4f6; color:#333; }
+.navNext{ background:#eef4ff; color:#2f6feb; border-color:#bcd0ff; }
+
+/* 빈 상태 */
+.empty{ padding:24px 16px; text-align:center; color:#666; }

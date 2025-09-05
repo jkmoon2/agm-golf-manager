@@ -1,0 +1,265 @@
+/* /src/screens/EventManager.module.css */
+/* 기존 스타일을 보존하면서, 컨트롤 바(grid)와 소형 셀렉트, 범위편집기 오버플로우 방지만 추가/보완했습니다. */
+
+/* ===== 공통 레이아웃 ===== */
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.scrollArea {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px;
+}
+.grid {
+  display: grid;
+  gap: 12px;
+}
+
+/* ===== 카드 ===== */
+.card,
+.cardWide {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  overflow: hidden;              /* ← 내부 요소가 옆으로 밀려도 잘림 방지 */
+}
+.cardTitle {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 10px 0;
+}
+.empty {
+  color: #6b7280;
+  font-size: 14px;
+  padding: 12px 8px;
+}
+
+/* ===== 폼 ===== */
+.form { display: grid; gap: 10px; }
+.row  { display: flex; gap: 8px; align-items: center; }
+.rowJustify { justify-content: space-between; }  /* ← "대회 선택/연동" 한 줄 꽉 차게 */
+.label { display: grid; gap: 6px; font-size: 13px; }
+.labelGrow { display: grid; gap: 6px; flex: 1 1 auto; }
+.muted { color: #6b7280; font-size: 13px; }
+
+.select,
+.selectInline {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  min-width: 0;                  /* ← 컨테이너가 좁아져도 늘어나지 않도록 */
+}
+.selectGrow { width: 100%; }     /* ← 가로를 가능한 많이 차지하도록 */
+.input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+  min-width: 0;                  /* ← input 내용으로 넘침 방지 */
+}
+.textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: #fff;
+  box-sizing: border-box;        /* ← 100% 너비 계산 안정화 */
+}
+
+.btn,
+.btnPrimary,
+.btnDanger {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  font-weight: 600;
+  white-space: nowrap;           /* ← 버튼 줄바꿈 방지 */
+}
+.btn:hover { background:#f3f4f6; }
+.btnPrimary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+.btnPrimary:hover { background:#1e40af; }
+.btnDanger {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #fff;
+}
+.btnDanger:hover { background:#fef2f2; }
+
+/* ===== 범위 편집기 ===== */
+.rangeBox {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px;
+  background: #fafafa;
+  width: 100%;                   /* ← 카드 안에서 꽉 차게 */
+  box-sizing: border-box;
+}
+.rangeHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.rangeTable { 
+  display: grid; 
+  gap: 6px; 
+  width: 100%;                  /* ← 테이블 래퍼도 100% */
+  box-sizing: border-box;
+}
+.rangeRowHead {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 60px; /* ← 버튼폭 60px 고정 */
+  gap: 6px;
+  color: #6b7280;
+  font-size: 12px;
+}
+.rangeRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 60px; /* ← 입력 3개 + 삭제버튼 */
+  gap: 6px;
+}
+.center { text-align: center; }
+
+/* ===== JSON 접힘/펼침 ===== */
+.collapse { display: grid; gap: 6px; }
+.collapseBtn {
+  height: 32px;
+  border-radius: 8px;
+  border: 1px dashed #c7cdd8;
+  background: #f8fafc;
+  font-size: 13px;
+}
+
+/* ===== 목록(이벤트 리스트) ===== */
+.listItem {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+.listHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.listTitle { font-size: 15px; font-weight: 700; }
+.headRight { display:flex; align-items:center; gap:8px; }
+.badgeOn,
+.badgeOff {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid;
+}
+.badgeOn { color:#10b981; border-color:#a7f3d0; background:#ecfdf5; }
+.badgeOff{ color:#6b7280; border-color:#d1d5db; background:#f9fafb; }
+
+.moreWrap { position: relative; }
+.moreBtn {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+}
+.menu {
+  position: absolute;
+  right: 0; top: 36px;
+  min-width: 120px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
+  border-radius: 10px;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  z-index: 10;
+}
+.menu > button {
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+.menu > button:hover { background:#f9fafb; }
+
+/* 상태 메타 한 줄 */
+.listMetaLine {
+  margin-top: 6px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+/* ===== 가져오기 리스트 ===== */
+.importList {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px;
+  background: #fafafa;
+  display: grid;
+  gap: 6px;
+}
+.importItem {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+.importTitle { font-weight: 600; }
+.meta { color:#6b7280; }
+
+/* ===== 미리보기 컨트롤 바(중요) ===== */
+/* flex → grid(1fr auto auto). 오른쪽 셀렉트가 잘리지 않도록 고정폭 제공 */
+.controlsRow{
+  display: grid;
+  grid-template-columns: 1fr auto auto;  /* 이벤트 선택은 가변, 나머지는 고정 */
+  column-gap: 6px;
+  align-items: center;
+}
+.selectInline{
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  min-width: 0;          /* grid 안에서 줄어들 수 있게 */
+  background: #fff;
+  font-size: 14px;
+}
+.selectGrow{ width: 100%; }              /* 첫 번째(이벤트) */
+.selectSmall{ width: 68px; padding: 0 6px; } /* 가운데/오른쪽(개인/방/팀, 오름/내림) */
+
+/* ===== 미리보기 리스트 ===== */
+.previewList {
+  margin: 10px 0 0 0;
+  padding: 0 0 0 22px;
+}
+.previewList li { display: flex; justify-content: space-between; padding: 2px 0; }
+.rank { color:#6b7280; margin-right: 6px; }
+.score { font-weight: 800; }
+.dim { color:#9ca3af; }
+
+/* ===== 편의 텍스트 ===== */
+.help { margin: 6px 0 0; font-size: 13px; color:#6b7280; }

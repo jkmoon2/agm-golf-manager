@@ -9,7 +9,10 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './EventSelectScreen.module.css';
 
 export default function EventSelectScreen() {
-  const { setEventId, setParticipant, setAuthCode } = useContext(PlayerContext);
+  // ✅ 방어적 비구조화: Provider 미장착 시에도 크래시 방지
+  const ctx = useContext(PlayerContext) || {};
+  const { setEventId, setParticipant, setAuthCode } = ctx;
+
   const [availableEvents, setAvailableEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const nav = useNavigate();
@@ -41,10 +44,13 @@ export default function EventSelectScreen() {
 
   const handleSelect = (id) => {
     // 컨텍스트/세션 복원(기존 로직 유지)
-    setEventId(id);
+    // ✅ 컨텍스트가 없을 수 있으므로 옵셔널 호출 + 로컬 스토리지 폴백
+    try { localStorage.setItem('eventId', id); } catch {}
+    setEventId?.(id);
+
     const savedPart = JSON.parse(sessionStorage.getItem(`participant_${id}`) || 'null');
-    setParticipant(savedPart);
-    setAuthCode(sessionStorage.getItem(`authcode_${id}`) || '');
+    setParticipant?.(savedPart);
+    setAuthCode?.(sessionStorage.getItem(`authcode_${id}`) || '');
 
     // 한 번 인증한 대회는 추가 인증 없이 바로 입장
     const isAuth = sessionStorage.getItem(`auth_${id}`) === 'true';

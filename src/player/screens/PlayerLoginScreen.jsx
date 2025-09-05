@@ -16,12 +16,28 @@ export default function PlayerLoginScreen() {
     setEventId,
     setAuthCode,
     setParticipant
-  } = useContext(PlayerContext);
+  } = useContext(PlayerContext) || {};
 
-  const nav                     = useNavigate();
+  const nav                       = useNavigate();
   const { eventId: routeEventId } = useParams();
 
-  // 이미 sessionStorage에 인증 기록이 있으면 바로 8버튼 메뉴로
+  // ✅ 진입 즉시: eventId 설정 + 같은 "세션"에서 이미 인증했다면 바로 홈으로 이동
+  useEffect(() => {
+    setEventId?.(routeEventId);
+    try {
+      const authed = sessionStorage.getItem(`auth_${routeEventId}`) === 'true';
+      if (authed) {
+        const code = sessionStorage.getItem(`authcode_${routeEventId}`) || '';
+        const partJson = sessionStorage.getItem(`participant_${routeEventId}`);
+        if (code) setAuthCode?.(code);
+        if (partJson) setParticipant?.(JSON.parse(partJson));
+        nav(`/player/home/${routeEventId}`, { replace: true });
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeEventId]);
+
+  // (보조) 컨텍스트가 이미 갖춰졌다면 홈으로
   useEffect(() => {
     const isAuth = sessionStorage.getItem(`auth_${routeEventId}`) === 'true';
     if (isAuth && ctxEventId === routeEventId && participant) {
@@ -33,7 +49,7 @@ export default function PlayerLoginScreen() {
     e.preventDefault();
     const auth = getAuth();
 
-    // 1) 익명 로그인
+    // 1) 익명 로그인(필요 시)
     if (!auth.currentUser) {
       try { await signInAnonymously(auth); }
       catch (err) { alert('익명 로그인 실패: ' + err.message); return; }
@@ -44,7 +60,7 @@ export default function PlayerLoginScreen() {
     try {
       const snap = await getDoc(doc(db, 'events', routeEventId));
       if (!snap.exists()) { alert('존재하지 않는 대회 ID입니다.'); return; }
-      part = snap.data().participants?.find(p => p.authCode === inputCode.trim());
+      part = snap.data().participants?.find(p => String(p.authCode) === inputCode.trim());
       if (!part) { alert('인증 코드가 일치하지 않습니다.'); return; }
     } catch (err) {
       console.error('로그인 중 오류', err);
@@ -53,16 +69,18 @@ export default function PlayerLoginScreen() {
     }
 
     // 3) 컨텍스트에 저장
-    setEventId(routeEventId);
-    setAuthCode(inputCode.trim());
-    setParticipant(part);
+    setEventId?.(routeEventId);
+    setAuthCode?.(inputCode.trim());
+    setParticipant?.(part);
 
-    // 4) sessionStorage에 기록
-    sessionStorage.setItem(`auth_${routeEventId}`, 'true');
-    sessionStorage.setItem(`participant_${routeEventId}`, JSON.stringify(part));
-    sessionStorage.setItem(`authcode_${routeEventId}`, inputCode.trim());
+    // 4) 인증 상태는 "세션"에만 기록(재시작하면 초기화됨) ←★ 핵심
+    try {
+      sessionStorage.setItem(`auth_${routeEventId}`, 'true');
+      sessionStorage.setItem(`participant_${routeEventId}`, JSON.stringify(part));
+      sessionStorage.setItem(`authcode_${routeEventId}`, inputCode.trim());
+    } catch {}
 
-    // 5) 8버튼 메뉴로 이동
+    // 5) 참가자 홈으로 이동
     nav(`/player/home/${routeEventId}`, { replace: true });
   };
 

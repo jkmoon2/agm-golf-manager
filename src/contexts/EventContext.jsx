@@ -1,4 +1,6 @@
-// src/contexts/EventContext.jsx
+// /src/contexts/EventContext.jsx
+
+// /src/contexts/EventContext.jsx
 
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import {
@@ -11,7 +13,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
-export const EventContext = createContext();
+// ✅ 기본값을 빈 객체로 지정(Provider 미장착 시 useContext가 {}를 반환)
+export const EventContext = createContext({});
 
 export function EventProvider({ children }) {
   const [allEvents, setAllEvents]   = useState([]);
@@ -39,6 +42,45 @@ export function EventProvider({ children }) {
   };
 
   // ────────────────────────────────────────────────────────────────
+  // 🆕 publicView 정규화: 과거 루트 값과 모드별 서브키(stroke/fourball) 공존 지원
+  //  - 기존 루트(publicView.hiddenRooms/score/banddang)는 보존(하위호환)
+  //  - 누락된 서브키만 기본값으로 채움(덮어쓰지 않음)
+  const normalizePublicView = (data) => {
+    const d  = data || {};
+    const pv = d.publicView || {};
+    const base = {
+      hiddenRooms: Array.isArray(pv.hiddenRooms) ? pv.hiddenRooms : [],
+      visibleMetrics: (pv.visibleMetrics && typeof pv.visibleMetrics === 'object')
+        ? pv.visibleMetrics
+        : {
+            score:    (typeof pv.score    === 'boolean' ? pv.score    : true),
+            banddang: (typeof pv.banddang === 'boolean' ? pv.banddang : true)
+          }
+    };
+    const stroke   = (pv.stroke   && typeof pv.stroke   === 'object') ? pv.stroke   : base;
+    const fourball = (pv.fourball && typeof pv.fourball === 'object') ? pv.fourball : base;
+    return { ...d, publicView: { ...pv, stroke, fourball } };
+  };
+
+  // 🆕 playerGate(참가자 홈 8버튼/STEP1 팀확인 제어) 기본값 & 정규화
+  const defaultPlayerGate = {
+    steps: { 1:'enabled',2:'enabled',3:'enabled',4:'enabled',5:'enabled',6:'enabled',7:'enabled',8:'enabled' },
+    step1: { teamConfirmEnabled: true }
+  };
+  const normalizePlayerGate = (data) => {
+    const d = data || {};
+    const g = d.playerGate || {};
+    const steps = g.steps || {};
+    const normSteps = {};
+    for (let i = 1; i <= 8; i += 1) {
+      normSteps[i] = steps[i] || 'enabled';
+    }
+    const step1 = { ...(g.step1 || {}) };
+    if (typeof step1.teamConfirmEnabled !== 'boolean') step1.teamConfirmEnabled = true;
+    return { ...d, playerGate: { steps: normSteps, step1 } };
+  };
+
+  // ────────────────────────────────────────────────────────────────
   // 전체 이벤트 구독
   useEffect(() => {
     const colRef = collection(db, 'events');
@@ -57,11 +99,13 @@ export function EventProvider({ children }) {
       docRef,
       { includeMetadataChanges: true },
       snap => {
-        // 로컬 pendingWrites는 무시 → 깜빡임/무한반복 방지
         if (snap.metadata.hasPendingWrites) return;
         const data = snap.data();
-        setEventData(data || null);
-        lastEventDataRef.current = data || null;
+        // 🆕 정규화 후 세팅(모드 간 충돌/누락 방지)
+        const withPV   = normalizePublicView(data || {});
+        const withGate = normalizePlayerGate(withPV);
+        setEventData(withGate);
+        lastEventDataRef.current = withGate;
       }
     );
     return unsub;
@@ -95,11 +139,20 @@ export function EventProvider({ children }) {
       dateStart,
       dateEnd,
       allowDuringPeriodOnly,
+      // ▶ 운영자 페이지(방배정표 선택/표시 옵션)를 참가자 쪽과 공유할 때 사용하는 저장소
+      //    루트 값(하위호환) + 모드별 서브키(stroke/fourball) 병행
       publicView: {
         hiddenRooms: [],
         score: true,
-        banddang: true
-      }
+        banddang: true,
+        stroke:   { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } },
+        fourball: { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } }
+      },
+      // 🆕 참가자 홈/스텝 게이트 기본값(전부 활성 + 팀확인 가능)
+      playerGate: defaultPlayerGate,
+      // 🆕 이벤트 정의 & 입력 저장소
+      events: [],          // [{id,title,template,params,target,rankOrder,enabled}, ...]
+      eventInputs: {}      // { [eventDefId]: { person:{[pid]:num}, room:{[r]:num}, team:{[key]:num} } }
     });
     return docRef.id;
   };
@@ -140,7 +193,7 @@ export function EventProvider({ children }) {
     });
   };
 
-  // 즉시 업데이트가 꼭 필요한 경우(디바운스 없이 바로)
+  // 즉시 업데이트
   const updateEventImmediate = async (updates, ifChanged = true) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
     const before = lastEventDataRef.current || {};
@@ -175,7 +228,7 @@ export function EventProvider({ children }) {
     }
   };
 
-  // ★ patch: unmount flush — 라우팅/언마운트 직전에 디바운스 큐를 즉시 기록
+  // ★ patch: unmount flush
   useEffect(() => {
     return () => {
       try {
@@ -192,52 +245,132 @@ export function EventProvider({ children }) {
         console.warn('[EventContext] unmount flush error:', e);
       }
     };
-  }, [eventId]);
+  }, [db, eventId]);
 
   // ────────────────────────────────────────────────────────────────
-  // publicView 편의 헬퍼
+  // publicView 편의 헬퍼(기존 유지) + 🆕 viewKey 지원
+  // - 기존: updatePublicView({ hiddenRooms:[3] })
+  // - 신규: updatePublicView({ visibleMetrics:{score:false} }, { viewKey:'fourball' })
   const updatePublicView = async (partial, opts = {}) => {
-    const curr = (lastEventDataRef.current && lastEventDataRef.current.publicView) || {};
-    const next = { ...curr, ...partial };
-    if (deepEqual(curr, next)) return;
-    await updateEvent({ publicView: next }, opts);
-  };
+    const { viewKey } = opts || {};
+    const currAll = (lastEventDataRef.current && lastEventDataRef.current.publicView) || {};
 
-  // 로컬스토리지 키(이벤트별)
-  const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
-
-  // 로컬 저장/복원 유틸
-  const savePublicViewToLocal = (pv) => {
-    try { localStorage.setItem(publicViewStorageKey(), JSON.stringify(pv || {})); } catch {}
-  };
-  const loadPublicViewFromLocal = () => {
-    try {
-      const raw = localStorage.getItem(publicViewStorageKey());
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
+    if (viewKey === 'stroke' || viewKey === 'fourball') {
+      const currOne = (currAll[viewKey] && typeof currAll[viewKey] === 'object') ? currAll[viewKey] : {};
+      const hasMetrics = partial && (partial.visibleMetrics || partial.metrics);
+      const nextOne = hasMetrics
+        ? {
+            ...currOne,
+            visibleMetrics: { ...(currOne.visibleMetrics || {}), ...(partial.visibleMetrics || partial.metrics || {}) }
+          }
+        : { ...currOne, ...partial };
+      const nextAll = { ...currAll, [viewKey]: nextOne };
+      if (deepEqual(currAll, nextAll)) return;
+      await updateEvent({ publicView: nextAll }, opts);
+      try { savePublicViewToLocal(nextAll); } catch {}
+      return;
     }
+
+    // 폴백: 루트 publicView 병합(구버전 호환)
+    const nextRoot = { ...currAll, ...partial };
+    if (deepEqual(currAll, nextRoot)) return;
+    await updateEvent({ publicView: nextRoot }, opts);
+    try { savePublicViewToLocal(nextRoot); } catch {}
   };
 
-  // 컨텍스트 값
+  const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
+  const savePublicViewToLocal = (pv) => { try { localStorage.setItem(publicViewStorageKey(), JSON.stringify(pv || {})); } catch {} };
+  const loadPublicViewFromLocal = () => {
+    try { const raw = localStorage.getItem(publicViewStorageKey()); return raw ? JSON.parse(raw) : null; }
+    catch { return null; }
+  };
+
+  // ────────────────────────────────────────────────────────────────
+  // 🆕 이벤트 정의/입력 헬퍼
+  const addEventDef = async (def) => {
+    const base = lastEventDataRef.current || {};
+    const list = Array.isArray(base.events) ? [...base.events] : [];
+    list.push(def);
+    await updateEventImmediate({ events: list });
+  };
+
+  const updateEventDef = async (eventDefId, partial) => {
+    const base = lastEventDataRef.current || {};
+    const list = Array.isArray(base.events) ? [...base.events] : [];
+    const next = list.map(d => d.id === eventDefId ? { ...d, ...partial } : d);
+    await updateEventImmediate({ events: next });
+  };
+
+  const removeEventDef = async (eventDefId) => {
+    const base = lastEventDataRef.current || {};
+    const list = Array.isArray(base.events) ? [...base.events] : [];
+    const next = list.filter(d => d.id !== eventDefId);
+    const inputs = { ...(base.eventInputs || {}) };
+    delete inputs[eventDefId];
+    await updateEventImmediate({ events: next, eventInputs: inputs });
+  };
+
+  /**
+   * setEventInput
+   * @param {Object} p
+   * @param {string} p.eventDefId
+   * @param {'person'|'room'|'team'} p.target
+   * @param {string|number} p.key - participantId or roomIndex(1-base) or teamKey
+   * @param {number|null} p.value
+   */
+  const setEventInput = async ({ eventDefId, target, key, value }) => {
+    const base = lastEventDataRef.current || {};
+    const all  = { ...(base.eventInputs || {}) };
+    const slot = { ...(all[eventDefId] || {}) };
+    const bucket = { ...(slot[target] || {}) };
+    if (value === '' || value == null) {
+      delete bucket[key];
+    } else {
+      bucket[key] = Number(value);
+    }
+    slot[target] = bucket;
+    all[eventDefId] = slot;
+    await updateEventImmediate({ eventInputs: all }, false);
+  };
+
+  // 🆕 playerGate 저장 헬퍼(안전 병합 + 변화 없으면 쓰기 생략) → 즉시 커밋으로 변경
+  const updatePlayerGate = async (partialGate) => {
+    const before = lastEventDataRef.current?.playerGate || defaultPlayerGate;
+    const next = {
+      steps: { ...(before.steps || {}), ...(partialGate?.steps || {}) },
+      step1: { ...(before.step1 || {}), ...(partialGate?.step1 || {}) },
+    };
+    if (deepEqual(before, next)) return;
+    await updateEventImmediate({ playerGate: next }); // 🆕 즉시 저장
+  };
+
+  const ctx = {
+    allEvents,
+    eventId,
+    eventData,
+    // ✅ 하위에서 안전하게 비구조화할 수 있도록 setEventId 노출
+    setEventId,
+    loadEvent,
+    createEvent,
+    updateEvent,
+    updateEventImmediate,
+    updateEventById,
+    deleteEvent,
+    // publicView
+    updatePublicView,
+    savePublicViewToLocal,
+    loadPublicViewFromLocal,
+    // 🆕 events
+    addEventDef,
+    updateEventDef,
+    removeEventDef,
+    setEventInput,
+    // 🆕 playerGate
+    updatePlayerGate
+  };
+
   return (
-    <EventContext.Provider
-      value={{
-        allEvents,
-        eventId,
-        eventData,
-        loadEvent,
-        createEvent,
-        updateEvent,               // 안전(디바운스) 업데이트
-        updateEventImmediate,      // 즉시 업데이트
-        updateEventById,
-        deleteEvent,
-        // publicView 관련
-        updatePublicView,
-        savePublicViewToLocal,
-        loadPublicViewFromLocal
-      }}
-    >
+    <EventContext.Provider value={ctx}>
       {children}
     </EventContext.Provider>
   );
