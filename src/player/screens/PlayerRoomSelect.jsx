@@ -251,6 +251,14 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       const roomLabel = getLabel(roomNumber);
       if (variant === 'fourball') {
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
+        // ★ 추가: 첫 알림 확인 후에 두 번째 알림(팀원 선택 결과)을 보여줍니다.
+        if (partnerNickname) {
+          setIsAssigning(true);
+          await sleep(TIMINGS.spinDuringPartnerPick);
+          setIsAssigning(false);
+          alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+        }
+        // ★ 추가 끝
       } else {
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
       }

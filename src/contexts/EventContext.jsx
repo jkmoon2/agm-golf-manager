@@ -11,7 +11,40 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
+// ★ patch: 인증 게이팅을 위해 auth 모듈 추가 import
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInAnonymously,
+  setPersistence,
+  browserLocalPersistence
+} from 'firebase/auth';
+
 export const EventContext = createContext({});
+
+// ★ patch: /player 경로에서 익명 인증을 보장하고, "인증 완료 후 resolve"되는 Promise 제공
+const auth = getAuth();
+try { setPersistence(auth, browserLocalPersistence).catch(() => {}); } catch {}
+const ensureAuthed = (() => {
+  let p;
+  return () => {
+    if (p) return p;
+    p = new Promise((resolve) => {
+      const stop = onAuthStateChanged(auth, async (user) => {
+        if (user) { stop(); resolve(user); return; }
+        const isPlayerApp =
+          typeof window !== 'undefined' &&
+          /^\/player(\/|$)/.test(window.location.pathname);
+        if (isPlayerApp) {
+          try { await signInAnonymously(auth); } catch (e) { console.warn('[EventContext] anonymous sign-in failed:', e); }
+          // 로그인 되면 onAuthStateChanged가 다시 호출되어 resolve
+        }
+        // /admin 등은 기존 보호 라우팅에서 로그인 처리되므로 여기서 추가 조치 없음
+      });
+    });
+    return p;
+  };
+})();
 
 export function EventProvider({ children }) {
   const [allEvents, setAllEvents]   = useState([]);
@@ -62,32 +95,42 @@ export function EventProvider({ children }) {
 
   // 전체 이벤트 구독
   useEffect(() => {
-    const colRef = collection(db, 'events');
-    const unsub  = onSnapshot(colRef, snap => {
-      const evts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setAllEvents(evts);
+    // ★ patch: 인증 완료 후에만 구독 attach
+    let unsub = null, cancelled = false;
+    ensureAuthed().then(() => {
+      if (cancelled) return;
+      const colRef = collection(db, 'events');
+      unsub = onSnapshot(colRef, snap => {
+        const evts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setAllEvents(evts);
+      });
     });
-    return unsub;
+    return () => { cancelled = true; if (unsub) unsub(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 선택 이벤트 구독
   useEffect(() => {
     if (!eventId) { setEventData(null); lastEventDataRef.current = null; return; }
-    const docRef = doc(db, 'events', eventId);
-    const unsub  = onSnapshot(
-      docRef,
-      { includeMetadataChanges: true },
-      snap => {
-        if (snap.metadata.hasPendingWrites) return;
-        const data = snap.data();
-        const withPV   = normalizePublicView(data || {});
-        const withGate = normalizePlayerGate(withPV);
-        setEventData(withGate);
-        lastEventDataRef.current = withGate;
-      }
-    );
-    return unsub;
+    // ★ patch: 인증 완료 후에만 구독 attach
+    let unsub = null, cancelled = false;
+    ensureAuthed().then(() => {
+      if (cancelled) return;
+      const docRef = doc(db, 'events', eventId);
+      unsub = onSnapshot(
+        docRef,
+        { includeMetadataChanges: true },
+        snap => {
+          if (snap.metadata.hasPendingWrites) return;
+          const data = snap.data();
+          const withPV   = normalizePublicView(data || {});
+          const withGate = normalizePlayerGate(withPV);
+          setEventData(withGate);
+          lastEventDataRef.current = withGate;
+        }
+      );
+    });
+    return () => { cancelled = true; if (unsub) unsub(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 

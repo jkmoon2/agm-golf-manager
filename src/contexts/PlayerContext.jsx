@@ -1,12 +1,11 @@
-// src/contexts/PlayerContext.jsx
+// /src/contexts/PlayerContext.jsx
 //
-// ✅ 변경 핵심 (원본 100% 유지 + 추가/보완):
-// 1) "이벤트별 + 세션 한정" 자동인증만 허용: sessionStorage('auth_<eventId>') 가 true일 때에만
-//    캐시(myId/nickname)를 사용해 me 매칭을 시도하도록 가드 추가
-// 2) me가 확정될 때, 전역키 대신 이벤트별 세션키에도 저장:
-//    sessionStorage.setItem(`myId_<eventId>`), sessionStorage.setItem(`nickname_<eventId>`)
-// 3) eventId 변경 시, 세션의 authcode를 상태로 복원(같은 세션 내 재인증 방지, 재시작하면 초기화)
-// ※ 기존 로직/함수/주석은 삭제하지 않고 그대로 유지했습니다.
+// ✅ 변경 핵심 (원본 100% 유지 + 필요한 부분만 추가):
+// A) Firestore 저장 전 sanitizeForFirestore() 로 undefined/NaN 제거 → 400 에러 방지
+// B) onSnapshot/transaction 맵핑 시 null 안전 스프레드( ...((p && typeof p==='object') ? p : {}) )
+//    → participants 배열에 null 섞여도 안전
+//
+// ※ 함수/레이아웃/주석/이름은 기존 그대로 두고, 추가/보완만 반영했습니다.
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -80,6 +79,27 @@ const minRooms = (participants, roomCount) => {
     .filter((x) => x.c === min)
     .map((x) => x.n);
 };
+
+// ✅ 추가: Firestore 저장 전 sanitize (중첩 undefined 제거, NaN → null)
+function sanitizeForFirestore(v) {
+  if (Array.isArray(v)) {
+    return v
+      .map(sanitizeForFirestore)
+      .filter((x) => x !== undefined);
+  }
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v)) {
+      const val = v[k];
+      if (val === undefined) continue;
+      if (typeof val === 'number' && Number.isNaN(val)) { out[k] = null; continue; }
+      out[k] = sanitizeForFirestore(val);
+    }
+    return out;
+  }
+  if (typeof v === 'number' && Number.isNaN(v)) return null;
+  return v;
+}
 
 // ✅ 추가: 인증 상태를 “세션에만” 기록(재시작 시 초기화)
 function markEventAuthed(id, code, meObj) {
@@ -163,8 +183,10 @@ export function PlayerProvider({ children }) {
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
 
-      const partArr = (data.participants || []).map((p, i) => ({
-        ...p,
+      // ✅ null 안전 스프레드 + 안전 기본값
+      const rawParts = Array.isArray(data.participants) ? data.participants : [];
+      const partArr = rawParts.map((p, i) => ({
+        ...((p && typeof p === 'object') ? p : {}),       // ⬅️ 여기만 보강
         id:       normId(p?.id ?? i),
         nickname: normName(p?.nickname),
         handicap: toInt(p?.handicap, 0),
@@ -243,11 +265,13 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // ── Firestore write helper (원본 유지) ───────────────────────────────
+  // ── Firestore write helper (원본 유지 + sanitize 추가) ────────────────
   async function writeParticipants(next) {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
-    await setDoc(ref, { participants: next }, { merge: true });
+    // ✅ 추가: 저장 전 sanitize
+    const payload = sanitizeForFirestore({ participants: Array.isArray(next) ? next : [] });
+    await setDoc(ref, payload, { merge: true });
   }
 
   // ── API (원본 유지) ──────────────────────────────────────────────────
@@ -375,7 +399,7 @@ export function PlayerProvider({ children }) {
           const snap = await tx.get(eref);
           const data = snap.exists() ? (snap.data() || {}) : {};
           const parts = (data.participants || []).map((p, i) => ({
-            ...p,
+            ...((p && typeof p === 'object') ? p : {}),  // ⬅️ null 안전 스프레드
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
@@ -406,7 +430,8 @@ export function PlayerProvider({ children }) {
             return p;
           });
 
-          tx.set(eref, { participants: next }, { merge: true });
+          // ✅ 저장 전 sanitize
+          tx.set(eref, sanitizeForFirestore({ participants: next }), { merge: true });
 
           const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
           if (mateId) tx.set(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }) }, { merge: true });
