@@ -11,6 +11,14 @@ import { db } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './PlayerScoreInput.module.css';
 
+// 🆕 null/형식 오류 방지용: 참가자 배열 정규화
+const asArray = (v) => Array.isArray(v) ? v : [];                 // 🆕
+const toSafeParticipants = (arr) =>                               // 🆕
+  asArray(arr)
+    .filter(Boolean)
+    .map((p) => ({ ...p, id: p?.id ?? p?.pid ?? p?.uid ?? p?._id ?? null }))
+    .filter((p) => p.id != null);
+
 // ★ patch: 1조+2조 한 팀(슬롯0·1), 1조+2조 한 팀(슬롯2·3) 순으로 정렬
 function orderByPair(list) {
   const slot = [null, null, null, null];
@@ -26,8 +34,9 @@ function orderByPair(list) {
       if (used.has(id1)) return;
       const p2 = (list || []).find((x) => String(x?.id) === String(p1?.partner));
       if (p2) {
-        const pos = slot[0] ? 2 : 0;
-        slot[pos] = p1; slot[pos + 1] = p2;
+        const pos = slot[0] ? 2 : 0; // 0·1 채웠으면 2·3
+        slot[pos] = p1;
+        slot[pos + 1] = p2;
         used.add(id1); used.add(asNum(p2.id));
       }
     });
@@ -41,20 +50,31 @@ function orderByPair(list) {
     }
   });
 
-  while (slot.length < 4) slot.push({ id: `empty-${slot.length}`, nickname: '', handicap: '', score: null, __empty: true });
+  // 🆕 남은 null 슬롯들을 안전한 placeholder로 치환(이후 p.id 접근 시 에러 방지)
+  for (let i = 0; i < 4; i += 1) {
+    if (!slot[i]) slot[i] = { id: `empty-${i}`, nickname: '', handicap: '', score: null, __empty: true };
+  }
+
   return slot.slice(0, 4);
 }
+
 const toNumberOrNull = (v) => {
-  if (v === '' || v === null || v === undefined) return null;
+  if (v === '' || v == null) return null;
   if (v === '-' || v === '+') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
 
 export default function PlayerScoreInput() {
-  const { eventId: ctxEventId, participants = [], participant, roomNames = [] } =
-    useContext(PlayerContext);
-  const { id: routeEventId } = useParams();
+  const {
+    eventId: ctxEventId,
+    participants = [],
+    participant,
+    roomNames = [],
+  } = useContext(PlayerContext);
+
+  const params = useParams();
+  const routeEventId = params?.eventId || params?.id;
   const eventId = ctxEventId || routeEventId;
 
   const myRoom = participant?.room ?? null;
@@ -65,13 +85,34 @@ export default function PlayerScoreInput() {
       ? `${myRoom}번방`
       : '';
 
+  // 🆕 1) 참가자 정규화(여기서 null/비객체 제거)
   const roomPlayers = useMemo(
-    () => (myRoom ? participants.filter((p) => (p?.room ?? null) === myRoom) : []),
+    // 🆕 null/잘못된 항목을 제거한 뒤 방 필터
+    () => (myRoom ? toSafeParticipants(participants).filter((p) => (p?.room ?? null) === myRoom) : []),
     [participants, myRoom]
   );
 
   // ★ patch: 페어 순서 고정 배열
   const orderedRoomPlayers = useMemo(() => orderByPair(roomPlayers), [roomPlayers]);
+
+  // ★ 추가: orderedRoomPlayers.forEach 를 null-세이프하게 패치(기존 코드 건드리지 않음)
+  //         배열 인스턴스의 forEach만 덮어써서, 이후 기존 코드의 forEach 호출이 안전하게 동작
+  useEffect(() => {
+    try {
+      const a = orderedRoomPlayers;
+      if (Array.isArray(a)) {
+        const safe = a.filter((p) => !!p && typeof p === 'object' && p.id != null);
+        // forEach 패치
+        Object.defineProperty(a, 'forEach', {
+          configurable: true,
+          writable: true,
+          value: function (cb, thisArg) { return safe.forEach(cb, thisArg); }
+        });
+      }
+    } catch (e) {
+      // noop
+    }
+  }, [orderedRoomPlayers]);
 
   // 4행 고정(공란 패딩)
   const paddedRows = useMemo(() => { /* ★ patch: orderedRoomPlayers 기반 */
@@ -101,17 +142,36 @@ export default function PlayerScoreInput() {
   // 저장
   const persistScore = async (pid, valueStr) => {
     if (!eventId) return;
-    const newScore = toNumberOrNull(valueStr); // '' → null
-    const next = participants.map((p) =>
-      String(p.id) === String(pid) ? { ...p, score: newScore } : p
+    const newScore = toNumberOrNull(valueStr);
+
+    const next = toSafeParticipants(participants).map((p) =>
+      String(p?.id) === String(pid) ? { ...p, score: newScore } : p
     );
-    await setDoc(doc(db, 'events', eventId), { participants: next }, { merge: true });
+
+    // 🆕 Firestore 400 방지: undefined/NaN 제거
+    const payload = (function sanitize(v) {
+      if (Array.isArray(v)) return v.map(sanitize);
+      if (v && typeof v === 'object') {
+        const out = {};
+        for (const k of Object.keys(v)) {
+          const val = v[k];
+          if (val === undefined) continue;
+          if (typeof val === 'number' && Number.isNaN(val)) { out[k] = null; continue; }
+          out[k] = sanitize(val);
+        }
+        return out;
+      }
+      if (typeof v === 'number' && Number.isNaN(v)) return null;
+      return v;
+    })({ participants: next });
+
+    await setDoc(doc(db, 'events', eventId), payload, { merge: true });
   };
 
   const onChangeScore = (pid, val) => {
-    const clean = val.replace(/[^\d\-+]/g, '');
+    const clean = String(val ?? '').replace(/[^\d\-+]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
-    if (clean === '') persistScore(pid, ''); // “한 번에 삭제”
+    if (clean === '') persistScore(pid, ''); // 즉시 삭제 반영
   };
   const onCommitScore = (pid) => persistScore(pid, draft[String(pid)]);
 
@@ -126,7 +186,7 @@ export default function PlayerScoreInput() {
       sumR += (s ?? 0) - h;
     });
     return { sumH, sumS, sumR };
-  }, [roomPlayers, draft]);
+  }, [orderedRoomPlayers, draft]);
 
   return (
     <div className={styles.page}>
@@ -163,8 +223,8 @@ export default function PlayerScoreInput() {
                 }
 
                 const key = String(p.id);
-                // ✅ 0도 표시: (p.score == null)인 경우만 ''
-                const raw = draft[key] ?? ((p.score == null) ? '' : String(p.score));
+                const raw =
+                  draft[key] ?? (p.score == null ? '' : String(p.score));
                 const s = toNumberOrNull(raw);
                 const h = Number(p.handicap || 0);
                 const r = (s ?? 0) - h;
@@ -185,7 +245,9 @@ export default function PlayerScoreInput() {
                         value={raw}
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
                         onBlur={() => onCommitScore(p.id)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                        }}
                       />
                     </td>
                     <td className={`${styles.td} ${styles.resultTd}`}>
@@ -198,9 +260,15 @@ export default function PlayerScoreInput() {
             <tfoot>
               <tr>
                 <td className={`${styles.td} ${styles.totalLabel}`}>합계</td>
-                <td className={`${styles.td} ${styles.totalBlack}`}>{totals.sumH}</td>
-                <td className={`${styles.td} ${styles.totalBlue}`}>{totals.sumS}</td>
-                <td className={`${styles.td} ${styles.totalRed}`}>{totals.sumR}</td>
+                <td className={`${styles.td} ${styles.totalBlack}`}>
+                  {totals.sumH}
+                </td>
+                <td className={`${styles.td} ${styles.totalBlue}`}>
+                  {totals.sumS}
+                </td>
+                <td className={`${styles.td} ${styles.totalRed}`}>
+                  {totals.sumR}
+                </td>
               </tr>
             </tfoot>
           </table>
@@ -209,8 +277,18 @@ export default function PlayerScoreInput() {
 
       {/* 하단 네비: 텍스트는 '이전' / '다음'만, 화살표는 CSS 의사요소에서 그립니다. */}
       <div className={styles.footerNav}>
-        <Link to={`/player/home/${eventId}/3`} className={`${styles.navBtn} ${styles.navPrev}`}>이전</Link>
-        <Link to={`/player/home/${eventId}/5`} className={`${styles.navBtn} ${styles.navNext}`}>다음</Link>
+        <Link
+          to={`/player/home/${eventId}/3`}
+          className={`${styles.navBtn} ${styles.navPrev}`}
+        >
+          이전
+        </Link>
+        <Link
+          to={`/player/home/${eventId}/5`}
+          className={`${styles.navBtn} ${styles.navNext}`}
+        >
+          다음
+        </Link>
       </div>
     </div>
   );
