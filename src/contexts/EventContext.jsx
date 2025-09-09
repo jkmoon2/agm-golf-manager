@@ -338,7 +338,11 @@ export function EventProvider({ children }) {
         id,
         dateStart = '',
         dateEnd = '',
-        allowDuringPeriodOnly = false
+        allowDuringPeriodOnly = false,
+        // ★ patch: Step0에서 넘겨주는 접근 구간/타임스탬프도 그대로 저장
+        accessStartAt = null,
+        accessEndAt = null,
+        accessUpdatedAt = null
       }) => {
         const colRef = collection(db, 'events');
         const docRef = id ? doc(db, 'events', id) : doc(colRef);
@@ -352,6 +356,10 @@ export function EventProvider({ children }) {
           dateStart,
           dateEnd,
           allowDuringPeriodOnly,
+          // ★ patch: 접근 허용 절대 구간(ms) 및 갱신 시각도 함께 저장
+          accessStartAt,
+          accessEndAt,
+          accessUpdatedAt,
           publicView: {
             hiddenRooms: [],
             score: true,

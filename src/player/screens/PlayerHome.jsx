@@ -37,6 +37,14 @@ function tsToMillis(ts) {
   return Number(ts) || 0;
 }
 
+// ★ patch: 문자열(YYYY-MM-DD)을 해당 날짜의 00:00/23:59:59로 변환
+function dateStrToMillis(s, kind /* 'start'|'end' */) {
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const t = kind === 'start' ? '00:00:00' : '23:59:59';
+  const d = new Date(`${s}T${t}`);
+  return Number.isFinite(d.getTime()) ? d.getTime() : null;
+}
+
 export default function PlayerHome() {
   const nav = useNavigate();
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
@@ -46,6 +54,14 @@ export default function PlayerHome() {
   const [fallbackGate, setFallbackGate] = useState(null);
   // ★ patch: 폴백 스냅샷의 gateUpdatedAt(최신판 식별용)
   const [fallbackGateUpdatedAt, setFallbackGateUpdatedAt] = useState(0);
+  // ★ patch: 접근 허용 정책 폴백(컨텍스트 부재 시 사용)
+  const [fallbackAccess, setFallbackAccess] = useState({
+    allowDuringPeriodOnly: false,
+    accessStartAt: null,
+    accessEndAt: null,
+    dateStart: '',
+    dateEnd: ''
+  });
 
   // URL의 eventId를 EventContext에 주입(있다면)
   useEffect(() => {
@@ -61,6 +77,13 @@ export default function PlayerHome() {
     if (eventData?.playerGate) { 
       setFallbackGate(null); 
       setFallbackGateUpdatedAt(0);
+      setFallbackAccess({
+        allowDuringPeriodOnly: false,
+        accessStartAt: null,
+        accessEndAt: null,
+        dateStart: '',
+        dateEnd: ''
+      });
       return; 
     } // 컨텍스트가 제공되면 폴백 해제
     const ref = doc(db, 'events', id);
@@ -74,6 +97,14 @@ export default function PlayerHome() {
         setFallbackGate(null);
         setFallbackGateUpdatedAt(0);
       }
+      // ★ patch: 접근 허용 관련 필드도 폴백 저장
+      setFallbackAccess({
+        allowDuringPeriodOnly: !!d?.allowDuringPeriodOnly,
+        accessStartAt: (typeof d?.accessStartAt === 'number') ? d.accessStartAt : tsToMillis(d?.accessStartAt) || null,
+        accessEndAt:   (typeof d?.accessEndAt   === 'number') ? d.accessEndAt   : tsToMillis(d?.accessEndAt)   || null,
+        dateStart: d?.dateStart || '',
+        dateEnd:   d?.dateEnd   || ''
+      });
     });
     return unsub;
   }, [urlEventId, ctxEventId, eventData?.playerGate]);
@@ -90,6 +121,55 @@ export default function PlayerHome() {
   }, [eventData?.playerGate, eventData?.gateUpdatedAt, fallbackGate, fallbackGateUpdatedAt]);
 
   const getStatus = (n) => (gate?.steps?.[n] || 'enabled');
+
+  // ★ patch: 대회 기간 기반 접근 차단 계산
+  const isAccessDenied = useMemo(() => {
+    const allowDuring =
+      (typeof eventData?.allowDuringPeriodOnly === 'boolean')
+        ? eventData.allowDuringPeriodOnly
+        : !!fallbackAccess.allowDuringPeriodOnly;
+
+    if (!allowDuring) return false;
+
+    const startAt =
+      (eventData?.accessStartAt ?? fallbackAccess.accessStartAt) ??
+      dateStrToMillis(eventData?.dateStart || fallbackAccess.dateStart, 'start');
+
+    const endAt =
+      (eventData?.accessEndAt ?? fallbackAccess.accessEndAt) ??
+      dateStrToMillis(eventData?.dateEnd || fallbackAccess.dateEnd, 'end');
+
+    const now = Date.now();
+    if (startAt && now < startAt) return true;
+    if (endAt && now > endAt) return true;
+    return false;
+  }, [
+    eventData?.allowDuringPeriodOnly,
+    eventData?.accessStartAt,
+    eventData?.accessEndAt,
+    eventData?.dateStart,
+    eventData?.dateEnd,
+    fallbackAccess.allowDuringPeriodOnly,
+    fallbackAccess.accessStartAt,
+    fallbackAccess.accessEndAt,
+    fallbackAccess.dateStart,
+    fallbackAccess.dateEnd
+  ]);
+
+  if (isAccessDenied) {
+    // 차단 메시지(간단한 안내). 필요 시 네비게이션 처리도 가능.
+    return (
+      <div className={styles.container} style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'60vh' }}>
+        <div style={{ textAlign:'center', lineHeight:1.6 }}>
+          <h2 style={{ margin:'0 0 8px 0' }}>대회 기간이 아닙니다</h2>
+          <p style={{ color:'#4b5563', margin:0 }}>
+            현재 대회는 참가자 접속이 제한되어 있습니다.<br/>
+            대회 기간 중에만 접속 가능합니다.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.container}>

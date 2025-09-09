@@ -1,9 +1,11 @@
-// src/screens/Step0.jsx
+// /src/screens/Step0.jsx
 
 import React, { useState, useContext, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../contexts/EventContext';
 import styles from './Step0.module.css';
+// ★ patch: 접속 가능 시간 갱신 시각을 남기기 위해 serverTimestamp 사용
+import { serverTimestamp } from 'firebase/firestore';
 
 export default function Step0() {
   const { createEvent, loadEvent, deleteEvent, allEvents, updateEventById } = useContext(EventContext);
@@ -16,7 +18,7 @@ export default function Step0() {
     setViewMode('stroke');
     try { localStorage.setItem('homeViewMode','stroke'); } catch {}
   }, []);
-const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const navigate = useNavigate();
 
   // 새 대회 생성 모달
@@ -42,11 +44,21 @@ const [selectedId, setSelectedId] = useState(null);
     return () => document.removeEventListener('click', onDocClick);
   }, []);
 
-  const filtered = useMemo(() => (allEvents || []).filter(e => normMode(e.mode) === viewMode), [allEvents, viewMode]);const fmt = (s) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s.replaceAll('-', '.') : '미정';
+  const filtered = useMemo(() => (allEvents || []).filter(e => normMode(e.mode) === viewMode), [allEvents, viewMode]);
+  const fmt = (s) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s.replaceAll('-', '.') : '미정';
   const isClosed = (dateEnd) => {
-    if (!dateEnd || !/^\d{4}-\d{2}-\d2$/.test(dateEnd)) return false;
+    // ★ patch: 정규식 오타 수정 (\d2 -> \d{2})
+    if (!dateEnd || !/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) return false;
     const end = new Date(`${dateEnd}T23:59:59`);
     return Date.now() > end.getTime();
+  };
+
+  // ★ patch: 문자열 날짜를 절대시간(ms)로 계산 (로컬 기준 00:00/23:59:59)
+  const toMillis = (dateStr, kind /* 'start' | 'end' */) => {
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+    const t = kind === 'start' ? '00:00:00' : '23:59:59';
+    const d = new Date(`${dateStr}T${t}`);
+    return Number.isFinite(d.getTime()) ? d.getTime() : null;
   };
 
   const handleLoad = async () => {
@@ -63,12 +75,20 @@ const [selectedId, setSelectedId] = useState(null);
       const e = new Date(`${newDateEnd}T23:59:59`);
       if (s.getTime() > e.getTime()) { alert('종료일은 시작일 이후여야 합니다.'); return; }
     }
+    // ★ patch: 접속 가능 절대 구간을 함께 저장(플레이어 차단 로직이 숫자 비교만 하면 되도록)
+    const accessStartAt = toMillis(newDateStart, 'start');
+    const accessEndAt   = toMillis(newDateEnd, 'end');
+
     const newId = await createEvent({
       title, mode: viewMode,
       id: useCustomId && customId.trim() ? customId.trim() : undefined,
       dateStart: newDateStart || '',
       dateEnd:   newDateEnd   || '',
       allowDuringPeriodOnly: duringOnly,
+      // ▼ 추가 필드(완전 추가만, 기존 코드 영향 없음)
+      accessStartAt: accessStartAt ?? null,
+      accessEndAt:   accessEndAt   ?? null,
+      accessUpdatedAt: serverTimestamp(),
     });
     setSelectedId(newId);
     setOpenCreate(false);
@@ -99,10 +119,18 @@ const [selectedId, setSelectedId] = useState(null);
       const e = new Date(`${editDateEnd}T23:59:59`);
       if (s.getTime() > e.getTime()) { alert('종료일은 시작일 이후여야 합니다.'); return; }
     }
+    // ★ patch: 편집 저장 시에도 절대 구간 동기화
+    const accessStartAt = toMillis(editDateStart, 'start');
+    const accessEndAt   = toMillis(editDateEnd, 'end');
+
     await updateEventById(editing.id, {
       dateStart: editDateStart || '',
       dateEnd:   editDateEnd   || '',
-      allowDuringPeriodOnly: editDuringOnly
+      allowDuringPeriodOnly: editDuringOnly,
+      // ▼ 추가 필드(완전 추가만, 기존 코드 영향 없음)
+      accessStartAt: accessStartAt ?? null,
+      accessEndAt:   accessEndAt   ?? null,
+      accessUpdatedAt: serverTimestamp(),
     });
     setEditing(null);
   };
