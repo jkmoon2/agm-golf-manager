@@ -1,17 +1,36 @@
 // /src/player/screens/PlayerEventInput.jsx
-// 변경 요약
-// 1) 갱신 모드(입력칸 1칸)에서 마지막 한자리까지 정상 삭제되도록 '로컬 draft'를 추가
-//    - refresh input은 화면 값이 eventData 저장 타이밍에 영향받지 않도록 draft로 제어
-//    - onChange에서 draft와 스토어를 같이 갱신, value는 draft 우선 표시
-// 2) 누적 모드(accumulate)는 기존 동작 유지
+// 기존 코드 유지 + "다음" 버튼 시각 비활성 스타일/포인터 차단만 추가
 
 import React, { useMemo, useContext, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
 
-/* 로컬에서 room 여러 키를 폭넓게 읽기 */
+function normalizeGate(raw){
+  if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
+  const g = { ...raw };
+  const steps = g.steps || {};
+  const out = { steps:{}, step1:{ ...(g.step1 || {}) } };
+  for (let i=1;i<=8;i+=1) out.steps[i] = steps[i] || 'enabled';
+  if (typeof out.step1.teamConfirmEnabled !== 'boolean') out.step1.teamConfirmEnabled = true;
+  return out;
+}
+function pickGateByMode(playerGate, mode){
+  const isFour = (mode === 'fourball' || mode === 'agm');
+  const nested = isFour ? playerGate?.fourball : playerGate?.stroke;
+  const base = nested && typeof nested === 'object' ? nested : playerGate;
+  return normalizeGate(base);
+}
+function tsToMillis(ts){
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  return Number(ts) || 0;
+}
+
 function readRoomFromLocal(eventId){
   const tryKeys = [
     `player.currentRoom:${eventId}`,
@@ -29,7 +48,6 @@ function readRoomFromLocal(eventId){
   return NaN;
 }
 
-/* 포볼: 1조+2조 페어 슬롯(4명) – 기존 로직 유지 */
 const MAX_PER_ROOM = 4;
 function orderSlotsByPairs(roomArr = [], allParticipants = []) {
   const N    = Array.isArray(allParticipants) ? allParticipants.length : 0;
@@ -71,14 +89,12 @@ function orderSlotsByPairs(roomArr = [], allParticipants = []) {
   return slot.slice(0, MAX_PER_ROOM);
 }
 
-/* ★ 참가자 안에서 '나'를 찾아 방을 역추적 */
 function inferRoomFromSelf(participants = [], eventData = {}) {
   const ids = [
     eventData?.auth?.uid, eventData?.player?.uid, eventData?.me?.uid,
     eventData?.auth?.id,  eventData?.player?.id,  eventData?.me?.id,
   ].filter(Boolean);
 
-  // 1) id/uid로 매칭
   for (const p of participants) {
     if (ids.includes(p?.uid) || ids.includes(p?.id)) {
       const r = Number(p?.room);
@@ -86,7 +102,6 @@ function inferRoomFromSelf(participants = [], eventData = {}) {
     }
   }
 
-  // 2) nickname(대소문자/공백 무시)로 매칭
   const myNick = (eventData?.auth?.nickname || eventData?.player?.nickname || eventData?.me?.nickname || '').trim().toLowerCase();
   if (myNick) {
     for (const p of participants) {
@@ -105,6 +120,35 @@ export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
   const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
+
+  // ★ patch: 실시간 게이트 구독 + 최신판 선택
+  const [fallbackGate, setFallbackGate] = useState(null);
+  const [fallbackAt, setFallbackAt] = useState(0);
+  useEffect(() => {
+    const id = eventId || ctxId;
+    if (!id) return;
+    const ref = doc(db, 'events', id);
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.data();
+      if (d?.playerGate) {
+        setFallbackGate(d.playerGate);
+        setFallbackAt(tsToMillis(d?.gateUpdatedAt));
+      }
+    });
+    return unsub;
+  }, [eventId, ctxId]);
+
+  const latestGate = useMemo(() => {
+    const mode = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
+    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const fbG  = pickGateByMode(fallbackGate || {}, mode);
+    const fbAt = fallbackAt;
+    return (ctxAt >= fbAt) ? ctxG : fbG;
+  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
+
+  // ★ patch: 다음 단계(=STEP4) 허용 여부
+  const nextDisabled = useMemo(() => (latestGate?.steps?.[4] !== 'enabled'), [latestGate]);
 
   // URL ↔ 컨텍스트 동기화(기존 유지)
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
@@ -134,19 +178,16 @@ export default function PlayerEventInput(){
     return Array.from(s).sort((a,b)=>a-b);
   }, [participants]);
 
-  /* 컨텍스트 후보 */
   const roomFromCtx = useMemo(() => {
     const cands = [ eventData?.myRoom, eventData?.player?.room, eventData?.auth?.room, eventData?.currentRoom ];
     return cands.map(Number).find(n => Number.isFinite(n) && n >= 1);
   }, [eventData]);
 
-  /* ★ '나'의 방을 참가자 목록에서 역추적 */
   const roomFromSelf = useMemo(
     () => inferRoomFromSelf(participants, eventData),
     [participants, eventData]
   );
 
-  /* 최종 방 선택: 컨텍스트 → 로컬 → 자기추론 → 첫 방 */
   const roomIdx = useMemo(() => {
     const ls  = readRoomFromLocal(eventId);
     const pick = [roomFromCtx, ls, roomFromSelf].find(
@@ -155,20 +196,17 @@ export default function PlayerEventInput(){
     return pick || allRoomNos[0] || 1;
   }, [roomFromCtx, roomFromSelf, eventId, allRoomNos]);
 
-  /* ★ 결정된 방을 즉시 LS에 기록(이벤트별 키) – 이후 방문에서도 안정적 */
   useEffect(() => {
     if (Number.isFinite(roomIdx) && roomIdx >= 1) {
       try { localStorage.setItem(`player.currentRoom:${eventId}`, String(roomIdx)); } catch {}
     }
   }, [roomIdx, eventId]);
 
-  /* 같은 방 4명 + 페어 슬롯 */
   const roomMembers = useMemo(() => {
     const inRoom = participants.filter(p => Number(p?.room) === roomIdx);
     return orderSlotsByPairs(inRoom, participants);
   }, [participants, roomIdx]);
 
-  /* 입력 저장(갱신/누적) – 기존 유지 */
   const inputsByEvent = eventData?.eventInputs || {};
   const patchValue = (evId, pid, value) => {
     const all = { ...(eventData?.eventInputs || {}) };
@@ -190,8 +228,7 @@ export default function PlayerEventInput(){
     updateEventImmediate({ eventInputs: all }, false);
   };
 
-  // ★★★ 갱신 모드용 로컬 draft (evId 별로 p.id 문자열 값을 임시 저장)
-  const [draft, setDraft] = useState({}); // { [evId]: { [pid]: string } }
+  const [draft, setDraft] = useState({});
 
   return (
     <div className={baseCss.page}>
@@ -248,7 +285,6 @@ export default function PlayerEventInput(){
                             <td className={tCss.cellEditable}>
                               <input
                                 type="number"
-                                // ✅ refresh 모드: draft 우선 → 마지막 한자리까지 깔끔히 지움
                                 value={p ? ((draft?.[ev.id]?.[p.id] !== undefined)
                                             ? draft[ev.id][p.id]
                                             : (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '')) : ''}
@@ -273,7 +309,16 @@ export default function PlayerEventInput(){
 
         <div className={baseCss.footerNav}>
           <button className={`${baseCss.navBtn} ${baseCss.navPrev}`} onClick={()=>nav(`/player/home/${eventId}/2`)}>← 이전</button>
-          <button className={`${baseCss.navBtn} ${baseCss.navNext}`} onClick={()=>nav(`/player/home/${eventId}/4`)}>다음 →</button>
+          <button
+            className={`${baseCss.navBtn} ${baseCss.navNext}`}
+            onClick={()=>{ if (!nextDisabled) nav(`/player/home/${eventId}/4`); }}
+            disabled={nextDisabled}
+            aria-disabled={nextDisabled}
+            data-disabled={nextDisabled ? '1' : '0'}
+            style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+          >
+            다음 →
+          </button>
         </div>
       </div>
     </div>

@@ -1,32 +1,49 @@
 // /src/player/screens/PlayerScoreInput.jsx
-// 변경 요약
-// 1) '0'을 입력했을 때도 다시 들어오면 그대로 "0"이 보이도록 처리
-//    - draft 초기화 및 raw fallback에서 (p.score === 0) 를 더 이상 공백으로 바꾸지 않음
-//    - 나머지 로직/레이아웃은 그대로 유지
+// 기존 코드 유지 + Link형 “다음” 버튼에 비활성 시 가시/포인터/포커스 차단(tabIndex) 추가
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
+import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerScoreInput.module.css';
 
-// 🆕 null/형식 오류 방지용: 참가자 배열 정규화
-const asArray = (v) => Array.isArray(v) ? v : [];                 // 🆕
-const toSafeParticipants = (arr) =>                               // 🆕
+function normalizeGate(raw){
+  if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
+  const g = { ...raw };
+  const steps = g.steps || {};
+  const out = { steps:{}, step1:{ ...(g.step1 || {}) } };
+  for (let i=1;i<=8;i+=1) out.steps[i] = steps[i] || 'enabled';
+  if (typeof out.step1.teamConfirmEnabled !== 'boolean') out.step1.teamConfirmEnabled = true;
+  return out;
+}
+function pickGateByMode(playerGate, mode){
+  const isFour = (mode === 'fourball' || mode === 'agm');
+  const nested = isFour ? playerGate?.fourball : playerGate?.stroke;
+  const base = nested && typeof nested === 'object' ? nested : playerGate;
+  return normalizeGate(base);
+}
+function tsToMillis(ts){
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  return Number(ts) || 0;
+}
+
+const asArray = (v) => Array.isArray(v) ? v : [];
+const toSafeParticipants = (arr) =>
   asArray(arr)
     .filter(Boolean)
     .map((p) => ({ ...p, id: p?.id ?? p?.pid ?? p?.uid ?? p?._id ?? null }))
     .filter((p) => p.id != null);
 
-// ★ patch: 1조+2조 한 팀(슬롯0·1), 1조+2조 한 팀(슬롯2·3) 순으로 정렬
 function orderByPair(list) {
   const slot = [null, null, null, null];
   const used = new Set();
   const asNum = (v) => Number(v ?? NaN);
   const half = Math.floor((list || []).length / 2) || 0;
 
-  // id < half 를 1조로 보고 partner와 짝지음
   (list || [])
     .filter((p) => Number.isFinite(asNum(p?.id)) && asNum(p.id) < half)
     .forEach((p1) => {
@@ -34,14 +51,13 @@ function orderByPair(list) {
       if (used.has(id1)) return;
       const p2 = (list || []).find((x) => String(x?.id) === String(p1?.partner));
       if (p2) {
-        const pos = slot[0] ? 2 : 0; // 0·1 채웠으면 2·3
+        const pos = slot[0] ? 2 : 0;
         slot[pos] = p1;
         slot[pos + 1] = p2;
         used.add(id1); used.add(asNum(p2.id));
       }
     });
 
-  // 남은 사람은 순서대로 채움
   (list || []).forEach((p) => {
     const id = asNum(p?.id);
     if (!used.has(id)) {
@@ -50,11 +66,9 @@ function orderByPair(list) {
     }
   });
 
-  // 🆕 남은 null 슬롯들을 안전한 placeholder로 치환(이후 p.id 접근 시 에러 방지)
   for (let i = 0; i < 4; i += 1) {
     if (!slot[i]) slot[i] = { id: `empty-${i}`, nickname: '', handicap: '', score: null, __empty: true };
   }
-
   return slot.slice(0, 4);
 }
 
@@ -73,9 +87,37 @@ export default function PlayerScoreInput() {
     roomNames = [],
   } = useContext(PlayerContext);
 
+  const { eventData } = useContext(EventContext) || {};
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;
   const eventId = ctxEventId || routeEventId;
+
+  const [fallbackGate, setFallbackGate] = useState(null);
+  const [fallbackAt, setFallbackAt] = useState(0);
+
+  useEffect(() => {
+    if (!eventId) return;
+    const ref = doc(db, 'events', eventId);
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.data();
+      if (d?.playerGate) {
+        setFallbackGate(d.playerGate);
+        setFallbackAt(tsToMillis(d?.gateUpdatedAt));
+      }
+    });
+    return unsub;
+  }, [eventId]);
+
+  const latestGate = useMemo(() => {
+    const mode = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
+    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const fbG   = pickGateByMode(fallbackGate || {}, mode);
+    const fbAt  = fallbackAt;
+    return (ctxAt >= fbAt) ? ctxG : fbG;
+  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
+
+  const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
   const myRoom = participant?.room ?? null;
   const roomLabel =
@@ -85,37 +127,27 @@ export default function PlayerScoreInput() {
       ? `${myRoom}번방`
       : '';
 
-  // 🆕 1) 참가자 정규화(여기서 null/비객체 제거)
   const roomPlayers = useMemo(
-    // 🆕 null/잘못된 항목을 제거한 뒤 방 필터
     () => (myRoom ? toSafeParticipants(participants).filter((p) => (p?.room ?? null) === myRoom) : []),
     [participants, myRoom]
   );
-
-  // ★ patch: 페어 순서 고정 배열
   const orderedRoomPlayers = useMemo(() => orderByPair(roomPlayers), [roomPlayers]);
 
-  // ★ 추가: orderedRoomPlayers.forEach 를 null-세이프하게 패치(기존 코드 건드리지 않음)
-  //         배열 인스턴스의 forEach만 덮어써서, 이후 기존 코드의 forEach 호출이 안전하게 동작
   useEffect(() => {
     try {
       const a = orderedRoomPlayers;
       if (Array.isArray(a)) {
         const safe = a.filter((p) => !!p && typeof p === 'object' && p.id != null);
-        // forEach 패치
         Object.defineProperty(a, 'forEach', {
           configurable: true,
           writable: true,
           value: function (cb, thisArg) { return safe.forEach(cb, thisArg); }
         });
       }
-    } catch (e) {
-      // noop
-    }
+    } catch {}
   }, [orderedRoomPlayers]);
 
-  // 4행 고정(공란 패딩)
-  const paddedRows = useMemo(() => { /* ★ patch: orderedRoomPlayers 기반 */
+  const paddedRows = useMemo(() => {
     const rows = [...orderedRoomPlayers];
     while (rows.length < 4) {
       rows.push({ id: `empty-${rows.length}`, nickname: '', handicap: '', score: null, __empty: true });
@@ -123,7 +155,6 @@ export default function PlayerScoreInput() {
     return rows;
   }, [orderedRoomPlayers]);
 
-  // 표시상 0 → '' 로 바꾸던 기존 로직을 제거 (0은 그대로 "0" 표기)
   const [draft, setDraft] = useState({});
   useEffect(() => {
     setDraft((prev) => {
@@ -131,7 +162,6 @@ export default function PlayerScoreInput() {
       orderedRoomPlayers.forEach((p) => {
         const key = String(p.id);
         if (next[key] === undefined) {
-          // ✅ 0도 그대로 문자열 "0"로 초기화 (이전: 0이면 ''로 비움)
           next[key] = (p.score == null) ? '' : String(p.score);
         }
       });
@@ -139,7 +169,6 @@ export default function PlayerScoreInput() {
     });
   }, [orderedRoomPlayers]);
 
-  // 저장
   const persistScore = async (pid, valueStr) => {
     if (!eventId) return;
     const newScore = toNumberOrNull(valueStr);
@@ -148,7 +177,6 @@ export default function PlayerScoreInput() {
       String(p?.id) === String(pid) ? { ...p, score: newScore } : p
     );
 
-    // 🆕 Firestore 400 방지: undefined/NaN 제거
     const payload = (function sanitize(v) {
       if (Array.isArray(v)) return v.map(sanitize);
       if (v && typeof v === 'object') {
@@ -171,11 +199,10 @@ export default function PlayerScoreInput() {
   const onChangeScore = (pid, val) => {
     const clean = String(val ?? '').replace(/[^\d\-+]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
-    if (clean === '') persistScore(pid, ''); // 즉시 삭제 반영
+    if (clean === '') persistScore(pid, ''); 
   };
   const onCommitScore = (pid) => persistScore(pid, draft[String(pid)]);
 
-  // 합계(표시는 ''여도 계산은 0)
   const totals = useMemo(() => {
     let sumH = 0, sumS = 0, sumR = 0;
     orderedRoomPlayers.forEach((p) => {
@@ -275,7 +302,6 @@ export default function PlayerScoreInput() {
         </div>
       </div>
 
-      {/* 하단 네비: 텍스트는 '이전' / '다음'만, 화살표는 CSS 의사요소에서 그립니다. */}
       <div className={styles.footerNav}>
         <Link
           to={`/player/home/${eventId}/3`}
@@ -284,8 +310,13 @@ export default function PlayerScoreInput() {
           이전
         </Link>
         <Link
-          to={`/player/home/${eventId}/5`}
+          to={nextDisabled ? '#' : `/player/home/${eventId}/5`}
           className={`${styles.navBtn} ${styles.navNext}`}
+          onClick={(e)=>{ if (nextDisabled) { e.preventDefault(); e.stopPropagation(); } }}
+          aria-disabled={nextDisabled}
+          data-disabled={nextDisabled ? '1' : '0'}
+          style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+          tabIndex={nextDisabled ? -1 : 0}
         >
           다음
         </Link>
