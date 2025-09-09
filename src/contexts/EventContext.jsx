@@ -7,11 +7,11 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
-  deleteDoc
+  deleteDoc,
+  serverTimestamp   // ★ patch
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
-// ★ patch: 인증 게이팅을 위해 auth 모듈 추가 import
 import {
   getAuth,
   onAuthStateChanged,
@@ -22,7 +22,9 @@ import {
 
 export const EventContext = createContext({});
 
-// ★ patch: /player 경로에서 익명 인증을 보장하고, "인증 완료 후 resolve"되는 Promise 제공
+// ───────────────────────────────────────────────
+// 인증 게이팅 (기존 유지)
+// ───────────────────────────────────────────────
 const auth = getAuth();
 try { setPersistence(auth, browserLocalPersistence).catch(() => {}); } catch {}
 const ensureAuthed = (() => {
@@ -37,9 +39,7 @@ const ensureAuthed = (() => {
           /^\/player(\/|$)/.test(window.location.pathname);
         if (isPlayerApp) {
           try { await signInAnonymously(auth); } catch (e) { console.warn('[EventContext] anonymous sign-in failed:', e); }
-          // 로그인 되면 onAuthStateChanged가 다시 호출되어 resolve
         }
-        // /admin 등은 기존 보호 라우팅에서 로그인 처리되므로 여기서 추가 조치 없음
       });
     });
     return p;
@@ -93,9 +93,8 @@ export function EventProvider({ children }) {
     return { ...d, playerGate: { steps: normSteps, step1 } };
   };
 
-  // 전체 이벤트 구독
+  // 전체 이벤트 구독 (인증 이후 attach)
   useEffect(() => {
-    // ★ patch: 인증 완료 후에만 구독 attach
     let unsub = null, cancelled = false;
     ensureAuthed().then(() => {
       if (cancelled) return;
@@ -106,13 +105,11 @@ export function EventProvider({ children }) {
       });
     });
     return () => { cancelled = true; if (unsub) unsub(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 선택 이벤트 구독
+  // 선택 이벤트 구독 (인증 이후 attach)
   useEffect(() => {
     if (!eventId) { setEventData(null); lastEventDataRef.current = null; return; }
-    // ★ patch: 인증 완료 후에만 구독 attach
     let unsub = null, cancelled = false;
     ensureAuthed().then(() => {
       if (cancelled) return;
@@ -131,7 +128,6 @@ export function EventProvider({ children }) {
       );
     });
     return () => { cancelled = true; if (unsub) unsub(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   const loadEvent = async (id) => {
@@ -140,43 +136,9 @@ export function EventProvider({ children }) {
     return id;
   };
 
-  const createEvent = async ({
-    title,
-    mode,
-    id,
-    dateStart = '',
-    dateEnd = '',
-    allowDuringPeriodOnly = false
-  }) => {
-    const colRef = collection(db, 'events');
-    const docRef = id ? doc(db, 'events', id) : doc(colRef);
-    await setDoc(docRef, {
-      title,
-      mode,
-      roomCount: 4,
-      roomNames: Array(4).fill(''),
-      uploadMethod: '',
-      participants: [],
-      dateStart,
-      dateEnd,
-      allowDuringPeriodOnly,
-      publicView: {
-        hiddenRooms: [],
-        score: true,
-        banddang: true,
-        stroke:   { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } },
-        fourball: { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } }
-      },
-      playerGate: defaultPlayerGate,
-      events: [],
-      eventInputs: {}
-    });
-    return docRef.id;
-  };
-
+  // 공용 업데이트(디바운스)
   const updateEvent = async (updates, opts = {}) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
-
     const { debounceMs = 400, ifChanged = true } = opts;
     const before = lastEventDataRef.current || {};
     if (ifChanged) {
@@ -186,9 +148,7 @@ export function EventProvider({ children }) {
       }
       if (!changed) return;
     }
-
     queuedUpdatesRef.current = { ...(queuedUpdatesRef.current || {}), ...updates };
-
     clearTimeout(debounceTimerRef.current);
     await new Promise((resolve) => {
       debounceTimerRef.current = setTimeout(async () => {
@@ -208,6 +168,7 @@ export function EventProvider({ children }) {
     });
   };
 
+  // 즉시 업데이트
   const updateEventImmediate = async (updates, ifChanged = true) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
     const before = lastEventDataRef.current || {};
@@ -241,7 +202,30 @@ export function EventProvider({ children }) {
     }
   };
 
-  // 언마운트 시 디바운스 큐 플러시
+  // 페이지 이탈/가려짐 시 강제 플러시
+  useEffect(() => {
+    const flush = () => {
+      try {
+        if (!eventId) return;
+        const pending = queuedUpdatesRef.current;
+        if (pending) {
+          queuedUpdatesRef.current = null;
+          updateDoc(doc(db, 'events', eventId), pending).catch(() => {});
+        }
+      } catch {}
+    };
+    const onVis = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      window.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, [eventId]);
+
+  // 언마운트 플러시(기존 유지)
   useEffect(() => {
     return () => {
       try {
@@ -258,8 +242,15 @@ export function EventProvider({ children }) {
         console.warn('[EventContext] unmount flush error:', e);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
+
+  // publicView 저장 (로컬 미러 포함)
+  const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
+  const savePublicViewToLocal = (pv) => { try { localStorage.setItem(publicViewStorageKey(), JSON.stringify(pv || {})); } catch {} };
+  const loadPublicViewFromLocal = () => {
+    try { const raw = localStorage.getItem(publicViewStorageKey()); return raw ? JSON.parse(raw) : null; }
+    catch { return null; }
+  };
 
   const updatePublicView = async (partial, opts = {}) => {
     const { viewKey } = opts || {};
@@ -287,27 +278,19 @@ export function EventProvider({ children }) {
     try { savePublicViewToLocal(nextRoot); } catch {}
   };
 
-  const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
-  const savePublicViewToLocal = (pv) => { try { localStorage.setItem(publicViewStorageKey(), JSON.stringify(pv || {})); } catch {} };
-  const loadPublicViewFromLocal = () => {
-    try { const raw = localStorage.getItem(publicViewStorageKey()); return raw ? JSON.parse(raw) : null; }
-    catch { return null; }
-  };
-
+  // 이벤트(미니 이벤트) 정의/입력 (기존 유지)
   const addEventDef = async (def) => {
     const base = lastEventDataRef.current || {};
     const list = Array.isArray(base.events) ? [...base.events] : [];
     list.push(def);
     await updateEventImmediate({ events: list });
   };
-
   const updateEventDef = async (eventDefId, partial) => {
     const base = lastEventDataRef.current || {};
     const list = Array.isArray(base.events) ? [...base.events] : [];
     const next = list.map(d => d.id === eventDefId ? { ...d, ...partial } : d);
     await updateEventImmediate({ events: next });
   };
-
   const removeEventDef = async (eventDefId) => {
     const base = lastEventDataRef.current || {};
     const list = Array.isArray(base.events) ? [...base.events] : [];
@@ -316,21 +299,20 @@ export function EventProvider({ children }) {
     delete inputs[eventDefId];
     await updateEventImmediate({ events: next, eventInputs: inputs });
   };
-
   const setEventInput = async ({ eventDefId, target, key, value }) => {
     const base = lastEventDataRef.current || {};
     const all  = { ...(base.eventInputs || {}) };
     const slot = { ...(all[eventDefId] || {}) };
     const bucket = { ...(slot[target] || {}) };
-    if (value === '' || value == null) {
-      delete bucket[key];
-    } else {
-      bucket[key] = Number(value);
-    }
+    if (value === '' || value == null) { delete bucket[key]; } else { bucket[key] = Number(value); }
     slot[target] = bucket;
     all[eventDefId] = slot;
     await updateEventImmediate({ eventInputs: all }, false);
   };
+
+  // ★ patch: playerGate 저장 시 서버 타임스탬프도 함께 저장(최신판 식별)
+  const gateStorageKey = (id) => `playerGate:${id || eventId || ''}`;
+  const saveGateToLocal = (gate) => { try { localStorage.setItem(gateStorageKey(), JSON.stringify(gate || {})); } catch {} };
 
   const updatePlayerGate = async (partialGate) => {
     const before = lastEventDataRef.current?.playerGate || defaultPlayerGate;
@@ -339,7 +321,8 @@ export function EventProvider({ children }) {
       step1: { ...(before.step1 || {}), ...(partialGate?.step1 || {}) },
     };
     if (deepEqual(before, next)) return;
-    await updateEventImmediate({ playerGate: next });
+    saveGateToLocal(next);
+    await updateEventImmediate({ playerGate: next, gateUpdatedAt: serverTimestamp() }, false); // ★ patch: timestamp + 강제 저장
   };
 
   return (
@@ -349,7 +332,39 @@ export function EventProvider({ children }) {
       eventData,
       setEventId,
       loadEvent,
-      createEvent,
+      createEvent: async ({
+        title,
+        mode,
+        id,
+        dateStart = '',
+        dateEnd = '',
+        allowDuringPeriodOnly = false
+      }) => {
+        const colRef = collection(db, 'events');
+        const docRef = id ? doc(db, 'events', id) : doc(colRef);
+        await setDoc(docRef, {
+          title,
+          mode,
+          roomCount: 4,
+          roomNames: Array(4).fill(''),
+          uploadMethod: '',
+          participants: [],
+          dateStart,
+          dateEnd,
+          allowDuringPeriodOnly,
+          publicView: {
+            hiddenRooms: [],
+            score: true,
+            banddang: true,
+            stroke:   { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } },
+            fourball: { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } }
+          },
+          playerGate: defaultPlayerGate,
+          events: [],
+          eventInputs: {}
+        });
+        return docRef.id;
+      },
       updateEvent,
       updateEventImmediate,
       updateEventById,

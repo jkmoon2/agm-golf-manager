@@ -1,17 +1,38 @@
 // /src/player/screens/PlayerRoomTable.jsx
-
 // ※ 기존 레이아웃/스타일/버튼 문구는 100% 유지하고,
-//    Admin STEP6/8의 "선택" 값이 바로 반영되도록 publicView 복원 로직만 보완했습니다.
-//    - hiddenRooms: 루트/모드별(stroke/fourball) 어느 쪽이든 읽고, 0/1 기반 혼용도 자동 교정
-//    - 슬롯 정렬: 1조( group===1 )와 그 파트너(2조)를 (0,1)/(2,3) 슬롯에 고정
-//    - 나머지 로직/레이아웃은 기존 그대로 유지
+//    "다음" 버튼이 비활성일 때 시각/포인터도 확실히 막히도록 style/data-attr만 추가했습니다.
 
-import React, { useContext, useMemo, useRef, useEffect } from 'react';
+import React, { useContext, useMemo, useRef, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './PlayerRoomTable.module.css';
 import { EventContext } from '../../contexts/EventContext';
+// ★ patch: Firestore 실시간 구독 import는 반드시 최상단
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
+
+// ★ patch: gate helpers + ts
+function normalizeGate(raw){
+  if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
+  const g = { ...raw }; const steps = g.steps || {};
+  const out = { steps:{}, step1:{ ...(g.step1 || {}) } };
+  for (let i=1;i<=8;i+=1) out.steps[i] = steps[i] || 'enabled';
+  if (typeof out.step1.teamConfirmEnabled !== 'boolean') out.step1.teamConfirmEnabled = true;
+  return out;
+}
+function pickGateByMode(playerGate, mode){
+  const isFour = (mode === 'fourball' || mode === 'agm');
+  const nested = isFour ? playerGate?.fourball : playerGate?.stroke;
+  const base = nested && typeof nested === 'object' ? nested : playerGate;
+  return normalizeGate(base);
+}
+function tsToMillis(ts){
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  return Number(ts) || 0;
+}
 
 const MAX_PER_ROOM = 4;
 
@@ -115,6 +136,35 @@ export default function PlayerRoomTable() {
   const { eventId: paramId } = useParams();
   const { eventId: ctxId, loadEvent, eventData } = useContext(EventContext) || {};
 
+  // ★ patch: 실시간 게이트 구독 + 최신판 선택
+  const [fallbackGate, setFallbackGate] = useState(null);
+  const [fallbackAt, setFallbackAt] = useState(0);
+  useEffect(() => {
+    const id = paramId || ctxId;
+    if (!id) return;
+    const ref = doc(db, 'events', id);
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.data();
+      if (d?.playerGate) {
+        setFallbackGate(d.playerGate);
+        setFallbackAt(tsToMillis(d?.gateUpdatedAt));
+      }
+    });
+    return unsub;
+  }, [paramId, ctxId]);
+
+  const latestGate = useMemo(() => {
+    const mode = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
+    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const fbG  = pickGateByMode(fallbackGate || {}, mode);
+    const fbAt = fallbackAt;
+    return (ctxAt >= fbAt) ? ctxG : fbG;
+  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
+
+  // ★ patch: 다음 단계(STEP3) 버튼 상태
+  const nextDisabled = (latestGate?.steps?.[3] !== 'enabled');
+
   // URL의 :eventId -> 컨텍스트 동기화
   useEffect(() => {
     if (paramId && paramId !== ctxId && typeof loadEvent === 'function') {
@@ -122,7 +172,7 @@ export default function PlayerRoomTable() {
     }
   }, [paramId, ctxId, loadEvent]);
 
-  // myRoom을 항상 로컬스토리지에 반영 (STEP3에서 확실히 읽도록)
+  // myRoom을 항상 로컬스토리지에 반영
   useEffect(() => {
     const candidates = [
       eventData?.myRoom,
@@ -252,8 +302,12 @@ export default function PlayerRoomTable() {
                     localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo));
                   }
                 } catch {}
-                navigate(`/player/home/${paramId}/3`);
+                if (!nextDisabled) navigate(`/player/home/${paramId}/3`);
               }}
+              disabled={nextDisabled}
+              aria-disabled={nextDisabled}
+              data-disabled={nextDisabled ? '1' : '0'}
+              style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
             >
               다음 →
             </button>
@@ -364,8 +418,12 @@ export default function PlayerRoomTable() {
                 localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo));
               }
             } catch {}
-            navigate(`/player/home/${paramId}/3`);
+            if (!nextDisabled) navigate(`/player/home/${paramId}/3`);
           }}
+          disabled={nextDisabled}
+          aria-disabled={nextDisabled}
+          data-disabled={nextDisabled ? '1' : '0'}
+          style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
         >
           다음 →
         </button>

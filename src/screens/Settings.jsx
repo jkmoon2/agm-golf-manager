@@ -1,8 +1,12 @@
 // /src/screens/Settings.jsx
+// 대회별 저장 + "전체 프리셋" 4버튼(한 줄 4등분) + 스텝 변경 시 프리셋 선택 해제
+// 기존 로직/함수 그대로 유지, 필요한 코드만 추가
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import styles from './Settings.module.css';
 import { EventContext } from '../contexts/EventContext';
+import { collection, doc, onSnapshot, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const STATUS = ['hidden', 'disabled', 'enabled'];
 
@@ -12,137 +16,249 @@ function getDefaultGate() {
     step1: { teamConfirmEnabled: true },
   };
 }
-function mergeGate(prev, next) {
-  const a = prev || {};
-  const b = next || {};
-  return {
-    steps: { ...(a.steps || {}), ...(b.steps || {}) },
-    step1: { ...(a.step1 || {}), ...(b.step1 || {}) },
-  };
+function mergeGate(base, next){
+  const g = { ...(base || getDefaultGate()) };
+  const n = next || {};
+  g.steps = { ...(g.steps||{}), ...(n.steps||{}) };
+  g.step1 = { ...(g.step1||{}), ...(n.step1||{}) };
+  return g;
 }
 
 export default function Settings() {
-  const { eventId, eventData, updatePlayerGate, updateEvent, updateEventImmediate } = useContext(EventContext);
-  const hasEvent = !!eventId;
+  const {
+    allEvents = [],
+    eventId,
+    loadEvent,
+    eventData,
+    updateEvent,
+    updateEventImmediate,
+  } = useContext(EventContext) || {};
 
-  const initial = useMemo(() => mergeGate(getDefaultGate(), eventData?.playerGate), [eventData]);
-  const [gate, setGate] = useState(initial);
-  useEffect(() => { setGate(initial); }, [initial]);
-
-  const save = async (partial) => {
-    const next = mergeGate(gate, partial);
-    setGate(next);
-
-    if (!hasEvent) {
-      console.warn('[Settings] save blocked: no event selected');
+  const [events, setEvents] = useState([]);
+  useEffect(() => {
+    if (Array.isArray(allEvents) && allEvents.length) {
+      setEvents(allEvents);
       return;
     }
+    const unsub = onSnapshot(collection(db, 'events'), (snap) => {
+      const list = [];
+      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+      setEvents(list);
+    });
+    return unsub;
+  }, [allEvents]);
 
+  const selectedId = eventId || (events[0]?.id ?? '');
+  const selectedEvent = useMemo(() => events.find(e => e.id === selectedId) || {}, [events, selectedId]);
+
+  const [gate, setGate] = useState(getDefaultGate());
+  useEffect(() => {
+    setGate(mergeGate(getDefaultGate(), selectedEvent?.playerGate));
+    // ★ 새 대회로 바꾸면 프리셋 강조는 자동판단(감지값)으로 돌림
+    setSelectedPreset('');
+  }, [selectedEvent?.playerGate]);
+
+  const [saveState, setSaveState] = useState('idle');
+
+  const applyPreset = (type) => {
+    setGate(prev => {
+      const next = mergeGate(getDefaultGate(), prev);
+      if (type === 'allHidden') { for(let i=1;i<=8;i+=1) next.steps[i] = 'hidden'; }
+      if (type === 'allEnabled'){ for(let i=1;i<=8;i+=1) next.steps[i] = 'enabled'; }
+      if (type === 'openOnlyStep1'){ for(let i=1;i<=8;i+=1) next.steps[i] = (i===1 ? 'enabled':'disabled'); }
+      if (type === 'progressFlow'){ next.steps[1]='enabled'; next.steps[2]='enabled'; for(let i=3;i<=8;i+=1) next.steps[i]='disabled'; }
+      return { ...next };
+    });
+  };
+
+  // ★ 스텝/옵션을 수동으로 바꾸면 프리셋 선택 강조 해제
+  const setStep = (idx, status) => {
+    setSelectedPreset('none'); // 수동 편집 모드 표시
+    setGate(prev => ({ ...prev, steps: { ...(prev.steps||{}), [idx]: status } }));
+  };
+  const setTeamConfirm = (v) => {
+    setSelectedPreset('none'); // 수동 편집 시 프리셋 강조 해제
+    setGate(prev => ({ ...prev, step1: { ...(prev.step1||{}), teamConfirmEnabled: !!v } }));
+  };
+
+  async function save(){
+    const id = selectedId;
+    if (!id) return;
+    const next = mergeGate(getDefaultGate(), gate);
     try {
+      setSaveState('saving');
       if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ playerGate: next }, true);
-        console.info('[Settings] saved playerGate for', eventId, next);
-        return;
-      }
-      if (typeof updatePlayerGate === 'function') {
-        await updatePlayerGate(next);
+        await updateEventImmediate({ playerGate: next, gateUpdatedAt: serverTimestamp() }, false);
       } else if (typeof updateEvent === 'function') {
-        await updateEvent({ playerGate: next });
+        await updateEvent({ playerGate: next, gateUpdatedAt: serverTimestamp() });
+      } else {
+        await setDoc(doc(db,'events', id), { playerGate: next, gateUpdatedAt: serverTimestamp() }, { merge: true });
       }
-    } catch (e) {
-      console.error('[Settings] save failed:', e);
-    }
-  };
+      const snap = await getDoc(doc(db, 'events', id));
+      const after = snap.exists() ? snap.data()?.playerGate : null;
+      if (after) { setGate(mergeGate(getDefaultGate(), after)); setSaveState('saved'); setTimeout(()=>setSaveState('idle'), 800); }
+      else { setSaveState('error'); }
+    } catch (e) { console.error(e); setSaveState('error'); }
+  }
 
-  const setStepStatus = (n, status) => {
-    if (!STATUS.includes(status)) return;
-    save({ steps: { [n]: status } });
-  };
+  // ★ 4버튼 프리셋 선택 상태
+  const [selectedPreset, setSelectedPreset] = useState('');
 
-  const applyPreset = (key) => {
-    if (key === 'allHidden') {
-      save({ steps: { 1:'hidden',2:'hidden',3:'hidden',4:'hidden',5:'hidden',6:'hidden',7:'hidden',8:'hidden' } });
-    } else if (key === 'openOnlyStep1') {
-      save({ steps: { 1:'enabled',2:'disabled',3:'hidden',4:'hidden',5:'hidden',6:'hidden',7:'hidden',8:'hidden' }, step1: { teamConfirmEnabled: true } });
-    } else if (key === 'progressFlow') {
-      save({ steps: { 1:'enabled',2:'enabled',3:'disabled',4:'disabled',5:'disabled',6:'disabled',7:'hidden',8:'hidden' }, step1: { teamConfirmEnabled: true } });
-    } else if (key === 'allEnabled') {
-      save(getDefaultGate());
-    }
-  };
+  // 현재 gate가 어떤 프리셋과 일치하는지 감지(수동 편집 "none"이면 감지값 무시)
+  const detectedPreset = useMemo(() => {
+    const s = gate?.steps || {};
+    const isAllHidden   = [1,2,3,4,5,6,7,8].every(i => s[i] === 'hidden');
+    const isAllEnabled  = [1,2,3,4,5,6,7,8].every(i => s[i] === 'enabled');
+    const isOnlyStep1   = s[1] === 'enabled' && [2,3,4,5,6,7,8].every(i => s[i] === 'disabled');
+    const isProgress    = s[1] === 'enabled' && s[2] === 'enabled' && [3,4,5,6,7,8].every(i => s[i] === 'disabled');
+    if (isAllHidden)  return 'allHidden';
+    if (isOnlyStep1)  return 'openOnlyStep1';
+    if (isProgress)   return 'progressFlow';
+    if (isAllEnabled) return 'allEnabled';
+    return '';
+  }, [gate?.steps]);
 
-  const guideNextBlocked = gate.steps?.[2] !== 'enabled';
+  // 선택 강조: 'none'이면 해제, 빈문자면 감지값 사용
+  const activePreset = selectedPreset === 'none' ? '' : (selectedPreset || detectedPreset);
 
   return (
     <div className={styles.page}>
+      {/* 상단 타이틀/설명은 코드 유지 + CSS로 숨김 */}
       <div className={styles.header}>
-        <h2>운영자 설정</h2>
-        <div className={styles.caption}>
-          참가자 홈(8버튼)과 STEP1 “팀확인” 버튼의 노출/상태를 제어합니다.
-          {guideNextBlocked && (
-            <span className={styles.warn}>
-              ※ 현재 설정에서 STEP2가 활성화되지 않아, 참가자 STEP1의 “다음” 버튼은 비활성화됩니다.
-            </span>
-          )}
-        </div>
+        <h2>AGM Golf Manager</h2>
+        <div className={styles.caption}>운영자 설정</div>
       </div>
 
-      {!hasEvent && (
-        <div className={styles.notice}>
-          이벤트가 선택되지 않았습니다. 먼저 대회를 선택하세요.
-        </div>
-      )}
-
+      {/* ① 대회 선택 */}
       <section className={styles.card}>
         <div className={styles.cardHeader}>
-          <h3>① 전체 프리셋</h3>
+          <h3>① 대회 선택</h3>
         </div>
+        <div className={styles.eventRow}>
+          <div className={styles.eventSelectWrap}>
+            <select
+              className={styles.eventSelect}
+              value={selectedId}
+              onChange={(e)=>{ const id = e.target.value; if (typeof loadEvent==='function') loadEvent(id); }}
+            >
+              {events.map(ev => (
+                <option key={ev.id} value={ev.id}>
+                  {`${ev.title || ev.name || ev.id} · ${ev.mode || 'stroke'}`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button className={styles.saveBtn} onClick={save}>저장</button>
+        </div>
+        <div className={styles.eventNote}>선택된 대회에만 설정값이 저장됩니다.</div>
+        <div className={styles.saveStatus} data-state={saveState}>
+          {saveState === 'saving' && '저장 중...'}
+          {saveState === 'saved'  && '저장됨'}
+          {saveState === 'error'  && '저장 실패'}
+        </div>
+      </section>
+
+      {/* ② 전체 프리셋 */}
+      <section className={styles.card}>
+        <div className={styles.cardHeader}>
+          <h3>② 전체 프리셋</h3>
+        </div>
+
+        {/* 기존 프리셋 UI(코드 유지용) */}
         <div className={styles.presetRow}>
           <button onClick={() => applyPreset('allHidden')}>전체 숨김</button>
           <button onClick={() => applyPreset('openOnlyStep1')}>STEP1만 오픈</button>
           <button onClick={() => applyPreset('progressFlow')}>1·2만 오픈(진행형)</button>
           <button onClick={() => applyPreset('allEnabled')}>전체 활성</button>
         </div>
+        <ul className={styles.presetList}>
+          <li className={styles.presetItem}><label className={styles.presetLabel}><input type="radio" name="preset" className={styles.presetRadio} /><span className={styles.presetTitle}>전체 숨김</span><span className={styles.presetDesc}>모든 스텝 버튼을 숨깁니다.</span></label></li>
+          <li className={styles.presetItem}><label className={styles.presetLabel}><input type="radio" name="preset" className={styles.presetRadio} /><span className={styles.presetTitle}>STEP1만 오픈</span><span className={styles.presetDesc}>STEP1만 활성, 나머지는 비활성.</span></label></li>
+          <li className={styles.presetItem}><label className={styles.presetLabel}><input type="radio" name="preset" className={styles.presetRadio} /><span className={styles.presetTitle}>1·2만 오픈(진행형)</span><span className={styles.presetDesc}>STEP1·2만 활성, 3~8 비활성.</span></label></li>
+          <li className={styles.presetItem}><label className={styles.presetLabel}><input type="radio" name="preset" className={styles.presetRadio} /><span className={styles.presetTitle}>전체 활성</span><span className={styles.presetDesc}>모든 스텝 버튼을 활성화.</span></label></li>
+        </ul>
+        <div className={styles.presetActions}>
+          <button className={styles.applyBtn}>선택 프리셋 적용</button>
+        </div>
+
+        {/* ★ 신규: 4개의 버튼 — 한 줄 4등분(좌/우 꽉차게) */}
+        <div className={styles.presetGrid} role="group" aria-label="전체 프리셋">
+          <button
+            type="button"
+            className={`${styles.presetBox} ${activePreset === 'allHidden' ? styles.presetBoxActive : ''}`}
+            onClick={() => { setSelectedPreset('allHidden'); applyPreset('allHidden'); }}
+            aria-pressed={activePreset === 'allHidden'}
+            title="모든 스텝 버튼 숨김"
+          >
+            전체 숨김
+          </button>
+
+          {/* 두 줄 라벨: STEP1 / 오픈 */}
+          <button
+            type="button"
+            className={`${styles.presetBox} ${activePreset === 'openOnlyStep1' ? styles.presetBoxActive : ''}`}
+            onClick={() => { setSelectedPreset('openOnlyStep1'); applyPreset('openOnlyStep1'); }}
+            aria-pressed={activePreset === 'openOnlyStep1'}
+            title="STEP1만 활성"
+          >
+            <span className={styles.presetBoxLabel}>
+              <span className={styles.l1}>STEP1</span>
+              <span className={styles.l2}>오픈</span>
+            </span>
+          </button>
+
+          {/* 두 줄 라벨: STEP1.2 / 오픈 */}
+          <button
+            type="button"
+            className={`${styles.presetBox} ${activePreset === 'progressFlow' ? styles.presetBoxActive : ''}`}
+            onClick={() => { setSelectedPreset('progressFlow'); applyPreset('progressFlow'); }}
+            aria-pressed={activePreset === 'progressFlow'}
+            title="STEP1·2만 활성"
+          >
+            <span className={styles.presetBoxLabel}>
+              <span className={styles.l1}>STEP1.2</span>
+              <span className={styles.l2}>오픈</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`${styles.presetBox} ${activePreset === 'allEnabled' ? styles.presetBoxActive : ''}`}
+            onClick={() => { setSelectedPreset('allEnabled'); applyPreset('allEnabled'); }}
+            aria-pressed={activePreset === 'allEnabled'}
+            title="모든 스텝 버튼 활성"
+          >
+            전체 활성
+          </button>
+        </div>
       </section>
 
+      {/* ③ 스텝별 제어 */}
       <section className={styles.card}>
         <div className={styles.cardHeader}>
-          <h3>② 스텝별 제어 (숨김 / 비활성 / 활성)</h3>
-          <div className={styles.subtle}>* 숨김: 버튼 자체 미노출 · 비활성: 회색/클릭 불가 · 활성: 정상 동작</div>
+          <h3>③ 스텝별 제어</h3>
+          <div className={styles.subtle}>* 숨김: 버튼 자체 미노출 · 비활성: 클릭 불가 · 활성: 정상 동작</div>
         </div>
 
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>STEP</th>
-              <th>기능</th>
-              <th>숨김</th>
-              <th>비활성</th>
-              <th>활성</th>
+              <th>STEP</th><th>기능</th><th>숨김</th><th>비활성</th><th>활성</th>
             </tr>
           </thead>
           <tbody>
-            {[1,2,3,4,5,6,7,8].map((n) => (
-              <tr key={n}>
-                <td className={styles.stepCol}>STEP {n}</td>
-                <td className={styles.titleCol}>
-                  {n===1 && '방 선택'}
-                  {n===2 && '방배정표'}
-                  {n===3 && '이벤트'}
-                  {n===4 && '점수 입력'}
-                  {n===5 && '결과 확인'}
-                  {n===6 && '이벤트 확인'}
-                  {n===7 && '#TEMP'}
-                  {n===8 && '#TEMP'}
-                </td>
-                {STATUS.map(s => (
+            {Array.from({ length: 8 }, (_, i) => i + 1).map(idx => (
+              <tr key={idx}>
+                <td>STEP {idx}</td>
+                <td>메뉴 버튼</td>
+                {STATUS.map((s) => (
                   <td key={s}>
-                    <label className={styles.radio}>
+                    <label className={styles.radioLabel}>
                       <input
                         type="radio"
-                        name={`step-${n}`}
-                        checked={(gate.steps?.[n] || 'enabled') === s}
-                        onChange={() => setStepStatus(n, s)}
+                        name={`step-${idx}`}
+                        checked={(gate?.steps?.[idx] || 'enabled') === s}
+                        onChange={() => setStep(idx, s)}
                       />
                       <span />
                     </label>
@@ -154,39 +270,19 @@ export default function Settings() {
         </table>
       </section>
 
+      {/* ④ 기타 */}
       <section className={styles.card}>
         <div className={styles.cardHeader}>
-          <h3>③ STEP1 옵션</h3>
-          <div className={styles.subtle}>
-            * “팀확인” 버튼을 끄면 참가자 STEP1에서 팀확인을 할 수 없습니다.
-          </div>
+          <h3>④ 기타</h3>
         </div>
         <div className={styles.optionRow}>
+          <label className={styles.optionLabel}>STEP1 “팀확인” 버튼 활성화</label>
           <label className={styles.switch}>
-            <input
-              type="checkbox"
-              checked={!!gate.step1?.teamConfirmEnabled}
-              onChange={e => save({ step1: { teamConfirmEnabled: e.target.checked } })}
-            />
-            <span className={styles.slider} />
+            <input type="checkbox" checked={!!gate?.step1?.teamConfirmEnabled} onChange={(e)=>setTeamConfirm(e.target.checked)} />
+            <span className={styles.slider}></span>
           </label>
-          <span className={styles.optionLabel}>팀확인 버튼 활성화</span>
         </div>
-        <div className={styles.hint}>
-          ※ 권장: 경기 시작 전엔 STEP1만 활성화, STEP2 비활성 → 진행 신호 후 STEP2 활성.
-        </div>
-      </section>
-
-      <section className={styles.card}>
-        <div className={styles.cardHeader}>
-          <h3>④ (선택) 진행 안내</h3>
-        </div>
-        <ul className={styles.todoList}>
-          <li>진행 시작: <b>STEP1만 활성화</b>하여 참가자 대기 유도</li>
-          <li>방배정 공개: <b>STEP2 활성화</b> → STEP1의 “다음” 활성</li>
-          <li>스코어 입력: <b>STEP4 활성화</b> (필드 종료 후)</li>
-          <li>최종 결과 공개: <b>STEP5 활성화</b></li>
-        </ul>
+        <div className={styles.hint}>※ 현재 STEP2가 비활성 또는 숨김이라면, STEP1의 “다음” 버튼은 자동으로 비활성화됩니다.</div>
       </section>
     </div>
   );

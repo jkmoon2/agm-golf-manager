@@ -1,4 +1,4 @@
-// src/player/screens/PlayerResults.jsx
+// /src/player/screens/PlayerResults.jsx
 
 import React, { useMemo, useRef, useEffect, useContext, useState } from 'react';
 import html2canvas from 'html2canvas';
@@ -8,6 +8,17 @@ import styles from './PlayerResults.module.css';
 
 import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
+// ★ patch: Firestore 실시간 구독 import는 반드시 최상단
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
+
+// ★ patch: Timestamp -> millis
+function tsToMillis(ts){
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  return Number(ts) || 0;
+}
 
 const strlen = (s) => Array.from(String(s || '')).length;
 const MAX_PER_ROOM = 4;
@@ -86,6 +97,30 @@ function orderRoomFourball(roomArr = []) {
 export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
   const { eventData } = useContext(EventContext) || {};
+
+  // ★ patch: 실시간 게이트 구독(항상 상단에서 훅 호출, 어떤 return보다 앞)
+  const [fallbackGate, setFallbackGate] = useState(null);
+  const [fallbackAt, setFallbackAt] = useState(0);
+  useEffect(() => {
+    const id = eventData?.id || eventData?.eventId || null;
+    if (!id) return;
+    const ref = doc(db, 'events', id);
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.data();
+      if (d?.playerGate) {
+        setFallbackGate(d.playerGate);
+        setFallbackAt(tsToMillis(d?.gateUpdatedAt));
+      }
+    });
+    return unsub;
+  }, [eventData?.id, eventData?.eventId]);
+
+  const nextDisabled = useMemo(() => {
+    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const fbAt  = fallbackAt;
+    const gate  = (ctxAt >= fbAt ? eventData?.playerGate : fallbackGate) || { steps:{} };
+    return (gate?.steps?.[6] !== 'enabled');
+  }, [eventData?.playerGate, eventData?.gateUpdatedAt, fallbackGate, fallbackAt]);
 
   const mode         = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
   const roomCount    = eventData?.roomCount || 0;
@@ -200,14 +235,9 @@ export default function PlayerResults() {
   const resultRef = useRef(null);
   const teamRef   = useRef(null);
 
-  /* 📸 캡처 저장(JPG/PDF)
-     - JPG: 현재 화면 캔버스를 그대로 저장
-     - PDF: 캔버스 픽셀 크기와 동일한 페이지를 만들어 "화면과 100% 동일"하게 저장  */
   const captureAndSave = async (ref, file, type='jpg') => {
     const el = ref.current; if (!el) return;
     const ovr = el.style.overflow, ow = el.style.width;
-
-    // 렌더 영역을 전체로 넓혀 완전 캡처
     el.style.overflow  = 'visible';
     el.style.width     = `${el.scrollWidth}px`;
     el.scrollLeft = 0; el.scrollTop = 0;
@@ -220,7 +250,6 @@ export default function PlayerResults() {
       scale: window.devicePixelRatio || 2
     });
 
-    // 원래 스타일 복원
     el.style.overflow = ovr; el.style.width = ow;
 
     if (type === 'jpg') {
@@ -231,10 +260,6 @@ export default function PlayerResults() {
       return;
     }
 
-    // ✅ PDF를 "JPG와 완전히 동일"하게 만들기
-    // 1) 페이지 단위를 'px'로 고정
-    // 2) 페이지 크기를 캔버스 픽셀 크기와 동일하게 설정
-    // 3) (0,0) 위치에 원본 크기로 addImage
     const imgData = canvas.toDataURL('image/png');
     const orientation = canvas.width >= canvas.height ? 'landscape' : 'portrait';
     const pdf = new jsPDF({
@@ -273,7 +298,7 @@ export default function PlayerResults() {
               style={{ minWidth: `calc(var(--cols) * ( var(--nick-w) + ${metricsPerRoom} * var(--metric-w) + 12px ))` }}
             >
               <colgroup>
-                {headers.map((_, i) => !hiddenRooms.has(i) && (
+                {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
                   <React.Fragment key={`colgrp-${i}`}>
                     <col style={{ width: 'var(--nick-w)' }} />
                     <col style={{ width: 'var(--metric-w)' }} />
@@ -286,15 +311,16 @@ export default function PlayerResults() {
 
               <thead>
                 <tr>
-                  {headers.map((h, i) => !hiddenRooms.has(i) && (
-                    <th key={`res-h-${i}`} colSpan={2 + (visibleMetrics.score?1:0) + (visibleMetrics.banddang?1:0) + 1} className={styles.th}>{h}</th>
+                  {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
+                    <th key={`res-h-${i}`} colSpan={2 + (visibleMetrics.score?1:0) + (visibleMetrics.banddang?1:0) + 1} className={styles.th}>
+                      {roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`}
+                    </th>
                   ))}
                 </tr>
                 <tr>
-                  {headers.map((_, i) => !hiddenRooms.has(i) && (
+                  {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
                     <React.Fragment key={`res-sub-${i}`}>
                       <th className={`${styles.subTh} ${styles.nickCol}`}>닉네임</th>
-                      {/* ⬇ G핸디만 별도 폰트 크기 조절 — --ghead-fz 로 변경하세요 */}
                       <th className={`${styles.subTh} ${styles.metricCol} ${styles.gHead}`}>G핸디</th>
                       <th className={`${styles.subTh} ${styles.metricCol}`}>점수</th>
                       {visibleMetrics.banddang && <th className={`${styles.subTh} ${styles.metricCol}`}>반땅</th>}
@@ -307,13 +333,13 @@ export default function PlayerResults() {
               <tbody>
                 {Array.from({ length: MAX_PER_ROOM }).map((_, ri) => (
                   <tr key={`res-row-${ri}`}>
-                    {resultByRoom.map((roomObj, ci) => !hiddenRooms.has(ci) && (
+                    {Array.from({length: roomCount}).map((_, ci) => !hiddenRooms.has(ci) && (
                       <React.Fragment key={`res-${ci}-${ri}`}>
-                        <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{roomObj.detail[ri].nickname}</span></td>
-                        <td className={`${styles.td} ${styles.metricCol}`}>{roomObj.detail[ri].handicap}</td>
-                        {visibleMetrics.score    && <td className={`${styles.td} ${styles.metricCol}`}>{roomObj.detail[ri].score}</td>}
-                        {visibleMetrics.banddang && <td className={`${styles.td} ${styles.metricCol}`} style={{ color: '#0b61da' }}>{roomObj.detail[ri].banddang}</td>}
-                        <td className={`${styles.td} ${styles.metricCol}`} style={{ color:'red', fontWeight:600 }}>{roomObj.detail[ri].result}</td>
+                        <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{(resultByRoom[ci]||{}).detail?.[ri]?.nickname || ''}</span></td>
+                        <td className={`${styles.td} ${styles.metricCol}`}>{(resultByRoom[ci]||{}).detail?.[ri]?.handicap || 0}</td>
+                        {visibleMetrics.score    && <td className={`${styles.td} ${styles.metricCol}`}>{(resultByRoom[ci]||{}).detail?.[ri]?.score || 0}</td>}
+                        {visibleMetrics.banddang && <td className={`${styles.td} ${styles.metricCol}`} style={{ color: '#0b61da' }}>{(resultByRoom[ci]||{}).detail?.[ri]?.banddang || 0}</td>}
+                        <td className={`${styles.td} ${styles.metricCol}`} style={{ color:'red', fontWeight:600 }}>{(resultByRoom[ci]||{}).detail?.[ri]?.result || 0}</td>
                       </React.Fragment>
                     ))}
                   </tr>
@@ -322,20 +348,20 @@ export default function PlayerResults() {
 
               <tfoot>
                 <tr>
-                  {resultByRoom.map((roomObj, ci) => !hiddenRooms.has(ci) && (
+                  {Array.from({length: roomCount}).map((_, ci) => !hiddenRooms.has(ci) && (
                     <React.Fragment key={`res-sum-${ci}`}>
                       <td className={`${styles.td} ${styles.totalLabel}`}>합계</td>
-                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{roomObj.sumHandicap}</td>
-                      {visibleMetrics.score    && <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{roomObj.sumScore}</td>}
+                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{(resultByRoom[ci]||{}).sumHandicap || 0}</td>
+                      {visibleMetrics.score    && <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{(resultByRoom[ci]||{}).sumScore || 0}</td>}
                       <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: visibleMetrics.banddang ? '#0b61da' : 'black' }}>
-                        {visibleMetrics.banddang ? roomObj.sumBanddang : 0}
+                        {visibleMetrics.banddang ? (resultByRoom[ci]||{}).sumBanddang : 0}
                       </td>
-                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color:'#cc0000' }}>{roomObj.sumResult}</td>
+                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color:'#cc0000' }}>{(resultByRoom[ci]||{}).sumResult || 0}</td>
                     </React.Fragment>
                   ))}
                 </tr>
                 <tr>
-                  {headers.map((_, i) => !hiddenRooms.has(i) && (
+                  {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
                     <React.Fragment key={`res-rank-${i}`}>
                       <td colSpan={metricsPerRoom} className={styles.td} />
                       <td className={`${styles.td} ${styles.metricCol} ${styles.rankCell}`}>{rankMap[i]}등</td>
@@ -358,12 +384,11 @@ export default function PlayerResults() {
             <div className={styles.cardHeader}><div className={styles.cardTitle}>📋 팀결과표</div></div>
             <div ref={teamRef} className={styles.tableWrap}>
               <table className={`${styles.roomTable} ${styles.teamTable}`}>
-                {/* ✅ 열폭 고정 — rowSpan과 무관하게 colgroup으로만 제어 */}
                 <colgroup>
                   <col style={{ width: 'var(--team-room-w)' }} />
                   <col style={{ width: 'var(--team-nick-w)' }} />
-                  <col style={{ width: 'var(--team-hand-w)' }} />   {/* G핸디 */}
-                  <col style={{ width: 'var(--team-score-w)' }} />  {/* 점수 */}
+                  <col style={{ width: 'var(--team-hand-w)' }} />
+                  <col style={{ width: 'var(--team-score-w)' }} />
                   <col style={{ width: 'var(--team-result-w)' }} />
                   <col style={{ width: 'var(--team-total-w)' }} />
                   <col style={{ width: 'var(--team-rank-w)' }} />
@@ -384,7 +409,7 @@ export default function PlayerResults() {
                     if (hiddenRooms.has(roomIdx)) return null;
                     const room = resultByRoom[roomIdx];
                     if (!room) return null;
-                    const [p0, p1, p2, p3] = room.detail;
+                    const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀
                     const r = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
                     const sumA = r(p0) + r(p1);
                     const sumB = r(p2) + r(p3);
@@ -394,7 +419,7 @@ export default function PlayerResults() {
                     return (
                       <React.Fragment key={`team-room-${roomIdx}`}>
                         <tr>
-                          <td className={styles.td} rowSpan={4}>{headers[roomIdx]}</td>
+                          <td className={styles.td} rowSpan={4}>{roomNames[roomIdx]?.trim() ? roomNames[roomIdx] : `${roomIdx + 1}번방`}</td>
                           <td className={styles.td}>{p0?.nickname || ''}</td>
                           <td className={styles.td}>{p0?.handicap || 0}</td>
                           <td className={styles.td} style={{ color:'#0b61da' }}>{p0?.score || 0}</td>
@@ -439,7 +464,16 @@ export default function PlayerResults() {
 
       <div className={styles.footerNav}>
         <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={goPrev}>← 이전</button>
-        <button className={`${styles.navBtn} ${styles.navNext}`} onClick={goNext}>다음 →</button>
+        <button
+          className={`${styles.navBtn} ${styles.navNext}`}
+          onClick={() => { if (!nextDisabled && typeof goNext === 'function') goNext(); }}
+          disabled={nextDisabled}
+          aria-disabled={nextDisabled}
+          data-disabled={nextDisabled ? '1' : '0'}
+          style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+        >
+          다음 →
+        </button>
       </div>
     </div>
   );
