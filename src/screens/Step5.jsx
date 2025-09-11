@@ -1,4 +1,5 @@
-// src/screens/Step5.jsx
+// /src/screens/Step5.jsx
+
 import React, { useState, useEffect, useContext } from 'react';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext'; // ★ patch

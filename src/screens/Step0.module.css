@@ -14,7 +14,8 @@
 .cardRow { display:flex; align-items:stretch; justify-content:space-between; gap:.5rem; }
 .cardMain { flex:1; min-width:0; }
 
-.titleRow { display:flex; align-items:center; gap:.5rem; }
+/* ▼ 줄바꿈 방지 보강 */
+.titleRow { display:flex; align-items:center; gap:.5rem; flex-wrap: nowrap; }
 .title { margin:0; font-size:1rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .badge { font-size:.72rem; padding:.16rem .45rem; border-radius:999px; border:1px solid #ddd; flex-shrink:0; }
 .badgeStroke { background:#eaf3ff; color:#1e63c6; }
@@ -25,7 +26,19 @@
   margin-top:.28rem; font-size:.86rem; color:#555;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
-.closed { color:#c00; }
+
+/* ▼ “종료” 배지: 플레이어 리스트와 동일 느낌 + 한 줄 고정 */
+.closed {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;   /* 줄바꿈 금지 */
+  flex-shrink: 0;        /* 축소 방지 */
+}
 
 /* ⋮ 더보기 메뉴 */
 .moreWrap { position:relative; flex-shrink:0; display:flex; align-items:center; }
