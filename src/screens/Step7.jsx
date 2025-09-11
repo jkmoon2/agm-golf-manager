@@ -1,3 +1,5 @@
+// /src/screens/Step7.jsx
+
 import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';

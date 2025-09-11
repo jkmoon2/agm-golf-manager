@@ -72,6 +72,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
+  // ★ 추가: joinRoom을 별도 훅 호출로 가져와서(기존 줄 수정 없이) 중복 감지 시 교정 커밋에 사용
+  const { joinRoom } = useContext(PlayerContext); // ★ 추가
+
   // 🆕 폴백 구독 상태
   const [fallbackGate, setFallbackGate] = useState(null);
 
@@ -100,6 +103,11 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const gate = eventData?.playerGate ? normalizeGate(eventData.playerGate) : (fallbackGate || {});
   const step2Enabled = (gate?.steps?.[2] || 'enabled') === 'enabled';
   const teamConfirmEnabled = !!(gate?.step1?.teamConfirmEnabled ?? true);
+
+  // ★ 추가: '숨김' 지원 (기본값: 보이기). Admin Settings에서 step1.teamConfirmHidden === true 이면 숨김.
+  //         혹은 step1.teamConfirmVisible === false 여도 숨김.
+  const teamConfirmVisible =
+    !(gate?.step1?.teamConfirmHidden === true) && !!(gate?.step1?.teamConfirmVisible ?? true); // ★ 추가
 
   const done = !!participant?.room;
   const assignedRoom = participant?.room ?? null;
@@ -203,6 +211,22 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     }
   }, [participant?.room]);
 
+  // ★ 추가: 방 유효성 검사(스트로크 전용)
+  const roomCount = useMemo(() => (Array.isArray(roomNames) ? roomNames.length : 0), [roomNames]); // ★ 추가
+  const isValidStrokeRoom = (roomNo) => { // ★ 추가
+    if (variant !== 'stroke' || !roomNo) return true;
+    const myGroup = Number(participant?.group) || 0;
+    const sameGroupExists = participants.some(
+      (p) =>
+        Number(p.room) === Number(roomNo) &&
+        Number(p.group) === myGroup &&
+        String(p.id) !== String(participant?.id)
+    );
+    const currentCount = participants.filter((p) => Number(p.room) === Number(roomNo)).length;
+    const isFull = currentCount >= 4;
+    return !sameGroupExists && !isFull;
+  };
+
   const handleAssign = async () => {
     if (!participant?.id) return;
     if (done || isAssigning) return;
@@ -241,24 +265,45 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       await sleep(TIMINGS.spinBeforeAssign);
       const { roomNumber, partnerNickname } = await onAssign(participant.id);
-      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
+
+      // ★ 추가: 스트로크 방중복/정원초과 즉시 검증 + 교정
+      let finalRoom = roomNumber;
+      if (!isValidStrokeRoom(finalRoom)) {
+        // 교정 후보(같은 조 없는 방 + 정원 미만) 중 랜덤
+        const candidates = Array.from({ length: roomCount }, (_, i) => i + 1)
+          .filter((r) => isValidStrokeRoom(r));
+        if (candidates.length > 0) {
+          finalRoom = candidates[Math.floor(Math.random() * candidates.length)];
+          if (typeof joinRoom === 'function') {
+            await joinRoom(finalRoom, participant.id); // Firestore에 즉시 커밋
+          }
+        } else {
+          // 교정 불가(모든 방이 충돌/정원초과) → 사용자에게 안내하고 종료
+          setIsAssigning(false);
+          setFlowStep('idle');
+          alert('동시 배정으로 인한 충돌이 감지되었습니다.\n잠시 후 다시 시도해주세요.');
+          return;
+        }
+      }
+      // ★ 추가 끝
+
+      if (Number.isFinite(Number(finalRoom))) saveMyRoom(Number(finalRoom));
 
       setFlowStep('afterAssign');
 
       await sleep(variant === 'fourball' ? TIMINGS.preAlertFourball : TIMINGS.preAlertStroke);
       setIsAssigning(false);
 
-      const roomLabel = getLabel(roomNumber);
+      const roomLabel = getLabel(finalRoom);
       if (variant === 'fourball') {
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
-        // ★ 추가: 첫 알림 확인 후에 두 번째 알림(팀원 선택 결과)을 보여줍니다.
+        // ★ (기존) 팀원 선택 안내
         if (partnerNickname) {
           setIsAssigning(true);
           await sleep(TIMINGS.spinDuringPartnerPick);
           setIsAssigning(false);
           alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
         }
-        // ★ 추가 끝
       } else {
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
       }
@@ -343,6 +388,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
           className={`${styles.btn} ${styles.btnGray}`}
           onClick={handleTeamButton}
           disabled={teamBtnDisabled}
+          style={teamConfirmVisible ? undefined : { display: 'none' }} // ★ 추가: 숨김 반영
         >
           팀확인
         </button>

@@ -1,6 +1,5 @@
 // /src/screens/Settings.jsx
-// 대회별 저장 + "전체 프리셋" 4버튼(한 줄 4등분) + 스텝 변경 시 프리셋 선택 해제
-// 기존 로직/함수 그대로 유지, 필요한 코드만 추가
+// STEP1 토글 라벨을 ‘활성/숨김’ 관점으로 표현(저장 로직은 동일)
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import styles from './Settings.module.css';
@@ -13,7 +12,11 @@ const STATUS = ['hidden', 'disabled', 'enabled'];
 function getDefaultGate() {
   return {
     steps: { 1:'enabled', 2:'enabled', 3:'enabled', 4:'enabled', 5:'enabled', 6:'enabled', 7:'enabled', 8:'enabled' },
-    step1: { teamConfirmEnabled: true },
+    step1: { 
+      teamConfirmEnabled: true, 
+      teamConfirmVisible: true,       // ★ 추가: 기본 표시
+      teamConfirmHidden:  false       // ★ 추가: 기본 숨김 아님
+    },
   };
 }
 function mergeGate(base, next){
@@ -54,8 +57,23 @@ export default function Settings() {
   const [gate, setGate] = useState(getDefaultGate());
   useEffect(() => {
     setGate(mergeGate(getDefaultGate(), selectedEvent?.playerGate));
-    // ★ 새 대회로 바꾸면 프리셋 강조는 자동판단(감지값)으로 돌림
     setSelectedPreset('');
+    // ★ 추가: 구버전 호환 — visible/hidden 값이 없으면 enabled값으로 보정
+    setGate(prev => {
+      const vis = prev?.step1?.teamConfirmVisible;
+      if (typeof vis === 'undefined') {
+        const en = !!prev?.step1?.teamConfirmEnabled;
+        return { 
+          ...prev, 
+          step1: { 
+            ...(prev.step1||{}), 
+            teamConfirmVisible: en, 
+            teamConfirmHidden: !en 
+          } 
+        };
+      }
+      return prev;
+    });
   }, [selectedEvent?.playerGate]);
 
   const [saveState, setSaveState] = useState('idle');
@@ -71,14 +89,22 @@ export default function Settings() {
     });
   };
 
-  // ★ 스텝/옵션을 수동으로 바꾸면 프리셋 선택 강조 해제
   const setStep = (idx, status) => {
-    setSelectedPreset('none'); // 수동 편집 모드 표시
+    setSelectedPreset('none');
     setGate(prev => ({ ...prev, steps: { ...(prev.steps||{}), [idx]: status } }));
   };
   const setTeamConfirm = (v) => {
-    setSelectedPreset('none'); // 수동 편집 시 프리셋 강조 해제
-    setGate(prev => ({ ...prev, step1: { ...(prev.step1||{}), teamConfirmEnabled: !!v } }));
+    setSelectedPreset('none');
+    // ★ 변경: 표시/숨김 필드를 함께 저장(구버전 호환 위해 enabled는 항상 true로 유지)
+    setGate(prev => ({ 
+      ...prev, 
+      step1: { 
+        ...(prev.step1||{}), 
+        teamConfirmVisible: !!v,     // 표시 여부
+        teamConfirmHidden:  !v,      // 숨김 여부(반대값)
+        teamConfirmEnabled: true     // 구버전 경로에서 ‘비활성’로 보이지 않게 하기 위함
+      } 
+    }));
   };
 
   async function save(){
@@ -101,10 +127,7 @@ export default function Settings() {
     } catch (e) { console.error(e); setSaveState('error'); }
   }
 
-  // ★ 4버튼 프리셋 선택 상태
   const [selectedPreset, setSelectedPreset] = useState('');
-
-  // 현재 gate가 어떤 프리셋과 일치하는지 감지(수동 편집 "none"이면 감지값 무시)
   const detectedPreset = useMemo(() => {
     const s = gate?.steps || {};
     const isAllHidden   = [1,2,3,4,5,6,7,8].every(i => s[i] === 'hidden');
@@ -117,13 +140,10 @@ export default function Settings() {
     if (isAllEnabled) return 'allEnabled';
     return '';
   }, [gate?.steps]);
-
-  // 선택 강조: 'none'이면 해제, 빈문자면 감지값 사용
   const activePreset = selectedPreset === 'none' ? '' : (selectedPreset || detectedPreset);
 
   return (
     <div className={styles.page}>
-      {/* 상단 타이틀/설명은 코드 유지 + CSS로 숨김 */}
       <div className={styles.header}>
         <h2>AGM Golf Manager</h2>
         <div className={styles.caption}>운영자 설정</div>
@@ -158,13 +178,12 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* ② 전체 프리셋 */}
+      {/* ② 전체 프리셋 (기존 유지) */}
       <section className={styles.card}>
         <div className={styles.cardHeader}>
           <h3>② 전체 프리셋</h3>
         </div>
 
-        {/* 기존 프리셋 UI(코드 유지용) */}
         <div className={styles.presetRow}>
           <button onClick={() => applyPreset('allHidden')}>전체 숨김</button>
           <button onClick={() => applyPreset('openOnlyStep1')}>STEP1만 오픈</button>
@@ -181,7 +200,7 @@ export default function Settings() {
           <button className={styles.applyBtn}>선택 프리셋 적용</button>
         </div>
 
-        {/* ★ 신규: 4개의 버튼 — 한 줄 4등분(좌/우 꽉차게) */}
+        {/* 4개 프리셋 버튼(신규 UI 유지) */}
         <div className={styles.presetGrid} role="group" aria-label="전체 프리셋">
           <button
             type="button"
@@ -192,8 +211,6 @@ export default function Settings() {
           >
             전체 숨김
           </button>
-
-          {/* 두 줄 라벨: STEP1 / 오픈 */}
           <button
             type="button"
             className={`${styles.presetBox} ${activePreset === 'openOnlyStep1' ? styles.presetBoxActive : ''}`}
@@ -206,8 +223,6 @@ export default function Settings() {
               <span className={styles.l2}>오픈</span>
             </span>
           </button>
-
-          {/* 두 줄 라벨: STEP1.2 / 오픈 */}
           <button
             type="button"
             className={`${styles.presetBox} ${activePreset === 'progressFlow' ? styles.presetBoxActive : ''}`}
@@ -220,7 +235,6 @@ export default function Settings() {
               <span className={styles.l2}>오픈</span>
             </span>
           </button>
-
           <button
             type="button"
             className={`${styles.presetBox} ${activePreset === 'allEnabled' ? styles.presetBoxActive : ''}`}
@@ -276,13 +290,20 @@ export default function Settings() {
           <h3>④ 기타</h3>
         </div>
         <div className={styles.optionRow}>
-          <label className={styles.optionLabel}>STEP1 “팀확인” 버튼 활성화</label>
+          {/* ★ patch: 문구를 ‘활성/숨김’ 관점으로 변경 */}
+          <label className={styles.optionLabel}>STEP1 “팀확인” 버튼 <b>표시</b></label>
           <label className={styles.switch}>
-            <input type="checkbox" checked={!!gate?.step1?.teamConfirmEnabled} onChange={(e)=>setTeamConfirm(e.target.checked)} />
+            {/* ★ 변경: visible 값을 사용 */}
+            <input 
+              type="checkbox" 
+              checked={!!gate?.step1?.teamConfirmVisible} 
+              onChange={(e)=>setTeamConfirm(e.target.checked)} 
+            />
             <span className={styles.slider}></span>
           </label>
         </div>
-        <div className={styles.hint}>※ 현재 STEP2가 비활성 또는 숨김이라면, STEP1의 “다음” 버튼은 자동으로 비활성화됩니다.</div>
+        {/* 안내 문구도 ‘활성/숨김’ 표현으로 보정 */}
+        <div className={styles.hint}>※ 현재 STEP2가 비활성 또는 숨김이라면, STEP1의 “다음” 버튼은 자동으로 비활성화됩니다. (팀확인 버튼은 <b>표시/숨김</b>으로 동작)</div>
       </section>
     </div>
   );

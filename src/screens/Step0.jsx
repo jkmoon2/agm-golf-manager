@@ -175,12 +175,14 @@ export default function Step0() {
                     <span className={`${styles.badge} ${(normMode(evt.mode) === 'fourball')?styles.badgeFour:styles.badgeStroke}`}>
                       {(normMode(evt.mode) === 'fourball') ? 'AGM 포볼' : '스트로크'}
                     </span>
+                    {/* ★ patch: 종료 라벨을 윗줄로 이동(배지 옆) */}
+                    {closed && <span className={styles.closed}>종료</span>}
                   </div>
 
                   <div className={styles.subline}>
                     <span>👥 참가자 {count}명</span>
                     <span>📅 {fmt(evt.dateStart)} ~ {fmt(evt.dateEnd)}</span>
-                    {closed && <span className={styles.closed}>종료</span>}
+                    {/* (이전 위치) {closed && <span className={styles.closed}>종료</span>} */}
                   </div>
                 </div>
 

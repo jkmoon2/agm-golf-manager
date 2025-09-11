@@ -1,10 +1,6 @@
 // /src/player/screens/PlayerEventList.jsx
-// 변경 요약:
-// - "이미 인증된 대회" 판단을 sessionStorage만 사용(브라우저 재시작 시 초기화 보장)
-// - 카드 클릭: 인증됨 → /player/home/:id, 미인증 → /player/home/:id/login
-// - 기존 스타일(EventSelectScreen.module.css) 유지
-// - ★ patch: 기간 제한 검사 추가(allowDuringPeriodOnly + accessStartAt/accessEndAt/dateStart/dateEnd)
-//            허용되지 않으면 클릭 차단 + 카드 시각적 비활성화 + '접속 제한' 라벨 표시
+// 기간 제한 시 라벨을 "종료"로, 줄바꿈 방지(whiteSpace: 'nowrap').
+// "종료"는 실제 종료(현재 > 종료시각)일 때만 노출. 시작 전에는 라벨 없음.
 
 import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -36,14 +32,11 @@ export default function PlayerEventList() {
 
   // ✅ 같은 "세션"에서만 인증 유지
   const wasAuthed = (id) => {
-    try {
-      return sessionStorage.getItem(`auth_${id}`) === 'true';
-    } catch {
-      return false;
-    }
+    try { return sessionStorage.getItem(`auth_${id}`) === 'true'; }
+    catch { return false; }
   };
 
-  // ★ patch: Timestamp/number 안전 변환
+  // Timestamp/number 안전 변환
   const tsToMillis = (ts) => {
     if (ts == null) return null;
     if (typeof ts === 'number') return ts;
@@ -51,51 +44,59 @@ export default function PlayerEventList() {
     if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
     return null;
   };
-  // ★ patch: 'YYYY-MM-DD' → 00:00/23:59:59 millis
+  // 'YYYY-MM-DD' → 00:00/23:59:59 millis
   const dateStrToMillis = (s, kind /* 'start'|'end' */) => {
     if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
     const t = kind === 'start' ? '00:00:00' : '23:59:59';
     const d = new Date(`${s}T${t}`);
     return Number.isFinite(d.getTime()) ? d.getTime() : null;
   };
-  // ★ patch: 현재 접속 허용 여부 계산
+  const getStartEnd = (ev) => ({
+    startAt: tsToMillis(ev?.accessStartAt) ?? dateStrToMillis(ev?.dateStart, 'start'),
+    endAt:   tsToMillis(ev?.accessEndAt)   ?? dateStrToMillis(ev?.dateEnd, 'end'),
+  });
+
+  // 접속 허용 여부(제한은 막되, 라벨은 "종료"일 때만 표기)
   const isAccessAllowed = (ev) => {
-    const allowDuring = !!ev?.allowDuringPeriodOnly;
-    if (!allowDuring) return true; // 제한 없음
-    const startAt =
-      tsToMillis(ev?.accessStartAt) ??
-      dateStrToMillis(ev?.dateStart, 'start');
-    const endAt =
-      tsToMillis(ev?.accessEndAt) ??
-      dateStrToMillis(ev?.dateEnd, 'end');
+    if (!ev?.allowDuringPeriodOnly) return true;
+    const { startAt, endAt } = getStartEnd(ev);
     const now = Date.now();
     if (startAt && now < startAt) return false;
     if (endAt && now > endAt) return false;
     return true;
   };
+  const isEnded = (ev) => {
+    const { endAt } = getStartEnd(ev);
+    return !!(endAt && Date.now() > endAt);
+  };
 
   const goNext = async (ev) => {
-    // ★ patch: 기간 제한 차단
     if (!isAccessAllowed(ev)) {
+      // 안내만, 이동 차단
       alert('대회 기간이 아닙니다.\n대회 기간 중에만 참가자 접속이 허용됩니다.');
       return;
     }
     try { localStorage.setItem('eventId', ev.id); } catch {}
     setEventId?.(ev.id);
-    if (typeof loadEvent === 'function') {
-      try { await loadEvent(ev.id); } catch {}
-    }
-    if (wasAuthed(ev.id)) {
-      nav(`/player/home/${ev.id}`);
-    } else {
-      nav(`/player/home/${ev.id}/login`);
-    }
+    if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
+    if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}`); }
+    else { nav(`/player/home/${ev.id}/login`); }
+  };
+
+  // 인라인 스타일(모듈 CSS 없이도 동일 배지 스타일 보장)
+  const endedBadgeStyle = {
+    marginLeft: 6,
+    padding: '2px 6px',
+    borderRadius: 8,
+    background: '#fee2e2',
+    color: '#b91c1c',
+    fontSize: 12,
+    fontWeight: 700,
+    whiteSpace: 'nowrap'
   };
 
   return (
     <div className={styles.container}>
-      {/* 상단 중복 제목 제거 */}
-
       {!events.length && <div style={{ color:'#6b7280', padding: 12 }}>등록된 대회가 없습니다.</div>}
 
       <ul className={styles.list}>
@@ -104,14 +105,14 @@ export default function PlayerEventList() {
           const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
           const count = Array.isArray(ev.participants) ? ev.participants.length : 0;
           const isFour = (ev.mode === 'agm' || ev.mode === 'fourball');
-          const accessOk = isAccessAllowed(ev); // ★ patch
+          const accessOk = isAccessAllowed(ev);
+          const ended = isEnded(ev);
 
           return (
             <li
               key={ev.id}
               className={styles.card}
               onClick={() => goNext(ev)}
-              // ★ patch: 시각적 비활성화
               style={accessOk ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
               title={accessOk ? undefined : '대회 기간 외 접속 제한'}
             >
@@ -120,22 +121,8 @@ export default function PlayerEventList() {
                 <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
                   {isFour ? 'AGM 포맷' : '스트로크'}
                 </span>
-                {/* ★ patch: 접속 제한 라벨 */}
-                {!accessOk && (
-                  <span
-                    style={{
-                      marginLeft: 6,
-                      padding: '2px 6px',
-                      borderRadius: 8,
-                      background: '#fee2e2',
-                      color: '#b91c1c',
-                      fontSize: 12,
-                      fontWeight: 700
-                    }}
-                  >
-                    접속 제한
-                  </span>
-                )}
+                {/* 종료(한 줄, 줄바꿈 없음) */}
+                {ended && <span style={endedBadgeStyle}>종료</span>}
               </div>
               <div className={styles.subline}>
                 <span>👥 참가자 {count}명</span>

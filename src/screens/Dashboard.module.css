@@ -1,0 +1,77 @@
+/* src/screens/Dashboard.module.css */
+
+.page {
+  padding: 12px 12px 80px;
+  background: #fff;
+}
+.visuallyHidden { position:absolute; left:-9999px; top:auto; width:1px; height:1px; overflow:hidden; }
+
+.header {
+  display:flex; align-items:flex-end; justify-content:space-between;
+  gap:12px; margin-bottom:12px; border-bottom:1px solid #eee; padding-bottom:8px;
+}
+.titleWrap { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.eventTitle { font-size:18px; font-weight:700; }
+.modeBadge {
+  font-size:12px; padding:2px 8px; border-radius:999px; border:1px solid #ddd;
+  background:#f8fafc; color:#334155;
+}
+.modeBadge.stroke { background:#eef2ff; color:#3730a3; border-color:#c7d2fe; }
+.modeBadge.fourball { background:#ecfeff; color:#155e75; border-color:#a5f3fc; }
+.meta { display:flex; gap:12px; font-size:12px; color:#475569; flex-wrap:wrap; }
+
+.kpiGrid {
+  display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap:10px; margin:12px 0;
+}
+.card {
+  background:#fff; border:1px solid #eee; border-radius:12px; padding:10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+}
+.cardHead { font-size:12px; color:#475569; }
+.cardValue { font-size:12px; color:#334155; }
+.donut { display:block; }
+.donutText { font-size:12px; fill:#334155; font-weight:700; }
+
+.panel { background:#fff; border:1px solid #eee; border-radius:12px; padding:10px; margin:12px 0; }
+.panelHead { font-weight:700; font-size:13px; margin-bottom:8px; }
+
+.flexRow { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+.toggleGroup { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.toggleLabel { font-size:12px; color:#475569; margin-right:2px; }
+.pill {
+  border:1px solid #e2e8f0; background:#f8fafc; padding:4px 8px; border-radius:999px;
+  font-size:12px; cursor:pointer;
+}
+.pill.on { background:#e0f2fe; border-color:#bae6fd; color:#0c4a6e; }
+.pill:active { transform: translateY(1px); }
+
+.bars { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px; }
+.barRow { display:grid; grid-template-columns: 1fr 5fr auto; gap:8px; align-items:center; }
+.barLabel { font-size:12px; color:#334155; position:relative; }
+.warnDot {
+  display:inline-block; width:6px; height:6px; border-radius:999px; background:#ef4444;
+  margin-left:6px; vertical-align:middle;
+}
+.barTrack { background:#f1f5f9; height:10px; border-radius:6px; overflow:hidden; }
+.barFill { height:100%; background:#3b82f6; }
+.barValue { font-size:12px; min-width:34px; text-align:right; }
+
+.miniTable { width:100%; border-collapse:collapse; }
+.miniTable th, .miniTable td {
+  border:1px solid #e5e7eb; padding:6px 8px; font-size:12px; text-align:center;
+}
+.rankCell { text-align:center; }
+.rankBadge {
+  display:inline-block; min-width:28px; padding:2px 6px; border-radius:999px; font-weight:700;
+  background:#fff7ed; color:#b45309; border:1px solid #fed7aa;
+}
+
+.quick { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.quickBtn {
+  border:1px solid #e2e8f0; background:#ffffff; padding:8px 10px; border-radius:10px;
+  font-size:13px; box-shadow:0 1px 4px rgba(0,0,0,0.04); cursor:pointer;
+}
+.quickBtn:active { transform: translateY(1px); }
+.dim { opacity:0.45; }
