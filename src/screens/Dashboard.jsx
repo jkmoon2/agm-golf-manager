@@ -1,40 +1,78 @@
 // src/screens/Dashboard.jsx
-
-import React, { useMemo, useContext, useState } from 'react';
+import React, { useMemo, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styles from './Dashboard.module.css';
-
-// 기존 컨텍스트/로직 재사용
-import { EventContext } from '../contexts/EventContext'; // publicView, participants, roomCount 등 :contentReference[oaicite:9]{index=9}
+import { EventContext } from '../contexts/EventContext';
+import { db } from '../firebase';
+import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
 
 export default function Dashboard() {
-  // 기존 h2 유지 (요구사항: 기존 코드 100% 유지)
-  // 이전에는 h2만 반환했지만, 이제 전체 레이아웃 안에 포함해 사용합니다.
   const preservedTitle = <h2 className={styles.visuallyHidden}>대시보드 화면</h2>;
 
   const navigate = useNavigate();
-  const { eventId, eventData, updatePublicView } = useContext(EventContext) || {};
-  const mode        = eventData?.mode || 'stroke';
-  const title       = eventData?.title || 'Untitled Event';
-  const roomCount   = eventData?.roomCount || 0;
-  const roomNames   = eventData?.roomNames || [];
-  const participants = Array.isArray(eventData?.participants) ? eventData.participants : [];
-  const pv          = eventData?.publicView || {};
-  const hiddenRooms = Array.isArray(pv.hiddenRooms) ? pv.hiddenRooms.map(Number) : [];
-  const showScore   = (pv.visibleMetrics?.score ?? pv.score ?? true);
-  const showBand    = (pv.visibleMetrics?.banddang ?? pv.banddang ?? true);
+  const ctx = useContext(EventContext) || {};
+  const { eventId: ctxEventId, eventData: ctxEventData, updatePublicView: ctxUpdatePublicView } = ctx;
 
-  const capacity = roomCount * 4;
+  // 대회 목록
+  const [events, setEvents] = useState([]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'events'));
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => String(b.dateStart || '').localeCompare(String(a.dateStart || '')));
+        if (mounted) setEvents(list);
+      } catch (e) { console.warn('[Dashboard] events load failed:', e); }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // 선택된 대회
+  const [selectedId, setSelectedId] = useState(ctxEventId || '');
+  useEffect(() => { if (ctxEventId && !selectedId) setSelectedId(ctxEventId); }, [ctxEventId, selectedId]);
+
+  const [selectedData, setSelectedData] = useState(ctxEventData || null);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        if (selectedId && ctxEventId && selectedId === ctxEventId) {
+          if (mounted) setSelectedData(ctxEventData || null);
+          return;
+        }
+        if (selectedId) {
+          const ds = await getDoc(doc(db, 'events', selectedId));
+          if (mounted) setSelectedData(ds.exists() ? ds.data() : null);
+        } else {
+          if (mounted) setSelectedData(ctxEventData || null);
+        }
+      } catch (e) { console.warn('[Dashboard] event load failed:', e); }
+    })();
+    return () => { mounted = false; };
+  }, [selectedId, ctxEventId, ctxEventData]);
+
+  // 파생값
+  const mode         = selectedData?.mode || 'stroke';
+  const title        = selectedData?.title || 'Untitled Event';
+  const roomCount    = Number(selectedData?.roomCount) || 0;
+  const roomNames    = Array.isArray(selectedData?.roomNames) ? selectedData.roomNames : [];
+  const participants = Array.isArray(selectedData?.participants) ? selectedData.participants : [];
+  const pv           = selectedData?.publicView || {};
+  const hiddenRooms  = Array.isArray(pv.hiddenRooms) ? pv.hiddenRooms.map(Number) : [];
+  const showScore    = (pv.visibleMetrics?.score ?? pv.score ?? true);
+  const showBand     = (pv.visibleMetrics?.banddang ?? pv.banddang ?? true);
+  const capacity     = roomCount * 4;
+
+  // KPI
   const assignedCount = useMemo(
-    () => participants.filter(p => Number.isFinite(p?.room)).length,
+    () => participants.filter(p => Number.isFinite(Number(p?.room))).length,
     [participants]
   );
   const scoreCount = useMemo(
-    () => participants.filter(p => p?.score != null).length,
+    () => participants.filter(p => p?.score != null && p?.score !== '').length,
     [participants]
   );
-
-  // 포볼(2인1팀)일 때 페어 수 계산(중복 제거)
   const pairCount = useMemo(() => {
     if (mode !== 'fourball') return 0;
     const seen = new Set();
@@ -47,52 +85,47 @@ export default function Dashboard() {
     });
     return seen.size;
   }, [participants, mode]);
-  const expectedPairs = useMemo(() => {
-    if (mode !== 'fourball') return 0;
-    return Math.floor(participants.length / 2);
-  }, [participants.length, mode]);
+  const expectedPairs = useMemo(() => (mode !== 'fourball' ? 0 : Math.floor(participants.length / 2)), [participants.length, mode]);
 
-  // 방별 묶기
+  // 방별
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     participants.forEach(p => {
       const r = Number(p?.room);
-      if (Number.isFinite(r) && r >= 1 && r <= roomCount) {
-        arr[r - 1].push(p);
-      }
+      if (Number.isFinite(r) && r >= 1 && r <= roomCount) arr[r - 1].push(p);
     });
     return arr;
   }, [participants, roomCount]);
 
-  // 방별 G핸디 합(파란색)
   const roomHandiSum = useMemo(
     () => byRoom.map(list => list.reduce((s, p) => s + (Number(p?.handicap) || 0), 0)),
     [byRoom]
   );
   const maxHandiSum = Math.max(1, ...roomHandiSum);
 
-  // 방별 “결과 합계/순위” (Step6/8 동일 규칙)
+  const roomHasGroupDup = useMemo(() => {
+    return byRoom.map(list => {
+      const cnt = {};
+      list.forEach(p => { const g = String(p?.group ?? ''); cnt[g] = (cnt[g] || 0) + 1; });
+      return Object.values(cnt).some(n => n > 1);
+    });
+  }, [byRoom]);
+
   const resultByRoom = useMemo(() => {
     return byRoom.map(roomArr => {
-      // 반땅 대상(최고 점수) 인덱스
-      let maxIdx = 0, maxVal = -Infinity;
       const filled = Array.from({ length: 4 }, (_, i) => roomArr[i] || { handicap: 0, score: 0 });
-      filled.forEach((p, i) => {
-        const sc = Number(p?.score) || 0;
-        if (sc > maxVal) { maxVal = sc; maxIdx = i; }
-      });
-
-      let sumHd = 0, sumSc = 0, sumBd = 0, sumRs = 0;
+      let maxIdx = 0, maxVal = -Infinity;
+      filled.forEach((p, i) => { const sc = Number(p?.score) || 0; if (sc > maxVal) { maxVal = sc; maxIdx = i; } });
+      let sumHd = 0, sumRs = 0;
       filled.forEach((p, i) => {
         const hd = Number(p?.handicap) || 0;
         const sc = Number(p?.score) || 0;
-        const bd = (i === maxIdx) ? Math.floor(sc / 2) : sc; // 반땅 룰(소수점 절사) :contentReference[oaicite:10]{index=10}
-        const used = showScore ? (showBand ? bd : sc) : bd;  // Step6 보이는 항목 규칙과 일치 :contentReference[oaicite:11]{index=11}
+        const bd = (i === maxIdx) ? Math.floor(sc / 2) : sc;
+        const used = showScore ? (showBand ? bd : sc) : bd;
         const rs = used - hd;
-        sumHd += hd; sumSc += sc; sumBd += bd; sumRs += rs;
+        sumHd += hd; sumRs += rs;
       });
-
-      return { sumHandicap: sumHd, sumScore: sumSc, sumBanddang: sumBd, sumResult: sumRs };
+      return { sumHandicap: sumHd, sumResult: sumRs };
     });
   }, [byRoom, showScore, showBand]);
 
@@ -100,92 +133,102 @@ export default function Dashboard() {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
       .filter(x => !hiddenRooms.includes(x.idx))
-      .sort((a, b) => a.tot - b.tot || a.hd - b.hd); // 낮은 점수 우선, 동점 시 핸디합 낮은 방 우선 :contentReference[oaicite:12]{index=12}
-    const map = {};
-    arr.forEach((x, i) => { map[x.idx] = i + 1; });
+      .sort((a, b) => a.tot - b.tot || a.hd - b.hd);
+    const map = {}; arr.forEach((x, i) => { map[x.idx] = i + 1; });
     return map;
   }, [resultByRoom, hiddenRooms]);
 
-  // 조 중복(같은 방에 같은 조 2명 이상) 탐지
-  const roomHasGroupDup = useMemo(() => {
-    return byRoom.map(list => {
-      const cnt = {};
-      list.forEach(p => {
-        const g = String(p?.group ?? '');
-        cnt[g] = (cnt[g] || 0) + 1;
-      });
-      return Object.values(cnt).some(n => n > 1);
-    });
-  }, [byRoom]);
+  // publicView 갱신
+  const writePublicView = async (patch) => {
+    const targetId = selectedId || ctxEventId;
+    if (!targetId) return;
+    if (ctxUpdatePublicView && targetId === ctxEventId) { await ctxUpdatePublicView(patch); return; }
+    const prev = selectedData?.publicView || {};
+    const next = { ...prev, ...patch };
+    try {
+      await updateDoc(doc(db, 'events', targetId), { publicView: next });
+      setSelectedData(d => ({ ...(d || {}), publicView: next }));
+    } catch (e) { console.warn('[Dashboard] publicView update failed:', e); }
+  };
 
-  // publicView 토글
   const toggleHiddenRoom = async (idx) => {
     const set = new Set(hiddenRooms);
     set.has(idx) ? set.delete(idx) : set.add(idx);
     const next = Array.from(set).sort((a, b) => a - b);
-    try {
-      await updatePublicView?.({ hiddenRooms: next }); // 안전 병합/디바운스 헬퍼 :contentReference[oaicite:13]{index=13}
-    } catch {}
+    await writePublicView({ hiddenRooms: next });
   };
   const toggleMetric = async (key) => {
-    const next = {
-      score: key === 'score' ? !showScore : showScore,
-      banddang: key === 'banddang' ? !showBand : showBand,
-    };
-    try {
-      // 구/신 키 동시 갱신(호환): visibleMetrics + (score/banddang)
-      await updatePublicView?.({ visibleMetrics: next, ...next }); // :contentReference[oaicite:14]{index=14}
-    } catch {}
+    const next = { score: key === 'score' ? !showScore : showScore, banddang: key === 'banddang' ? !showBand : showBand };
+    await writePublicView({ visibleMetrics: next, ...next });
   };
 
-  // 네비
   const goStep = (n) => navigate(`/admin/home/${n}`);
 
   return (
     <div className={styles.page}>
       {preservedTitle}
 
-      {/* 헤더 */}
-      <header className={styles.header}>
-        <div className={styles.titleWrap}>
-          <div className={styles.eventTitle}>{title}</div>
-          <span className={`${styles.modeBadge} ${mode === 'fourball' ? styles.fourball : styles.stroke}`}>
-            {mode === 'fourball' ? 'AGM 포볼' : '스트로크'}
+      {/* 상단: 대회 선택 + 모드 뱃지 */}
+      <div className={styles.topRow}>
+        <div className={styles.selectWrap} title={title}>
+          <select
+            className={styles.select}
+            value={selectedId || ctxEventId || ''}
+            onChange={(e) => setSelectedId(e.target.value)}
+          >
+            {(selectedId || ctxEventId) && !events.find(ev => ev.id === (selectedId || ctxEventId)) && (
+              <option value={selectedId || ctxEventId}>
+                {title} ({selectedId || ctxEventId})
+              </option>
+            )}
+            {events.map(ev => (
+              <option key={ev.id} value={ev.id}>
+                {ev.title || ev.id}
+              </option>
+            ))}
+          </select>
+        </div>
+        <span className={`${styles.modeBadge} ${mode === 'fourball' ? styles.fourball : styles.stroke}`}>
+          {mode === 'fourball' ? 'AGM 포볼' : '스트로크'}
+        </span>
+      </div>
+
+      {/* 메타 정보(한 줄, 가로 스크롤/툴팁로 생략 방지) */}
+      <div className={styles.metaStrip}>
+        <div className={`${styles.metaItem} ${styles.metaLeft}`}>
+          <b>ID</b>
+          <span title={selectedId || ctxEventId || '-'}>
+            {selectedId || ctxEventId || '-'}
           </span>
         </div>
-        <div className={styles.meta}>
-          <div>이벤트ID: <b>{eventId || '-'}</b></div>
-          <div>기간: <b>{eventData?.dateStart || '-'}</b> ~ <b>{eventData?.dateEnd || '-'}</b></div>
-          <div>방 수: <b>{roomCount}</b></div>
+        <div className={`${styles.metaItem} ${styles.metaCenter}`}>
+          <b>기간</b>
+          <span title={`${selectedData?.dateStart || '-'} ~ ${selectedData?.dateEnd || '-'}`}>
+            {selectedData?.dateStart || '-'} ~ {selectedData?.dateEnd || '-'}
+          </span>
         </div>
-      </header>
+        <div className={`${styles.metaItem} ${styles.metaRight}`}>
+          <b>방 수</b>
+          <span title={String(roomCount)}>{roomCount}</span>
+        </div>
+      </div>
 
-      {/* KPI 도넛 */}
+      {/* KPI */}
       <section className={styles.kpiGrid}>
-        <KpiCard label="참가자" value={participants.length} total={capacity} />
+        <KpiCard label="참가자" value={participants.length} total={capacity || 0} />
         <KpiCard label="방배정" value={assignedCount} total={participants.length || 1} />
         <KpiCard label="점수입력" value={scoreCount} total={participants.length || 1} />
         {mode === 'fourball' && <KpiCard label="팀결성" value={pairCount} total={expectedPairs || 1} />}
       </section>
 
-      {/* 표시 옵션 (PublicView) */}
+      {/* 표시 옵션 */}
       <section className={styles.panel}>
         <div className={styles.panelHead}>표시 옵션(공유 뷰)</div>
         <div className={styles.flexRow}>
           <div className={styles.toggleGroup}>
             <span className={styles.toggleLabel}>항목</span>
-            <button
-              className={`${styles.pill} ${showScore ? styles.on : ''}`}
-              onClick={() => toggleMetric('score')}
-            >
-              점수
-            </button>
-            <button
-              className={`${styles.pill} ${showBand ? styles.on : ''}`}
-              onClick={() => toggleMetric('banddang')}
-            >
-              반땅
-            </button>
+            <button className={`${styles.pill} ${showScore ? styles.on : ''}`} onClick={() => toggleMetric('score')}>점수</button>
+            <button className={`${styles.pill} ${showBand ? styles.on : ''}`} onClick={() => toggleMetric('banddang')}>반땅</button>
           </div>
           <div className={styles.toggleGroup}>
             <span className={styles.toggleLabel}>방 숨김</span>
@@ -203,7 +246,27 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* 방별 G핸디 합계 (막대) */}
+      {/* 방별 배정 현황 */}
+      <section className={styles.panel}>
+        <div className={styles.panelHead}>방별 배정 현황</div>
+        <ul className={styles.assignList}>
+          {byRoom.map((list, i) => {
+            const count = list.length;
+            const pct = Math.max(0, Math.min(1, count / 4));
+            return (
+              <li key={i} className={styles.assignRow}>
+                <div className={styles.assignLabel}>{roomNames[i]?.trim() || `${i + 1}번방`}</div>
+                <div className={styles.assignTrack}>
+                  <div className={styles.assignFill} style={{ width: `${Math.round(pct * 100)}%` }} />
+                </div>
+                <div className={styles.assignVal}>{count} / 4</div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      {/* 방별 G핸디 합계 */}
       <section className={styles.panel}>
         <div className={styles.panelHead}>방별 G핸디 합계</div>
         <ul className={styles.bars}>
@@ -216,9 +279,7 @@ export default function Dashboard() {
                   {roomNames[i]?.trim() || `${i + 1}번방`}
                   {roomHasGroupDup[i] && <span className={styles.warnDot} title="같은 조 중복 배정 감지" />}
                 </div>
-                <div className={styles.barTrack}>
-                  <div className={styles.barFill} style={{ width }} />
-                </div>
+                <div className={styles.barTrack}><div className={styles.barFill} style={{ width }} /></div>
                 <div className={styles.barValue} style={{ color: 'blue' }}>{sum}</div>
               </li>
             );
@@ -226,7 +287,7 @@ export default function Dashboard() {
         </ul>
       </section>
 
-      {/* 방별 결과 & 순위 (요약) */}
+      {/* 방별 결과 합 & 순위 */}
       <section className={styles.panel}>
         <div className={styles.panelHead}>방별 결과 합 & 순위</div>
         <table className={styles.miniTable}>
@@ -246,9 +307,7 @@ export default function Dashboard() {
                   <td>{roomNames[i]?.trim() || `${i + 1}번방`}</td>
                   <td style={{ color: 'blue' }}>{r.sumHandicap}</td>
                   <td style={{ color: 'red' }}>{r.sumResult}</td>
-                  <td className={styles.rankCell}>
-                    <span className={styles.rankBadge}>{rankMap[i] ?? '-'}</span>
-                  </td>
+                  <td className={styles.rankCell}><span className={styles.rankBadge}>{rankMap[i] ?? '-'}</span></td>
                 </tr>
               );
             })}
@@ -270,42 +329,27 @@ export default function Dashboard() {
   );
 }
 
-/* ───────────────────────────────────────────── */
-/* 내부 컴포넌트: KPI 카드(도넛 그래프)          */
-/* ───────────────────────────────────────────── */
+/* 내부 컴포넌트: KPI 카드 */
 function KpiCard({ label, value, total }) {
   const pct = Math.max(0, Math.min(1, total ? value / total : 0));
   return (
     <div className={styles.card}>
       <div className={styles.cardHead}>{label}</div>
       <Donut percent={pct} />
-      <div className={styles.cardValue}>
-        <b>{value}</b> / {total || 0}
-      </div>
+      <div className={styles.cardValue}><b>{value}</b> / {total || 0}</div>
     </div>
   );
 }
 
 function Donut({ percent = 0 }) {
-  const size = 64;
-  const stroke = 8;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const dash = c * percent;
+  const size = 64, stroke = 8, r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r, dash = c * percent;
   return (
     <svg width={size} height={size} className={styles.donut}>
       <circle cx={size/2} cy={size/2} r={r} stroke="#eee" strokeWidth={stroke} fill="none" />
-      <circle
-        cx={size/2}
-        cy={size/2}
-        r={r}
-        stroke="#4f46e5"
-        strokeWidth={stroke}
-        fill="none"
-        strokeLinecap="round"
-        strokeDasharray={`${dash} ${c - dash}`}
-        transform={`rotate(-90 ${size/2} ${size/2})`}
-      />
+      <circle cx={size/2} cy={size/2} r={r} stroke="#4f46e5" strokeWidth={stroke} fill="none"
+              strokeLinecap="round" strokeDasharray={`${dash} ${c - dash}`}
+              transform={`rotate(-90 ${size/2} ${size/2})`} />
       <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className={styles.donutText}>
         {Math.round(percent * 100)}%
       </text>
