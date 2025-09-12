@@ -1,12 +1,11 @@
-/* src/screens/Step0.module.css */
+/* /src/screens/Step0.module.css */
 
-/* 컨테이너/탭 */
+/* ───────── 기존 내용 유지 ───────── */
 .container { padding: 1rem; max-width: 420px; margin: 0 auto; }
 .tabContainer { display:flex; gap:.5rem; margin-bottom:.75rem; }
 .tabBtn { flex:1; height:38px; border:1px solid #d1d5db; border-radius:10px; background:#fff; }
 .active { background:#eaf3ff; border-color:#bcd7ff; }
 
-/* 리스트 / 카드 */
 .list { display:grid; gap:.75rem; padding:0; margin:0; list-style:none; }
 .item { background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.03); padding:.75rem; }
 .selected { outline:2px solid #cde5ff; }
@@ -14,7 +13,6 @@
 .cardRow { display:flex; align-items:stretch; justify-content:space-between; gap:.5rem; }
 .cardMain { flex:1; min-width:0; }
 
-/* ▼ 줄바꿈 방지 보강 */
 .titleRow { display:flex; align-items:center; gap:.5rem; flex-wrap: nowrap; }
 .title { margin:0; font-size:1rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .badge { font-size:.72rem; padding:.16rem .45rem; border-radius:999px; border:1px solid #ddd; flex-shrink:0; }
@@ -27,7 +25,6 @@
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
-/* ▼ “종료” 배지: 플레이어 리스트와 동일 느낌 + 한 줄 고정 */
 .closed {
   margin-left: 6px;
   padding: 2px 6px;
@@ -36,11 +33,10 @@
   color: #b91c1c;
   font-size: 12px;
   font-weight: 700;
-  white-space: nowrap;   /* 줄바꿈 금지 */
-  flex-shrink: 0;        /* 축소 방지 */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-/* ⋮ 더보기 메뉴 */
 .moreWrap { position:relative; flex-shrink:0; display:flex; align-items:center; }
 .moreBtn {
   width:40px; height:40px; line-height:40px;
@@ -61,7 +57,6 @@
 .moreItemDanger { color:#b91c1c; }
 .moreItemDanger:hover { background:#fff1f1; }
 
-/* 하단 고정 버튼: 컨테이너 폭(카드 좌우 여백과 동일) */
 .bottomDockFixed {
   position: fixed;
   left: 50%;
@@ -74,14 +69,11 @@
 .dockInner {
   display:flex;
   gap:.75rem;
-  /* 테두리/그림자 제거 */
   background: transparent;
   padding: .25rem 0;
   border: none;
   box-shadow: none;
 }
-
-/* 버튼: 동일 크기, 약간 축소(44px) */
 .primaryBtn, .secondaryBtn {
   flex:1;
   height:40px;
@@ -93,32 +85,46 @@
 .primaryBtn  { background:#2e8b57; color:#fff; }
 .secondaryBtn{ background:#1e63c6; color:#fff; }
 
-/* 모달 내에서 버튼도 동일 폭으로 배치 */
 .btnFlex { flex: 1; }
-
-/* 리스트가 버튼 뒤에 가려지지 않도록 여분 */
 .bottomSpacer { height: 96px; }
 
-/* ───────────────────────────────────────────── */
-/* ▼▼▼ 추가 보완(모바일 우측 잘림/가로 드래그 방지) ▼▼▼ */
-/* ───────────────────────────────────────────── */
-
-/* 1) 컨테이너 자체에서 가로 오버플로우 방지(콘텐츠는 줄임/스크롤 없이 자연스럽게 맞춤) */
+/* ───────── (이전 보완) iOS vw 보정/가로 드래그 방지 ───────── */
 .container { overflow-x: hidden; }
-
-/* 2) iOS Safari에서 100vw가 실제 가시 영역보다 몇 px 커지는 문제 보정
-      - 고정 하단 바의 width를 vw 대신 % 기반으로 재계산하여 미세 오버플로우 제거
-      - 기존 선언은 그대로 두고, 아래 규칙으로 '덮어쓰기'만 합니다. */
 @supports (width: min(100%, 100%)) {
-  .bottomDockFixed {
-    /* 컨테이너 내부 내용 폭(= 100% - 좌우 패딩 2rem)과 max-width 420px을 동시에 만족 */
-    width: min(420px, calc(100% - 2rem));
-  }
+  .bottomDockFixed { width: min(420px, calc(100% - 2rem)); }
 }
-/* 지원하지 않는 브라우저용 안전망 */
 @supports not (width: min(100%, 100%)) {
   .bottomDockFixed { width: calc(100% - 2rem); max-width: 420px; }
 }
-
-/* 3) 드물게 절대/고정 요소가 페이지 폭을 늘리는 경우 방지(열린 ⋮ 메뉴 등) */
 .moreMenu { max-width: calc(100vw - 2rem); }
+
+/* ───────── (이전 보완) 좌/우 동일 여백 변수화 ───────── */
+:root { --padL: 1rem; --padR: 1rem; }
+@supports (padding: max(0px)) {
+  :root {
+    --padL: max(1rem, env(safe-area-inset-left));
+    --padR: max(1rem, env(safe-area-inset-right));
+  }
+}
+.container {
+  padding-left: var(--padL);
+  padding-right: var(--padR);
+  overflow-x: visible;
+}
+@supports (width: min(100%, 100%)) {
+  .bottomDockFixed { width: min(420px, calc(100% - (var(--padL) + var(--padR)))); }
+}
+@supports not (width: min(100%, 100%)) {
+  .bottomDockFixed { width: calc(100% - (var(--padL) + var(--padR))); max-width: 420px; }
+}
+.moreMenu { max-width: calc(100vw - (var(--padL) + var(--padR))); }
+
+/* ──────────────────────────────────────────────── */
+/* ▼▼ 이번 이슈 전용 오버라이드 (AGM 포볼 우측 여백 불일치) ▼▼ */
+/* 원인: flex 컨테이너에서 `justify-content: space-between`과 `gap`이 결합되면
+   항목 수/문자 폭/서브픽셀 라운딩에 따라 우측 끝 여백이 들쭉날쭉해질 수 있습니다.
+   해결: 정렬을 '내용-왼쪽 정렬'로 고정하고, trailing 요소(.moreWrap)에만
+   `margin-left:auto`를 주어 **항상 오른쪽 패딩에 정확히 붙도록** 강제. */
+/* 덮어쓰기만 추가(기존 선언 유지) */
+.cardRow { justify-content: flex-start; }   /* space-between → flex-start */
+.moreWrap { margin-left: auto; }            /* 오른쪽 끝으로 고정(패딩 기준) */
