@@ -1,9 +1,9 @@
 // /src/screens/EventManager.jsx
-// - 전역 confirm 사용 → askConfirm() 래퍼로 교체(ESLint no-restricted-globals 해결) ★
-// - "대회 선택/연동" 행을 한 줄로 꽉 차게(셀렉트 확장 + 버튼 오른쪽 정렬) ★
-// - 범위 편집기는 JSX 구조 유지, CSS로 width:100%/min-width:0 처리(오른쪽 넘어감 방지) ★
-// - 미리보기 컨트롤 바(Grid 1fr auto auto) 유지(오른쪽 잘림 방지) ★
-// - 나머지는 기존 동작/레이아웃 그대로 유지
+// - 햄버거 메뉴 flip(하단 아이템은 위로 열기) + 카드 overflow 보정
+// - 누적 칸수 2~20 허용(5~N 가능) + 4칸 기준 폭 고정, 5칸↑ 가로 스크롤
+// - '입력 초기화', '빠른 입력(관리자)' 메뉴 추가
+// - 새 템플릿 range-convert-bonus(보너스) 추가 + 편집/집계 지원
+// - 미리보기 점수 표시는 소수점 '두 자리까지만' 포맷
 
 import React, { useContext, useMemo, useState, useEffect, useRef } from 'react';
 import { EventContext } from '../contexts/EventContext';
@@ -13,15 +13,17 @@ import css from './EventManager.module.css';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-/** 템플릿(순서: 숫자 입력, 숫자 범위→점수, 숫자×계수) */
+/** 템플릿(기존 + 보너스 추가) */
 const TEMPLATES = [
   { type: 'raw-number',     label: '숫자 입력(그대로 점수)', defaultParams: { aggregator: 'sum' } },
   { type: 'range-convert',  label: '숫자 범위→점수(테이블)', defaultParams: { aggregator: 'sum', table: [{min:0,max:0.5,score:3},{min:0.51,max:1,score:2},{min:1.1,max:1.5,score:1}] } },
+  { type: 'range-convert-bonus', label: '숫자 범위→점수(테이블)+보너스', defaultParams: { aggregator: 'sum', table: [{min:0,max:0.5,score:3},{min:0.51,max:1,score:2},{min:1.1,max:1.5,score:1}], bonus: [{label:'파',score:1},{label:'버디',score:2}] } },
   { type: 'number-convert', label: '숫자 × 계수(환산)',       defaultParams: { aggregator: 'sum', factor: 1 } },
 ];
 
 const ParamHelp = ({ template }) => {
   if (template === 'range-convert')  return <p className={css.help}>* 구간별 점수표로 환산합니다. <b>범위 편집기</b>에서 구간/점을 관리하세요.</p>;
+  if (template === 'range-convert-bonus') return <p className={css.help}>* 구간별 점수표 환산 + <b>보너스</b> 점수를 추가로 더합니다. 아래 보너스 항목을 등록하세요.</p>;
   if (template === 'number-convert') return <p className={css.help}>* 입력값에 <b>계수(factor)</b>를 곱해 환산합니다.</p>;
   return <p className={css.help}>* 입력 숫자를 그대로 점수로 사용합니다.</p>;
 };
@@ -43,6 +45,14 @@ function askConfirm(message){
   }
   return true;
 }
+
+// 소수점 2자리까지만 표기(불필요한 0/점 제거)
+const fmt2 = (x) => {
+  const n = Number(x ?? 0);
+  if (!Number.isFinite(n)) return '0';
+  const s = n.toFixed(2);
+  return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
+};
 
 export default function EventManager() {
   const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate } = useContext(EventContext) || {};
@@ -66,6 +76,9 @@ export default function EventManager() {
   });
   const [paramOpen, setParamOpen] = useState(false); // 기본 닫힘
 
+  // ★ patch: 칸수 삭제-재입력 가능하도록 텍스트 상태 병행
+  const [attemptsText, setAttemptsText] = useState('');
+
   const onTemplateChange = (t) => {
     const def = TEMPLATES.find(x => x.type === t);
     setForm(s => ({ ...s, template: t, paramsJson: JSON.stringify(def?.defaultParams || {}, null, 2) }));
@@ -73,6 +86,8 @@ export default function EventManager() {
 
   const getParams = () => { try { return JSON.parse(form.paramsJson || '{}'); } catch { return {}; } };
   const params = getParams();
+  // ★ patch: attemptsText 초기화
+  useEffect(()=>{ setAttemptsText(String(form.attempts||4)); }, [form.attempts]);
   const setParams = (updater) => {
     const next = typeof updater === 'function' ? updater(getParams()) : updater;
     setForm(s => ({ ...s, paramsJson: JSON.stringify(next, null, 2) }));
@@ -85,13 +100,24 @@ export default function EventManager() {
   const onRangeChange = (idx, key, v) => {
     const table = Array.isArray(params.table) ? [...params.table] : [];
     const row = { ...(table[idx] || { min: '', max: '', score: 0 }) };
-    if (key === 'min' || key === 'max') row[key] = v === '' ? '' : Number(v);
+    if (key === 'min' || 'max') row[key] = v === '' ? '' : Number(v);
     if (key === 'score') row[key] = Number(v || 0);
     table[idx] = row;
     setParams({ ...params, table, aggregator: params.aggregator || 'sum' });
   };
   const addRangeRow    = () => setParams(p => ({ ...p, table: [ ...(Array.isArray(p.table) ? p.table : []), { min: '', max: '', score: 0 } ], aggregator: p.aggregator || 'sum' }));
   const removeRangeRow = (idx) => setParams(p => { const t = [ ...(Array.isArray(p.table) ? p.table : []) ]; t.splice(idx, 1); return { ...p, table: t }; });
+
+  // 보너스 편집(UI 간단 버전: 라벨/점수 리스트)
+  const onBonusChange = (idx, key, v) => {
+    const bonus = Array.isArray(params.bonus) ? [...params.bonus] : [];
+    const row = { ...(bonus[idx] || { label:'', score:0 }) };
+    row[key] = key === 'score' ? Number(v || 0) : String(v || '');
+    bonus[idx] = row;
+    setParams({ ...params, bonus, aggregator: params.aggregator || 'sum' });
+  };
+  const addBonusRow    = () => setParams(p => ({ ...p, bonus: [ ...(Array.isArray(p.bonus) ? p.bonus : []), { label:'파', score:1 } ] }));
+  const removeBonusRow = (idx) => setParams(p => { const t = [ ...(Array.isArray(p.bonus) ? p.bonus : []) ]; t.splice(idx,1); return { ...p, bonus:t }; });
 
   const addEvent = async () => {
     try {
@@ -125,31 +151,62 @@ export default function EventManager() {
 
   /* ── 목록 햄버거 메뉴 ─────────────────────────────────── */
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [menuUpId, setMenuUpId] = useState(null); // ★ 아래 공간 부족시 위로 열기
   const menuRef = useRef(null);
   useEffect(() => {
     const onClick = (e) => {
-      if (!menuRef.current) { setOpenMenuId(null); return; }
-      if (!menuRef.current.contains(e.target)) setOpenMenuId(null);
+      if (!menuRef.current) { setOpenMenuId(null); setMenuUpId(null); return; }
+      if (!menuRef.current.contains(e.target)) { setOpenMenuId(null); setMenuUpId(null); }
     };
     document.addEventListener('click', onClick);
     return () => document.removeEventListener('click', onClick);
   }, []);
 
+  const onOpenMenu = (ev, e) => {
+    e.stopPropagation();
+    const id = (openMenuId === ev.id) ? null : ev.id;
+    setOpenMenuId(id);
+    setTimeout(() => {
+      try {
+        const btnRect = e.currentTarget.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - btnRect.bottom;
+        const NEED = 160; // 메뉴 높이 대략치
+        setMenuUpId(spaceBelow < NEED ? ev.id : null);
+      } catch {
+        setMenuUpId(null);
+      }
+    }, 0);
+  };
+
   const toggleEnable = async (ev) => {
     const next = eventsOfSelected.map(e => e.id === ev.id ? { ...e, enabled: !e.enabled } : e);
     await updateEventImmediate({ events: next }, false);
-    setOpenMenuId(null);
+    setOpenMenuId(null); setMenuUpId(null);
+    setEditAttemptsText(String(Number(ev.attempts||4)));
   };
 
   const removeEvent = async (ev) => {
-    if (!askConfirm('삭제하시겠어요?')) return;            // ★ 안전 래퍼
+    if (!askConfirm('삭제하시겠어요?')) return;
     const next = eventsOfSelected.filter(e => e.id !== ev.id);
     await updateEventImmediate({ events: next }, false);
-    setOpenMenuId(null);
+    setOpenMenuId(null); setMenuUpId(null);
+    setEditAttemptsText(String(Number(ev.attempts||4)));
+  };
+
+  // ★ 입력 초기화(해당 이벤트의 person/room/team 입력을 비움)
+  const clearInputs = async (ev) => {
+    if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
+    const all = { ...(eventData?.eventInputs || {}) };
+    delete all[ev.id];
+    await updateEventImmediate({ eventInputs: all }, false);
+    setOpenMenuId(null); setMenuUpId(null);
+    setEditAttemptsText(String(Number(ev.attempts||4)));
   };
 
   /* ── 수정 인라인 폼 ───────────────────────────────────── */
   const [editId, setEditId] = useState(null);
+  // ★ patch: 수정폼 칸수 텍스트 상태
+  const [editAttemptsText, setEditAttemptsText] = useState('');
   const [editForm, setEditForm] = useState(null);
   const [editParamOpen, setEditParamOpen] = useState(false); // 기본 닫힘
 
@@ -164,7 +221,8 @@ export default function EventManager() {
       paramsJson: JSON.stringify(ev.params || {}, null, 2),
     });
     setEditParamOpen(false);
-    setOpenMenuId(null);
+    setOpenMenuId(null); setMenuUpId(null);
+    setEditAttemptsText(String(Number(ev.attempts||4)));
   };
 
   const editParams = useMemo(() => { try { return JSON.parse(editForm?.paramsJson || '{}'); } catch { return {}; } }, [editForm]);
@@ -172,7 +230,7 @@ export default function EventManager() {
     setEditForm(s => {
       if (!s) return s;
       const next = typeof updater === 'function' ? updater(editParams) : updater;
-      return { ...s, paramsJson: JSON.stringify(next || {}, null, 2) };
+      return { ...s, paramsJson: JSON.stringify(next || {},  null, 2) };
     });
   };
   const onEditFactorChange = (v) => setEditParams(p => ({ ...p, factor: Number(v || 0), aggregator: p.aggregator || 'sum' }));
@@ -186,6 +244,16 @@ export default function EventManager() {
   };
   const addEditRangeRow    = () => setEditParams(p => ({ ...p, table: [ ...(Array.isArray(p.table) ? p.table : []), { min: '', max: '', score: 0 } ], aggregator: p.aggregator || 'sum' }));
   const removeEditRangeRow = (i) => setEditParams(p => { const t = [ ...(Array.isArray(p.table) ? p.table : []) ]; t.splice(i, 1); return { ...p, table: t }; });
+
+  const onEditBonusChange = (i, k, v) => {
+    const b = Array.isArray(editParams.bonus) ? [...editParams.bonus] : [];
+    const row = { ...(b[i] || { label:'', score:0 }) };
+    row[k] = k === 'score' ? Number(v || 0) : String(v || '');
+    b[i] = row;
+    setEditParams({ ...editParams, bonus: b, aggregator: editParams.aggregator || 'sum' });
+  };
+  const addEditBonusRow = () => setEditParams(p => ({ ...p, bonus: [ ...(Array.isArray(p.bonus) ? p.bonus : []), { label:'파', score:1 } ] }));
+  const removeEditBonusRow = (i) => setEditParams(p => { const b = [ ...(Array.isArray(p.bonus) ? p.bonus : []) ]; b.splice(i,1); return { ...p, bonus:b }; });
 
   const applyEdit = async () => {
     try {
@@ -217,22 +285,33 @@ export default function EventManager() {
       : (raw && typeof raw === 'object' && Array.isArray(raw.values) ? raw.values : [raw]);
     const t = def?.template || 'raw-number';
     const p = def?.params || {};
-    const scoreOf = (n) => {
+    const bonusRows = Array.isArray(p.bonus) ? p.bonus : [];
+    const bonusMap  = bonusRows.reduce((m, r) => (r?.label ? (m[r.label] = Number(r.score||0), m) : m), {});
+
+    const scoreOfAt = (n, i) => {
       const v = Number(n ?? 0);
-      if (t === 'raw-number') return v;
-      if (t === 'number-convert') return Math.round(v * Number(p.factor ?? 1));
-      if (t === 'range-convert') {
+      let base = v;
+      if (t === 'raw-number') base = v;
+      else if (t === 'number-convert') base = Math.round(v * Number(p.factor ?? 1));
+      else if (t === 'range-convert' || t === 'range-convert-bonus') {
         const tb = Array.isArray(p.table) ? p.table : [];
+        let hit = 0;
         for (const r of tb) {
           const okMin = r.min === '' || r.min == null || v >= Number(r.min);
           const okMax = r.max === '' || r.max == null || v <= Number(r.max);
-          if (okMin && okMax) return Number(r.score ?? 0);
+          if (okMin && okMax) { hit = Number(r.score ?? 0); break; }
         }
-        return 0;
+        base = hit;
       }
-      return v;
+      if (t === 'range-convert-bonus') {
+        const tag = (raw && typeof raw === 'object' && Array.isArray(raw.bonus)) ? raw.bonus[i] : (raw && typeof raw === 'object' ? raw.bonus : undefined);
+        const bonus = bonusMap[String(tag || '')] || 0;
+        return base + bonus;
+      }
+      return base;
     };
-    return arr.map(scoreOf).reduce((a, b) => a + b, 0);
+
+    return arr.map((n, i) => scoreOfAt(n, i)).reduce((a, b) => a + b, 0);
   };
   const aggregate = (arr = []) => arr.map(Number).filter(Number.isFinite).reduce((a, b) => a + b, 0);
 
@@ -321,7 +400,7 @@ export default function EventManager() {
       const snap = await getDoc(doc(db, 'events', id));
       const data = snap.data() || {};
       const arr  = Array.isArray(data.events) ? data.events : [];
-      setImportList(arr.map(ev => ({ ...ev, _checked: false })));   // ★ 괄호 누락 보완
+      setImportList(arr.map(ev => ({ ...ev, _checked: false })));
     } catch (e) {
       setImportList([]);
     }
@@ -340,9 +419,103 @@ export default function EventManager() {
   const formatMeta = (ev) => {
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
+      : ev.template === 'range-convert-bonus' ? 'range+bonus'
       : 'number-convert';
     const mode = ev.inputMode === 'accumulate' ? `누적(${ev.attempts || 4})` : '갱신';
     return `${t} · ${mode}`;
+  };
+
+  /* ── 관리자 빠른 입력 ─────────────────────────────────── */
+  const [quickId, setQuickId] = useState(null);
+  const [quickTarget, setQuickTarget] = useState('person'); // person|room|team
+  const [quickKey, setQuickKey] = useState('');
+  const [quickValues, setQuickValues] = useState(['']);
+  // ★ patch: 보너스 선택값(누적일 때 각 칸용)
+  const [quickBonus, setQuickBonus] = useState(['']);
+
+  /* ★ patch: 빠른입력 선택 대상 변경/실시간 데이터 반영하여 값/보너스 프리필 */
+  useEffect(()=>{
+    if (!quickId || !quickKey) return;
+    const ev = eventsOfSelected.find(e=>e.id===quickId);
+    if (!ev) return;
+    const N = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+    const slotAll = (eventData?.eventInputs || {})[ev.id] || {};
+    if (quickTarget === 'person') {
+      const rec = (slotAll.person || {})[quickKey];
+      if (ev.inputMode === 'accumulate') {
+        const vals = Array.from({length:N}, (_,i)=> (rec && rec.values ? (rec.values[i] ?? '') : ''));
+        const bons = Array.from({length:N}, (_,i)=> (rec && rec.bonus ? (rec.bonus[i] ?? '') : ''));
+        setQuickValues(vals.map(v => (v===null? '' : String(v))));
+        setQuickBonus(bons.map(v => (v==null? '' : String(v))));
+      } else {
+        const v = (rec==null ? '' : String(rec));
+        setQuickValues([v==='null'?'':v]);
+        setQuickBonus(['']);
+      }
+    } else if (quickTarget === 'room') {
+      const v = ((slotAll.room || {})[Number(quickKey)] ?? '');
+      setQuickValues([v===null?'':String(v)]);
+      setQuickBonus(['']);
+    } else {
+      const v = ((slotAll.team || {})[String(quickKey)] ?? '');
+      setQuickValues([v===null?'':String(v)]);
+      setQuickBonus(['']);
+    }
+  }, [quickId, quickKey, quickTarget, eventData]);
+
+  const buildTeamKeys = (ev) => {
+    const keys = [];
+    for (let r=1; r<=roomCount; r+=1) {
+      keys.push({ key:`${r}-A`, label:`${roomNames[r-1]} A팀` });
+      keys.push({ key:`${r}-B`, label:`${roomNames[r-1]} B팀` });
+    }
+    return keys;
+  };
+
+  const openQuick = (ev) => {
+    setQuickId(ev.id);
+    setQuickTarget('person');
+    setQuickKey('');
+    const N = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+    setQuickValues(Array.from({length: N}, () => ''));
+    setQuickBonus(Array.from({length: N}, () => ''));
+    setOpenMenuId(null); setMenuUpId(null);
+    setEditAttemptsText(String(Number(ev.attempts||4)));
+  };
+  const applyQuick = async (ev) => {
+    if (!quickKey) { alert('대상을 선택하세요.'); return; }
+    const all = { ...(eventData?.eventInputs || {}) };
+    const slot = { ...(all[ev.id] || {}) };
+
+    if (quickTarget === 'person') {
+      const person = { ...(slot.person || {}) };
+      const N = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+      if (ev.inputMode === 'accumulate') {
+        const obj = { values: Array.from({length:N}, (_,i)=> {
+          const v = quickValues[i];
+          return (v===''||v==null) ? '' : Number(v);
+        }) };
+        if (ev.template === 'range-convert-bonus') {
+          obj.bonus = Array.from({length:N}, (_,i)=> quickBonus[i] ?? '');
+        }
+        person[quickKey] = obj;
+      } else {
+        person[quickKey] = (quickValues[0]===''||quickValues[0]==null) ? '' : Number(quickValues[0]);
+      }
+      slot.person = person;
+    } else if (quickTarget === 'room') {
+      const room = { ...(slot.room || {}) };
+      room[Number(quickKey)] = Number(quickValues[0] || 0);
+      slot.room = room;
+    } else { // team
+      const team = { ...(slot.team || {}) };
+      team[String(quickKey)] = Number(quickValues[0] || 0);
+      slot.team = team;
+    }
+
+    all[ev.id] = slot;
+    await updateEventImmediate({ eventInputs: all }, false);
+    setQuickId(null);
   };
 
   return (
@@ -353,7 +526,6 @@ export default function EventManager() {
           {/* 대회 선택/연동 */}
           <section className={css.card}>
             <h4 className={css.cardTitle}>대회 선택/연동</h4>
-            {/* ★ 한 줄로 꽉 차게: select는 확장, 버튼은 오른쪽 */}
             <div className={`${css.row} ${css.rowJustify}`}>
               <select className={`${css.select} ${css.selectGrow}`} value={selectedEvId} onChange={e => setSelectedEvId(e.target.value)}>
                 <option value="">대회 선택</option>
@@ -384,7 +556,7 @@ export default function EventManager() {
                 </div>
               )}
 
-              {form.template === 'range-convert' && (
+              {(form.template === 'range-convert' || form.template === 'range-convert-bonus') && (
                 <div className={css.rangeBox}>
                   <div className={css.rangeHead}>
                     <span>범위 편집기</span>
@@ -409,6 +581,27 @@ export default function EventManager() {
                 </div>
               )}
 
+              {form.template === 'range-convert-bonus' && (
+                <div className={css.rangeBox} style={{ marginTop: 8 }}>
+                  <div className={css.rangeHead}>
+                    <span>보너스 항목</span>
+                    <button type="button" className={css.btn} onClick={addBonusRow}>+ 항목 추가</button>
+                  </div>
+                  <div className={css.rangeTable}>
+                    <div className={css.rangeRowHead}>
+                      <span>라벨</span><span>점수</span><span></span><span></span>
+                    </div>
+                    {(params.bonus || []).map((row, idx) => (
+                      <div key={idx} className={css.rangeRow} style={{ gridTemplateColumns:'1fr 1fr 60px 0' }}>
+                        <input className={css.input} placeholder="예: 파" value={row.label ?? ''} onChange={e => onBonusChange(idx, 'label', e.target.value)} />
+                        <input className={`${css.input} ${css.center}`} type="number" step="1" placeholder="예: 1" value={row.score ?? 0} onChange={e => onBonusChange(idx, 'score', e.target.value)} />
+                        <button className={css.btnDanger} type="button" onClick={() => removeBonusRow(idx)}>삭제</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <label className={css.label}>제목
                 <input className={css.input} value={form.title} onChange={e => setForm(s => ({ ...s, title: e.target.value }))} />
               </label>
@@ -422,8 +615,11 @@ export default function EventManager() {
                 </label>
                 {form.inputMode === 'accumulate' && (
                   <label className={css.labelGrow}>칸 수
-                    <input className={css.input} type="number" min={2} max={8} value={form.attempts}
-                      onChange={e => setForm(s => ({ ...s, attempts: Number(e.target.value || 4) }))} />
+                    {/* ★ 2~20까지 허용(5~N 가능) */}
+                    <input className={css.input} type="text" inputMode="numeric" pattern="[0-9]*" value={attemptsText}
+                      onChange={e => setAttemptsText(e.target.value)}
+                      onBlur={()=>{ const n = parseInt(attemptsText,10); const safe = Number.isFinite(n) ? Math.max(2, Math.min(20, n)) : (form.attempts||4); setForm(s=>({ ...s, attempts: safe })); setAttemptsText(String(safe)); }}
+                      placeholder={String(form.attempts||4)} />
                   </label>
                 )}
               </div>
@@ -489,11 +685,13 @@ export default function EventManager() {
                   <div className={css.headRight}>
                     <span className={ev.enabled ? css.badgeOn : css.badgeOff}>{ev.enabled ? '사용' : '숨김'}</span>
                     <div className={css.moreWrap} ref={menuRef}>
-                      <button className={css.moreBtn} onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === ev.id ? null : ev.id); }}>⋮</button>
+                      <button className={css.moreBtn} onClick={(e) => onOpenMenu(ev, e)}>⋮</button>
                       {openMenuId === ev.id && (
-                        <div className={css.menu} onClick={(e) => e.stopPropagation()}>
+                        <div className={`${css.menu} ${menuUpId===ev.id ? css.menuUp : ''}`} onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => toggleEnable(ev)}>{ev.enabled ? '숨기기' : '사용'}</button>
                           <button onClick={() => openEdit(ev)}>수정</button>
+                          <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
+                          <button onClick={() => clearInputs(ev)}>입력 초기화</button>
                           <button className={css.btnDanger} onClick={() => removeEvent(ev)}>삭제</button>
                         </div>
                       )}
@@ -505,6 +703,67 @@ export default function EventManager() {
                   <span className={css.meta}>{formatMeta(ev)}</span>
                 </div>
 
+                {/* 빠른 입력(관리자) – 최소 UI, 카드 바로 아래 */}
+                {quickId === ev.id && (
+                  <div className={css.quickEdit}>
+                    <div className={css.quickRow}>
+                      <select className={`${css.select} ${css.quickGrow}`} value={quickTarget}
+                        onChange={(e)=>{ setQuickTarget(e.target.value); setQuickKey(''); }}>
+                        <option value="person">개인</option>
+                        <option value="room">방</option>
+                        <option value="team">팀</option>
+                      </select>
+
+                      {quickTarget === 'person' && (
+                        <select className={`${css.select} ${css.quickGrow}`} value={quickKey} onChange={(e)=>setQuickKey(e.target.value)}>
+                          <option value="">개인 선택</option>
+                          {participants.map(p => <option key={p.id} value={p.id}>{p.nickname} ({p.room ? roomNames[p.room-1] : '-'})</option>)}
+                        </select>
+                      )}
+
+                      {quickTarget === 'room' && (
+                        <select className={`${css.select} ${css.quickGrow}`} value={quickKey} onChange={(e)=>setQuickKey(e.target.value)}>
+                          <option value="">방 선택</option>
+                          {roomNames.map((nm, i) => <option key={i+1} value={i+1}>{nm}</option>)}
+                        </select>
+                      )}
+
+                      {quickTarget === 'team' && (
+                        <select className={`${css.select} ${css.quickGrow}`} value={quickKey} onChange={(e)=>setQuickKey(e.target.value)}>
+                          <option value="">팀 선택</option>
+                          {buildTeamKeys(ev).map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                        </select>
+                      )}
+                    </div>
+
+                    <div className={css.quickRow}>
+                      {ev.inputMode === 'accumulate'
+                        ? quickValues.map((v, i) => (
+                            <div key={i} style={{display:'grid', gridTemplateColumns: (ev.template==='range-convert-bonus' ? '1fr 1fr' : '1fr'), gap:6, width:'100%'}}>
+                              <input className={`${css.input} ${css.inputSmall}`} type="number" value={v}
+                                onChange={(e)=>setQuickValues(arr=>{ const n=[...arr]; n[i]=e.target.value; return n; })} placeholder={`입력${i+1}`} />
+                              {ev.template==='range-convert-bonus' && (
+                                <select className={`${css.select} ${css.inputSmall}`} value={quickBonus[i]||''}
+                                  onChange={(e)=>setQuickBonus(arr=>{ const n=[...arr]; n[i]=e.target.value; return n; })}>
+                                  <option value="">보너스</option>
+                                  {(Array.isArray(ev?.params?.bonus) ? ev.params.bonus : (Array.isArray(ev?.params?.bonusOptions) ? ev.params.bonusOptions : [])).map((b,bi)=> (<option key={bi} value={b.label ?? b}>{(b.label ?? b)}{(b.score!=null? ` (+${b.score})` : '')}</option>))}
+                                </select>
+                              )}
+                            </div>
+                          ))
+                        : <input className={`${css.input} ${css.quickGrow}`} type="number" value={quickValues[0]}
+                            onChange={(e)=>setQuickValues([e.target.value])} placeholder="입력값" />
+                      }
+                    </div>
+
+                    <div className={css.quickRow} style={{ justifyContent:'flex-end' }}>
+                      <button className={css.btn} onClick={()=>setQuickId(null)}>닫기</button>
+                      <button className={css.btnPrimary} onClick={()=>applyQuick(ev)}>저장</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 인라인 수정 폼(기존) */}
                 {editId === ev.id && editForm && (
                   <div className={css.card} style={{ marginTop: 8 }}>
                     <div className={css.form}>
@@ -524,7 +783,7 @@ export default function EventManager() {
                           </label>
                         </div>
                       )}
-                      {editForm.template === 'range-convert' && (
+                      {(editForm.template === 'range-convert' || editForm.template === 'range-convert-bonus') && (
                         <div className={css.rangeBox}>
                           <div className={css.rangeHead}>
                             <span>범위 편집기</span>
@@ -540,6 +799,27 @@ export default function EventManager() {
                                 <input className={`${css.input} ${css.center}`} type="number" step="0.01" value={row.max ?? ''} onChange={e => onEditRangeChange(idx, 'max', e.target.value)} />
                                 <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? 0} onChange={e => onEditRangeChange(idx, 'score', e.target.value)} />
                                 <button className={css.btnDanger} type="button" onClick={() => removeEditRangeRow(idx)}>삭제</button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {editForm.template === 'range-convert-bonus' && (
+                        <div className={css.rangeBox} style={{ marginTop: 8 }}>
+                          <div className={css.rangeHead}>
+                            <span>보너스 항목</span>
+                            <button type="button" className={css.btn} onClick={addEditBonusRow}>+ 항목 추가</button>
+                          </div>
+                          <div className={css.rangeTable}>
+                            <div className={css.rangeRowHead}>
+                              <span>라벨</span><span>점수</span><span></span><span></span>
+                            </div>
+                            {(editParams.bonus || []).map((row, idx) => (
+                              <div key={idx} className={css.rangeRow} style={{ gridTemplateColumns:'1fr 1fr 60px 0' }}>
+                                <input className={css.input} value={row.label ?? ''} onChange={e => onEditBonusChange(idx, 'label', e.target.value)} />
+                                <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? 0} onChange={e => onEditBonusChange(idx, 'score', e.target.value)} />
+                                <button className={css.btnDanger} type="button" onClick={() => removeEditBonusRow(idx)}>삭제</button>
                               </div>
                             ))}
                           </div>
@@ -575,8 +855,11 @@ export default function EventManager() {
                         </label>
                         {editForm.inputMode === 'accumulate' && (
                           <label className={css.labelGrow}>칸 수
-                            <input className={css.input} type="number" min={2} max={8} value={editForm.attempts}
-                              onChange={e => setEditForm(s => ({ ...s, attempts: Number(e.target.value || 4) }))} />
+                            {/* ★ 2~20 허용 */}
+                            <input className={css.input} type="text" inputMode="numeric" pattern="[0-9]*" value={editAttemptsText}
+                              onChange={e => setEditAttemptsText(e.target.value)}
+                              onBlur={()=>{ const n=parseInt(editAttemptsText,10); const safe=Number.isFinite(n)? Math.max(2,Math.min(20,n)) : (Number(editForm.attempts||4)); setEditForm(s=>({ ...s, attempts: safe })); setEditAttemptsText(String(safe)); }}
+                              placeholder={String(editForm.attempts||4)} />
                           </label>
                         )}
                       </div>
@@ -596,7 +879,6 @@ export default function EventManager() {
           <section className={css.cardWide}>
             <h4 className={css.cardTitle}>미리보기(현황)</h4>
 
-            {/* grid: 1fr(이벤트) + auto(보기) + auto(정렬). 오른쪽 잘림 방지 */}
             <div className={css.controlsRow}>
               <select className={`${css.selectInline} ${css.selectGrow}`} value={previewId} onChange={e => setPreviewId(e.target.value)}>
                 {eventsOfSelected.map(ev => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
@@ -629,7 +911,7 @@ export default function EventManager() {
                 {personRows.map((r, i) => (
                   <li key={r.id}>
                     <span><span className={css.rank}>{i + 1}.</span> {r.name} <small className={css.dim}>({r.room ? roomNames[r.room - 1] : '-'})</small></span>
-                    <b className={css.score}>{r.score}</b>
+                    <b className={css.score}>{fmt2(r.score)}</b>
                   </li>
                 ))}
               </ol>
@@ -640,7 +922,7 @@ export default function EventManager() {
                 {roomRows.map((r, i) => (
                   <li key={r.room}>
                     <span><span className={css.rank}>{i + 1}.</span> {r.name}</span>
-                    <b className={css.score}>{r.score}</b>
+                    <b className={css.score}>{fmt2(r.score)}</b>
                   </li>
                 ))}
               </ol>
@@ -651,7 +933,7 @@ export default function EventManager() {
                 {teamRows.map((t, i) => (
                   <li key={t.key}>
                     <span><span className={css.rank}>{i + 1}.</span> {t.label}</span>
-                    <b className={css.score}>{t.score}</b>
+                    <b className={css.score}>{fmt2(t.score)}</b>
                   </li>
                 ))}
               </ol>

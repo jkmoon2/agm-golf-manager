@@ -20,6 +20,19 @@ import {
   browserLocalPersistence
 } from 'firebase/auth';
 
+/* ★ 추가: Firestore 저장 전 undefined/NaN 정제 */
+function sanitizeUndefinedDeep(v){
+  if (v === undefined) return null;
+  if (typeof v === 'number' && Number.isNaN(v)) return null;
+  if (Array.isArray(v)) return v.map(sanitizeUndefinedDeep);
+  if (v && typeof v === 'object'){
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = sanitizeUndefinedDeep(v[k]);
+    return out;
+  }
+  return v;
+}
+
 export const EventContext = createContext({});
 
 // ───────────────────────────────────────────────
@@ -156,7 +169,7 @@ export function EventProvider({ children }) {
         queuedUpdatesRef.current = null;
         try {
           const ref = doc(db, 'events', eventId);
-          await setDoc(ref, toWrite, { merge: true });
+          await setDoc(ref, sanitizeUndefinedDeep(toWrite), { merge: true });
           lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...toWrite };
           setEventData(prev => prev ? { ...prev, ...toWrite } : toWrite);
         } catch (e) {
@@ -181,7 +194,7 @@ export function EventProvider({ children }) {
     }
     try {
       const ref = doc(db, 'events', eventId);
-      await setDoc(ref, updates, { merge: true });
+      await setDoc(ref, sanitizeUndefinedDeep(updates), { merge: true });
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...updates };
       setEventData(prev => prev ? { ...prev, ...updates } : updates);
     } catch (e) {
@@ -210,7 +223,7 @@ export function EventProvider({ children }) {
         const pending = queuedUpdatesRef.current;
         if (pending) {
           queuedUpdatesRef.current = null;
-          updateDoc(doc(db, 'events', eventId), pending).catch(() => {});
+          updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(pending)).catch(() => {});
         }
       } catch {}
     };
@@ -236,7 +249,7 @@ export function EventProvider({ children }) {
         const pending = queuedUpdatesRef.current;
         if (pending && eventId) {
           queuedUpdatesRef.current = null;
-          updateDoc(doc(db, 'events', eventId), pending).catch(() => {});
+          updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(pending)).catch(() => {});
         }
       } catch (e) {
         console.warn('[EventContext] unmount flush error:', e);
