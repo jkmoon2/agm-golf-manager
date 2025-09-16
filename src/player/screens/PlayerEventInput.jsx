@@ -1,5 +1,8 @@
 // /src/player/screens/PlayerEventInput.jsx
-// 기존 코드 유지 + "다음" 버튼 시각 비활성 스타일/포인터 차단만 추가
+// 변경 요약
+// - calcPopupWidth(): 여유폭 축소(PADDING_X=16, SHADOW_BORDER=8), 가드 108~168
+// - 팝업 항목 버튼 padding 6px 10px 로 슬림화
+// - 나머지 로직/레이아웃/스타일은 동일
 
 import React, { useMemo, useContext, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -121,7 +124,7 @@ export default function PlayerEventInput(){
   const { eventId } = useParams();
   const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
 
-  // ★ patch: 실시간 게이트 구독 + 최신판 선택
+  // 실시간 게이트 구독
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
   useEffect(() => {
@@ -147,10 +150,9 @@ export default function PlayerEventInput(){
     return (ctxAt >= fbAt) ? ctxG : fbG;
   }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
 
-  // ★ patch: 다음 단계(=STEP4) 허용 여부
   const nextDisabled = useMemo(() => (latestGate?.steps?.[4] !== 'enabled'), [latestGate]);
 
-  // URL ↔ 컨텍스트 동기화(기존 유지)
+  // URL ↔ 컨텍스트 동기화
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
   const participants = useMemo(
@@ -208,6 +210,8 @@ export default function PlayerEventInput(){
   }, [participants, roomIdx]);
 
   const inputsByEvent = eventData?.eventInputs || {};
+
+  // 단일 입력
   const patchValue = (evId, pid, value) => {
     const all = { ...(eventData?.eventInputs || {}) };
     const slot = { ...(all[evId] || {}) };
@@ -217,18 +221,88 @@ export default function PlayerEventInput(){
     slot.person = person; all[evId] = slot;
     updateEventImmediate({ eventInputs: all }, false);
   };
-  const patchAccum = (evId, pid, idx, value) => {
+
+  // 누적 입력: 배열 보정(건너뛰기 안전)
+  const patchAccum = (evId, pid, idx, value, attemptsOverride) => {
     const all = { ...(eventData?.eventInputs || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
     const obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
-      ? { values:[...person[pid].values] } : { values:[] };
+      ? { ...person[pid], values:[...person[pid].values] } : { values:[] };
+    const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (idx+1);
+    while (obj.values.length < atts) obj.values.push('');
     obj.values[idx] = (value===''||value==null) ? '' : Number(value);
     person[pid]=obj; slot.person=person; all[evId]=slot;
     updateEventImmediate({ eventInputs: all }, false);
   };
 
-  const [draft, setDraft] = useState({});
+  // 보너스 저장: 배열 보정(건너뛰기 선택 안전)
+  const patchBonus = (evId, pid, idxOrVal, value, isAccum, attemptsOverride) => {
+    const all = { ...(eventData?.eventInputs || {}) };
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    const obj = person[pid] && typeof person[pid]==='object'
+      ? { ...person[pid] } : {};
+    if (isAccum) {
+      const arr = Array.isArray(obj.bonus) ? [...obj.bonus] : [];
+      const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (Number(idxOrVal)+1);
+      while (arr.length < atts) arr.push('');
+      arr[idxOrVal] = value || '';
+      obj.bonus = arr;
+    } else {
+      obj.bonus = value || '';
+    }
+    person[pid] = obj; slot.person = person; all[evId] = slot;
+    updateEventImmediate({ eventInputs: all }, false);
+  };
+
+  // ===== 팝업 폭 계산 (가장 긴 항목 기준, 여유폭 소폭) =====
+  const calcPopupWidth = (evId) => {
+    try {
+      const ev = events.find(e => e.id === evId);
+      const opts = (ev && ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus))
+        ? ev.params.bonus : [];
+      const labels = [
+        ...opts.map(b => `${b.label}${b.score != null ? ` (+${b.score})` : ''}`),
+        '선택 해제',
+      ];
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial';
+      const textW = Math.max(...labels.map(s => ctx.measureText(String(s)).width || 0));
+      const PADDING_X = 16; // 좌우 padding 합(각 8px)  ← 기존 24보다 슬림
+      const SHADOW_BORDER = 8; // 테두리/그림자 여유 ← 기존 16보다 슬림
+      const W = Math.ceil(textW + PADDING_X + SHADOW_BORDER);
+      return Math.min(Math.max(W, 90), 168); // 90~168 범위에서 자동
+    } catch {
+      return 136; // 안전 기본값(슬림)
+    }
+  };
+
+  // 보너스 팝업 상태
+  const [bonusPopup, setBonusPopup] = useState({ open:false, x:0, y:0, evId:null, pid:null, idx:0, attempts:0, w:136 });
+
+  // 위치/폭 계산: content width 기반 좌우 클램프
+  const openBonusPopup = (evId, pid, idx, attempts, e) => {
+    e.stopPropagation();
+    const w  = calcPopupWidth(evId);
+    const r  = e.currentTarget.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth || 360;
+    const GAP = 8;
+    let x = r.left + r.width / 2;
+    const half = w / 2;
+    if (x + half + GAP > vw) x = vw - (half + GAP);
+    if (x - half - GAP < 0)  x = half + GAP;
+    const y = r.bottom + 6;
+    setBonusPopup({ open:true, x, y, evId, pid, idx, attempts, w });
+  };
+
+  const closeBonusPopup = () => setBonusPopup({ open:false, x:0, y:0, evId:null, pid:null, idx:0, attempts:0, w:136 });
+  useEffect(()=>{
+    const onDoc = ()=> setBonusPopup(p => (p.open ? { ...p, open:false } : p));
+    document.addEventListener('click', onDoc);
+    return ()=> document.removeEventListener('click', onDoc);
+  },[]);
 
   return (
     <div className={baseCss.page}>
@@ -236,11 +310,17 @@ export default function PlayerEventInput(){
 
         {events.map(ev => {
           const isAccum  = ev.inputMode === 'accumulate';
-          const attempts = Math.max(2, Math.min(Number(ev.attempts || 4), 8));
-          const nicknameWidth = '35%';
-          const inputWidths   = isAccum
-            ? Array.from({ length: attempts }, () => `calc(65% / ${attempts})`)
-            : ['65%'];
+          const attempts = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+
+          // 닉네임 35% + 입력 65% (누적 4칸까지 균등), 5~N칸은 테이블 전체폭 증가 → 가로 스크롤
+          const NICK_PCT = 35;
+          const ONE_PCT  = 65 / 4; // 16.25
+          const tableWidthPct = isAccum
+            ? (NICK_PCT + attempts * ONE_PCT)
+            : 100;
+
+          const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus))
+            ? ev.params.bonus : [];
 
           return (
             <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -251,10 +331,13 @@ export default function PlayerEventInput(){
               </div>
 
               <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                <table className={tCss.table}>
+                <table className={tCss.table} style={{ width: isAccum ? `${tableWidthPct}%` : '100%' }}>
                   <colgroup>
-                    <col style={{ width: nicknameWidth }} />
-                    {inputWidths.map((w,i)=>(<col key={i} style={{ width: w }} />))}
+                    <col style={{ width: `${NICK_PCT}%` }} />
+                    {isAccum
+                      ? Array.from({ length: attempts }, (_,i) => <col key={i} style={{ width: `${ONE_PCT}%` }} />)
+                      : <col style={{ width: '65%' }} />
+                    }
                   </colgroup>
 
                   <thead>
@@ -270,34 +353,46 @@ export default function PlayerEventInput(){
                     {roomMembers.map((p, rIdx)=>(
                       <tr key={rIdx}>
                         <td>{p ? p.nickname : ''}</td>
-                        {isAccum
-                          ? Array.from({length: attempts}, (_,i)=>(
-                              <td key={i} className={tCss.cellEditable}>
-                                <input
-                                  type="number"
-                                  value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''}
-                                  onChange={e=> p && patchAccum(ev.id, p.id, i, e.target.value)}
-                                  className={tCss.cellInput}
-                                />
-                              </td>
-                            ))
-                          : (
-                            <td className={tCss.cellEditable}>
+
+                        {isAccum ? (
+                          Array.from({length: attempts}, (_,i)=>(
+                            <td
+                              key={i}
+                              className={tCss.cellEditable}
+                              onClick={(e)=>{
+                                if (bonusOpts.length) openBonusPopup(ev.id, p?.id, i, attempts, e);
+                              }}
+                            >
                               <input
                                 type="number"
-                                value={p ? ((draft?.[ev.id]?.[p.id] !== undefined)
-                                            ? draft[ev.id][p.id]
-                                            : (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '')) : ''}
-                                onChange={(e)=>{
-                                  if (!p) return;
-                                  const v = e.target.value;
-                                  setDraft(d => ({ ...d, [ev.id]: { ...(d[ev.id]||{}), [p.id]: v } }));
-                                  patchValue(ev.id, p.id, v);
-                                }}
+                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''}
+                                onChange={e=> p && patchAccum(ev.id, p.id, i, e.target.value, attempts)}
                                 className={tCss.cellInput}
+                                data-focus-evid={ev.id}
+                                data-focus-pid={p ? p.id : ''}
+                                data-focus-idx={i}
                               />
                             </td>
-                          )}
+                          ))
+                        ) : (
+                          <td
+                            className={tCss.cellEditable}
+                            onClick={(e)=>{
+                              if (bonusOpts.length) openBonusPopup(ev.id, p?.id, 0, 1, e);
+                            }}
+                          >
+                            <input
+                              type="number"
+                              value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '') : ''}
+                              onChange={(e)=> p && patchValue(ev.id, p.id, e.target.value)}
+                              className={tCss.cellInput}
+                              data-focus-evid={ev.id}
+                              data-focus-pid={p ? p.id : ''}
+                              data-focus-idx={0}
+                            />
+                          </td>
+                        )}
+
                       </tr>
                     ))}
                   </tbody>
@@ -306,6 +401,56 @@ export default function PlayerEventInput(){
             </div>
           );
         })}
+
+        {/* 보너스 선택 팝업 */}
+        {bonusPopup.open && (()=>{
+          const ev = events.find(e=> e.id===bonusPopup.evId);
+          const opts = (ev && ev.template==='range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
+          const onPick = (label)=>{
+            const isAccum = !!(ev && ev.inputMode==='accumulate');
+            patchBonus(bonusPopup.evId, bonusPopup.pid, bonusPopup.idx, label || '', isAccum, bonusPopup.attempts);
+            closeBonusPopup();
+            // 선택 후 해당 숫자 입력칸으로 포커스
+            setTimeout(()=>{
+              const sel = `[data-focus-evid="${bonusPopup.evId}"][data-focus-pid="${bonusPopup.pid}"][data-focus-idx="${bonusPopup.idx}"]`;
+              const el  = document.querySelector(sel);
+              if (el && typeof el.focus === 'function') el.focus();
+            },0);
+          };
+          return (
+            <div
+              className={tCss.bonusPopup}
+              style={{
+                position:'fixed',
+                left:bonusPopup.x,
+                top:bonusPopup.y,
+                transform:'translate(-50%,0)',
+                zIndex:1000,
+                background:'#fff',
+                border:'1px solid #e5e7eb',
+                borderRadius:8,
+                boxShadow:'0 8px 24px rgba(0,0,0,.12)',
+                width: bonusPopup.w
+              }}
+              onClick={(e)=>e.stopPropagation()}
+            >
+              {opts.map((b,i)=>(
+                <button key={i}
+                  onClick={()=>onPick(b.label)}
+                  style={{display:'block', width:'100%', padding:'6px 10px', border:0, background:'transparent', textAlign:'left', whiteSpace:'nowrap'}}
+                >
+                  {b.label}{b.score!=null?` (+${b.score})`:''}
+                </button>
+              ))}
+              <button
+                onClick={()=>onPick('')}
+                style={{display:'block', width:'100%', padding:'6px 10px', border:0, background:'transparent', textAlign:'left', color:'#6b7280', whiteSpace:'nowrap'}}
+              >
+                선택 해제
+              </button>
+            </div>
+          );
+        })()}
 
         <div className={baseCss.footerNav}>
           <button className={`${baseCss.navBtn} ${baseCss.navPrev}`} onClick={()=>nav(`/player/home/${eventId}/2`)}>← 이전</button>

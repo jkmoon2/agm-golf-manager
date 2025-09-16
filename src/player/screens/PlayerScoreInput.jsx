@@ -1,5 +1,7 @@
 // /src/player/screens/PlayerScoreInput.jsx
-// 기존 코드 유지 + Link형 “다음” 버튼에 비활성 시 가시/포인터/포커스 차단(tabIndex) 추가
+// - 초기 0을 빈칸으로(placeholder "입력") 처리
+// - '-' 입력 허용(이미 지원하되 안정화)
+// - 나머지 로직/스타일 유지
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -162,7 +164,9 @@ export default function PlayerScoreInput() {
       orderedRoomPlayers.forEach((p) => {
         const key = String(p.id);
         if (next[key] === undefined) {
-          next[key] = (p.score == null) ? '' : String(p.score);
+          // ★ 초기 0도 빈칸으로 보이게
+          const base = (p.score == null || p.score === 0) ? '' : String(p.score);
+          next[key] = base;
         }
       });
       return next;
@@ -251,7 +255,7 @@ export default function PlayerScoreInput() {
 
                 const key = String(p.id);
                 const raw =
-                  draft[key] ?? (p.score == null ? '' : String(p.score));
+                  draft[key] ?? (p.score == null ? '' : (p.score === 0 ? '' : String(p.score)));
                 const s = toNumberOrNull(raw);
                 const h = Number(p.handicap || 0);
                 const r = (s ?? 0) - h;
@@ -268,7 +272,7 @@ export default function PlayerScoreInput() {
                       <input
                         inputMode="numeric"
                         className={styles.cellInput}
-                        placeholder="입력"
+                        
                         value={raw}
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
                         onBlur={() => onCommitScore(p.id)}

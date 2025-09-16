@@ -33,7 +33,8 @@ function evaluateValue(template, params, rawValue){
       const factor = asNum(params?.factor);
       return Number.isFinite(factor) ? v * factor : v;
     }
-    case 'range-convert': {
+    case 'range-convert':
+    case 'range-convert-bonus': {
       const table = Array.isArray(params?.table) ? params.table : [];
       for (const item of table) {
         const min = asNum(item?.min), max = asNum(item?.max);
@@ -59,6 +60,15 @@ function aggregate(values, aggregator='sum'){
     default:     return arr.reduce((a,b)=>a+b,0);
   }
 }
+
+function bonusMapFromParams(params){
+  const rows = Array.isArray(params?.bonus) ? params.bonus : [];
+  const map = {};
+  rows.forEach(r => { if (r && r.label != null) map[String(r.label)] = Number(r.score||0); });
+  return map;
+}
+
+
 function foldAccum(obj, aggregator='sum'){
   const vals = Array.isArray(obj?.values) ? obj.values : [];
   return aggregate(vals, aggregator);
@@ -104,10 +114,30 @@ export default function PlayerEventConfirm() {
         const slot = inputsByEvent?.[evId]?.person?.[p.id];
         let val;
         if (typeof slot === 'object' && slot && Array.isArray(slot.values)) {
-          const folded = foldAccum(slot, agg);
-          val = evaluateValue(template, params, folded);
+          let folded;
+          if (template === 'range-convert-bonus') {
+            const map = bonusMapFromParams(params);
+            const vals = Array.isArray(slot.values) ? slot.values : [];
+            const bons = Array.isArray(slot.bonus) ? slot.bonus : [];
+            let total = 0;
+            for (let i=0;i<vals.length;i++){
+              const base = evaluateValue('range-convert', params, vals[i]);
+              total += (Number.isFinite(base)? base : 0) + (map[String(bons[i]||'')] || 0);
+            }
+            folded = total;
+          } else {
+            folded = foldAccum(slot, agg);
+          }
+          val = evaluateValue(template === 'range-convert-bonus' ? 'raw-number' : template, params, folded);
+        } else {
+          if (template === 'range-convert-bonus' && typeof slot === 'object' && slot){
+          const base = evaluateValue('range-convert', params, slot?.values ? slot.values[0] : slot);
+          const map = bonusMapFromParams(params);
+          const b = (Array.isArray(slot.bonus) ? slot.bonus[0] : slot.bonus);
+          val = (Number.isFinite(base)? base:0) + (map[String(b||'')]||0);
         } else {
           val = evaluateValue(template, params, slot);
+        }
         }
         return { key: String(p.id), label: String(p.nickname || ''), room: p.room ? getRoomLabel(p.room) : '-', value: asNum(val) };
       }).filter(r => isFiniteNum(r.value));
@@ -123,10 +153,19 @@ export default function PlayerEventConfirm() {
         const inRoom = participants.filter(p => Number(p?.room) === idx1);
         const vals = inRoom.map(p => {
           const slot = inputsByEvent?.[evId]?.person?.[p.id];
-          const per = (typeof slot === 'object' && slot && Array.isArray(slot.values))
-            ? foldAccum(slot, agg)
-            : asNum(slot);
-          return evaluateValue(template, params, per);
+          let per;
+          if (typeof slot === 'object' && slot && Array.isArray(slot.values)){
+            if (template === 'range-convert-bonus'){
+              const map = bonusMapFromParams(params);
+              let total=0; const vals=slot.values||[]; const bons=slot.bonus||[];
+              for (let i=0;i<vals.length;i++){
+                const base = evaluateValue('range-convert', params, vals[i]);
+                total += (Number.isFinite(base)?base:0) + (map[String(bons[i]||'')]||0);
+              }
+              per = total;
+            } else per = foldAccum(slot, agg);
+          } else per = asNum(slot);
+          return evaluateValue(template==='range-convert-bonus' ? 'raw-number' : template, params, per);
         }).filter(isFiniteNum);
         const value = aggregate(vals, agg);
         return { key: String(idx1), label: getRoomLabel(idx1), value: asNum(value) };
@@ -150,10 +189,19 @@ export default function PlayerEventConfirm() {
         const vals = members
           .map(m => {
             const slot = inputsByEvent?.[evId]?.person?.[m?.id];
-            const per = (typeof slot === 'object' && slot && Array.isArray(slot.values))
-              ? foldAccum(slot, agg)
-              : asNum(slot);
-            return evaluateValue(template, params, per);
+            let per;
+            if (typeof slot === 'object' && slot && Array.isArray(slot.values)){
+              if (template === 'range-convert-bonus'){
+                const map = bonusMapFromParams(params);
+                let total=0; const vals=slot.values||[]; const bons=slot.bonus||[];
+                for (let i=0;i<vals.length;i++){
+                  const base = evaluateValue('range-convert', params, vals[i]);
+                  total += (Number.isFinite(base)?base:0) + (map[String(bons[i]||'')]||0);
+                }
+                per = total;
+              } else per = foldAccum(slot, agg);
+            } else per = asNum(slot);
+            return evaluateValue(template==='range-convert-bonus' ? 'raw-number' : template, params, per);
           })
           .filter(isFiniteNum);
 
