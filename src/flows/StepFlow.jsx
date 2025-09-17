@@ -14,6 +14,7 @@ import Step5    from '../screens/Step5';
 import Step6    from '../screens/Step6';
 import Step7    from '../screens/Step7';
 import Step8    from '../screens/Step8';
+import { useApplyTheme } from '../themes/useTheme';
 
 export const StepContext = createContext();
 
@@ -21,6 +22,9 @@ export default function StepFlow() {
   const { eventId, eventData, updateEvent, updateEventImmediate } = useContext(EventContext);
   const { step }    = useParams();
   const navigate    = useNavigate();
+
+  // Apply theme (admin scope)
+  useApplyTheme('admin');
 
   useEffect(() => {
     if (!eventId) navigate('/admin/home/0', { replace: true });

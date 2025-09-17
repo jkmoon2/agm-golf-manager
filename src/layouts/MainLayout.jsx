@@ -10,6 +10,7 @@ import {
 } from '@heroicons/react/24/outline';
 import styles from './MainLayout.module.css';
 import { useAuth } from '../contexts/AuthContext';
+import { useApplyTheme } from '../themes/useTheme'; // ★ 추가: 테마 훅
 
 // 참가자 STEP 제목 매핑
 const PLAYER_STEP_TITLES = {
@@ -39,6 +40,10 @@ const ADMIN_STEP_TITLES = {
 export default function MainLayout() {
   const { pathname } = useLocation();
 
+  // ★ 테마 스코프 자동 감지(플레이어/운영자)
+  const scope = /^\/player\//.test(pathname) ? 'player' : 'admin';
+  useApplyTheme(scope);
+
   // 참가자 STEP 경로: /player/home/:eventId/:step
   const playerMatch = pathname.match(/^\/player\/home\/[^/]+\/(\d+)/);
   const playerStep  = playerMatch ? Number(playerMatch[1]) : null;
@@ -49,34 +54,33 @@ export default function MainLayout() {
   const adminStep  = adminMatch && adminMatch[1] != null ? Number(adminMatch[1]) : null;
   const isAdminStep = adminStep !== null && ADMIN_STEP_TITLES.hasOwnProperty(adminStep);
 
-  // ✅ 이벤트 페이지 여부(둘 다 지원: /admin/events, /admin/home/events)
+  // 이벤트 페이지 여부(둘 다 지원: /admin/events, /admin/home/events)
   const isEventsPage = /^\/admin(?:\/home)?\/events/.test(pathname);
 
-  // 헤더: STEP 화면이면 STEP 타이틀, 이벤트 페이지라면 '#EVENT · 이벤트 관리'
+  // 헤더 타이틀
   let header = 'AGM Golf Manager';
   if (isPlayerStep) {
     header = PLAYER_STEP_TITLES[playerStep];
   } else if (isAdminStep) {
     header = `STEP ${adminStep}. ${ADMIN_STEP_TITLES[adminStep]}`;
   }
-  if (isEventsPage) {
-    header = '#EVENT · 이벤트 관리';
-  }
+  if (isEventsPage) header = '#EVENT · 이벤트 관리';
 
-  // 탭바 활성화 로직
+  // 탭바 활성화
   const isHomeActive    = pathname === '/admin' || pathname === '/admin/home' || isAdminStep || isEventsPage;
-  const isPlayerActive  = pathname.startsWith('/player');
+  const isPlayerActive  = pathname.startsWith('/player'); // 참가자 전체 영역 활성
 
-  // 🔐 현재 사용자 역할(운영자 여부)
+  // 사용자 역할
   const { firebaseUser, appRole } = useAuth() || {};
   const isAdmin = !!firebaseUser && appRole === 'admin';
 
-  // ✅ 참가자 탭 목적지는 항상 "대회 리스트"
+  // 참가자 탭 목적지는 항상 "대회 리스트"
   const participantTo = '/player/events';
 
   return (
     <div className={styles.app}>
-      <header className={styles.header}>
+      {/* 헤더: agm-surface로 은은한 입체감 */}
+      <header className={`${styles.header} agm-surface`}>
         <h1 className={styles.title}>{header}</h1>
       </header>
 
@@ -84,37 +88,40 @@ export default function MainLayout() {
         <Outlet />
       </main>
 
-      <footer className={styles.tabbar}>
-        {/* ── 운영자 전용: 관리자일 때만 노출 ── */}
+      {/* 하단 탭바: 기존 높이 그대로, 스타일만 bottom-nav로 주입 */}
+      <footer className={`${styles.tabbar} bottom-nav`}>
+        {/* 운영자 전용: 관리자일 때만 노출 */}
         {isAdmin && (
           <Link
             to="/admin/home"
-            className={isHomeActive ? styles.navItemActive : styles.navItem}
+            className={isHomeActive ? `${styles.navItemActive} item` : `${styles.navItem} item`}
+            data-active={isHomeActive ? 'true' : undefined}   /* ★ 추가: 홈 탭 활성 표식 */
           >
             <HomeIcon className={styles.icon} />
             <span className={styles.label}>홈</span>
           </Link>
         )}
 
-        {/* ✅ 참가자: 항상 노출, 무조건 대회 리스트로 이동 */}
+        {/* 참가자: 항상 노출, 무조건 대회 리스트로 이동 */}
         <NavLink
           to={participantTo}
           className={({ isActive }) =>
             (isActive || isPlayerActive)
-              ? styles.navItemActive
-              : styles.navItem
+              ? `${styles.navItemActive} item`
+              : `${styles.navItem} item`
           }
+          data-active={isPlayerActive ? 'true' : undefined}   /* ★ 추가: 참가자 전 경로 활성 */
         >
           <UserIcon className={styles.icon} />
           <span className={styles.label}>참가자</span>
         </NavLink>
 
-        {/* ── 운영자 전용: 관리자일 때만 노출 ── */}
+        {/* 운영자 전용: 관리자일 때만 노출 */}
         {isAdmin && (
           <NavLink
             to="/admin/dashboard"
             className={({ isActive }) =>
-              isActive ? styles.navItemActive : styles.navItem
+              isActive ? `${styles.navItemActive} item` : `${styles.navItem} item`
             }
           >
             <ChartBarIcon className={styles.icon} />
@@ -126,7 +133,7 @@ export default function MainLayout() {
           <NavLink
             to="/admin/settings"
             className={({ isActive }) =>
-              isActive ? styles.navItemActive : styles.navItem
+              isActive ? `${styles.navItemActive} item` : `${styles.navItem} item`
             }
           >
             <Cog6ToothIcon className={styles.icon} />

@@ -1,4 +1,4 @@
-// src/App.js
+// /src/App.js
 
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
@@ -10,6 +10,7 @@ import StepFlow    from './flows/StepFlow';      // 신규
 import AdminMode   from './screens/AdminMode';
 import ParticipantMode from './screens/ParticipantMode';
 import Dashboard   from './screens/Dashboard';
+import ThemeSettings from './settings/ThemeSettings'; // ★ 추가: 테마 설정 화면
 
 export default function App() {
   return (
@@ -26,6 +27,9 @@ export default function App() {
           <Route path="admin"       element={<AdminMode />} />
           <Route path="participant" element={<ParticipantMode />} />
           <Route path="dashboard"   element={<Dashboard />} />
+
+          {/* ★ 추가: 설정 화면 라우트 */}
+          <Route path="admin/settings" element={<ThemeSettings />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
