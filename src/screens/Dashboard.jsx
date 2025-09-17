@@ -64,15 +64,67 @@ export default function Dashboard() {
   const showBand     = (pv.visibleMetrics?.banddang ?? pv.banddang ?? true);
   const capacity     = roomCount * 4;
 
+  // ===== 진행률용 보완: 이벤트/입력 집계(기존 로직은 유지, 계산만 추가) =====
+  const activeEvents = useMemo(
+    () => Array.isArray(selectedData?.events)
+      ? selectedData.events.filter(ev => ev?.enabled !== false)
+      : [],
+    [selectedData]
+  );
+  // 개인 대상 이벤트만 점수 입력 진행률에 반영
+  const personEvents = useMemo(
+    () => activeEvents.filter(ev => String(ev?.target || 'person') === 'person'),
+    [activeEvents]
+  );
+  const attemptsOf = (ev) => {
+    const n = ev?.inputMode === 'accumulate' ? Number(ev?.attempts ?? 4) : 1;
+    return Math.max(1, Math.min(n, 20));
+  };
+  const assignedList = useMemo(
+    () => participants.filter(p => Number.isFinite(Number(p?.room))),
+    [participants]
+  );
+  // 총 기대 입력칸(개인 대상 이벤트 × 시도수 × 배정된 인원)
+  const scoreExpectTotal = useMemo(() => {
+    const perPersonCells = personEvents.reduce((s, ev) => s + attemptsOf(ev), 0);
+    return assignedList.length * perPersonCells;
+  }, [personEvents, assignedList]);
+  // 실제 채워진 입력칸(eventInputs 기반)
+  const scoreFilledTotal = useMemo(() => {
+    const ei = selectedData?.eventInputs || {};
+    let filled = 0;
+    personEvents.forEach(ev => {
+      const attempts = attemptsOf(ev);
+      const slot = ei?.[ev.id]?.person || {};
+      assignedList.forEach(p => {
+        const rec = slot[p.id];
+        if (attempts === 1) {
+          // 단일 입력: 숫자만 카운트
+          const v = (rec && typeof rec === 'object' && 'value' in rec) ? rec.value : rec;
+          if (v !== '' && v != null && !Number.isNaN(Number(v))) filled += 1;
+        } else {
+          const arr = (rec && typeof rec === 'object' && Array.isArray(rec.values)) ? rec.values : [];
+          for (let i = 0; i < attempts; i += 1) {
+            const v = arr[i];
+            if (v !== '' && v != null && !Number.isNaN(Number(v))) filled += 1;
+          }
+        }
+      });
+    });
+    return filled;
+  }, [selectedData, personEvents, assignedList]);
+
   // KPI
   const assignedCount = useMemo(
-    () => participants.filter(p => Number.isFinite(Number(p?.room))).length,
-    [participants]
+    () => assignedList.length,
+    [assignedList]
   );
-  const scoreCount = useMemo(
-    () => participants.filter(p => p?.score != null && p?.score !== '').length,
-    [participants]
+  // (이전: participants[].score 기반) → (보완: eventInputs 기반 진행률)
+  const scoreProgress = useMemo(
+    () => ({ filled: scoreFilledTotal, total: Math.max(1, scoreExpectTotal) }),
+    [scoreFilledTotal, scoreExpectTotal]
   );
+
   const pairCount = useMemo(() => {
     if (mode !== 'fourball') return 0;
     const seen = new Set();
@@ -217,7 +269,8 @@ export default function Dashboard() {
       <section className={styles.kpiGrid}>
         <KpiCard label="참가자" value={participants.length} total={capacity || 0} />
         <KpiCard label="방배정" value={assignedCount} total={participants.length || 1} />
-        <KpiCard label="점수입력" value={scoreCount} total={participants.length || 1} />
+        {/* 점수입력: eventInputs 기반 진행률 */}
+        <KpiCard label="점수입력" value={scoreProgress.filled} total={scoreProgress.total} />
         {mode === 'fourball' && <KpiCard label="팀결성" value={pairCount} total={expectedPairs || 1} />}
       </section>
 

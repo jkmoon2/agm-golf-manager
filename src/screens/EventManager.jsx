@@ -8,7 +8,7 @@
 import React, { useContext, useMemo, useState, useEffect, useRef } from 'react';
 import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import css from './EventManager.module.css';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -198,7 +198,19 @@ export default function EventManager() {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
     const all = { ...(eventData?.eventInputs || {}) };
     delete all[ev.id];
-    await updateEventImmediate({ eventInputs: all }, false);
+    // ★★★ 핵심 보완: 실시간 반영 트리거 타임스탬프 추가
+    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    // ★★★ Firestore에서도 해당 이벤트 입력 필드를 삭제 + 트리거 필드 갱신
+    try {
+      if (eventId) {
+        await updateDoc(doc(db, 'events', eventId), {
+          [`eventInputs.${ev.id}`]: deleteField(),
+          inputsUpdatedAt: serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.warn('[clearInputs] remote patch failed:', e);
+    }
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));
   };
@@ -514,7 +526,19 @@ export default function EventManager() {
     }
 
     all[ev.id] = slot;
-    await updateEventImmediate({ eventInputs: all }, false);
+    // ★★★ 핵심 보완: 실시간 반영 트리거 타임스탬프 추가
+    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    // ★★★ Firestore에도 부분 업데이트 + 트리거 필드
+    try {
+      if (eventId) {
+        await updateDoc(doc(db, 'events', eventId), {
+          [`eventInputs.${ev.id}`]: slot,
+          inputsUpdatedAt: serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.warn('[applyQuick] remote patch failed:', e);
+    }
     setQuickId(null);
   };
 
