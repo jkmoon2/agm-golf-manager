@@ -1,15 +1,12 @@
 // /src/screens/Settings.jsx
-// 기존 코드 100% 유지 + [⑤ 테마 설정] 섹션만 보완
+
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import styles from './Settings.module.css';
 import { EventContext } from '../contexts/EventContext';
 import { collection, doc, onSnapshot, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-
-/* ▼ 테마 유틸 (이미 추가되어 있었다면 그대로 둡니다) */
 import { getThemePrefs, setThemePrefs, listPresets, applyTheme } from '../themes/useTheme';
 import '../themes/agm-themes.css';
-/* ▲ */
 
 const STATUS = ['hidden', 'disabled', 'enabled'];
 
@@ -62,7 +59,7 @@ export default function Settings() {
   useEffect(() => {
     setGate(mergeGate(getDefaultGate(), selectedEvent?.playerGate));
     setSelectedPreset('');
-    // 구버전 호환 — visible 값 없으면 enabled로 보정
+    // visible 키가 없던 구버전 보정
     setGate(prev => {
       const vis = prev?.step1?.teamConfirmVisible;
       if (typeof vis === 'undefined') {
@@ -145,7 +142,7 @@ export default function Settings() {
   }, [gate?.steps]);
   const activePreset = selectedPreset === 'none' ? '' : (selectedPreset || detectedPreset);
 
-  /* ▼▼▼ 테마 상태/라벨 — 변경: '지금 적용' 버튼을 눌러야 적용되도록 */
+  // ===== 테마 상태/라벨 =====
   const [theme, setTheme] = useState(getThemePrefs());
   const PRESET_TEXT = {
     A: 'A · Soft Neumorph Light',
@@ -159,16 +156,13 @@ export default function Settings() {
     O: 'O · Crisp White / Purple',
   };
   const presets = useMemo(() => listPresets(), []);
-  // 마운트 시 현재 설정은 한 번 적용(동작 동일)
-  useEffect(() => { applyTheme('global'); }, []);
-  // 저장만 하고, 자동 적용은 하지 않음
+  useEffect(() => { applyTheme('global'); }, []); // 최초 1회만 현재값 적용
+  // 변경 시 저장만 하고 즉시 적용하지 않음
   const updateTheme = (patch) => {
     const merged = setThemePrefs(patch);
     setTheme(merged);
-    // (의도) 즉시 적용하지 않음: '지금 적용' 버튼에서만 적용
   };
   const setThemePreset = (scope, val) => updateTheme({ presets: { [scope]: val } });
-  /* ▲▲▲ */
 
   return (
     <div className={styles.page}>
@@ -271,27 +265,27 @@ export default function Settings() {
               <th>STEP</th><th>기능</th><th>숨김</th><th>비활성</th><th>활성</th>
             </tr>
           </thead>
-        <tbody>
-          {Array.from({ length: 8 }, (_, i) => i + 1).map(idx => (
-            <tr key={idx}>
-              <td>STEP {idx}</td>
-              <td>메뉴 버튼</td>
-              {STATUS.map((s) => (
-                <td key={s}>
-                  <label className={styles.radioLabel}>
-                    <input
-                      type="radio"
-                      name={`step-${idx}`}
-                      checked={(gate?.steps?.[idx] || 'enabled') === s}
-                      onChange={() => setStep(idx, s)}
-                    />
-                    <span />
-                  </label>
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
+          <tbody>
+            {Array.from({ length: 8 }, (_, i) => i + 1).map(idx => (
+              <tr key={idx}>
+                <td>STEP {idx}</td>
+                <td>메뉴 버튼</td>
+                {STATUS.map((s) => (
+                  <td key={s}>
+                    <label className={styles.radioLabel}>
+                      <input
+                        type="radio"
+                        name={`step-${idx}`}
+                        checked={(gate?.steps?.[idx] || 'enabled') === s}
+                        onChange={() => setStep(idx, s)}
+                      />
+                      <span />
+                    </label>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
         </table>
       </section>
 
@@ -315,53 +309,43 @@ export default function Settings() {
       </section>
 
       {/* ⑤ 테마 설정 */}
-      <section className={`${styles.card} ${styles.themeCard}`}> {/* ← 버튼/셀렉트 테두리 파랑 */}
+      <section className={`${styles.card} ${styles.themeCard}`}>
         <div className={styles.cardHeader}>
           <h3>⑤ 테마 설정</h3>
         </div>
 
-        {/* 적용 모드 (한글, 한 줄: 무적용/통합/개별) */}
+        {/* 적용 모드: 통합 · 개별 · 무적용 (작은 글씨) */}
         <div className={styles.themeRow}>
           <div className={styles.optionLabel}>적용 모드</div>
-          <div className={styles.inlineRadios}>
+          <div className={`${styles.inlineRadios} ${styles.smallNote}`}>
             <label>
-              <input
-                type="radio"
-                name="applyMode"
-                checked={theme.applyMode==='none'}
-                onChange={()=>updateTheme({applyMode:'none'})}
-              /> 무적용
+              <input type="radio" name="applyMode"
+                     checked={theme.applyMode==='global'}
+                     onChange={()=>updateTheme({applyMode:'global'})}/>
+              &nbsp;통합
             </label>
-            <span className={styles.sep}>/</span>
-            <label>
-              <input
-                type="radio"
-                name="applyMode"
-                checked={theme.applyMode==='global'}
-                onChange={()=>updateTheme({applyMode:'global'})}
-              /> 통합
+            <label style={{marginLeft:12}}>
+              <input type="radio" name="applyMode"
+                     checked={theme.applyMode==='separate'}
+                     onChange={()=>updateTheme({applyMode:'separate'})}/>
+              &nbsp;개별
             </label>
-            <span className={styles.sep}>/</span>
-            <label>
-              <input
-                type="radio"
-                name="applyMode"
-                checked={theme.applyMode==='separate'}
-                onChange={()=>updateTheme({applyMode:'separate'})}
-              /> 개별
+            <label style={{marginLeft:12}}>
+              <input type="radio" name="applyMode"
+                     checked={theme.applyMode==='none'}
+                     onChange={()=>updateTheme({applyMode:'none'})}/>
+              &nbsp;무적용
             </label>
           </div>
         </div>
 
-        {/* 프리셋 (알파벳 + 설명) */}
+        {/* 프리셋 (알파벳+설명) */}
         {theme.applyMode === 'global' ? (
           <div className={styles.themeRow}>
             <div className={styles.optionLabel}>프리셋(Global)</div>
-            <select
-              className={`${styles.select} ${styles.blueBorder}`}
-              value={theme.presets.global}
-              onChange={e=>setThemePreset('global', e.target.value)}
-            >
+            <select className={styles.select}
+                    value={theme.presets.global}
+                    onChange={e=>setThemePreset('global', e.target.value)}>
               {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
             </select>
           </div>
@@ -369,55 +353,45 @@ export default function Settings() {
           <>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Admin</div>
-              <select
-                className={`${styles.select} ${styles.blueBorder}`}
-                value={theme.presets.admin}
-                onChange={e=>setThemePreset('admin', e.target.value)}
-              >
+              <select className={styles.select}
+                      value={theme.presets.admin}
+                      onChange={e=>setThemePreset('admin', e.target.value)}>
                 {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
               </select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Player</div>
-              <select
-                className={`${styles.select} ${styles.blueBorder}`}
-                value={theme.presets.player}
-                onChange={e=>setThemePreset('player', e.target.value)}
-              >
+              <select className={styles.select}
+                      value={theme.presets.player}
+                      onChange={e=>setThemePreset('player', e.target.value)}>
                 {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
               </select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>PlayerOnly</div>
-              <select
-                className={`${styles.select} ${styles.blueBorder}`}
-                value={theme.presets.playerOnly}
-                onChange={e=>setThemePreset('playerOnly', e.target.value)}
-              >
+              <select className={styles.select}
+                      value={theme.presets.playerOnly}
+                      onChange={e=>setThemePreset('playerOnly', e.target.value)}>
                 {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
               </select>
             </div>
           </>
         ) : null}
 
-        {/* 가독성/밀도/다크 자동 (다크 문구 작게) */}
+        {/* 가독성/밀도/다크 자동(작은 글씨) */}
         <div className={styles.themeRow}>
           <div className={styles.optionLabel}>밀도</div>
-          <select
-            className={`${styles.select} ${styles.blueBorder}`}
-            value={theme.density}
-            onChange={e=>updateTheme({density:e.target.value})}
-          >
+          <select className={styles.select}
+                  value={theme.density}
+                  onChange={e=>updateTheme({density:e.target.value})}>
             {['compact','default','relaxed'].map(x => <option key={x} value={x}>{x}</option>)}
           </select>
         </div>
         <div className={styles.themeRow}>
           <div className={styles.optionLabel}>가독성</div>
-          <select
-            className={`${styles.select} ${styles.blueBorder}`}
-            value={theme.contrast}
-            onChange={e=>updateTheme({contrast:e.target.value})}
-          >
+          <select className={styles.select}
+                  value={theme.contrast}
+                  onChange={e=>updateTheme({contrast:e.target.value})}>
             {['low','default','high'].map(x => <option key={x} value={x}>{x}</option>)}
           </select>
         </div>
@@ -433,26 +407,20 @@ export default function Settings() {
           </label>
         </div>
 
-        {/* 동작 버튼 (이제 여기서만 실제 적용) */}
+        {/* 동작 버튼 */}
         <div className={styles.themeRow}>
           <div />
           <div style={{display:'flex', gap:8}}>
+            <button className={styles.saveBtn} onClick={()=>applyTheme('global')}>적용</button>
             <button
-              className={`${styles.saveBtn} ${styles.blueBorder}`}
-              onClick={()=>applyTheme('global')}
-            >
-              지금 적용
-            </button>
-            <button
-              className={`${styles.eventSelect} ${styles.blueBorder}`}
+              className={styles.eventSelect}
               style={{height:40}}
               onClick={()=>{
                 localStorage.removeItem('agm_theme_prefs_v1');
                 const fresh = getThemePrefs();
                 setTheme(fresh);
                 applyTheme('global');
-              }}
-            >
+              }}>
               초기화
             </button>
           </div>
