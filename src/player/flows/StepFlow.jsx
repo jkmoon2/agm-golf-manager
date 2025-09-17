@@ -13,6 +13,8 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
 
+import { useApplyTheme } from '../../themes/useTheme';
+
 export const StepContext = createContext(null);
 
 function getCurrentStepFromPath(pathname) {
@@ -42,6 +44,8 @@ function pickGateByMode(playerGate, mode) {
 }
 
 export default function StepFlowProvider({ children }) {
+  // ★ theme: 플레이어 화면 테마 적용 (설정의 applyMode에 따라 자동)
+  useApplyTheme('player');
   const navigate = useNavigate();
   const location = useLocation();
   const { eventId } = useParams();
