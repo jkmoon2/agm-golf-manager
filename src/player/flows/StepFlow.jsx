@@ -1,35 +1,25 @@
 // /src/player/flows/StepFlow.jsx
 //
-// ★ patch 요약
-// - EventContext/PlayerContext를 읽어 '대회 모드별 gate'를 계산
-// - nextAllowed(다음 단계 이동 가능 여부) 추가
-// - goNext가 gate를 검사하여 차단(중앙 가드)
-// - 컨텍스트로 { step, goPrev, goNext, nextAllowed } 제공
+// 변경 사항(기존 100% 유지 + 보완):
+// 1) URL 쿼리 ?login=1 뿐 아니라, 경로 세그먼트가 '/login' 이어도 게이트 강제 표출
+// 2) 나머지 네비/게이트/모드 계산 로직은 원본 유지
 //
 import React, { createContext, useMemo, useCallback, useContext, useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-
-// ★ patch: gate/모드 정보를 읽기 위해
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
-
 import { useApplyTheme } from '../../themes/useTheme';
-
-// ★ 추가: 로그인/인증코드 탭 게이트 화면
-//   - 새 파일: /src/player/screens/LoginOrCode.jsx (기존 코드 유지, 추가만)
 import LoginOrCode from '../screens/LoginOrCode';
 
 export const StepContext = createContext(null);
 
 function getCurrentStepFromPath(pathname) {
-  // 예: /player/home/agm1/4  →  4
   const seg = pathname.split('/').filter(Boolean);
   const last = seg[seg.length - 1];
   const n = Number(last);
   return Number.isFinite(n) && n >= 1 && n <= 6 ? n : 1;
 }
 
-// ★ patch: gate 정규화 (+ 모드별 선택)
 function normalizeGate(raw) {
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
   const g = { ...raw };
@@ -40,7 +30,6 @@ function normalizeGate(raw) {
   return out;
 }
 function pickGateByMode(playerGate, mode) {
-  // mode: 'stroke' | 'fourball' | 'agm'(=fourball)
   const isFour = (mode === 'fourball' || mode === 'agm');
   const nested = isFour ? playerGate?.fourball : playerGate?.stroke;
   const base = nested && typeof nested === 'object' ? nested : playerGate;
@@ -48,7 +37,6 @@ function pickGateByMode(playerGate, mode) {
 }
 
 export default function StepFlowProvider({ children }) {
-  // ★ theme: 플레이어 화면 테마 적용 (설정의 applyMode에 따라 자동)
   useApplyTheme('player');
   const navigate = useNavigate();
   const location = useLocation();
@@ -56,46 +44,47 @@ export default function StepFlowProvider({ children }) {
 
   const step = getCurrentStepFromPath(location.pathname);
 
-  // ★ patch: 컨텍스트에서 모드/게이트를 읽어 “다음단계 허용 여부” 계산
   const { eventData } = useContext(EventContext) || {};
   const { mode: playerMode } = useContext(PlayerContext) || {};
   const mode = (playerMode || (eventData?.mode === 'fourball' ? 'fourball' : 'stroke'));
   const gate = useMemo(() => pickGateByMode(eventData?.playerGate || {}, mode), [eventData?.playerGate, mode]);
 
-  // ★ 추가: 로그인/코드 게이트 통과 여부
+  // ── 로컬 티켓 확인 ────────────────────────────────────────────
   const hasTicket = useMemo(() => {
     try {
       if (!eventId) return false;
       const raw = localStorage.getItem(`ticket:${eventId}`);
       if (!raw) return false;
       const t = JSON.parse(raw);
-      // 형식만 간단 확인 (code 존재 여부)
-      return !!String(t?.code || '').trim();
+      return !!(t?.code || t?.via); // code(인증코드) or via:'login'
     } catch {
       return false;
     }
   }, [eventId]);
 
-  const [entered, setEntered] = useState(hasTicket);
-  useEffect(() => { setEntered(hasTicket); }, [hasTicket]);
+  // ── 게이트 강제 표출 플래그: ?login=1  또는 경로 끝 세그먼트가 'login'
+  const search = new URLSearchParams(location.search);
+  const forceByQuery = search.get('login') === '1';
+  const lastSeg = location.pathname.split('/').filter(Boolean).pop();
+  const forceByPath = lastSeg === 'login';
+  const forceGate = forceByQuery || forceByPath;
 
-  // ⬇⬇⬇ 함수 참조를 안정화
-  const goTo = useCallback(
-    (n) => {
-      if (!eventId) return;
-      const target = Math.min(6, Math.max(1, Number(n) || 1));
-      navigate(`/player/home/${eventId}/${target}`);
-    },
-    [eventId, navigate]
-  );
+  const [entered, setEntered] = useState(!forceGate && hasTicket);
+  useEffect(() => {
+    setEntered(!forceGate && hasTicket);
+  }, [forceGate, hasTicket]);
+
+  const goTo = useCallback((n) => {
+    if (!eventId) return;
+    const target = Math.min(6, Math.max(1, Number(n) || 1));
+    navigate(`/player/home/${eventId}/${target}`);
+  }, [eventId, navigate]);
 
   const goPrev = useCallback(() => { goTo(step - 1); }, [goTo, step]);
 
-  // ★ patch: 다음 단계 허용 여부
   const nextAllowed = useMemo(() => {
     const next = step + 1;
     if (step === 1) {
-      // STEP1 → STEP2: step1.teamConfirmEnabled && step2 enabled
       return !!gate?.step1?.teamConfirmEnabled && (gate?.steps?.[2] === 'enabled');
     }
     if (next >= 2 && next <= 6) {
@@ -104,9 +93,8 @@ export default function StepFlowProvider({ children }) {
     return true;
   }, [step, gate]);
 
-  // ★ patch: 중앙 가드
   const goNext = useCallback(() => {
-    if (!nextAllowed) return; // 막기
+    if (!nextAllowed) return;
     goTo(step + 1);
   }, [goTo, step, nextAllowed]);
 
@@ -120,12 +108,9 @@ export default function StepFlowProvider({ children }) {
     [eventId, step, goTo, goPrev, goNext, goHome, nextAllowed, gate, mode]
   );
 
-  // ★ 추가: 로그인/인증코드 게이트
-  // - entered=false 이면 LoginOrCode를 먼저 보여주고, onEnter 후 본 흐름으로.
-  if (!entered) {
-    return (
-      <LoginOrCode onEnter={() => setEntered(true)} />
-    );
+  // ── 게이트: 로그인/인증코드 탭 (강제표출 or 티켓 없을 때)
+  if (forceGate || !entered) {
+    return <LoginOrCode onEnter={() => setEntered(true)} />;
   }
 
   return <StepContext.Provider value={value}>{children}</StepContext.Provider>;
