@@ -15,8 +15,10 @@ import PlayerLoginScreen   from './player/screens/PlayerLoginScreen';
 import PlayerApp           from './player/PlayerApp';
 import MainLayout          from './layouts/MainLayout';
 
-// 🆕 추가: 탭 UI (회원 로그인 + 인증코드)
+// 기존 추가: 탭 UI
 import LoginOrCode         from './player/screens/LoginOrCode';
+// 🆕 운영자: 회원 전용 이벤트 토글 화면
+import EventMembersOnlyToggle from './admin/screens/EventMembersOnlyToggle';
 
 function Protected({ children, roles }) {
   const { firebaseUser, appRole } = useAuth();
@@ -29,14 +31,12 @@ export default function AppRouter() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        {/* 🆕 이벤트 상태를 전역에서 구독(설정/플레이어 공통) */}
         <EventProvider>
           <Routes>
-
             <Route path="/" element={<Navigate to="/login?role=admin" replace />} />
             <Route path="/login" element={<LoginScreen />} />
 
-            {/* ───────── 참가자 전용(공개) ───────── */}
+            {/* 참가자(공개) */}
             <Route
               path="/player"
               element={
@@ -48,15 +48,12 @@ export default function AppRouter() {
               <Route index element={<Navigate to="events" replace />} />
               <Route path="events" element={<PlayerEventList />} />
               <Route path="home/:eventId/*" element={<PlayerApp />} />
-
-              {/* 🆕 여기서 /player/home/:eventId/login 은 '탭 UI'로 진입 */}
               <Route path="home/:eventId/login" element={<LoginOrCode />} />
-
-              {/* (참고) 레거시 인증코드 전용 화면이 필요하면 아래 라인을 남기되, 경로를 다른 곳으로 두세요.
-                  <Route path="home/:eventId/join" element={<PlayerLoginScreen />} /> */}
+              {/* (레거시) 인증코드 전용 */}
+              <Route path="home/:eventId/join" element={<PlayerLoginScreen />} />
             </Route>
 
-            {/* ───────── 보호 구역(운영자) ───────── */}
+            {/* 운영자(보호) */}
             <Route
               element={
                 <Protected roles={['admin','player']}>
@@ -75,6 +72,8 @@ export default function AppRouter() {
                 <Route path="/admin/home/*"    element={<AdminApp />} />
                 <Route path="/admin/dashboard" element={<Dashboard />} />
                 <Route path="/admin/settings"  element={<Settings />} />
+                {/* 🆕 회원 전용 토글 관리 */}
+                <Route path="/admin/events/:eventId/members-only" element={<EventMembersOnlyToggle />} />
               </Route>
             </Route>
 
