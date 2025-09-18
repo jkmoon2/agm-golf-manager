@@ -1,0 +1,23 @@
+/* /src/player/components/modal.css */
+
+.modal__backdrop{
+  position:fixed; inset:0; background:rgba(0,0,0,.4);
+  display:flex; align-items:center; justify-content:center; z-index:50;
+}
+.modal__card{
+  width:min(92vw,420px); background:#fff; border-radius:16px;
+  box-shadow:0 12px 32px rgba(0,0,0,.2); padding:20px;
+}
+.modal__title{ margin:0 0 12px; font-size:18px; font-weight:800; text-align:center; }
+.modal__form{ display:grid; gap:10px; margin-bottom:12px; }
+.modal__input{
+  height:44px; border:1px solid #d7deea; border-radius:10px; padding:0 12px; font-size:14px;
+}
+.modal__actions{ display:flex; gap:8px; justify-content:flex-end; }
+.modal__primary{
+  height:40px; padding:0 14px; border:none; border-radius:10px; background:#1d4ed8; color:#fff; font-weight:700;
+}
+.modal__ghost{
+  height:40px; padding:0 14px; border:1px solid #cfd7e6; border-radius:10px; background:#f9fbff; font-weight:600;
+}
+.modal__hint{ margin-top:8px; font-size:12px; color:#475569; }

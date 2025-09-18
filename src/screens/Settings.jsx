@@ -426,6 +426,24 @@ export default function Settings() {
           </div>
         </div>
       </section>
+
+      {/* 🆕 ⑥ 설정 바로가기(회원 관리) — 새 카드 추가 */}
+      <section className={styles.card}>
+        <div className={styles.cardHeader}>
+          <h3>⑥ 회원 관리</h3>
+        </div>
+        <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
+          <a href="/admin/settings/members-only">
+            <button className={styles.saveBtn} type="button">회원 전용 ON/OFF</button>
+          </a>
+          <a href="/admin/settings/members">
+            <button className={styles.saveBtn} type="button">회원 목록 / 다운로드</button>
+          </a>
+        </div>
+        <div className={styles.hint} style={{marginTop:8}}>
+          회원 전용을 켜면 참가자는 반드시 <b>로그인</b> 후, 해당 대회에 <b>업로드된 명단</b>에 있어야 입장 가능합니다.
+        </div>
+      </section>
     </div>
   );
 }
