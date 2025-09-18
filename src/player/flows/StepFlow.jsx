@@ -6,7 +6,7 @@
 // - goNext가 gate를 검사하여 차단(중앙 가드)
 // - 컨텍스트로 { step, goPrev, goNext, nextAllowed } 제공
 //
-import React, { createContext, useMemo, useCallback, useContext } from 'react';
+import React, { createContext, useMemo, useCallback, useContext, useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 // ★ patch: gate/모드 정보를 읽기 위해
@@ -14,6 +14,10 @@ import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
 
 import { useApplyTheme } from '../../themes/useTheme';
+
+// ★ 추가: 로그인/인증코드 탭 게이트 화면
+//   - 새 파일: /src/player/screens/LoginOrCode.jsx (기존 코드 유지, 추가만)
+import LoginOrCode from '../screens/LoginOrCode';
 
 export const StepContext = createContext(null);
 
@@ -58,6 +62,23 @@ export default function StepFlowProvider({ children }) {
   const mode = (playerMode || (eventData?.mode === 'fourball' ? 'fourball' : 'stroke'));
   const gate = useMemo(() => pickGateByMode(eventData?.playerGate || {}, mode), [eventData?.playerGate, mode]);
 
+  // ★ 추가: 로그인/코드 게이트 통과 여부
+  const hasTicket = useMemo(() => {
+    try {
+      if (!eventId) return false;
+      const raw = localStorage.getItem(`ticket:${eventId}`);
+      if (!raw) return false;
+      const t = JSON.parse(raw);
+      // 형식만 간단 확인 (code 존재 여부)
+      return !!String(t?.code || '').trim();
+    } catch {
+      return false;
+    }
+  }, [eventId]);
+
+  const [entered, setEntered] = useState(hasTicket);
+  useEffect(() => { setEntered(hasTicket); }, [hasTicket]);
+
   // ⬇⬇⬇ 함수 참조를 안정화
   const goTo = useCallback(
     (n) => {
@@ -98,6 +119,14 @@ export default function StepFlowProvider({ children }) {
     () => ({ eventId, step, goTo, goPrev, goNext, goHome, nextAllowed, gate, mode }),
     [eventId, step, goTo, goPrev, goNext, goHome, nextAllowed, gate, mode]
   );
+
+  // ★ 추가: 로그인/인증코드 게이트
+  // - entered=false 이면 LoginOrCode를 먼저 보여주고, onEnter 후 본 흐름으로.
+  if (!entered) {
+    return (
+      <LoginOrCode onEnter={() => setEntered(true)} />
+    );
+  }
 
   return <StepContext.Provider value={value}>{children}</StepContext.Provider>;
 }
