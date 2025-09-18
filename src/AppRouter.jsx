@@ -1,4 +1,4 @@
-// src/AppRouter.jsx
+// /src/AppRouter.jsx
 
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
@@ -14,6 +14,9 @@ import PlayerEventList     from './player/screens/PlayerEventList';
 import PlayerLoginScreen   from './player/screens/PlayerLoginScreen';
 import PlayerApp           from './player/PlayerApp';
 import MainLayout          from './layouts/MainLayout';
+
+// 🆕 추가: 탭 UI (회원 로그인 + 인증코드)
+import LoginOrCode         from './player/screens/LoginOrCode';
 
 function Protected({ children, roles }) {
   const { firebaseUser, appRole } = useAuth();
@@ -45,8 +48,12 @@ export default function AppRouter() {
               <Route index element={<Navigate to="events" replace />} />
               <Route path="events" element={<PlayerEventList />} />
               <Route path="home/:eventId/*" element={<PlayerApp />} />
-              {/* 필요 시 사용 */}
-              <Route path="home/:eventId/login" element={<PlayerLoginScreen />} />
+
+              {/* 🆕 여기서 /player/home/:eventId/login 은 '탭 UI'로 진입 */}
+              <Route path="home/:eventId/login" element={<LoginOrCode />} />
+
+              {/* (참고) 레거시 인증코드 전용 화면이 필요하면 아래 라인을 남기되, 경로를 다른 곳으로 두세요.
+                  <Route path="home/:eventId/join" element={<PlayerLoginScreen />} /> */}
             </Route>
 
             {/* ───────── 보호 구역(운영자) ───────── */}

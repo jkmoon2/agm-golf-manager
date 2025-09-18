@@ -1,9 +1,7 @@
 // /src/player/flows/StepFlow.jsx
-//
-// 변경 사항(기존 100% 유지 + 보완):
-// 1) URL 쿼리 ?login=1 뿐 아니라, 경로 세그먼트가 '/login' 이어도 게이트 강제 표출
-// 2) 나머지 네비/게이트/모드 계산 로직은 원본 유지
-//
+// (기존 코드 100% 유지 + "플레이어용"으로 필요한 부분만 보완)
+// - ?login=1 또는 /login 세그먼트면 하이브리드 게이트(LoginOrCode) 강제 표출
+
 import React, { createContext, useMemo, useCallback, useContext, useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
@@ -19,7 +17,6 @@ function getCurrentStepFromPath(pathname) {
   const n = Number(last);
   return Number.isFinite(n) && n >= 1 && n <= 6 ? n : 1;
 }
-
 function normalizeGate(raw) {
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
   const g = { ...raw };
@@ -49,20 +46,18 @@ export default function StepFlowProvider({ children }) {
   const mode = (playerMode || (eventData?.mode === 'fourball' ? 'fourball' : 'stroke'));
   const gate = useMemo(() => pickGateByMode(eventData?.playerGate || {}, mode), [eventData?.playerGate, mode]);
 
-  // ── 로컬 티켓 확인 ────────────────────────────────────────────
+  // 티켓
   const hasTicket = useMemo(() => {
     try {
       if (!eventId) return false;
       const raw = localStorage.getItem(`ticket:${eventId}`);
       if (!raw) return false;
       const t = JSON.parse(raw);
-      return !!(t?.code || t?.via); // code(인증코드) or via:'login'
-    } catch {
-      return false;
-    }
+      return !!(t?.code || t?.via);
+    } catch { return false; }
   }, [eventId]);
 
-  // ── 게이트 강제 표출 플래그: ?login=1  또는 경로 끝 세그먼트가 'login'
+  // 게이트 강제 표출: ?login=1 OR path endsWith '/login'
   const search = new URLSearchParams(location.search);
   const forceByQuery = search.get('login') === '1';
   const lastSeg = location.pathname.split('/').filter(Boolean).pop();
@@ -70,9 +65,7 @@ export default function StepFlowProvider({ children }) {
   const forceGate = forceByQuery || forceByPath;
 
   const [entered, setEntered] = useState(!forceGate && hasTicket);
-  useEffect(() => {
-    setEntered(!forceGate && hasTicket);
-  }, [forceGate, hasTicket]);
+  useEffect(() => { setEntered(!forceGate && hasTicket); }, [forceGate, hasTicket]);
 
   const goTo = useCallback((n) => {
     if (!eventId) return;
@@ -84,34 +77,21 @@ export default function StepFlowProvider({ children }) {
 
   const nextAllowed = useMemo(() => {
     const next = step + 1;
-    if (step === 1) {
-      return !!gate?.step1?.teamConfirmEnabled && (gate?.steps?.[2] === 'enabled');
-    }
-    if (next >= 2 && next <= 6) {
-      return (gate?.steps?.[next] === 'enabled');
-    }
+    if (step === 1) return !!gate?.step1?.teamConfirmEnabled && (gate?.steps?.[2] === 'enabled');
+    if (next >= 2 && next <= 6) return (gate?.steps?.[next] === 'enabled');
     return true;
   }, [step, gate]);
 
-  const goNext = useCallback(() => {
-    if (!nextAllowed) return;
-    goTo(step + 1);
-  }, [goTo, step, nextAllowed]);
+  const goNext = useCallback(() => { if (nextAllowed) goTo(step + 1); }, [goTo, step, nextAllowed]);
 
-  const goHome = useCallback(() => {
-    if (!eventId) return;
-    navigate(`/player/home/${eventId}`);
-  }, [eventId, navigate]);
+  const goHome = useCallback(() => { if (eventId) navigate(`/player/home/${eventId}`); }, [eventId, navigate]);
 
-  const value = useMemo(
-    () => ({ eventId, step, goTo, goPrev, goNext, goHome, nextAllowed, gate, mode }),
-    [eventId, step, goTo, goPrev, goNext, goHome, nextAllowed, gate, mode]
-  );
+  const value = useMemo(() => ({ eventId, step, goTo, goPrev, goNext, goHome, nextAllowed, gate, mode }),
+    [eventId, step, goTo, goPrev, goNext, goHome, nextAllowed, gate, mode]);
 
-  // ── 게이트: 로그인/인증코드 탭 (강제표출 or 티켓 없을 때)
+  // 게이트: 로그인/인증코드 탭
   if (forceGate || !entered) {
     return <LoginOrCode onEnter={() => setEntered(true)} />;
   }
-
   return <StepContext.Provider value={value}>{children}</StepContext.Provider>;
 }
