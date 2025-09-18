@@ -1,14 +1,7 @@
 // /src/player/screens/LoginOrCode.jsx
-//
-// 보완사항:
-// - onEnter prop이 없을 때도 자체적으로 /player/home/:eventId/1 로 이동하도록 처리(버튼 무반응 이슈 해결)
-// - 버튼에 type="button" 지정
-// - 레이아웃은 CSS 모듈에서 중앙정렬/넘침 해결
-// - "비번 재설정" 버튼을 ghost 스타일로 변경(회원가입과 동일한 톤)
-// - 기본 버튼 텍스트 사이즈 약간 확대
-//
+
 import React, { useState, useContext } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
 import { EventContext } from '../../contexts/EventContext';
@@ -24,10 +17,10 @@ function InnerLoginOrCode({ onEnter }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false); // ◀ 로딩 상태
 
   if (!ready) return null;
 
-  // ── helpers ──────────────────────────────────────────────────
   const normalize = (v) => String(v || '').trim().toLowerCase();
   const goNext = () => {
     if (typeof onEnter === 'function') onEnter();
@@ -54,67 +47,125 @@ function InnerLoginOrCode({ onEnter }) {
     const snap = await getDoc(evRef);
     const data = snap.data() || {};
     const arr = Array.isArray(data.participants) ? [...data.participants] : [];
-    if (arr.length === 0) return;
 
     const emailNorm = normalize(uEmail);
     let idx = -1;
-    idx = arr.findIndex(p => p && p.uid === uid);
-    if (idx < 0 && emailNorm) idx = arr.findIndex(p => normalize(p?.email) === emailNorm);
-    if (idx < 0 && emailNorm) idx = arr.findIndex(p => normalize(p?.userId) === emailNorm);
-
-    if (idx >= 0) {
-      const target = { ...arr[idx] };
-      let changed = false;
-      if (target.uid !== uid) { target.uid = uid; changed = true; }
-      if (!target.email && uEmail) { target.email = uEmail; changed = true; }
-      if (changed) {
-        arr[idx] = target;
-        await setDoc(evRef, { participants: arr }, { merge: true });
+    if (arr.length) {
+      idx = arr.findIndex(p => p && p.uid === uid);
+      if (idx < 0 && emailNorm) idx = arr.findIndex(p => normalize(p?.email) === emailNorm);
+      if (idx < 0 && emailNorm) idx = arr.findIndex(p => normalize(p?.userId) === emailNorm);
+      if (idx >= 0) {
+        const target = { ...arr[idx] };
+        let changed = false;
+        if (target.uid !== uid) { target.uid = uid; changed = true; }
+        if (!target.email && uEmail) { target.email = uEmail; changed = true; }
+        if (changed) {
+          arr[idx] = target;
+          await setDoc(evRef, { participants: arr }, { merge: true });
+        }
       }
     }
   };
 
   // ── handlers ─────────────────────────────────────────────────
   const handleLogin = async () => {
-    await signInEmail(email, pw);
+    if (!email.trim()) { alert('이메일을 입력해 주세요.'); return; }
+    if (!pw.trim())    { alert('비밀번호를 입력해 주세요.'); return; }
+    setBusy(true);
     try {
-      if (eventId && user) {
-        await syncMembershipAndLinkParticipant(user, eventId);
-        setLoginTicket(eventId);
-      }
-    } catch (e) { console.warn('post-login sync failed:', e); }
-    goNext();
+      await signInEmail(email.trim(), pw);
+      try {
+        if (eventId && user) {
+          await syncMembershipAndLinkParticipant(user, eventId);
+          setLoginTicket(eventId);
+        }
+      } catch (e) { console.warn('post-login sync failed:', e); }
+      goNext();
+    } catch (err) {
+      alert(`로그인 실패: ${err?.message || err}`);
+    } finally { setBusy(false); }
   };
 
   const handleSignUp = async () => {
-    await signUpEmail(email, pw);
+    if (!email.trim()) { alert('이메일을 입력해 주세요.'); return; }
+    if (!pw.trim())    { alert('비밀번호를 입력해 주세요.'); return; }
+    setBusy(true);
     try {
-      if (eventId && user) {
-        await syncMembershipAndLinkParticipant(user, eventId);
-        setLoginTicket(eventId);
-      }
-    } catch (e) { console.warn('post-signup sync failed:', e); }
-    goNext();
+      await signUpEmail(email.trim(), pw);
+      try {
+        if (eventId && user) {
+          await syncMembershipAndLinkParticipant(user, eventId);
+          setLoginTicket(eventId);
+        }
+      } catch (e) { console.warn('post-signup sync failed:', e); }
+      goNext();
+    } catch (err) {
+      alert(`회원가입 실패: ${err?.message || err}`);
+    } finally { setBusy(false); }
   };
 
   const handleReset = async () => {
-    await resetPassword(email);
-    alert('입력한 이메일로 비밀번호 재설정 메일을 보냈습니다(계정이 존재하는 경우).');
+    if (!email.trim()) { alert('비번 재설정을 위해 이메일을 먼저 입력해 주세요.'); return; }
+    setBusy(true);
+    try {
+      await resetPassword(email.trim());
+      alert('입력한 이메일로 비밀번호 재설정 메일을 보냈습니다(계정이 존재하는 경우).');
+    } catch (err) {
+      alert(`재설정 메일 전송 실패: ${err?.message || err}`);
+    } finally { setBusy(false); }
+  };
+
+  // participants 배열 → 없으면 서브컬렉션 /participants 로 fallback
+  const verifyCode = async (evtId, inputCode) => {
+    const codeStr = String(inputCode || '').trim();
+    if (!evtId || !codeStr) return false;
+
+    // 1) 이벤트 문서의 participants 배열
+    try {
+      const evSnap = await getDoc(doc(db, 'events', evtId));
+      const data = evSnap.data() || {};
+      if (Array.isArray(data.participants) && data.participants.length) {
+        const okArr = data.participants.some(p =>
+          String(p?.authCode || p?.code || '').trim() === codeStr
+        );
+        if (okArr) return true;
+      }
+    } catch (e) { console.warn('verifyCode(arr) error:', e); }
+
+    // 2) 서브컬렉션 /events/{evtId}/participants
+    try {
+      const col = collection(db, 'events', evtId, 'participants');
+      const qs = await getDocs(col);
+      let ok = false;
+      qs.forEach(d => {
+        const v = d.data() || {};
+        if (String(v?.authCode || v?.code || '').trim() === codeStr) ok = true;
+      });
+      return ok;
+    } catch (e) {
+      console.warn('verifyCode(subcollection) error:', e);
+    }
+
+    return false;
   };
 
   const handleCode = async () => {
-    await ensureAnonymous();
-    if (!eventId) { alert('이벤트가 선택되지 않았습니다.'); return; }
-    const snap = await getDoc(doc(db, 'events', eventId));
-    const data = snap.data() || {};
-    const ok = Array.isArray(data.participants)
-      && data.participants.some(p => String(p.authCode || '').trim() === String(code).trim());
-    if (!ok) { alert('인증코드가 올바르지 않습니다.'); return; }
-    setCodeTicket(eventId, code);
-    goNext();
+    if (!code.trim()) { alert('인증코드를 입력해 주세요.'); return; }
+    setBusy(true);
+    try {
+      await ensureAnonymous();
+      if (!eventId) { alert('이벤트가 선택되지 않았습니다.'); return; }
+
+      const ok = await verifyCode(eventId, code);
+      if (!ok) { alert('인증코드가 올바르지 않습니다.'); return; }
+
+      setCodeTicket(eventId, code);
+      goNext();
+    } catch (err) {
+      alert(`코드 확인 중 오류: ${err?.message || err}`);
+    } finally { setBusy(false); }
   };
 
-  // membersOnly면 인증코드 탭 비활성(표시는 하되 안내)
   const membersOnly = !!eventData?.membersOnly;
 
   return (
@@ -157,9 +208,9 @@ function InnerLoginOrCode({ onEnter }) {
               onChange={e=>setPw(e.target.value)}
             />
             <div className={styles.actions}>
-              <button type="button" className={styles.primary} onClick={handleLogin}>로그인</button>
-              <button type="button" className={styles.ghost} onClick={handleSignUp}>회원가입</button>
-              <button type="button" className={styles.ghost} onClick={handleReset}>비번 재설정</button>
+              <button type="button" className={styles.primary} onClick={handleLogin} disabled={busy}>로그인</button>
+              <button type="button" className={styles.ghost}   onClick={handleSignUp} disabled={busy}>회원가입</button>
+              <button type="button" className={styles.ghost}   onClick={handleReset} disabled={busy}>비번 재설정</button>
             </div>
           </div>
         ) : (
@@ -177,7 +228,7 @@ function InnerLoginOrCode({ onEnter }) {
                 type="button"
                 className={styles.primary}
                 onClick={handleCode}
-                disabled={membersOnly}
+                disabled={busy || membersOnly}
                 title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
               >
                 코드로 입장
