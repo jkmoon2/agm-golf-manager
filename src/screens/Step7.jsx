@@ -3,6 +3,9 @@
 import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
+// [ADD] 라이브 이벤트 보조(참고용: 렌더에 직접 사용하지 않아 기존 흐름 100% 유지)
+import { EventContext } from '../contexts/EventContext';
+import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
 if (process.env.NODE_ENV!=='production') console.log('[AGM] Step7 render');
 
@@ -19,6 +22,10 @@ export default function Step7() {
     goNext
   } = useContext(StepContext);
   const [loadingId, setLoadingId] = useState(null);
+
+  // [ADD] 이벤트 아이디만 받아서 백그라운드 구독(로깅/확인용)
+  const { eventId } = useContext(EventContext) || {};
+  useEventLiveQuery(eventId); // ← 기존 동작은 그대로, 실시간 소스는 컨텍스트 쪽이 담당
 
   const isCompleted = id => {
     const me = participants.find(p => p.id === id);

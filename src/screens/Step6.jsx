@@ -7,6 +7,8 @@ import styles from './Step6.module.css';
 import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
+// [ADD] 라이브 이벤트 문서 구독(컨텍스트가 실시간이 아닐 때 보조)
+import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
 export default function Step6() {
   // Step 컨텍스트
@@ -20,6 +22,9 @@ export default function Step6() {
 
   // 이벤트 컨텍스트
   const { eventId, eventData, updateEventImmediate } = useContext(EventContext) || {};
+  // [ADD] 라이브 이벤트 데이터(있으면 컨텍스트보다 우선)
+  const { eventData: liveEvent } = useEventLiveQuery(eventId);
+  const effectiveEventData = liveEvent || eventData;
 
   // 표시 옵션 상태
   // ※ hiddenRooms 는 **1-based(방번호)** Set<number>로 유지 (Step8/Player와 동일)
@@ -64,7 +69,7 @@ export default function Step6() {
 
   // 이벤트 문서의 publicView를 **권위 소스**로 안전 복원(과거 0-based도 자동 보정)
   useEffect(() => {
-    const pv = eventData?.publicView;
+    const pv = effectiveEventData?.publicView;
     if (!pv) return;
 
     const nums = (pv.hiddenRooms || []).map(Number).filter(Number.isFinite);
@@ -85,7 +90,7 @@ export default function Step6() {
       setVisibleMetrics(nextVM);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventData?.publicView, roomCount]);
+  }, [effectiveEventData?.publicView, roomCount]);
 
   // 메뉴 토글 + 바깥 클릭 닫기
   const toggleMenu = (e) => { e.stopPropagation(); setMenuOpen(o => !o); };
@@ -161,10 +166,10 @@ export default function Step6() {
     roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`
   );
 
-  // 참가자 소스: 컨텍스트 비어있으면 eventData 폴백
+  // 참가자 소스: 컨텍스트 비어있으면 **라이브/컨텍스트 이벤트 문서** 폴백
   const sourceParticipants = (participants && participants.length)
     ? participants
-    : ((eventData && Array.isArray(eventData.participants)) ? eventData.participants : []);
+    : ((effectiveEventData && Array.isArray(effectiveEventData.participants)) ? effectiveEventData.participants : []);
 
   // 방별 그룹
   const byRoom = useMemo(() => {

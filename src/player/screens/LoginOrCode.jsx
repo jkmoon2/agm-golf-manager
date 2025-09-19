@@ -1,7 +1,11 @@
 // /src/player/screens/LoginOrCode.jsx
-// 기존 코드 100% 유지 + [ADD] ensureUserDoc() + [CHG] goNext 폴백 + 버튼/인풋 selectable 유지
+//
+// (중요) 기존 코드 100% 유지하고 필요한 부분만 보완했습니다.
+// - [ADD] 이미 세션 인증된 eventId는 로그인 화면을 건너뛰고 즉시 STEP1로 이동
+// - [ADD] 세션에 저장된 참가자/코드 값을 PlayerContext에 즉시 복원
+// - 나머지 기존 로직(코드 인증/이메일 로그인/회원가입 등)은 그대로 유지
 
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
@@ -12,7 +16,7 @@ import styles from './LoginOrCode.module.css';
 
 import SignupModal from '../components/SignupModal';
 import ResetPasswordModal from '../components/ResetPasswordModal';
-import { getAuth } from 'firebase/auth'; // [ADD]
+import { getAuth } from 'firebase/auth';
 
 function InnerLoginOrCode({ onEnter }) {
   const navigate = useNavigate();
@@ -32,33 +36,14 @@ function InnerLoginOrCode({ onEnter }) {
 
   if (!ready) return null;
 
-  // [ADD] 로그인/가입 직후 users/{uid} 문서 없으면 만들어주는 보정
-  const ensureUserDoc = async (u) => {
-    try {
-      if (!u?.uid) return;
-      const ref = doc(db, 'users', u.uid);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) {
-        await setDoc(ref, {
-          uid: u.uid,
-          email: u.email || null,
-          name: u.displayName || '',
-          createdAt: new Date().toISOString(),
-        }, { merge: true });
-      }
-    } catch (e) {
-      // 읽기/쓰기 규칙에 막히면 콘솔만 경고 (회원가입 규칙: isSelf(uid) 기준이면 통과)
-      console.warn('[ensureUserDoc] failed:', e);
-    }
-  };
-
+  // ──────────────────────────────────────────────────────────────
+  // 공용 헬퍼
   const normalize = (v) => String(v ?? '').trim().toLowerCase();
 
-  // [CHG] eventId 없을 때 폴백 경로로 이동
   const goNext = () => {
     if (typeof onEnter === 'function') onEnter();
     else if (eventId) navigate(`/player/home/${eventId}/1`, { replace: true });
-    else navigate('/player/events', { replace: true });
+    else navigate('/player/events', { replace: true }); // 폴백
   };
 
   const setLoginTicket = (evtId) => {
@@ -68,6 +53,25 @@ function InnerLoginOrCode({ onEnter }) {
     try { localStorage.setItem(`ticket:${evtId}`, JSON.stringify({ code: String(c || ''), ts: Date.now() })); } catch {}
   };
 
+  // [★★★ ADD] 이미 세션에 인증 흔적이 있으면 자동 통과
+  useEffect(() => {
+    if (!eventId) return;
+    try {
+      const ok = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+      if (!ok) return;
+      const savedCode = sessionStorage.getItem(`authcode_${eventId}`) || '';
+      const savedPart = sessionStorage.getItem(`participant_${eventId}`);
+      setEventId?.(eventId);
+      if (savedCode) setAuthCode?.(savedCode);
+      if (savedPart) setParticipant?.(JSON.parse(savedPart));
+      // StepFlow 게이트 통과용 로컬 티켓(있으면 갱신)
+      setCodeTicket(eventId, savedCode);
+      // 곧바로 STEP1로 이동
+      goNext();
+    } catch { /* no-op */ }
+  }, [eventId]); // ← 이벤트를 바꿔도 즉시 반응
+
+  // 로그인 후 멤버십/참가자 매핑
   const syncMembershipAndLinkParticipant = async (firebaseUser, evtId) => {
     if (!firebaseUser || !evtId) return;
     const { uid, email: uEmail } = firebaseUser;
@@ -112,6 +116,7 @@ function InnerLoginOrCode({ onEnter }) {
   const verifyCode = async (evtId, input) => {
     const inCode = String(input || '').trim();
     if (!evtId || !inCode) return false;
+
     try {
       const evSnap = await getDoc(doc(db, 'events', evtId));
       const data = evSnap.data() || {};
@@ -148,6 +153,22 @@ function InnerLoginOrCode({ onEnter }) {
     return null;
   };
 
+  const ensureUserDoc = async (u) => {
+    try {
+      if (!u?.uid) return;
+      const ref = doc(db, 'users', u.uid);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          uid: u.uid,
+          email: u.email || null,
+          name: u.displayName || '',
+          createdAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+    } catch (e) { console.warn('[ensureUserDoc] failed:', e); }
+  };
+
   const handleLogin = async () => {
     if (!email.trim()) { alert('이메일을 입력해 주세요.'); return; }
     if (!pw.trim())    { alert('비밀번호를 입력해 주세요.'); return; }
@@ -155,7 +176,6 @@ function InnerLoginOrCode({ onEnter }) {
     try {
       await signInEmail(email.trim(), pw);
 
-      // [ADD] 로그인 직후 users/{uid} 보정
       const cu = getAuth().currentUser;
       if (cu) await ensureUserDoc(cu);
 
@@ -164,7 +184,7 @@ function InnerLoginOrCode({ onEnter }) {
           await syncMembershipAndLinkParticipant(cu, eventId);
           setLoginTicket(eventId);
         } else {
-          setLoginTicket('global'); // eventId 없을 때도 티켓 저장
+          setLoginTicket('global');
         }
       } catch {}
       goNext();
@@ -184,15 +204,15 @@ function InnerLoginOrCode({ onEnter }) {
 
       const part = await findParticipantByCode(eventId, code);
       try {
-        sessionStorage.setItem(`auth_${eventId}`, 'true');
-        sessionStorage.setItem(`authcode_${eventId}`, String(code));
+        sessionStorage.setItem(`auth_${eventId}`, 'true');              // ← 세션 인증 플래그
+        sessionStorage.setItem(`authcode_${eventId}`, String(code));    // ← 세션 저장
         if (part) sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(part));
       } catch {}
       setEventId?.(eventId);
       setAuthCode?.(String(code));
       if (part) setParticipant?.(part);
 
-      setCodeTicket(eventId, code);
+      setCodeTicket(eventId, code); // StepFlow 게이트용 로컬 티켓
       goNext();
     } catch (err) {
       alert(`코드 확인 중 오류: ${err?.message || err}`);
@@ -269,14 +289,12 @@ function InnerLoginOrCode({ onEnter }) {
         )}
       </div>
 
-      {/* 팝업들 */}
       {showSignup && (
         <SignupModal
           defaultEmail={email}
           onClose={()=>setShowSignup(false)}
           onComplete={async ({ email: em, password, name })=>{
             try {
-              // cred.user 사용하여 users/{uid} 생성 (rules: isSelf(uid))
               const cred = await signUpEmail(em, password);
               const uid  = cred?.user?.uid;
               await setDoc(doc(db, 'users', uid), {
