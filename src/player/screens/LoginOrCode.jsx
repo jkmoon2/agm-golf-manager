@@ -1,6 +1,7 @@
 // /src/player/screens/LoginOrCode.jsx
 //
 // (중요) 기존 코드 100% 유지하고 필요한 부분만 보완했습니다.
+// - [FIX] 훅을 조건부로 호출하지 않도록 조기 return 제거 (ready 체크는 JSX에서 렌더 분기)
 // - [ADD] 이미 세션 인증된 eventId는 로그인 화면을 건너뛰고 즉시 STEP1로 이동
 // - [ADD] 세션에 저장된 참가자/코드 값을 PlayerContext에 즉시 복원
 // - 나머지 기존 로직(코드 인증/이메일 로그인/회원가입 등)은 그대로 유지
@@ -33,8 +34,6 @@ function InnerLoginOrCode({ onEnter }) {
 
   const [showSignup, setShowSignup] = useState(false);
   const [showReset,  setShowReset]  = useState(false);
-
-  if (!ready) return null;
 
   // ──────────────────────────────────────────────────────────────
   // 공용 헬퍼
@@ -221,116 +220,136 @@ function InnerLoginOrCode({ onEnter }) {
 
   const membersOnly = !!eventData?.membersOnly;
 
+  // 🔁 JSX 렌더
   return (
     <div className={styles.wrap}>
-      <div className={styles.card}>
-        <h2 className={styles.title}>로그인</h2>
-
-        <div className={styles.tabs}>
-          <button
-            type="button"
-            className={`${styles.tab} ${tab==='login' ? styles.active : ''} selectable`}
-            onClick={()=>setTab('login')}
-          >
-            이메일 로그인
-          </button>
-          <button
-            type="button"
-            className={`${styles.tab} ${tab==='code' ? styles.active : ''} selectable`}
-            onClick={()=>setTab('code')}
-            disabled={membersOnly}
-            title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
-          >
-            인증코드 입장
-          </button>
-        </div>
-
-        {tab === 'login' ? (
-          <div className={styles.form}>
-            <input
-              className={`${styles.input} selectable`}
-              placeholder="이메일"
-              value={email}
-              onChange={(e)=>setEmail(e.target.value)}
-            />
-            <input
-              className={`${styles.input} selectable`}
-              placeholder="비밀번호"
-              type="password"
-              value={pw}
-              onChange={(e)=>setPw(e.target.value)}
-            />
-            <div className={styles.actions}>
-              <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={busy}>로그인</button>
-              <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
-              <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowReset(true)}  disabled={busy}>비번 재설정</button>
+      {/* ready가 false일 때 훅을 조건부 호출하지 않고, 렌더만 분기 */}
+      {!ready ? (
+        <div className={styles.card}>
+          <h2 className={styles.title}>로그인</h2>
+          <div className={styles.form} style={{ opacity: 0.6 }}>
+            <div className={styles.input} style={{ height: 40, background: '#f3f4f6' }} />
+            <div className={styles.input} style={{ height: 40, background: '#f3f4f6', marginTop: 8 }} />
+            <div className={styles.actions} style={{ marginTop: 12 }}>
+              <button className={styles.primary} disabled>로딩중…</button>
+              <button className={styles.ghost} disabled>회원가입</button>
+              <button className={styles.ghost} disabled>비번 재설정</button>
             </div>
           </div>
-        ) : (
-          <div className={styles.form}>
-            <input
-              className={`${styles.input} selectable`}
-              placeholder="인증코드 6자리"
-              value={code}
-              onChange={(e)=>setCode(e.target.value)}
-              disabled={membersOnly}
-              title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
-            />
-            <div className={styles.actions}>
+        </div>
+      ) : (
+        <>
+          <div className={styles.card}>
+            <h2 className={styles.title}>로그인</h2>
+
+            <div className={styles.tabs}>
               <button
                 type="button"
-                className={`${styles.primary} selectable`}
-                onClick={handleCode}
-                disabled={busy || membersOnly}
+                className={`${styles.tab} ${tab==='login' ? styles.active : ''} selectable`}
+                onClick={()=>setTab('login')}
+              >
+                이메일 로그인
+              </button>
+              <button
+                type="button"
+                className={`${styles.tab} ${tab==='code' ? styles.active : ''} selectable`}
+                onClick={()=>setTab('code')}
+                disabled={membersOnly}
                 title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
-              >코드로 입장</button>
+              >
+                인증코드 입장
+              </button>
             </div>
-          </div>
-        )}
-      </div>
 
-      {showSignup && (
-        <SignupModal
-          defaultEmail={email}
-          onClose={()=>setShowSignup(false)}
-          onComplete={async ({ email: em, password, name })=>{
-            try {
-              const cred = await signUpEmail(em, password);
-              const uid  = cred?.user?.uid;
-              await setDoc(doc(db, 'users', uid), {
-                uid,
-                email: cred?.user?.email || em,
-                name,
-                createdAt: new Date().toISOString(),
-              }, { merge: true });
-              alert('회원가입이 완료되었습니다.');
-            } catch (err) {
-              const msg = err?.message || '';
-              const code = err?.code || '';
-              if (code === 'auth/email-already-in-use' || /email-already-in-use/i.test(msg)) {
-                alert('이미 가입된 이메일입니다. 로그인하거나 비밀번호 재설정을 진행해 주세요.');
-                setShowSignup(false);
-                setShowReset(true);
-              } else {
-                alert(`회원가입 실패: ${msg}`);
-              }
-            }
-          }}
-        />
-      )}
-      {showReset && (
-        <ResetPasswordModal
-          defaultEmail={email}
-          onClose={()=>setShowReset(false)}
-          onComplete={async ({ email: em })=>{
-            try {
-              await resetPassword(em);
-              alert('입력한 이메일로 비밀번호 재설정 메일을 보냈습니다.');
-            } catch (err) {
-              alert(`재설정 메일 전송 실패: ${err?.message || err}`);
-            }
-          }}
-        />
+            {tab === 'login' ? (
+              <div className={styles.form}>
+                <input
+                  className={`${styles.input} selectable`}
+                  placeholder="이메일"
+                  value={email}
+                  onChange={(e)=>setEmail(e.target.value)}
+                />
+                <input
+                  className={`${styles.input} selectable`}
+                  placeholder="비밀번호"
+                  type="password"
+                  value={pw}
+                  onChange={(e)=>setPw(e.target.value)}
+                />
+                <div className={styles.actions}>
+                  <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={busy}>로그인</button>
+                  <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
+                  <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowReset(true)}  disabled={busy}>비번 재설정</button>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.form}>
+                <input
+                  className={`${styles.input} selectable`}
+                  placeholder="인증코드 6자리"
+                  value={code}
+                  onChange={(e)=>setCode(e.target.value)}
+                  disabled={membersOnly}
+                  title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
+                />
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={`${styles.primary} selectable`}
+                    onClick={handleCode}
+                    disabled={busy || membersOnly}
+                    title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
+                  >코드로 입장</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 팝업들 */}
+          {showSignup && (
+            <SignupModal
+              defaultEmail={email}
+              onClose={()=>setShowSignup(false)}
+              onComplete={async ({ email: em, password, name })=>{
+                try {
+                  const cred = await signUpEmail(em, password);
+                  const uid  = cred?.user?.uid;
+                  await setDoc(doc(db, 'users', uid), {
+                    uid,
+                    email: cred?.user?.email || em,
+                    name,
+                    createdAt: new Date().toISOString(),
+                  }, { merge: true });
+                  alert('회원가입이 완료되었습니다.');
+                } catch (err) {
+                  const msg = err?.message || '';
+                  const code = err?.code || '';
+                  if (code === 'auth/email-already-in-use' || /email-already-in-use/i.test(msg)) {
+                    alert('이미 가입된 이메일입니다. 로그인하거나 비밀번호 재설정을 진행해 주세요.');
+                    setShowSignup(false);
+                    setShowReset(true);
+                  } else {
+                    alert(`회원가입 실패: ${msg}`);
+                  }
+                }
+              }}
+            />
+          )}
+          {showReset && (
+            <ResetPasswordModal
+              defaultEmail={email}
+              onClose={()=>setShowReset(false)}
+              onComplete={async ({ email: em })=>{
+                try {
+                  await resetPassword(em);
+                  alert('입력한 이메일로 비밀번호 재설정 메일을 보냈습니다.');
+                } catch (err) {
+                  alert(`재설정 메일 전송 실패: ${err?.message || err}`);
+                }
+              }}
+            />
+          )}
+        </>
       )}
     </div>
   );
