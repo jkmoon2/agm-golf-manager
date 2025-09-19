@@ -1,0 +1,13 @@
+/* /src/styles/common.css */
+/* 클릭/포커스 시 파란 테두리 공통 규칙 */
+
+button:focus-visible,
+button:active,
+.btn:focus-visible, .btn:active,
+.pill:focus-visible, .pill:active,
+.box:focus-visible, .box:active,
+.selectable:focus-visible, .selectable:active {
+  outline: 2px solid #2563eb;    /* blue-600 */
+  outline-offset: 2px;
+  border-color: #2563eb !important;
+}

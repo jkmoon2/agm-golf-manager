@@ -1,10 +1,8 @@
 // /src/player/screens/LoginOrCode.jsx
 //
-// 기존 코드 100% 유지 + 참가자 인증(코드 입장) 흐름을 보완
-// 1) 코드 인증 성공 시에도 PlayerContext와 sessionStorage를 '레거시 방식'으로 동기화하여 이후 단계(팀확인 등)에서 누락이 없도록 함
-// 2) 레거시 /join 경로와 신규 /login 탭 UI 모두 동일하게 localStorage 티켓을 저장하여 StepFlow 게이트를 통과
-// 3) 회원가입 에러 메시지 보완: 이미 가입된 이메일(auth/email-already-in-use)일 경우 친절한 안내 및 '비번 재설정' 모달로 유도
-// 4) 비밀번호 재설정은 모달 내부 고정 힌트를 제거(ResetPasswordModal.jsx 수정)하고, 전송 후 alert로만 알림
+// 기존 코드 100% 유지 + 필요한 부분만 보완
+// - [FIX] 회원가입 onComplete: signUpEmail() 반환 credential.user로 users/{uid} 생성
+// - [UI] 버튼에 .selectable 클래스 추가(공통 파란 테두리 규칙 적용)
 
 import React, { useState, useContext } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -202,14 +200,14 @@ function InnerLoginOrCode({ onEnter }) {
         <div className={styles.tabs}>
           <button
             type="button"
-            className={`${styles.tab} ${tab==='login' ? styles.active : ''}`}
+            className={`${styles.tab} ${tab==='login' ? styles.active : ''} selectable`}
             onClick={()=>setTab('login')}
           >
             이메일 로그인
           </button>
           <button
             type="button"
-            className={`${styles.tab} ${tab==='code' ? styles.active : ''}`}
+            className={`${styles.tab} ${tab==='code' ? styles.active : ''} selectable`}
             onClick={()=>setTab('code')}
             disabled={membersOnly}
             title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
@@ -234,9 +232,9 @@ function InnerLoginOrCode({ onEnter }) {
               onChange={(e)=>setPw(e.target.value)}
             />
             <div className={styles.actions}>
-              <button type="button" className={styles.primary} onClick={handleLogin} disabled={busy}>로그인</button>
-              <button type="button" className={styles.ghost}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
-              <button type="button" className={styles.ghost}   onClick={()=>setShowReset(true)}  disabled={busy}>비번 재설정</button>
+              <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={busy}>로그인</button>
+              <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
+              <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowReset(true)}  disabled={busy}>비번 재설정</button>
             </div>
           </div>
         ) : (
@@ -252,7 +250,7 @@ function InnerLoginOrCode({ onEnter }) {
             <div className={styles.actions}>
               <button
                 type="button"
-                className={styles.primary}
+                className={`${styles.primary} selectable`}
                 onClick={handleCode}
                 disabled={busy || membersOnly}
                 title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
@@ -269,15 +267,15 @@ function InnerLoginOrCode({ onEnter }) {
           onClose={()=>setShowSignup(false)}
           onComplete={async ({ email: em, password, name })=>{
             try {
-              await signUpEmail(em, password);
-              // (선택) 가입자 정보 기록
-              if (user) {
-                await setDoc(doc(db, 'users', user.uid), {
-                  email: user.email || em,
-                  name,
-                  createdAt: new Date().toISOString(),
-                }, { merge: true });
-              }
+              // [FIX] cred.user 사용하여 users/{uid} 생성 (rules: isSelf(uid) 통과)
+              const cred = await signUpEmail(em, password);
+              const uid  = cred?.user?.uid;
+              await setDoc(doc(db, 'users', uid), {
+                uid,
+                email: cred?.user?.email || em,
+                name,
+                createdAt: new Date().toISOString(),
+              }, { merge: true });
               alert('회원가입이 완료되었습니다.');
             } catch (err) {
               const msg = err?.message || '';
