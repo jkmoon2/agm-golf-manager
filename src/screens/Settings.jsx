@@ -257,7 +257,6 @@ export default function Settings() {
       <section className={styles.card}>
         <div className={styles.cardHeader}>
           <h3>③ 스텝별 제어</h3>
-          <div className={styles.subtle}>* 숨김: 버튼 자체 미노출 · 비활성: 클릭 불가 · 활성: 정상 동작</div>
         </div>
 
         <table className={styles.table}>
@@ -306,7 +305,7 @@ export default function Settings() {
             <span className={styles.slider}></span>
           </label>
         </div>
-        <div className={styles.hint}>※ 현재 STEP2가 비활성 또는 숨김이라면, STEP1의 “다음” 버튼은 자동으로 비활성화됩니다. (팀확인 버튼은 <b>표시/숨김</b>으로 동작)</div>
+        <div className={styles.hint}>※ 현재 STEP2가 비활성 또는 숨김이라면, STEP1의 “다음” 버튼은 자동으로 비활성화됩니다.</div>
       </section>
 
       {/* ⑤ 테마 설정 */}
@@ -315,148 +314,100 @@ export default function Settings() {
           <h3>⑤ 테마 설정</h3>
         </div>
 
-        {/* 적용 모드: 통합 · 개별 · 무적용 (작은 글씨) */}
         <div className={styles.themeRow}>
           <div className={styles.optionLabel}>적용 모드</div>
           <div className={`${styles.inlineRadios} ${styles.smallNote}`}>
-            <label>
-              <input type="radio" name="applyMode"
-                     checked={theme.applyMode==='global'}
-                     onChange={()=>updateTheme({applyMode:'global'})}/>
-              &nbsp;통합
-            </label>
-            <label style={{marginLeft:12}}>
-              <input type="radio" name="applyMode"
-                     checked={theme.applyMode==='separate'}
-                     onChange={()=>updateTheme({applyMode:'separate'})}/>
-              &nbsp;개별
-            </label>
-            <label style={{marginLeft:12}}>
-              <input type="radio" name="applyMode"
-                     checked={theme.applyMode==='none'}
-                     onChange={()=>updateTheme({applyMode:'none'})}/>
-              &nbsp;무적용
-            </label>
+            <label><input type="radio" name="applyMode" checked={theme.applyMode==='global'} onChange={()=>updateTheme({applyMode:'global'})}/> 통합</label>
+            <label style={{marginLeft:12}}><input type="radio" name="applyMode" checked={theme.applyMode==='separate'} onChange={()=>updateTheme({applyMode:'separate'})}/> 개별</label>
+            <label style={{marginLeft:12}}><input type="radio" name="applyMode" checked={theme.applyMode==='none'} onChange={()=>updateTheme({applyMode:'none'})}/> 무적용</label>
           </div>
         </div>
 
-        {/* 프리셋 (알파벳+설명) */}
         {theme.applyMode === 'global' ? (
           <div className={styles.themeRow}>
             <div className={styles.optionLabel}>프리셋(Global)</div>
-            <select className={styles.select}
-                    value={theme.presets.global}
-                    onChange={e=>setThemePreset('global', e.target.value)}>
-              {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
+            <select className={styles.select} value={theme.presets.global} onChange={e=>setThemePreset('global', e.target.value)}>
+              {listPresets().map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
         ) : theme.applyMode === 'separate' ? (
           <>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Admin</div>
-              <select className={styles.select}
-                      value={theme.presets.admin}
-                      onChange={e=>setThemePreset('admin', e.target.value)}>
-                {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
-              </select>
+              <select className={styles.select} value={theme.presets.admin} onChange={e=>setThemePreset('admin', e.target.value)}>{listPresets().map(p => <option key={p} value={p}>{p}</option>)}</select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Player</div>
-              <select className={styles.select}
-                      value={theme.presets.player}
-                      onChange={e=>setThemePreset('player', e.target.value)}>
-                {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
-              </select>
+              <select className={styles.select} value={theme.presets.player} onChange={e=>setThemePreset('player', e.target.value)}>{listPresets().map(p => <option key={p} value={p}>{p}</option>)}</select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>PlayerOnly</div>
-              <select className={styles.select}
-                      value={theme.presets.playerOnly}
-                      onChange={e=>setThemePreset('playerOnly', e.target.value)}>
-                {presets.map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
-              </select>
+              <select className={styles.select} value={theme.presets.playerOnly} onChange={e=>setThemePreset('playerOnly', e.target.value)}>{listPresets().map(p => <option key={p} value={p}>{p}</option>)}</select>
             </div>
           </>
         ) : null}
 
-        {/* 가독성/밀도/다크 자동(작은 글씨) */}
         <div className={styles.themeRow}>
           <div className={styles.optionLabel}>밀도</div>
-          <select className={styles.select}
-                  value={theme.density}
-                  onChange={e=>updateTheme({density:e.target.value})}>
+          <select className={styles.select} value={theme.density} onChange={e=>updateTheme({density:e.target.value})}>
             {['compact','default','relaxed'].map(x => <option key={x} value={x}>{x}</option>)}
           </select>
         </div>
         <div className={styles.themeRow}>
           <div className={styles.optionLabel}>가독성</div>
-          <select className={styles.select}
-                  value={theme.contrast}
-                  onChange={e=>updateTheme({contrast:e.target.value})}>
+          <select className={styles.select} value={theme.contrast} onChange={e=>updateTheme({contrast:e.target.value})}>
             {['low','default','high'].map(x => <option key={x} value={x}>{x}</option>)}
           </select>
         </div>
         <div className={styles.themeRow}>
           <div className={styles.optionLabel}>다크 자동전환</div>
-          <label className={styles.smallNote}>
-            <input
-              type="checkbox"
-              checked={theme.darkAuto}
-              onChange={e=>updateTheme({darkAuto:e.target.checked})}
-            />
-            &nbsp;시스템 다크면 F 테마
-          </label>
+          <label className={styles.smallNote}><input type="checkbox" checked={theme.darkAuto} onChange={e=>updateTheme({darkAuto:e.target.checked})}/> 시스템 다크면 F 테마</label>
         </div>
 
-        {/* 동작 버튼 */}
         <div className={styles.themeRow}>
           <div />
           <div style={{display:'flex', gap:8}}>
             <button className={styles.saveBtn} onClick={()=>applyTheme('global')}>적용</button>
-            <button
-              className={styles.eventSelect}
-              style={{height:40}}
-              onClick={()=>{
-                localStorage.removeItem('agm_theme_prefs_v1');
-                const fresh = getThemePrefs();
-                setTheme(fresh);
-                applyTheme('global');
-              }}>
-              초기화
-            </button>
+            <button className={styles.eventSelect} style={{height:40}} onClick={()=>{
+              localStorage.removeItem('agm_theme_prefs_v1');
+              const fresh = getThemePrefs();
+              setTheme(fresh);
+              applyTheme('global');
+            }}>초기화</button>
           </div>
         </div>
       </section>
 
-      {/* 🆕 ⑥ 설정 바로가기(회원 관리) — 새 카드 추가 */}
-      <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>회원 관리</h3>
+      {/* ⑥ 회원 관리 (바로가기) */}
+      <section className={`${styles.section} ${styles.sectionBox}`}>
+        <h3 className={`${styles.sectionTitle} ${styles.titleTight}`}>회원 관리</h3>
 
-        <div className={styles.optionRow}>
+        <div className={`${styles.optionRow} ${styles.optionRowGrid}`}>
           <div className={styles.optionLabel}>회원 전용 이벤트</div>
-          <div>
-            <Link
-              to="/admin/settings/members-only"
-              style={{display:'inline-flex',alignItems:'center',height:36,padding:'0 12px',
-                border:'1px solid #cfd7e6',borderRadius:10,background:'#f9fbff',fontWeight:600}}
-            >
-              토글 관리
-            </Link>
+          <div className={styles.rowRight}>
+            <div className={styles.controlBox}>
+              <Link to="/admin/settings/members-only" className={`${styles.linkBtnFullLarge} ${styles.blueFocus}`}>토글 관리</Link>
+            </div>
           </div>  
         </div>
 
-        <div className={styles.optionRow}>
+        <div className={`${styles.optionRow} ${styles.optionRowGrid}`}>
           <div className={styles.optionLabel}>회원 목록</div>
-          <div>
-            <Link
-              to="/admin/settings/members"
-              style={{display:'inline-flex',alignItems:'center',height:36,padding:'0 12px',
-                border:'1px solid #cfd7e6',borderRadius:10,background:'#f9fbff',fontWeight:600}}
-            >
-              목록/다운로드
-            </Link>
+          <div className={styles.rowRight}>
+            <div className={styles.controlBox}>
+              <Link to="/admin/settings/members" className={`${styles.linkBtnFullLarge} ${styles.blueFocus}`}>목록/다운로드</Link>
+            </div>
           </div>  
         </div>
+
+        <div className={`${styles.optionRow} ${styles.optionRowGrid}`}>
+          <div className={styles.optionLabel}>여러 이벤트 관리</div>
+          <div className={styles.rowRight}>
+            <div className={styles.controlBox}>
+              <Link to="/admin/settings/members-bulk" className={`${styles.linkBtnFullLarge} ${styles.blueFocus}`}>일괄 토글</Link>
+            </div>
+          </div>
+        </div> 
       </section>
     </div>
   );

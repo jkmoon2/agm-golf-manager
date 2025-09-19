@@ -1,56 +1,86 @@
 // /src/admin/screens/EventMembersOnlyToggle.jsx
+// 기존 파일을 100% 대체해도 되는 드롭인 버전입니다.
+// 변경 요약:
+// 1) 토글을 검증된 switch(.switch + .slider)로 회귀 -> 즉시 동작
+// 2) "이벤트를 불러오세요" 문구를 한 줄, 입력박스 오른쪽 라인에 맞춰 표시
+// 3) 저장 필드: events/{eventId}.membersOnly (최상위) 로 통일
+//    ※ 과거 데이터(playerGate.membersOnly 등)는 읽을 때 백워드 호환
 
-import React, { useEffect, useState } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import React, { useState } from 'react';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
+import styles from '../../screens/Settings.module.css';
 
 export default function EventMembersOnlyToggle() {
   const [eventId, setEventId] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [membersOnly, setMembersOnly] = useState(false);
   const [title, setTitle] = useState('');
+  const [membersOnly, setMembersOnly] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
-  const fetch = async (id) => {
-    if(!id) return;
-    setLoading(true);
-    try{
-      const ref = doc(db,'events',id);
-      const snap = await getDoc(ref);
-      const data = snap.data() || {};
-      setMembersOnly(!!data.membersOnly);
-      setTitle(data.title || id);
-    }finally{ setLoading(false); }
-  };
+  async function load() {
+    setLoaded(false);
+    if (!eventId) return;
+    const ref = doc(db, 'events', eventId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      setTitle('');
+      setMembersOnly(false);
+      setLoaded(true);
+      return;
+    }
+    const v = snap.data() || {};
+    // 백워드 호환: 과거 필드도 함께 체크
+    const flag = !!(v.membersOnly || v.playerGate?.membersOnly || v.playerGate?.memberOnly);
+    setTitle(v.title || v.name || eventId);
+    setMembersOnly(flag);
+    setLoaded(true);
+  }
 
-  const save = async (id, next) => {
-    setLoading(true);
-    try{
-      await setDoc(doc(db,'events',id), { membersOnly: next }, { merge:true });
-      setMembersOnly(next);
-      alert(`회원 전용: ${next ? 'ON' : 'OFF'}`);
-    }finally{ setLoading(false); }
-  };
+  async function toggle() {
+    if (!eventId) return;
+    const ref = doc(db, 'events', eventId);
+    const next = !membersOnly;
+    await updateDoc(ref, { membersOnly: next }); // 최상위 필드로 통일
+    setMembersOnly(next);
+  }
 
   return (
-    <div style={{padding:20, maxWidth:560}}>
-      <h2 style={{marginTop:0}}>설정 · 회원 전용 이벤트</h2>
-      <div style={{display:'flex', gap:8}}>
-        <input placeholder="이벤트 ID 입력" value={eventId} onChange={e=>setEventId(e.target.value)} style={{flex:1, height:40, border:'1px solid #cfd7e6', borderRadius:10, padding:'0 12px'}}/>
-        <button onClick={()=>fetch(eventId)} disabled={!eventId||loading} style={{height:40, borderRadius:10, border:'1px solid #cfd7e6', background:'#f9fbff', padding:'0 14px'}}>불러오기</button>
-      </div>
-      {title && (
-        <div style={{marginTop:16, padding:16, border:'1px solid #e5e7eb', borderRadius:12}}>
-          <div style={{fontWeight:700, marginBottom:8}}>이벤트: {title}</div>
-          <div style={{display:'flex', gap:8, alignItems:'center'}}>
-            <div style={{flex:1, color:'#475569'}}>ON: 로그인 회원만 입장 / OFF: 로그인·인증코드 모두 허용</div>
-            <button onClick={()=>save(eventId, !membersOnly)} disabled={!eventId||loading}
-                    style={{minWidth:96, height:40, borderRadius:10, border:'1px solid #cfd7e6',
-                            background:membersOnly?'#1d4ed8':'#f9fbff', color:membersOnly?'#fff':'#334155', fontWeight:700}}>
-              {membersOnly?'ON':'OFF'}
-            </button>
-          </div>
+    <div style={{ padding: 12 }}>
+      <section className={styles.card}>
+        <div className={styles.cardHeader}>
+          <h3>회원 전용 이벤트</h3>
         </div>
-      )}
+
+        {/* 상단: 입력 오른쪽에 "불러오기" 버튼 (Settings.module.css의 .bulkTopRow 활용) */}
+        <div className={styles.bulkTopRow}>
+          <input
+            className={styles.searchInput}
+            placeholder="이벤트ID"
+            value={eventId}
+            onChange={(e) => setEventId(e.target.value.trim())}
+          />
+          <button className={styles.searchBtn} onClick={load}>불러오기</button>
+        </div>
+
+        {/* 불러오기 전 도움말: 한 줄 + 입력 옆 라인에 맞춤 */}
+        {!loaded && (
+          <div className={styles.singleHelp}>이벤트를 불러오세요</div>
+        )}
+
+        {/* 불러온 뒤: 캡션(한 줄) + 토글을 같은 라인에 배치 */}
+        {loaded && (
+          <div className={styles.optionRow} style={{ marginTop: 8 }}>
+            <div className={styles.eventCaptionInline}>
+              {title ? `이벤트 : ${title}` : '이벤트를 찾을 수 없습니다'}
+            </div>
+            {/* 검증된 스위치: 즉시 동작 */}
+            <label className={styles.switch} title="회원 전용">
+              <input type="checkbox" checked={!!membersOnly} onChange={toggle} />
+              <span className={styles.slider}></span>
+            </label>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
