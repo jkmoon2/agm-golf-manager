@@ -28,8 +28,9 @@ export default function SignupModal({ defaultEmail='', onClose, onComplete }) {
           <input className="modal__input" placeholder="이름" value={name} onChange={e=>setName(e.target.value)} />
         </div>
         <div className="modal__actions">
-          <button className="modal__ghost" onClick={onClose}>취소</button>
-          <button className="modal__primary" onClick={submit}>가입 완료</button>
+          <button className="modal__ghost selectable" onClick={onClose}>취소</button>
+          {/* [KEEP TEXT] 요청 문구: 가입 신청 */}
+          <button className="modal__primary selectable" onClick={submit}>가입 신청</button>
         </div>
       </div>
     </div>

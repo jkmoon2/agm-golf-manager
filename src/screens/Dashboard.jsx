@@ -1,4 +1,5 @@
-// src/screens/Dashboard.jsx
+// /src/screens/Dashboard.jsx
+
 import React, { useMemo, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styles from './Dashboard.module.css';
@@ -71,7 +72,6 @@ export default function Dashboard() {
       : [],
     [selectedData]
   );
-  // 개인 대상 이벤트만 점수 입력 진행률에 반영
   const personEvents = useMemo(
     () => activeEvents.filter(ev => String(ev?.target || 'person') === 'person'),
     [activeEvents]
@@ -80,15 +80,30 @@ export default function Dashboard() {
     const n = ev?.inputMode === 'accumulate' ? Number(ev?.attempts ?? 4) : 1;
     return Math.max(1, Math.min(n, 20));
   };
+
+  // [ADD] 확정 배정 판단: room이 있어도 아래 조건 중 하나가 없으면 '미확정'으로 간주
+  const isCommittedAssignment = (p) => {
+    if (!Number.isFinite(Number(p?.room))) return false;
+    const yes =
+      p?.assigned === true ||
+      ['self','admin'].includes(String(p?.assignmentState || '').toLowerCase()) ||
+      ['self','admin'].includes(String(p?.assignSource || '').toLowerCase()) ||
+      p?.confirmed === true;
+    return yes;
+  };
+
+  // [CHG] 확정 배정자 목록
   const assignedList = useMemo(
-    () => participants.filter(p => Number.isFinite(Number(p?.room))),
+    () => participants.filter(isCommittedAssignment),
     [participants]
   );
-  // 총 기대 입력칸(개인 대상 이벤트 × 시도수 × 배정된 인원)
+
+  // 총 기대 입력칸(개인 대상 이벤트 × 시도수 × "확정 배정된 인원")
   const scoreExpectTotal = useMemo(() => {
     const perPersonCells = personEvents.reduce((s, ev) => s + attemptsOf(ev), 0);
     return assignedList.length * perPersonCells;
   }, [personEvents, assignedList]);
+
   // 실제 채워진 입력칸(eventInputs 기반)
   const scoreFilledTotal = useMemo(() => {
     const ei = selectedData?.eventInputs || {};
@@ -99,7 +114,6 @@ export default function Dashboard() {
       assignedList.forEach(p => {
         const rec = slot[p.id];
         if (attempts === 1) {
-          // 단일 입력: 숫자만 카운트
           const v = (rec && typeof rec === 'object' && 'value' in rec) ? rec.value : rec;
           if (v !== '' && v != null && !Number.isNaN(Number(v))) filled += 1;
         } else {
@@ -119,7 +133,6 @@ export default function Dashboard() {
     () => assignedList.length,
     [assignedList]
   );
-  // (이전: participants[].score 기반) → (보완: eventInputs 기반 진행률)
   const scoreProgress = useMemo(
     () => ({ filled: scoreFilledTotal, total: Math.max(1, scoreExpectTotal) }),
     [scoreFilledTotal, scoreExpectTotal]
@@ -139,10 +152,11 @@ export default function Dashboard() {
   }, [participants, mode]);
   const expectedPairs = useMemo(() => (mode !== 'fourball' ? 0 : Math.floor(participants.length / 2)), [participants.length, mode]);
 
-  // 방별
+  // [CHG] 방별(확정 배정 기준으로 카운트)
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     participants.forEach(p => {
+      if (!isCommittedAssignment(p)) return;
       const r = Number(p?.room);
       if (Number.isFinite(r) && r >= 1 && r <= roomCount) arr[r - 1].push(p);
     });
@@ -268,6 +282,7 @@ export default function Dashboard() {
       {/* KPI */}
       <section className={styles.kpiGrid}>
         <KpiCard label="참가자" value={participants.length} total={capacity || 0} />
+        {/* [CHG] 확정 배정 인원 / 전체 참가자 */}
         <KpiCard label="방배정" value={assignedCount} total={participants.length || 1} />
         {/* 점수입력: eventInputs 기반 진행률 */}
         <KpiCard label="점수입력" value={scoreProgress.filled} total={scoreProgress.total} />
@@ -299,7 +314,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* 방별 배정 현황 */}
+      {/* [CHG] 방별 배정 현황 — 확정 배정만 카운트 */}
       <section className={styles.panel}>
         <div className={styles.panelHead}>방별 배정 현황</div>
         <ul className={styles.assignList}>

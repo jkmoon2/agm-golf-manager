@@ -11,6 +11,7 @@ import AdminMode   from './screens/AdminMode';
 import ParticipantMode from './screens/ParticipantMode';
 import Dashboard   from './screens/Dashboard';
 import ThemeSettings from './settings/ThemeSettings'; // ★ 추가: 테마 설정 화면
+import './styles/common.css';
 
 export default function App() {
   return (
