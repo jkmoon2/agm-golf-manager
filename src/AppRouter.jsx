@@ -19,6 +19,8 @@ import MainLayout          from './layouts/MainLayout';
 import LoginOrCode         from './player/screens/LoginOrCode';
 // 🆕 운영자: 회원 전용 이벤트 토글 화면
 import EventMembersOnlyToggle from './admin/screens/EventMembersOnlyToggle';
+// 🆕 운영자: 회원 목록(다운로드/삭제)
+import MembersList from './admin/screens/MembersList';
 
 function Protected({ children, roles }) {
   const { firebaseUser, appRole } = useAuth();
@@ -72,8 +74,13 @@ export default function AppRouter() {
                 <Route path="/admin/home/*"    element={<AdminApp />} />
                 <Route path="/admin/dashboard" element={<Dashboard />} />
                 <Route path="/admin/settings"  element={<Settings />} />
-                {/* 🆕 회원 전용 토글 관리 */}
+
+                {/* (기존 유지) 이벤트별 멤버스 온/오프 라우트 */}
                 <Route path="/admin/events/:eventId/members-only" element={<EventMembersOnlyToggle />} />
+
+                {/* 🆕 설정 메뉴 하위 라우트 2개 추가 */}
+                <Route path="/admin/settings/members-only" element={<EventMembersOnlyToggle />} />
+                <Route path="/admin/settings/members"      element={<MembersList />} />
               </Route>
             </Route>
 
