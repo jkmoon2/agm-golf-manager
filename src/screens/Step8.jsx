@@ -7,6 +7,8 @@ import styles from './Step8.module.css';
 import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
 import { EventContext } from '../contexts/EventContext';
 import { StepContext } from '../flows/StepFlow';
+// [ADD] 라이브 이벤트 문서 구독(컨텍스트가 실시간이 아닐 때 보조)
+import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
 export default function Step8() {
   const {
@@ -19,6 +21,9 @@ export default function Step8() {
   } = useContext(StepContext);
 
   const { eventId, eventData, updateEventImmediate } = useContext(EventContext) || {};
+  // [ADD] 라이브 이벤트 데이터(있으면 컨텍스트보다 우선)
+  const { eventData: liveEvent } = useEventLiveQuery(eventId);
+  const effectiveEventData = liveEvent || eventData;
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
@@ -66,7 +71,7 @@ export default function Step8() {
 
   // 🔒 Admin 값 고정: Firestore publicView를 **권위 소스**로 복원(과거 0-based도 자동 보정)
   useEffect(() => {
-    const pv = eventData?.publicView;
+    const pv = effectiveEventData?.publicView;
     if (!pv) return;
     const nums = (pv.hiddenRooms || []).map(Number).filter(Number.isFinite);
     const looksZeroBased = nums.some(v => v === 0);
@@ -81,7 +86,7 @@ export default function Step8() {
       score: typeof vm.score === 'boolean' ? vm.score : true,
       banddang: typeof vm.banddang === 'boolean' ? vm.banddang : true
     });
-  }, [eventData?.publicView, roomCount]);
+  }, [effectiveEventData?.publicView, roomCount]);
 
   // 운영자 즉시 저장(홈으로 나가지 않아도 Player 반영)
   const persistPublicViewNow = async (nextHiddenRoomsSet = hiddenRooms, nextVisible = visibleMetrics) => {
@@ -177,8 +182,8 @@ export default function Step8() {
   );
 
   // ── 5) participants를 방별로 묶은 2차원 배열 ─────────────────────
-  const sourceParticipants = (eventData?.participants && eventData.participants.length)
-    ? eventData.participants
+  const sourceParticipants = (effectiveEventData?.participants && effectiveEventData.participants.length)
+    ? effectiveEventData.participants
     : participants;
 
   const byRoom = useMemo(() => {

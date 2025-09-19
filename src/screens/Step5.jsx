@@ -4,6 +4,8 @@ import React, { useState, useEffect, useContext } from 'react';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext'; // ★ patch
 import styles from './Step5.module.css';
+// [ADD] 라이브 이벤트 구독 훅(있으면 사용, 없으면 무시)
+import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
 if (process.env.NODE_ENV!=='production') console.log('[AGM] Step5 render');
 
@@ -21,25 +23,32 @@ export default function Step5() {
     updateParticipantsBulk,   // (changes: Array<{id, fields}>) => Promise<void> | void
   } = useContext(StepContext);
 
-  
+  // ★ patch: Firestore(events/{eventId})에 participants[] 즉시 커밋을 위한 컨텍스트 + 헬퍼
+  const { eventId, updateEventImmediate } = useContext(EventContext) || {};
 
-// ★ patch: Firestore(events/{eventId})에 participants[] 즉시 커밋을 위한 컨텍스트 + 헬퍼
-const { eventId, updateEventImmediate } = useContext(EventContext) || {};
-const buildNextFromChanges = (baseList, changes) => {
-  try {
-    const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
-    (changes || []).forEach(({ id, fields }) => {
-      const key = String(id);
-      const cur = map.get(key) || {};
-      map.set(key, { ...cur, ...(fields || {}) });
-    });
-    return Array.from(map.values());
-  } catch (e) {
-    console.warn('[Step5] buildNextFromChanges error:', e);
-    return baseList || [];
-  }
-};
-const [loadingId, setLoadingId] = useState(null);
+  // [ADD] 라이브 이벤트 문서 구독(있으면 사용)
+  const { eventData: liveEvent, loading: liveLoading } = useEventLiveQuery(eventId);
+  // 렌더링에 사용할 참가자 소스(기존 컨텍스트 우선, 없으면 라이브 폴백)
+  const renderParticipants = (participants && participants.length)
+    ? participants
+    : (Array.isArray(liveEvent?.participants) ? liveEvent.participants : []);
+
+  const buildNextFromChanges = (baseList, changes) => {
+    try {
+      const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
+      (changes || []).forEach(({ id, fields }) => {
+        const key = String(id);
+        const cur = map.get(key) || {};
+        map.set(key, { ...cur, ...(fields || {}) });
+      });
+      return Array.from(map.values());
+    } catch (e) {
+      console.warn('[Step5] buildNextFromChanges error:', e);
+      return baseList || [];
+    }
+  };
+
+  const [loadingId, setLoadingId] = useState(null);
   const [forceSelectingId, setForceSelectingId] = useState(null);
 
   // 방 번호 1~roomCount 배열
@@ -65,7 +74,7 @@ const [loadingId, setLoadingId] = useState(null);
     // ★ patch: 이벤트 문서 participants[]를 단일 소스로 즉시 커밋
     try {
       if (typeof updateEventImmediate === 'function' && eventId) {
-        const base = participants || [];
+        const base = (participants && participants.length) ? participants : renderParticipants;
         const next = buildNextFromChanges(base, changes);
         await updateEventImmediate({ participants: next });
       }
@@ -92,12 +101,13 @@ const [loadingId, setLoadingId] = useState(null);
       let targetNickname = null;
 
       setParticipants(ps => {
-        const target = ps.find(p => p.id === id);
+        const base = (ps && ps.length) ? ps : renderParticipants;
+        const target = base.find(p => p.id === id);
         if (!target) return ps;
         targetNickname = target.nickname;
 
         // 같은 조에서 이미 배정된 방(최신 상태 기준)
-        const usedRooms = ps
+        const usedRooms = base
           .filter(p => p.group === target.group && p.room != null)
           .map(p => p.room);
 
@@ -107,7 +117,7 @@ const [loadingId, setLoadingId] = useState(null);
           ? available[Math.floor(Math.random() * available.length)]
           : null;
 
-        return ps.map(p => (p.id === id ? { ...p, room: chosen } : p));
+        return base.map(p => (p.id === id ? { ...p, room: chosen } : p));
       });
 
       setLoadingId(null);
@@ -131,12 +141,13 @@ const [loadingId, setLoadingId] = useState(null);
     const changes = [];
 
     setParticipants(ps => {
-      const target = ps.find(p => p.id === id);
+      const base = (ps && ps.length) ? ps : renderParticipants;
+      const target = base.find(p => p.id === id);
       if (!target) return ps;
       targetNickname = target.nickname;
       prevRoom = target.room ?? null;
 
-      let next = ps.map(p => (p.id === id ? { ...p, room } : p));
+      let next = base.map(p => (p.id === id ? { ...p, room } : p));
       changes.push({ id, fields: { room } });
 
       // ✅ room이 null(취소)일 때는 절대 스왑하지 않음
@@ -145,7 +156,7 @@ const [loadingId, setLoadingId] = useState(null);
       }
 
       // room이 숫자인 경우에만, 같은 조의 기존 occupant를 prevRoom으로 이동
-      const occupant = ps.find(
+      const occupant = base.find(
         p => p.group === target.group && p.room === room && p.id !== id
       );
       if (occupant) {
@@ -174,7 +185,8 @@ const [loadingId, setLoadingId] = useState(null);
   const onAutoAssign = async () => {
     let nextSnapshot = null;
     setParticipants(ps => {
-      let updated = [...ps];
+      const base = (ps && ps.length) ? ps : renderParticipants;
+      let updated = [...base];
       const groups = Array.from(new Set(updated.map(p => p.group)));
 
       groups.forEach(group => {
@@ -199,9 +211,10 @@ const [loadingId, setLoadingId] = useState(null);
 
     // 변경분만 동기화(있다면)
     if (nextSnapshot) {
+      const base = renderParticipants;
       const changes = [];
-      nextSnapshot.forEach((p, i) => {
-        const old = participants[i];
+      nextSnapshot.forEach((p) => {
+        const old = base.find(x => x.id === p.id);
         if (!old || old.room !== p.room) {
           changes.push({ id: p.id, fields: { room: p.room ?? null } });
         }
@@ -212,11 +225,12 @@ const [loadingId, setLoadingId] = useState(null);
 
   // ── 5) 초기화 ──
   const onReset = async () => {
+    const base = renderParticipants;
     setParticipants(ps =>
-      ps.map(p => ({ ...p, room: null, score: null, selected: false }))
+      (ps && ps.length ? ps : base).map(p => ({ ...p, room: null, score: null, selected: false }))
     );
     // 실시간 저장(있다면)
-    const changes = participants.map(p => ({
+    const changes = base.map(p => ({
       id: p.id,
       fields: { room: null, score: null, selected: false },
     }));
@@ -224,8 +238,8 @@ const [loadingId, setLoadingId] = useState(null);
   };
 
   useEffect(() => {
-    console.log('[Step5] participants:', participants);
-  }, [participants]);
+    console.log('[Step5] participants(render):', renderParticipants);
+  }, [renderParticipants]);
 
   return (
     <div className={styles.step}>
@@ -241,7 +255,7 @@ const [loadingId, setLoadingId] = useState(null);
 
       {/* 참가자 리스트 */}
       <div className={styles.participantTable}>
-        {participants.map(p => {
+        {renderParticipants.map(p => {
           const isDisabled = loadingId === p.id || p.room != null;
           return (
             <div key={p.id} className={styles.participantRow}>
