@@ -1,8 +1,5 @@
 // /src/player/screens/LoginOrCode.jsx
-//
-// 기존 코드 100% 유지 + 필요한 부분만 보완
-// - [FIX] 회원가입 onComplete: signUpEmail() 반환 credential.user로 users/{uid} 생성
-// - [UI] 버튼에 .selectable 클래스 추가(공통 파란 테두리 규칙 적용)
+// 기존 코드 100% 유지 + [ADD] ensureUserDoc() + [CHG] goNext 폴백 + 버튼/인풋 selectable 유지
 
 import React, { useState, useContext } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -13,47 +10,64 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import PlayerAuthProvider, { usePlayerAuth } from '../../contexts/PlayerAuthContext';
 import styles from './LoginOrCode.module.css';
 
-// 모달들
 import SignupModal from '../components/SignupModal';
 import ResetPasswordModal from '../components/ResetPasswordModal';
+import { getAuth } from 'firebase/auth'; // [ADD]
 
 function InnerLoginOrCode({ onEnter }) {
   const navigate = useNavigate();
   const { eventId, eventData } = useContext(EventContext) || {};
   const { user, ready, ensureAnonymous, signUpEmail, signInEmail, resetPassword } = usePlayerAuth();
 
-  // PlayerContext(레거시 호환: 세션/컨텍스트 동기화를 위해 사용)
   const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext) || {};
 
-  const [tab, setTab]   = useState('login'); // 'login' | 'code'
+  const [tab, setTab]   = useState('login');
   const [email, setEmail] = useState('');
   const [pw, setPw]       = useState('');
   const [code, setCode]   = useState('');
   const [busy, setBusy]   = useState(false);
 
-  // 팝업 상태
   const [showSignup, setShowSignup] = useState(false);
   const [showReset,  setShowReset]  = useState(false);
 
   if (!ready) return null;
 
-  // ──────────────────────────────────────────────────────────────
-  // 공용 헬퍼
+  // [ADD] 로그인/가입 직후 users/{uid} 문서 없으면 만들어주는 보정
+  const ensureUserDoc = async (u) => {
+    try {
+      if (!u?.uid) return;
+      const ref = doc(db, 'users', u.uid);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          uid: u.uid,
+          email: u.email || null,
+          name: u.displayName || '',
+          createdAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+    } catch (e) {
+      // 읽기/쓰기 규칙에 막히면 콘솔만 경고 (회원가입 규칙: isSelf(uid) 기준이면 통과)
+      console.warn('[ensureUserDoc] failed:', e);
+    }
+  };
+
   const normalize = (v) => String(v ?? '').trim().toLowerCase();
 
+  // [CHG] eventId 없을 때 폴백 경로로 이동
   const goNext = () => {
     if (typeof onEnter === 'function') onEnter();
     else if (eventId) navigate(`/player/home/${eventId}/1`, { replace: true });
+    else navigate('/player/events', { replace: true });
   };
 
   const setLoginTicket = (evtId) => {
-    try { localStorage.setItem(`ticket:${evtId}`, JSON.stringify({ via: 'login', ts: Date.now() })); } catch {}
+    try { localStorage.setItem(`ticket:${evtId || 'global'}`, JSON.stringify({ via: 'login', ts: Date.now() })); } catch {}
   };
   const setCodeTicket = (evtId, c) => {
     try { localStorage.setItem(`ticket:${evtId}`, JSON.stringify({ code: String(c || ''), ts: Date.now() })); } catch {}
   };
 
-  // 로그인 후 멤버십/참가자 매핑
   const syncMembershipAndLinkParticipant = async (firebaseUser, evtId) => {
     if (!firebaseUser || !evtId) return;
     const { uid, email: uEmail } = firebaseUser;
@@ -63,7 +77,6 @@ function InnerLoginOrCode({ onEnter }) {
       joinedAt: new Date().toISOString(),
     }, { merge: true });
 
-    // participants 배열에서 이메일/uid 기반 매칭
     const evRef = doc(db, 'events', evtId);
     const snap  = await getDoc(evRef);
     const data  = snap.data() || {};
@@ -86,7 +99,6 @@ function InnerLoginOrCode({ onEnter }) {
     }
   };
 
-  // 인증코드 추출(다국어/여러 키 지원)
   const extractCode = (obj) => {
     if (!obj || typeof obj !== 'object') return '';
     const candidates = ['authCode', 'code', 'auth_code', 'authcode', 'AuthCode', '인증코드', '인증 코드'];
@@ -97,12 +109,9 @@ function InnerLoginOrCode({ onEnter }) {
     return '';
   };
 
-  // 코드 검증: true/false
   const verifyCode = async (evtId, input) => {
     const inCode = String(input || '').trim();
     if (!evtId || !inCode) return false;
-
-    // 1) 이벤트 문서 배열
     try {
       const evSnap = await getDoc(doc(db, 'events', evtId));
       const data = evSnap.data() || {};
@@ -110,7 +119,6 @@ function InnerLoginOrCode({ onEnter }) {
         if (data.participants.some(p => extractCode(p) === inCode)) return true;
       }
     } catch {}
-    // 2) 서브컬렉션
     try {
       const qs = await getDocs(collection(db, 'events', evtId, 'participants'));
       let ok = false;
@@ -120,7 +128,6 @@ function InnerLoginOrCode({ onEnter }) {
     return false;
   };
 
-  // 코드로 참가자 객체 반환
   const findParticipantByCode = async (evtId, input) => {
     const inCode = String(input || '').trim();
     if (!evtId || !inCode) return null;
@@ -141,18 +148,23 @@ function InnerLoginOrCode({ onEnter }) {
     return null;
   };
 
-  // ──────────────────────────────────────────────────────────────
-  // handlers
   const handleLogin = async () => {
     if (!email.trim()) { alert('이메일을 입력해 주세요.'); return; }
     if (!pw.trim())    { alert('비밀번호를 입력해 주세요.'); return; }
     setBusy(true);
     try {
       await signInEmail(email.trim(), pw);
+
+      // [ADD] 로그인 직후 users/{uid} 보정
+      const cu = getAuth().currentUser;
+      if (cu) await ensureUserDoc(cu);
+
       try {
-        if (eventId && user) {
-          await syncMembershipAndLinkParticipant(user, eventId);
+        if (eventId && cu) {
+          await syncMembershipAndLinkParticipant(cu, eventId);
           setLoginTicket(eventId);
+        } else {
+          setLoginTicket('global'); // eventId 없을 때도 티켓 저장
         }
       } catch {}
       goNext();
@@ -170,7 +182,6 @@ function InnerLoginOrCode({ onEnter }) {
       const ok = await verifyCode(eventId, code);
       if (!ok) { alert('인증코드가 올바르지 않습니다.'); return; }
 
-      // ✅ 레거시 호환: 세션/컨텍스트 동기화
       const part = await findParticipantByCode(eventId, code);
       try {
         sessionStorage.setItem(`auth_${eventId}`, 'true');
@@ -181,7 +192,6 @@ function InnerLoginOrCode({ onEnter }) {
       setAuthCode?.(String(code));
       if (part) setParticipant?.(part);
 
-      // StepFlow 티켓 저장 → 게이트 통과
       setCodeTicket(eventId, code);
       goNext();
     } catch (err) {
@@ -191,7 +201,6 @@ function InnerLoginOrCode({ onEnter }) {
 
   const membersOnly = !!eventData?.membersOnly;
 
-  // ──────────────────────────────────────────────────────────────
   return (
     <div className={styles.wrap}>
       <div className={styles.card}>
@@ -219,13 +228,13 @@ function InnerLoginOrCode({ onEnter }) {
         {tab === 'login' ? (
           <div className={styles.form}>
             <input
-              className={styles.input}
+              className={`${styles.input} selectable`}
               placeholder="이메일"
               value={email}
               onChange={(e)=>setEmail(e.target.value)}
             />
             <input
-              className={styles.input}
+              className={`${styles.input} selectable`}
               placeholder="비밀번호"
               type="password"
               value={pw}
@@ -240,7 +249,7 @@ function InnerLoginOrCode({ onEnter }) {
         ) : (
           <div className={styles.form}>
             <input
-              className={styles.input}
+              className={`${styles.input} selectable`}
               placeholder="인증코드 6자리"
               value={code}
               onChange={(e)=>setCode(e.target.value)}
@@ -267,7 +276,7 @@ function InnerLoginOrCode({ onEnter }) {
           onClose={()=>setShowSignup(false)}
           onComplete={async ({ email: em, password, name })=>{
             try {
-              // [FIX] cred.user 사용하여 users/{uid} 생성 (rules: isSelf(uid) 통과)
+              // cred.user 사용하여 users/{uid} 생성 (rules: isSelf(uid))
               const cred = await signUpEmail(em, password);
               const uid  = cred?.user?.uid;
               await setDoc(doc(db, 'users', uid), {

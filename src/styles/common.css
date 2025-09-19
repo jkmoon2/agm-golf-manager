@@ -1,6 +1,7 @@
 /* /src/styles/common.css */
-/* 클릭/포커스 시 파란 테두리 공통 규칙 */
+/* 클릭/포커스 시 파란 테두리: 버튼 + 인풋 + 공용 selectable 클래스 */
 
+/* 버튼류 */
 button:focus-visible,
 button:active,
 .btn:focus-visible, .btn:active,
@@ -10,4 +11,16 @@ button:active,
   outline: 2px solid #2563eb;    /* blue-600 */
   outline-offset: 2px;
   border-color: #2563eb !important;
+}
+
+/* 인풋류 */
+input:focus, input:focus-visible, input:active,
+textarea:focus, textarea:focus-visible, textarea:active,
+.modal__input:focus, .modal__input:focus-visible, .modal__input:active,
+input.selectable:focus, input.selectable:focus-visible, input.selectable:active,
+textarea.selectable:focus, textarea.selectable:focus-visible, textarea.selectable:active {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
