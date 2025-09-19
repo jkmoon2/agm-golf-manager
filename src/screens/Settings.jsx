@@ -1,6 +1,7 @@
 // /src/screens/Settings.jsx
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import styles from './Settings.module.css';
 import { EventContext } from '../contexts/EventContext';
 import { collection, doc, onSnapshot, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
@@ -428,20 +429,33 @@ export default function Settings() {
       </section>
 
       {/* 🆕 ⑥ 설정 바로가기(회원 관리) — 새 카드 추가 */}
-      <section className={styles.card}>
-        <div className={styles.cardHeader}>
-          <h3>⑥ 회원 관리</h3>
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>회원 관리</h3>
+
+        <div className={styles.optionRow}>
+          <div className={styles.optionLabel}>회원 전용 이벤트</div>
+          <div>
+            <Link
+              to="/admin/settings/members-only"
+              style={{display:'inline-flex',alignItems:'center',height:36,padding:'0 12px',
+                border:'1px solid #cfd7e6',borderRadius:10,background:'#f9fbff',fontWeight:600}}
+            >
+              토글 관리
+            </Link>
+          </div>  
         </div>
-        <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-          <a href="/admin/settings/members-only">
-            <button className={styles.saveBtn} type="button">회원 전용 ON/OFF</button>
-          </a>
-          <a href="/admin/settings/members">
-            <button className={styles.saveBtn} type="button">회원 목록 / 다운로드</button>
-          </a>
-        </div>
-        <div className={styles.hint} style={{marginTop:8}}>
-          회원 전용을 켜면 참가자는 반드시 <b>로그인</b> 후, 해당 대회에 <b>업로드된 명단</b>에 있어야 입장 가능합니다.
+
+        <div className={styles.optionRow}>
+          <div className={styles.optionLabel}>회원 목록</div>
+          <div>
+            <Link
+              to="/admin/settings/members"
+              style={{display:'inline-flex',alignItems:'center',height:36,padding:'0 12px',
+                border:'1px solid #cfd7e6',borderRadius:10,background:'#f9fbff',fontWeight:600}}
+            >
+              목록/다운로드
+            </Link>
+          </div>  
         </div>
       </section>
     </div>

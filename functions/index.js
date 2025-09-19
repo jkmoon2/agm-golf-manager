@@ -4,7 +4,7 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp();
 
-// 운영자 이메일 화이트리스트
+// 관리자 이메일 화이트리스트 (필요시 추가)
 const ADMIN_EMAILS = new Set(['a@a.com']);
 
 exports.adminDeleteUser = functions.https.onCall(async (data, context) => {
