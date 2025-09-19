@@ -15,12 +15,14 @@ import PlayerLoginScreen   from './player/screens/PlayerLoginScreen';
 import PlayerApp           from './player/PlayerApp';
 import MainLayout          from './layouts/MainLayout';
 
-// 기존 추가: 탭 UI
+// ── [추가] 플레이어: 로그인/인증코드 탭 UI
 import LoginOrCode         from './player/screens/LoginOrCode';
-// 🆕 운영자: 회원 전용 이벤트 토글 화면
+// ── [추가] 운영자: 회원 전용 이벤트 토글 화면
 import EventMembersOnlyToggle from './admin/screens/EventMembersOnlyToggle';
-// 🆕 운영자: 회원 목록(다운로드/삭제)
+// ── [추가] 운영자: 회원 목록(다운로드/삭제)
 import MembersList from './admin/screens/MembersList';
+// ── [추가] 운영자: 여러 이벤트 일괄 토글 (신규)
+import EventMembersBulkToggle from './admin/screens/EventMembersBulkToggle';
 
 function Protected({ children, roles }) {
   const { firebaseUser, appRole } = useAuth();
@@ -38,7 +40,7 @@ export default function AppRouter() {
             <Route path="/" element={<Navigate to="/login?role=admin" replace />} />
             <Route path="/login" element={<LoginScreen />} />
 
-            {/* 참가자(공개) */}
+            {/* ─────────────── 참가자 영역(공개) ─────────────── */}
             <Route
               path="/player"
               element={
@@ -50,12 +52,15 @@ export default function AppRouter() {
               <Route index element={<Navigate to="events" replace />} />
               <Route path="events" element={<PlayerEventList />} />
               <Route path="home/:eventId/*" element={<PlayerApp />} />
+
+              {/* [추가] 탭형 로그인/인증코드 UI */}
               <Route path="home/:eventId/login" element={<LoginOrCode />} />
-              {/* (레거시) 인증코드 전용 */}
+
+              {/* (레거시 유지) 인증코드 전용 */}
               <Route path="home/:eventId/join" element={<PlayerLoginScreen />} />
             </Route>
 
-            {/* 운영자(보호) */}
+            {/* ─────────────── 운영자 영역(보호) ─────────────── */}
             <Route
               element={
                 <Protected roles={['admin','player']}>
@@ -75,12 +80,14 @@ export default function AppRouter() {
                 <Route path="/admin/dashboard" element={<Dashboard />} />
                 <Route path="/admin/settings"  element={<Settings />} />
 
-                {/* (기존 유지) 이벤트별 멤버스 온/오프 라우트 */}
+                {/* [유지] 이벤트별 토글 라우트가 이미 사용 중이면 살려둠 */}
                 <Route path="/admin/events/:eventId/members-only" element={<EventMembersOnlyToggle />} />
 
-                {/* 🆕 설정 메뉴 하위 라우트 2개 추가 */}
+                {/* [추가] 설정 하위 메뉴 라우트 */}
                 <Route path="/admin/settings/members-only" element={<EventMembersOnlyToggle />} />
                 <Route path="/admin/settings/members"      element={<MembersList />} />
+                {/* [추가] 여러 이벤트 일괄 토글 */}
+                <Route path="/admin/settings/members-bulk" element={<EventMembersBulkToggle />} />
               </Route>
             </Route>
 
