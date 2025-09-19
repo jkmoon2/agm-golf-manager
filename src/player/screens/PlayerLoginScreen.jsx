@@ -31,7 +31,9 @@ export default function PlayerLoginScreen() {
         const partJson = sessionStorage.getItem(`participant_${routeEventId}`);
         if (code) setAuthCode?.(code);
         if (partJson) setParticipant?.(JSON.parse(partJson));
-        nav(`/player/home/${routeEventId}`, { replace: true });
+        // ✅ StepFlow 게이트 통과용 티켓 보강
+        try { localStorage.setItem(`ticket:${routeEventId}`, JSON.stringify({ via:'legacy', ts: Date.now() })); } catch {}
+        nav(`/player/home/${routeEventId}/1`, { replace: true });
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -41,7 +43,8 @@ export default function PlayerLoginScreen() {
   useEffect(() => {
     const isAuth = sessionStorage.getItem(`auth_${routeEventId}`) === 'true';
     if (isAuth && ctxEventId === routeEventId && participant) {
-      nav(`/player/home/${routeEventId}`, { replace: true });
+      try { localStorage.setItem(`ticket:${routeEventId}`, JSON.stringify({ via:'legacy', ts: Date.now() })); } catch {}
+      nav(`/player/home/${routeEventId}/1`, { replace: true });
     }
   }, [ctxEventId, participant, routeEventId, nav]);
 
@@ -73,28 +76,25 @@ export default function PlayerLoginScreen() {
     setAuthCode?.(inputCode.trim());
     setParticipant?.(part);
 
-    // 4) 인증 상태는 "세션"에만 기록(재시작하면 초기화됨) ←★ 핵심
+    // 4) 인증 상태는 "세션"에만 기록(재시작하면 초기화됨) + StepFlow 게이트용 티켓 추가
     try {
       sessionStorage.setItem(`auth_${routeEventId}`, 'true');
-      sessionStorage.setItem(`participant_${routeEventId}`, JSON.stringify(part));
       sessionStorage.setItem(`authcode_${routeEventId}`, inputCode.trim());
+      sessionStorage.setItem(`participant_${routeEventId}`, JSON.stringify(part));
+      localStorage.setItem(`ticket:${routeEventId}`, JSON.stringify({ code: inputCode.trim(), ts: Date.now() }));
     } catch {}
 
-    // 5) 참가자 홈으로 이동
-    nav(`/player/home/${routeEventId}`, { replace: true });
+    // 5) 이동
+    nav(`/player/home/${routeEventId}/1`, { replace: true });
   };
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <h1 className={styles.title}>AGM Golf Manager</h1>
-      </header>
-      <div className={styles.container}>
-        <div className={styles.card}>
-          <h2 className={styles.heading}>참가자 로그인</h2>
-          <form onSubmit={handleSubmit} className={styles.form}>
+    <div className={styles.wrap}>
+      <div className={styles.card}>
+        <h2 className={styles.title}>인증코드로 입장</h2>
+        <div className={styles.form}>
+          <form onSubmit={handleSubmit}>
             <input
-              type="text"
               className={styles.input}
               value={inputCode}
               onChange={e => setInputCode(e.target.value)}
