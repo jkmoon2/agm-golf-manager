@@ -1,4 +1,4 @@
-// src/flows/StepFlow.jsx
+// /src/flows/StepFlow.jsx
 
 import React, { useState, createContext, useEffect, useContext } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -14,7 +14,6 @@ import Step5    from '../screens/Step5';
 import Step6    from '../screens/Step6';
 import Step7    from '../screens/Step7';
 import Step8    from '../screens/Step8';
-import { useApplyTheme } from '../themes/useTheme';
 
 export const StepContext = createContext();
 
@@ -23,13 +22,12 @@ export default function StepFlow() {
   const { step }    = useParams();
   const navigate    = useNavigate();
 
-  // Apply theme (admin scope)
-  useApplyTheme('admin');
-
+  // 0) eventId 없으면 STEP0으로 강제 이동
   useEffect(() => {
     if (!eventId) navigate('/admin/home/0', { replace: true });
   }, [eventId, navigate]);
 
+  // 1) 서버 데이터를 로컬 state에 항상 동기화
   const [mode, setMode]                 = useState('stroke');
   const [title, setTitle]               = useState('');
   const [roomCount, setRoomCount]       = useState(4);
@@ -51,55 +49,27 @@ export default function StepFlow() {
     setDateEnd(eventData.dateEnd || '');
   }, [eventData]);
 
-  // 저장 헬퍼(기존 로직 유지)
+  // 저장 헬퍼 (기존 유지) — 서버에 즉시 머지 저장
   const save = async (updates) => {
-    const normalize = (v) => {
-      if (v === undefined) return null;
-      if (typeof v === 'number' && Number.isNaN(v)) return null;
-      return v;
-    };
-    const cleanObj = (obj) => {
-      if (Array.isArray(obj)) {
-        return obj
-          .filter((x) => x != null)
-          .map((x) => (typeof x === 'object' ? cleanObj(x) : normalize(x)));
+    const clean = {};
+    Object.entries(updates).forEach(([key, value]) => {
+      if (key === 'participants' && Array.isArray(value)) {
+        clean[key] = value.map(item => {
+          const obj = {};
+          Object.entries(item).forEach(([k, v]) => {
+            if (typeof v !== 'function') obj[k] = v;
+          });
+          return obj;
+        });
+      } else if (typeof value !== 'function') {
+        clean[key] = value;
       }
-      if (obj && typeof obj === 'object') {
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) {
-          if (typeof v === 'function') continue;
-          if (v === undefined) continue;
-          if (v && typeof v === 'object') out[k] = cleanObj(v);
-          else out[k] = normalize(v);
-        }
-        return out;
-      }
-      return normalize(obj);
-    };
-    const clean = cleanObj(updates);
-
-    if (Array.isArray(clean.participants)) {
-      clean.participants = clean.participants.map((p) => ({
-        id:        normalize(p.id),
-        group:     normalize(p.group),
-        nickname:  p.nickname ?? '',
-        handicap:  normalize(p.handicap),
-        score:     p.score == null ? null : normalize(Number(p.score)),
-        room:      p.room == null ? null : normalize(p.room),
-        partner:   p.partner == null ? null : normalize(p.partner),
-        authCode:  p.authCode ?? '',
-        selected:  !!p.selected,
-      }));
-    }
-    const force = Object.prototype.hasOwnProperty.call(clean, 'participants');
-
-    await (updateEventImmediate
-      ? updateEventImmediate(clean, force ? false : true)
-      : updateEvent(clean, { ifChanged: force ? false : true }));
+    });
+    await (updateEventImmediate ? updateEventImmediate(clean) : updateEvent(clean));
   };
 
-  // ★ 변경: async로 바꾸고 저장을 await 한 뒤 라우팅
-  const resetAll = async () => {
+  // 전체 초기화 (현재 mode 유지)
+  const resetAll = () => {
     const init = {
       mode,
       title:        '',
@@ -118,7 +88,7 @@ export default function StepFlow() {
     setParticipants(init.participants);
     setDateStart(init.dateStart);
     setDateEnd(init.dateEnd);
-    await save(init);
+    save(init);
     navigate('/admin/home/0', { replace: true });
   };
 
@@ -127,17 +97,16 @@ export default function StepFlow() {
   const agmFlow    = [1,2,3,4,7,8];
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
 
-  // ★ 변경: async + await save
-  const goNext = async () => {
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
+  // [CRITICAL-FIX] participants를 여기서 저장하지 않음 (동시 편집 덮어쓰기 방지)
+  const goNext = () => {
+    save({ mode, title, roomCount, roomNames, uploadMethod, dateStart, dateEnd }); // [FIX]
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
   };
 
-  // ★ 변경: async + await save
-  const goPrev = async () => {
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
+  const goPrev = () => {
+    save({ mode, title, roomCount, roomNames, uploadMethod, dateStart, dateEnd }); // [FIX]
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
@@ -145,16 +114,10 @@ export default function StepFlow() {
 
   const setStep = n => navigate(`/admin/home/${n}`);
 
-  const changeMode  = newMode => {
-    setMode(newMode);
-    save({ mode: newMode });
-  };
+  const changeMode  = newMode => { setMode(newMode); save({ mode: newMode }); };
+  const changeTitle = newTitle => { setTitle(newTitle); save({ title: newTitle }); };
 
-  const changeTitle = newTitle => {
-    setTitle(newTitle);
-    save({ title: newTitle });
-  };
-
+  // 파일 업로드 처리 (Step4 등)
   const handleFile = async e => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -171,14 +134,13 @@ export default function StepFlow() {
       score:    null,
       room:     null,
       partner:  null,
-      authCode2: undefined, // 기존 구조 유지(있다면)
       selected: false
     }));
     setParticipants(data);
-    await save({ participants: data });
+    save({ participants: data });
   };
 
-  const initManual = async () => {
+  const initManual = () => {
     const data = Array.from({ length: roomCount * 4 }, (_, idx) => ({
       id:       idx,
       group:    1,
@@ -191,9 +153,10 @@ export default function StepFlow() {
       selected: false
     }));
     setParticipants(data);
-    await save({ participants: data });
+    save({ participants: data });
   };
 
+  // AGM 포볼 관련 (기존 유지)
   const assignPairToRoom = (id1, id2, roomNo) => {
     updateParticipantsBulkNow([
       { id: id1, fields: { room: roomNo, partner: id2 } },
@@ -272,7 +235,10 @@ export default function StepFlow() {
       });
     });
     setParticipants(ps);
-    const cleanList = ps.map(p => ({ id: p.id, group: p.group, nickname: p.nickname, handicap: p.handicap, score: p.score, room: p.room, partner: p.partner, authCode: p.authCode, selected: p.selected }));
+    const cleanList = ps.map(p => ({
+      id: p.id, group: p.group, nickname: p.nickname, handicap: p.handicap,
+      score: p.score, room: p.room, partner: p.partner, authCode: p.authCode, selected: p.selected
+    }));
     await save({ participants: cleanList });
   };
 
@@ -282,6 +248,7 @@ export default function StepFlow() {
     await save({ participants: ps });
   };
 
+  // STEP5 (스트로크/포볼 공통) 실시간 저장용 보완 함수 (기존 유지)
   const updateParticipantNow = async (id, fields) => {
     let next;
     setParticipants(prev => (next = prev.map(p => (p.id === id ? { ...p, ...fields } : p))));
@@ -316,8 +283,7 @@ export default function StepFlow() {
   };
 
   const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
-  // curr 값이 바뀔 때만 재계산되도록 메모이즈 (런타임 동작 동일)
-  const Current = pages[curr] || <Step1/>;
+  const Current = pages[curr] || <Step1 />;
 
   return (
     <StepContext.Provider value={ctxValue}>

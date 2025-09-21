@@ -211,32 +211,34 @@ export default function PlayerEventInput(){
 
   const inputsByEvent = eventData?.eventInputs || {};
 
-  // 단일 입력
+  // [FIX] 단일 입력: NaN 방지(공란/중간상태는 제거)
   const patchValue = (evId, pid, value) => {
-    const all = { ...(eventData?.eventInputs || {}) };
+    const all  = { ...(eventData?.eventInputs || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
-    if (value === '' || value == null) delete person[pid];
-    else person[pid] = Number(value);
+    const num = Number(value);
+    if (value === '' || value == null || Number.isNaN(num)) delete person[pid];
+    else person[pid] = num;
     slot.person = person; all[evId] = slot;
     updateEventImmediate({ eventInputs: all }, false);
   };
 
-  // 누적 입력: 배열 보정(건너뛰기 안전)
+  // [FIX] 누적 입력: NaN → '' 처리
   const patchAccum = (evId, pid, idx, value, attemptsOverride) => {
-    const all = { ...(eventData?.eventInputs || {}) };
+    const all  = { ...(eventData?.eventInputs || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
     const obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
       ? { ...person[pid], values:[...person[pid].values] } : { values:[] };
     const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (idx+1);
     while (obj.values.length < atts) obj.values.push('');
-    obj.values[idx] = (value===''||value==null) ? '' : Number(value);
+    const num = Number(value);
+    obj.values[idx] = (value===''||value==null||Number.isNaN(num)) ? '' : num;
     person[pid]=obj; slot.person=person; all[evId]=slot;
     updateEventImmediate({ eventInputs: all }, false);
   };
 
-  // 보너스 저장: 배열 보정(건너뛰기 선택 안전)
+  // 보너스 저장(원본 유지)
   const patchBonus = (evId, pid, idxOrVal, value, isAccum, attemptsOverride) => {
     const all = { ...(eventData?.eventInputs || {}) };
     const slot = { ...(all[evId] || {}) };
@@ -256,7 +258,7 @@ export default function PlayerEventInput(){
     updateEventImmediate({ eventInputs: all }, false);
   };
 
-  // ===== 팝업 폭 계산 (가장 긴 항목 기준, 여유폭 소폭) =====
+  // ===== 팝업 폭 계산 (원본 유지) =====
   const calcPopupWidth = (evId) => {
     try {
       const ev = events.find(e => e.id === evId);
@@ -270,19 +272,16 @@ export default function PlayerEventInput(){
       const ctx = canvas.getContext('2d');
       ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial';
       const textW = Math.max(...labels.map(s => ctx.measureText(String(s)).width || 0));
-      const PADDING_X = 16; // 좌우 padding 합(각 8px)  ← 기존 24보다 슬림
-      const SHADOW_BORDER = 8; // 테두리/그림자 여유 ← 기존 16보다 슬림
+      const PADDING_X = 16;
+      const SHADOW_BORDER = 8;
       const W = Math.ceil(textW + PADDING_X + SHADOW_BORDER);
-      return Math.min(Math.max(W, 90), 168); // 90~168 범위에서 자동
+      return Math.min(Math.max(W, 90), 168);
     } catch {
-      return 136; // 안전 기본값(슬림)
+      return 136;
     }
   };
 
-  // 보너스 팝업 상태
   const [bonusPopup, setBonusPopup] = useState({ open:false, x:0, y:0, evId:null, pid:null, idx:0, attempts:0, w:136 });
-
-  // 위치/폭 계산: content width 기반 좌우 클램프
   const openBonusPopup = (evId, pid, idx, attempts, e) => {
     e.stopPropagation();
     const w  = calcPopupWidth(evId);
@@ -296,13 +295,8 @@ export default function PlayerEventInput(){
     const y = r.bottom + 6;
     setBonusPopup({ open:true, x, y, evId, pid, idx, attempts, w });
   };
-
   const closeBonusPopup = () => setBonusPopup({ open:false, x:0, y:0, evId:null, pid:null, idx:0, attempts:0, w:136 });
-  useEffect(()=>{
-    const onDoc = ()=> setBonusPopup(p => (p.open ? { ...p, open:false } : p));
-    document.addEventListener('click', onDoc);
-    return ()=> document.removeEventListener('click', onDoc);
-  },[]);
+  useEffect(()=>{ const onDoc=()=>setBonusPopup(p=>(p.open?{...p,open:false}:p)); document.addEventListener('click',onDoc); return()=>document.removeEventListener('click',onDoc); },[]);
 
   return (
     <div className={baseCss.page}>
@@ -311,23 +305,15 @@ export default function PlayerEventInput(){
         {events.map(ev => {
           const isAccum  = ev.inputMode === 'accumulate';
           const attempts = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
-
-          // 닉네임 35% + 입력 65% (누적 4칸까지 균등), 5~N칸은 테이블 전체폭 증가 → 가로 스크롤
           const NICK_PCT = 35;
-          const ONE_PCT  = 65 / 4; // 16.25
-          const tableWidthPct = isAccum
-            ? (NICK_PCT + attempts * ONE_PCT)
-            : 100;
-
-          const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus))
-            ? ev.params.bonus : [];
+          const ONE_PCT  = 65 / 4;
+          const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT) : 100;
+          const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
 
           return (
             <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
               <div className={baseCss.cardHeader}>
-                <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>
-                  {ev.title}
-                </div>
+                <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
               </div>
 
               <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
@@ -350,7 +336,10 @@ export default function PlayerEventInput(){
                   </thead>
 
                   <tbody>
-                    {roomMembers.map((p, rIdx)=>(
+                    {orderSlotsByPairs(
+                      participants.filter(p => Number(p?.room)=== (Number.isFinite(roomIdx)?roomIdx:NaN)),
+                      participants
+                    ).map((p, rIdx)=>(
                       <tr key={rIdx}>
                         <td>{p ? p.nickname : ''}</td>
 
@@ -359,15 +348,20 @@ export default function PlayerEventInput(){
                             <td
                               key={i}
                               className={tCss.cellEditable}
-                              onClick={(e)=>{
-                                if (bonusOpts.length) openBonusPopup(ev.id, p?.id, i, attempts, e);
-                              }}
+                              onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, i, attempts, e); }}
                             >
                               <input
-                                type="number"
-                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''}
-                                onChange={e=> p && patchAccum(ev.id, p.id, i, e.target.value, attempts)}
+                                // [FIX] iOS/Android 호환 입력 (마이너스/소수점)
+                                type="text"               // ← number 에서 교체
+                                inputMode="decimal"       // [ADD]
+                                pattern="[0-9.\\-]*"     // [ADD]
+                                autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                                spellCheck={false}
                                 className={tCss.cellInput}
+                                value={p ? (eventData?.eventInputs?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''}
+                                onChange={e=> p && patchAccum(ev.id, p.id, i, e.target.value, attempts)}
                                 data-focus-evid={ev.id}
                                 data-focus-pid={p ? p.id : ''}
                                 data-focus-idx={i}
@@ -377,15 +371,20 @@ export default function PlayerEventInput(){
                         ) : (
                           <td
                             className={tCss.cellEditable}
-                            onClick={(e)=>{
-                              if (bonusOpts.length) openBonusPopup(ev.id, p?.id, 0, 1, e);
-                            }}
+                            onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, 0, 1, e); }}
                           >
                             <input
-                              type="number"
-                              value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '') : ''}
-                              onChange={(e)=> p && patchValue(ev.id, p.id, e.target.value)}
+                              // [FIX] iOS/Android 호환 입력 (마이너스/소수점)
+                              type="text"               // ← number 에서 교체
+                              inputMode="decimal"       // [ADD]
+                              pattern="[0-9.\\-]*"     // [ADD]
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="off"
+                              spellCheck={false}
                               className={tCss.cellInput}
+                              value={p ? (eventData?.eventInputs?.[ev.id]?.person?.[p.id] ?? '') : ''}
+                              onChange={(e)=> p && patchValue(ev.id, p.id, e.target.value)}
                               data-focus-evid={ev.id}
                               data-focus-pid={p ? p.id : ''}
                               data-focus-idx={0}
@@ -402,15 +401,14 @@ export default function PlayerEventInput(){
           );
         })}
 
-        {/* 보너스 선택 팝업 */}
-        {bonusPopup.open && (()=>{
+        {/* 보너스 선택 팝업 (원본 유지) */}
+        {bonusPopup.open && (()=>{ /* ... 동일 ... */ 
           const ev = events.find(e=> e.id===bonusPopup.evId);
           const opts = (ev && ev.template==='range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
           const onPick = (label)=>{
             const isAccum = !!(ev && ev.inputMode==='accumulate');
             patchBonus(bonusPopup.evId, bonusPopup.pid, bonusPopup.idx, label || '', isAccum, bonusPopup.attempts);
             closeBonusPopup();
-            // 선택 후 해당 숫자 입력칸으로 포커스
             setTimeout(()=>{
               const sel = `[data-focus-evid="${bonusPopup.evId}"][data-focus-pid="${bonusPopup.pid}"][data-focus-idx="${bonusPopup.idx}"]`;
               const el  = document.querySelector(sel);
@@ -421,16 +419,9 @@ export default function PlayerEventInput(){
             <div
               className={tCss.bonusPopup}
               style={{
-                position:'fixed',
-                left:bonusPopup.x,
-                top:bonusPopup.y,
-                transform:'translate(-50%,0)',
-                zIndex:1000,
-                background:'#fff',
-                border:'1px solid #e5e7eb',
-                borderRadius:8,
-                boxShadow:'0 8px 24px rgba(0,0,0,.12)',
-                width: bonusPopup.w
+                position:'fixed', left:bonusPopup.x, top:bonusPopup.y, transform:'translate(-50%,0)',
+                zIndex:1000, background:'#fff', border:'1px solid #e5e7eb', borderRadius:8,
+                boxShadow:'0 8px 24px rgba(0,0,0,.12)', width: bonusPopup.w
               }}
               onClick={(e)=>e.stopPropagation()}
             >

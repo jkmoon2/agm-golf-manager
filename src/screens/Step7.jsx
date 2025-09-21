@@ -3,9 +3,6 @@
 import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
-// [ADD] 라이브 이벤트 보조(참고용: 렌더에 직접 사용하지 않아 기존 흐름 100% 유지)
-import { EventContext } from '../contexts/EventContext';
-import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
 if (process.env.NODE_ENV!=='production') console.log('[AGM] Step7 render');
 
@@ -23,39 +20,45 @@ export default function Step7() {
   } = useContext(StepContext);
   const [loadingId, setLoadingId] = useState(null);
 
-  // [ADD] 이벤트 아이디만 받아서 백그라운드 구독(로깅/확인용)
-  const { eventId } = useContext(EventContext) || {};
-  useEventLiveQuery(eventId); // ← 기존 동작은 그대로, 실시간 소스는 컨텍스트 쪽이 담당
+  // [ADD] 점수 입력 드래프트 상태
+  const [scoreDraft, setScoreDraft] = useState({});
+  const isPartialNumber = (s) => /^-?\d*\.?\d*$/.test(s);
+  const handleScoreInputChange = (id, raw) => {
+    if (!isPartialNumber(raw)) return;
+    setScoreDraft(d => ({ ...d, [id]: raw }));
+    if (raw === '' || raw === '-' || raw === '.' || raw === '-.') return;
+    const v = Number(raw);
+    if (!Number.isNaN(v)) onScoreChange(id, v);
+  };
+  const handleScoreBlur = (id) => {
+    const raw = scoreDraft[id];
+    if (raw === undefined) return;
+    if (raw === '' || raw === '-' || raw === '.' || raw === '-.') onScoreChange(id, null);
+    setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
+  };
 
   const isCompleted = id => {
     const me = participants.find(p => p.id === id);
     return !!(me && me.room != null && me.partner != null);
   };
 
-  // ★ 변경: async + await onManualAssign(id)
-  const handleManualClick = async (id) => {
+  const handleManualClick = id => {
     if (isCompleted(id)) return;
     setLoadingId(id);
-
-    // 수동 배정 결과를 확실히 받아온다.
-    const { roomNo, nickname, partnerNickname } = await onManualAssign(id); // ★
-
+    const { roomNo, nickname, partnerNickname } = onManualAssign(id);
     setTimeout(() => {
       const label = roomNames[roomNo - 1]?.trim() || `${roomNo}번 방`;
       alert(
         `${nickname}님은 ${label}에 배정되었습니다.\n` +
         `팀원을 선택하려면 확인을 눌러주세요.`
       );
-
       setLoadingId(id);
-
       setTimeout(() => {
         if (partnerNickname) {
           alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
         }
         setLoadingId(null);
       }, 900);
-
     }, 900);
   };
 
@@ -67,13 +70,8 @@ export default function Step7() {
     }
   };
 
-  const handleAutoClick = () => {
-    onAutoAssign();
-  };
-
-  const handleResetClick = () => {
-    onReset();
-  };
+  const handleAutoClick = () => { onAutoAssign(); };
+  const handleResetClick = () => { onReset(); };
 
   return (
     <div className={styles.step}>
@@ -90,6 +88,7 @@ export default function Step7() {
         {participants.map(p => {
           const isGroup1 = Number.isFinite(Number(p?.group)) ? (Number(p.group) % 2 === 1) : (p.id % 2 === 1);
           const done     = isGroup1 && isCompleted(p.id);
+          const scoreValue = scoreDraft[p.id] ?? (p.score ?? '');
 
           return (
             <div key={p.id} className={styles.participantRow}>
@@ -102,11 +101,17 @@ export default function Step7() {
               <div className={`${styles.cell} ${styles.handicap}`}>
                 <input type="text" value={p.handicap} disabled />
               </div>
+
+              {/* [FIX] 숫자 입력: text + inputMode + draft */}
               <div className={`${styles.cell} ${styles.score}`}>
                 <input
-                  type="number"
-                  value={p.score ?? ''}
-                  onChange={e => onScoreChange(p.id, e.target.value)}
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9.\-]*"
+                  autoComplete="off"
+                  value={scoreValue}
+                  onChange={e => handleScoreInputChange(p.id, e.target.value)}
+                  onBlur={() => handleScoreBlur(p.id)}
                 />
               </div>
 
@@ -147,12 +152,8 @@ export default function Step7() {
 
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={handleAutoClick} className={styles.textOnly}>
-          자동배정
-        </button>
-        <button onClick={handleResetClick} className={styles.textOnly}>
-          초기화
-        </button>
+        <button onClick={handleAutoClick} className={styles.textOnly}>자동배정</button>
+        <button onClick={handleResetClick} className={styles.textOnly}>초기화</button>
         <button onClick={goNext}>다음 →</button>
       </div>
     </div>

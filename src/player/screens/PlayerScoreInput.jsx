@@ -1,9 +1,13 @@
 // /src/player/screens/PlayerScoreInput.jsx
-// - 초기 0을 빈칸으로(placeholder "입력") 처리
-// - '-' 입력 허용(이미 지원하되 안정화)
-// - 나머지 로직/스타일 유지
+// 변경 요약
+// - [FIX] 점수 입력칸에서 ± 버튼을 제거하고, 입력칸만 남김(기존 UI 복귀)
+// - [ADD] 입력칸을 1초 이상 길게 누르면 자동으로 '−'(마이너스) 기호가 앞에 붙도록 Long-Press 제스처 추가
+//         (iOS의 숫자패드에 '-' 키가 없는 상황 보완)
+// - [FIX] 입력 type="text" + inputMode="decimal" + pattern 유지(안드로이드/아이폰 모두 안정적으로 '.' 가능)
+// - [ADD] 길게 누르는 동안 시스템 컨텍스트 메뉴가 뜨지 않도록 onContextMenu 방지
+// - 나머지 계산/합계/정렬/게이트/레이아웃 로직은 기존 그대로 유지
 
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -164,7 +168,6 @@ export default function PlayerScoreInput() {
       orderedRoomPlayers.forEach((p) => {
         const key = String(p.id);
         if (next[key] === undefined) {
-          // ★ 초기 0도 빈칸으로 보이게
           const base = (p.score == null || p.score === 0) ? '' : String(p.score);
           next[key] = base;
         }
@@ -201,11 +204,72 @@ export default function PlayerScoreInput() {
   };
 
   const onChangeScore = (pid, val) => {
-    const clean = String(val ?? '').replace(/[^\d\-+]/g, '');
+    // [FIX] '.', '-' 허용 + 중간 상태 유지(iOS에서 깜빡임 방지)
+    const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
-    if (clean === '') persistScore(pid, ''); 
+    if (clean === '') persistScore(pid, '');
   };
   const onCommitScore = (pid) => persistScore(pid, draft[String(pid)]);
+
+  // ===== [ADD] Long Press 로 '-' 자동 입력 =====
+  const inputRefs = useRef({});              // 각 입력칸 ref
+  const holdMapRef = useRef({});             // { [pid]: { timer, x, y, fired } }
+  const LONG_PRESS_MS = 1000;                // 1초 이상 길게 눌렀을 때만 발동
+  const MOVE_CANCEL_PX = 10;                 // 손가락이 크게 움직이면 롱프레스 취소
+
+  const ensureMap = (pid) => {
+    const key = String(pid);
+    if (!holdMapRef.current[key]) holdMapRef.current[key] = { timer: null, x: 0, y: 0, fired: false };
+    return holdMapRef.current[key];
+  };
+
+  const startHold = (pid, e) => {
+    // iOS 컨텍스트 메뉴 방지
+    if (e && typeof e.preventDefault === 'function') {
+      // 입력 포커스는 유지해야 하므로 pointerdown의 기본동작은 막지 않음
+    }
+    const m = ensureMap(pid);
+    m.fired = false;
+    m.x = (e && 'clientX' in e) ? e.clientX : 0;
+    m.y = (e && 'clientY' in e) ? e.clientY : 0;
+    if (m.timer) clearTimeout(m.timer);
+    m.timer = setTimeout(() => {
+      m.fired = true;
+      setDraft((d) => {
+        const key = String(pid);
+        const cur = String(d[key] ?? '');
+        if (cur.startsWith('-')) return d; // 이미 음수면 그대로
+        const next = { ...d, [key]: cur ? `-${cur}` : '-' };
+        // 커서를 끝으로 이동 (시각적 부자연스러움 방지)
+        requestAnimationFrame(() => {
+          const el = inputRefs.current[key];
+          if (el && typeof el.setSelectionRange === 'function') {
+            const end = (next[key] || '').length;
+            try { el.setSelectionRange(end, end); } catch {}
+          }
+          // (선택) 진동 피드백
+          try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+        });
+        return next;
+      });
+    }, LONG_PRESS_MS);
+  };
+  const moveHold = (pid, e) => {
+    const m = ensureMap(pid);
+    if (!m.timer) return;
+    const dx = Math.abs((e.clientX ?? 0) - (m.x ?? 0));
+    const dy = Math.abs((e.clientY ?? 0) - (m.y ?? 0));
+    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) {
+      clearTimeout(m.timer); m.timer = null;
+    }
+  };
+  const endHold = (pid) => {
+    const m = ensureMap(pid);
+    if (m.timer) { clearTimeout(m.timer); m.timer = null; }
+  };
+
+  // 컨텍스트 메뉴(길게 눌렀을 때 뜨는 시스템 메뉴) 방지
+  const preventContextMenu = (e) => { e.preventDefault(); };
 
   const totals = useMemo(() => {
     let sumH = 0, sumS = 0, sumR = 0;
@@ -213,7 +277,7 @@ export default function PlayerScoreInput() {
       const s = toNumberOrNull(draft[String(p.id)] ?? ((p.score == null) ? '' : p.score));
       const h = Number(p.handicap || 0);
       sumH += h;
-      sumS += s ?? 0;
+      sumS += (s ?? 0);
       sumR += (s ?? 0) - h;
     });
     return { sumH, sumS, sumR };
@@ -269,15 +333,34 @@ export default function PlayerScoreInput() {
                       <span>{p.handicap}</span>
                     </td>
                     <td className={`${styles.td} ${styles.scoreTd}`}>
+                      {/* [FIX] 기존과 동일 UI(± 버튼 제거) + [ADD] Long-Press 제스처 */}
                       <input
-                        inputMode="numeric"
+                        // 숫자 입력 호환(기존과 동일한 시각/레이아웃)
+                        type="text"                 // [FIX] Android/iOS 호환을 위해 text 유지
+                        inputMode="decimal"         // [FIX] iOS에서 소수점 표시
+                        pattern="[0-9.\\-+]*"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
                         className={styles.cellInput}
-                        
                         value={raw}
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
                         onBlur={() => onCommitScore(p.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.currentTarget.blur();
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+
+                        // [ADD] Long-Press 핸들러
+                        onPointerDown={(e) => startHold(p.id, e)}
+                        onPointerUp={() => endHold(p.id)}
+                        onPointerCancel={() => endHold(p.id)}
+                        onPointerLeave={() => endHold(p.id)}
+                        onPointerMove={(e) => moveHold(p.id, e)}
+                        onContextMenu={preventContextMenu} // 시스템 메뉴 억제
+
+                        // 입력칸 ref (커서 위치 복구용)
+                        ref={(el) => {
+                          if (el) inputRefs.current[key] = el;
+                          else delete inputRefs.current[key];
                         }}
                       />
                     </td>
@@ -291,15 +374,9 @@ export default function PlayerScoreInput() {
             <tfoot>
               <tr>
                 <td className={`${styles.td} ${styles.totalLabel}`}>합계</td>
-                <td className={`${styles.td} ${styles.totalBlack}`}>
-                  {totals.sumH}
-                </td>
-                <td className={`${styles.td} ${styles.totalBlue}`}>
-                  {totals.sumS}
-                </td>
-                <td className={`${styles.td} ${styles.totalRed}`}>
-                  {totals.sumR}
-                </td>
+                <td className={`${styles.td} ${styles.totalBlack}`}>{totals.sumH}</td>
+                <td className={`${styles.td} ${styles.totalBlue}`}>{totals.sumS}</td>
+                <td className={`${styles.td} ${styles.totalRed}`}>{totals.sumR}</td>
               </tr>
             </tfoot>
           </table>
@@ -307,19 +384,14 @@ export default function PlayerScoreInput() {
       </div>
 
       <div className={styles.footerNav}>
-        <Link
-          to={`/player/home/${eventId}/3`}
-          className={`${styles.navBtn} ${styles.navPrev}`}
-        >
-          이전
-        </Link>
+        <Link to={`/player/home/${eventId}/3`} className={`${styles.navBtn} ${styles.navPrev}`}>이전</Link>
         <Link
           to={nextDisabled ? '#' : `/player/home/${eventId}/5`}
           className={`${styles.navBtn} ${styles.navNext}`}
           onClick={(e)=>{ if (nextDisabled) { e.preventDefault(); e.stopPropagation(); } }}
           aria-disabled={nextDisabled}
           data-disabled={nextDisabled ? '1' : '0'}
-          style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+          style={{ opacity: nextDisabled ? 0.5 : 1, pointerEvents: nextDisabled ? 'none' : 'auto' }}
           tabIndex={nextDisabled ? -1 : 0}
         >
           다음
