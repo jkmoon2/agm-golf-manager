@@ -1,0 +1,15 @@
+/* /src/auth/Auth.module.css */
+
+.panel{
+  border:1px solid #2563eb;   /* [FIX] 파란색 테두리 */
+  border-radius:12px;
+  padding:16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
+  background:#fff;
+}
+.title{ margin:0 0 12px; font-weight:700; font-size:18px; text-align:center; }
+.form{ display:flex; flex-direction:column; gap:10px; }
+.row{ display:flex; gap:10px; justify-content:flex-end; }
+.btnPrimary{ background:#2563eb; color:#fff; border:0; border-radius:8px; padding:10px 14px; }
+.btnPrimary:disabled{ opacity:.5; cursor:not-allowed; }
+.btnGhost{ background:#f3f4f6; color:#111; border:1px solid #e5e7eb; border-radius:8px; padding:10px 14px; }
