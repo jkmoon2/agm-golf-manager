@@ -1,78 +1,123 @@
 /* /src/screens/Settings.module.css
-   ─────────────────────────────────────────────────────────────
-   🔧 미세조정 변수(숫자만 바꾸면 됩니다)
-   - --members-list-offset : 목록 영역 높이 계산용(상·하 여백/버튼바/타이틀 합)
-   - --members-head-pad-y  : 표 헤더(타이틀 행) 세로 패딩 = 두께
-   - --members-head-bw     : 표 헤더 하단 보더 두께
-   - --members-footer-gap  : 버튼바 위쪽 여유 간격
-   ───────────────────────────────────────────────────────────── */
+   ✅ 그대로 유지 + [ADD]/[CHG]만 반영
+*/
 
 :root{
-  --members-list-offset: 260px; /* 버튼을 '위로' 올리고 싶으면 이 값을 키우세요(예: 300px) */
+  /* 회원목록 내부 여유치 */
+  --members-list-offset: 260px;
   --members-head-pad-y: 7px;
   --members-head-bw: 1px;
   --members-footer-gap: 10px;
 
-  --member-ctrl-width: 216px;
+  /* (요청값 유지) */
+  --member-ctrl-width: 200px;   /* 버튼 3개 래퍼 폭 */
+  --member-ctrl-gap-right: 10px;
+  --member-btn-pad-x: 12px;
   --member-btn-border: 0.8px;
 
+  /* 일괄 토글 표 열 폭 (합계 100%) */
   --col-event: 56%;
   --col-id:    24%;
   --col-flag:  20%;
 
+  /* 카드/타이틀 여백 */
   --members-title-gap: 2px;
   --members-title-pad-y: 8px;
+
+  /* 카드/표 좌우 패딩 */
+  --members-card-pad-x: 12px;
+  --members-table-pad-x: 0px;   /* [CHG] 표 좌측 라인과 카드 내측이 딱 맞도록 0px */
+
+  /* 하단 탭바 높이(필요시 숫자만 조정) */
+  --app-bottom-bar: 64px;
 }
 
-/* ===== 공통(기존 유지) ===== */
-.page { padding: 16px; max-width: 900px; margin: 0 auto; }
+/* ===== 페이지 공통 ===== */
+.page {
+  padding: 16px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ===== MembersList 전용: 카드 고정 + 내부 스크롤 ===== */
+.pageFullViewport{
+  /* [CHG] padding-bottom 제거, 높이를 정확히 뷰포트-탭바로 고정 */
+  height: calc(100vh - var(--app-bottom-bar) - env(safe-area-inset-bottom));
+  height: calc(100dvh - var(--app-bottom-bar) - env(safe-area-inset-bottom));
+  height: calc(100svh - var(--app-bottom-bar) - env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* 문서 스크롤 차단 -> 내부(리스트)만 스크롤 */
+}
+
 .header { display: none; }
 .header h2 { margin: 0 0 6px 0; font-size: 20px; }
 .caption { color: #6b7280; font-size: 12px; }
 
-.card { background:#fff; border-radius:12px; padding:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:12px; }
+/* 공통 카드 */
+.card {
+  background:#fff; border-radius:12px; padding:12px;
+  box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:12px;
+}
 .cardHeader { display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
 .cardHeader h3 { margin: 0; font-size: 16px; }
 
+/* 대회 선택 */
 .eventRow { display:grid; grid-template-columns: 1fr auto; gap: 10px; }
 .eventSelectWrap { width: 100%; }
-.eventSelect{ width:100%; height:40px; padding:0 12px; border:1px solid #d1d5db; border-radius:10px; background:#fff; font-size:14px; transition:border-color .15s, box-shadow .15s; }
-.eventSelect:focus, .eventSelect:focus-visible{ outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.20); }
+.eventSelect{
+  width:100%; height:40px; padding:0 12px;
+  border:1px solid #d1d5db; border-radius:10px; background:#fff; font-size:14px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.eventSelect:focus, .eventSelect:focus-visible{
+  outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.20);
+}
 .saveBtn{ height:40px; padding:0 14px; border:none; border-radius:10px; background:#2563eb; color:#fff; font-weight:700; box-shadow:0 2px 6px rgba(37,99,235,.25); }
-.eventNote { margin-top: 6px; font-size: 12px; color: #4b5563; }
-.saveStatus { margin-top: 6px; font-size: 12px; color: #6b7280; }
+.eventNote { margin-top:6px; font-size:12px; color:#4b5563; }
+.saveStatus { margin-top:6px; font-size:12px; color:#6b7280; }
 
+/* 프리셋 그리드 */
 .presetGrid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
-.presetBox{ width:100%; height:44px; border-radius:12px; border:1px solid #d1d5db; background:linear-gradient(180deg,#fafbff 0%, #f3f4f6 100%); font-size:14px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:background .18s,color .18s,border-color .18s, box-shadow .18s, transform .02s; box-shadow:0 1px 2px rgba(0,0,0,.06); display:flex; align-items:center; justify-content:center; }
+.presetBox{
+  width:100%; height:44px; border-radius:12px; border:1px solid #d1d5db;
+  background:linear-gradient(180deg,#fafbff 0%, #f3f4f6 100%);
+  font-size:14px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  transition:background .18s,color .18s,border-color .18s, box-shadow .18s, transform .02s;
+  box-shadow:0 1px 2px rgba(0,0,0,.06);
+  display:flex; align-items:center; justify-content:center;
+}
 .presetBox:hover { border-color:#c7d2fe; box-shadow:0 0 0 3px rgba(37,99,235,.10); }
-.presetBox:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(37,99,235,.25); }
-.presetBox:active { transform: scale(0.997); }
-.presetBoxActive{ background:linear-gradient(180deg,#2b6cf3 0%, #2563eb 100%); color:#fff; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.20), 0 6px 14px rgba(37,99,235,.25) inset; }
+.presetBox:focus-visible{ outline:none; box-shadow:0 0 0 3px rgba(37,99,235,.25); }
+.presetBox:active{ transform:scale(0.997); }
+.presetBoxActive{
+  background:linear-gradient(180deg,#2b6cf3 0%, #2563eb 100%);
+  color:#fff; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.20), 0 6px 14px rgba(37,99,235,.25) inset;
+}
 .presetBoxLabel{ display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.05; }
 .presetBoxLabel .l1{ font-size:13.5px; font-weight:800; }
 .presetBoxLabel .l2{ margin-top:2px; font-size:11.5px; font-weight:700; opacity:.9; }
 
-/* (공통 표 기본) */
-.table { width:100%; border-collapse: collapse; }
+/* 표 기본 */
+.table { width:100%; border-collapse:collapse; }
 .table th, .table td { border:1px solid #e5e7eb; padding:7px 8px; text-align:center; font-size:13px; }
 .table thead th { background:#f7f9fc; font-weight:700; }
 
-/* 라디오/스위치/그 외 …(생략 없이 유지) */
+/* 라디오 */
 .radioLabel{ position:relative; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; }
 .radioLabel input{ position:absolute; opacity:0; }
 .radioLabel span{ width:16px; height:16px; border-radius:50%; border:2px solid #9ca3af; display:inline-block; }
 .radioLabel input:checked + span{ border-color:#2563eb; box-shadow:inset 0 0 0 4px #2563eb; }
 
+/* 기타 */
 .optionRow{ display:flex; align-items:center; gap:10px; }
 .optionLabel{ font-size:14px; }
-
 .switch{ position:relative; display:inline-block; width:44px; height:24px; }
 .switch input{ display:none; }
 .slider{ position:absolute; inset:0; cursor:pointer; background:#e5e7eb; border-radius:999px; transition:.2s; }
 .slider:before{ position:absolute; content:""; width:18px; height:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; box-shadow:0 1px 2px rgba(0,0,0,.2); }
 .switch input:checked + .slider{ background:#2563eb; }
 .switch input:checked + .slider:before{ transform:translateX(20px); }
-
 .hint{ margin-top:8px; font-size:12px; color:#666; }
 
 .themeRow{ display:grid; grid-template-columns:120px 1fr; align-items:center; gap:10px; margin:8px 0; }
@@ -88,99 +133,81 @@
 
 .blueFocus:focus{ outline:none; border-color:#1d4ed8 !important; box-shadow:0 0 0 3px rgba(29,78,216,.25); }
 
-/* [유지] 타이틀(섹션 제목) */
+/* 섹션 타이틀 */
 .titleTight { margin-top: 0; }
-.sectionTitle{
-  margin:0;
-  text-align:center;
-  font-size:18px;
-  font-weight:800;
-  padding: var(--members-title-pad-y) 0 8px;
+.sectionTitle{ margin:0; text-align:left; font-size:18px; font-weight:800; padding: var(--members-title-pad-y) 0 8px; } /* 좌측 정렬 유지 */
+
+/* 카드/표 래퍼(설정 카드 공통) */
+.sectionBox{
+  background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+  padding:16px;
+  padding-left: var(--members-card-pad-x);
+  padding-right: var(--members-card-pad-x);
+  box-shadow:0 1px 2px rgba(0,0,0,.04);
+  flex: 1 1 auto; min-height: 0;
+  display:flex; flex-direction:column;
 }
 
-/* 표 래퍼 */
-.tableWrap{ overflow-x:auto; border:1px solid #e5e7eb; border-radius:12px; background:#fff; padding:8px; }
+/* 표 박스(헤더 + 목록 스크롤을 위한 플렉스 컨테이너) */
+.tableWrap{
+  overflow-x:auto; border:1px solid #e5e7eb; border-radius:12px;
+  background:#fff; padding:8px;
+  padding-left: var(--members-table-pad-x);
+  padding-right: var(--members-table-pad-x);
+  display:flex; flex-direction:column; flex: 1 1 auto; min-height:0; /* ★ 중요 */
+}
 .thead{ background:#f8fafc; }
 
-/* 기본 표 왼쪽 정렬(회원목록은 아래에서 덮어씀) */
+/* 표 셀(가독성) — 네 설정 유지 */
 .table th{ text-align:left; padding:10px 12px; font-weight:700; }
 .table td{ padding:10px 12px; border-top:1px solid #eef2f7; }
 .emptyCell{ color:#64748b; padding:14px 12px; }
 
-/* 버튼(공통) */
+/* 버튼 */
 .ghostBtn{ height:36px; padding:0 12px; border:1px solid #cfd7e6; border-radius:10px; background:#f9fbff; color:#334155; font-weight:600; font-size:14px; cursor:pointer; }
 .ghostBtnSm{ height:32px; padding:0 10px; border:1px solid #cfd7e6; border-radius:10px; background:#f9fbff; font-weight:600; font-size:13px; color:#334155; cursor:pointer; }
-.dangerGhostBtn{ height:22px; padding:0 8px; border:1px solid #ef4444; color:#ef4444; border-radius:8px; background:#fff; font-weight:500; cursor:pointer; white-space:nowrap; }
+.dangerGhostBtn{ height:22px; padding:0 8px; border:1px solid #ef4444; color:#ef4444; border-radius:8px; background:#fff; font-weight:500; white-space:nowrap; }
 
-/* 공용 라인/입력 */
+/* ───── 회원관리(3개 버튼) — 값 유지 ───── */
+.optionRowGrid{ display:grid; grid-template-columns:120px 1fr; align-items:center; gap:10px; margin-bottom:10px; }
+.controlBox{ width: var(--member-ctrl-width); display:flex; justify-content:flex-end; margin-right: var(--member-ctrl-gap-right); }
+.linkBtnFullLarge{ width:100%; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; height:32px; padding:0 var(--member-btn-pad-x); border: var(--member-btn-border) solid #cfd7e6; border-radius:10px; background:#f9fbff; color:#334155; font-weight:700; font-size:14px; }
+
+/* ───── 일괄/단일 토글 — 유지 ───── */
 .rowRight{ display:flex; justify-content:flex-end; }
 .rowFill{ display:flex; align-items:center; gap:8px; width:100%; }
 .inputBoxLarge{ flex:1; height:40px; border:1px solid #cfd7e6; border-radius:10px; padding:0 12px; font-size:14px; background:#fff; }
 .dimNote{ color:#6b7280; font-size:13px; }
 .eventCaption{ flex:1; }
+.bulkTopRow{ display:grid; grid-template-columns: 1fr auto; gap: 8px; }
+.searchInput{ height:40px; border:1px solid #cfd7e6; border-radius:10px; padding:0 12px; font-size:14px; width:100%; transition: border-color .15s, box-shadow .15s; }
+.searchInput:focus,.searchInput:focus-visible{ outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.18); }
+.searchBtn{ height:40px; padding:0 14px; border:1px solid #cfd7e6; border-radius:10px; background:#f9fbff; font-weight:700; }
+.bulkTable{ width:100%; border-collapse:collapse; }
+.bulkTable th, .bulkTable td{ border:1px solid #e5e7eb; padding:10px 12px; font-size:13px; }
+.bulkTable thead th{ background:#f7f9fc; text-align:center; white-space:nowrap; }
+.colEvent { width: var(--col-event); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.colId    { width: var(--col-id);    text-align:center; white-space:nowrap; }
+.colFlag  { width: var(--col-flag);  text-align:center; white-space:nowrap; }
+.eventCaptionInline{ margin-top: 6px; margin-left: 8px; white-space: nowrap; font-size: 14px; color: #334155; flex: 1; }
+.singleHelp{ white-space: nowrap; margin-left: 8px; align-self: center; font-size: 12.5px; }
 
-/* 회원 관리 카드 ──── 핵심: 카드=세로 플렉스, 중앙만 스크롤 */
-.sectionBox{
-  background:#fff;
-  border:1px solid #e5e7eb;
-  border-radius:12px;
-  padding:16px;
-  box-shadow:0 1px 2px rgba(0,0,0,.04);
-  display:flex;                /* [ADD] 카드 전체를 세로 플렉스로 */
-  flex-direction:column;
-}
+/* ───── 회원목록(헤더/하단 고정 + 내부 리스트만 스크롤) ───── */
+.mListScroll{ flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; margin-top: var(--members-title-gap); -webkit-overflow-scrolling: touch; }
+.mTable{ width:100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.mTable th, .mTable td{ padding: 4px 10px; line-height: 1.2; border: 1px solid #e5e7eb; }
 
-.mListScroll{
-  /* 가운데 영역만 스크롤 */
-  height: calc(100vh - var(--members-list-offset));
-  overflow-y: auto;
-  overflow-x: hidden;
-  margin-top: var(--members-title-gap);
-  -webkit-overflow-scrolling: touch;
-  min-height: 0;               /* flex 컨테이너 안에서 스크롤 보장 */
-}
+/* 헤더 고정: 두-테이블 방식 */
+.mTableHead thead{ position: static; background:#f7f9fc; box-shadow: 0 2px 0 rgba(0,0,0,.04); }
+.mTable thead{ position: sticky; top: 0; z-index: 5; background:#f7f9fc; }
+.mTable thead th{ text-align: center !important; padding: var(--members-head-pad-y) 10px; border-bottom: var(--members-head-bw) solid #e5e7eb; }
 
-/* 표 자체 설정(헤더는 sticky) */
-.mTable{
-  width:100%;
-  border-collapse: separate;   /* sticky 호환성 */
-  border-spacing: 0;
-  table-layout: fixed;
-}
-.mTable thead{
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background:#f7f9fc;
-  box-shadow: 0 2px 0 rgba(0,0,0,.04);
-}
-.mTable thead th{
-  text-align: center !important;
-  padding: var(--members-head-pad-y) 10px; /* [조절] 헤더 두께 */
-  border-bottom: var(--members-head-bw) solid #e5e7eb;
-}
-.mTable th, .mTable td{
-  padding: 4px 10px;
-  line-height: 1.2;
-  border: 1px solid #e5e7eb;
-}
+/* 헤더 하단 이중선 제거(첫 데이터행 상단 보더 제거) */
+.mTableBody tbody tr:first-child td{ border-top: 0 !important; }
 
-/* 하단 버튼바: 카드 안 ‘고정’ */
+/* 하단 버튼(섹션 바닥 고정) */
 .tableFooterRight{
-  display:flex;
-  justify-content:flex-end;
-  gap:8px;
-  margin-top: var(--members-footer-gap);
-  position: sticky;            /* 카드 안에서 고정 보장 */
-  bottom: 0;
-  background:#fff;
-  padding-top: 8px;
-  box-shadow: 0 -2px 0 rgba(0,0,0,.04);
+  display:flex; justify-content:flex-end; gap:8px;
+  padding-top: 8px; background:#fff;
+  margin-top: auto;  /* 플렉스 바닥 고정 */
 }
-
-/* 칼럼 폭 & 삭제 버튼 크기(수동 조절 포인트) */
-.mColEmail{ min-width:160px; white-space:nowrap; text-align:left; }
-.mColName{  width:70px;  min-width:72px; white-space:nowrap; text-align:center; }
-.mColDate{  width:100px; white-space:nowrap; text-align:center; }
-.mColCtrl{  width:48px;  min-width:48px;  white-space:nowrap; text-align:center; }
-.mDeleteBtn{ height:20px; padding:0 4px; font-size:10px; border-radius:8px; min-width:32px; }

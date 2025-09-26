@@ -390,7 +390,7 @@ export default function Settings() {
 
       {/* ⑥ 회원 관리 (바로가기) */}
       <section className={`${styles.section} ${styles.sectionBox}`}>
-        <h3 className={`${styles.sectionTitle} ${styles.titleTight}`}>회원 관리</h3>
+        <h3 className={`${styles.sectionTitle} ${styles.sectionTitleLeft}`}>회원 관리</h3>
 
         <div className={`${styles.optionRow} ${styles.optionRowGrid}`}>
           <div className={styles.optionLabel}>회원 전용 이벤트</div>
