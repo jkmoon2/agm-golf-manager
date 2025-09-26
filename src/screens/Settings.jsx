@@ -326,23 +326,33 @@ export default function Settings() {
         {theme.applyMode === 'global' ? (
           <div className={styles.themeRow}>
             <div className={styles.optionLabel}>프리셋(Global)</div>
+            {/* [FIX] 알파벳+설명 출력 */}
             <select className={styles.select} value={theme.presets.global} onChange={e=>setThemePreset('global', e.target.value)}>
-              {listPresets().map(p => <option key={p} value={p}>{p}</option>)}
+              {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
             </select>
           </div>
         ) : theme.applyMode === 'separate' ? (
           <>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Admin</div>
-              <select className={styles.select} value={theme.presets.admin} onChange={e=>setThemePreset('admin', e.target.value)}>{listPresets().map(p => <option key={p} value={p}>{p}</option>)}</select>
+              {/* [FIX] 알파벳+설명 출력 */}
+              <select className={styles.select} value={theme.presets.admin} onChange={e=>setThemePreset('admin', e.target.value)}>
+                {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
+              </select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Player</div>
-              <select className={styles.select} value={theme.presets.player} onChange={e=>setThemePreset('player', e.target.value)}>{listPresets().map(p => <option key={p} value={p}>{p}</option>)}</select>
+              {/* [FIX] 알파벳+설명 출력 */}
+              <select className={styles.select} value={theme.presets.player} onChange={e=>setThemePreset('player', e.target.value)}>
+                {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
+              </select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>PlayerOnly</div>
-              <select className={styles.select} value={theme.presets.playerOnly} onChange={e=>setThemePreset('playerOnly', e.target.value)}>{listPresets().map(p => <option key={p} value={p}>{p}</option>)}</select>
+              {/* [FIX] 알파벳+설명 출력 */}
+              <select className={styles.select} value={theme.presets.playerOnly} onChange={e=>setThemePreset('playerOnly', e.target.value)}>
+                {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
+              </select>
             </div>
           </>
         ) : null}
@@ -380,7 +390,7 @@ export default function Settings() {
 
       {/* ⑥ 회원 관리 (바로가기) */}
       <section className={`${styles.section} ${styles.sectionBox}`}>
-        <h3 className={`${styles.sectionTitle} ${styles.titleTight}`}>회원 관리</h3>
+        <h3 className={`${styles.sectionTitle} ${styles.sectionTitleLeft}`}>회원 관리</h3>
 
         <div className={`${styles.optionRow} ${styles.optionRowGrid}`}>
           <div className={styles.optionLabel}>회원 전용 이벤트</div>

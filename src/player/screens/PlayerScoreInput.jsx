@@ -1,11 +1,7 @@
 // /src/player/screens/PlayerScoreInput.jsx
 // 변경 요약
-// - [FIX] 점수 입력칸에서 ± 버튼을 제거하고, 입력칸만 남김(기존 UI 복귀)
-// - [ADD] 입력칸을 1초 이상 길게 누르면 자동으로 '−'(마이너스) 기호가 앞에 붙도록 Long-Press 제스처 추가
-//         (iOS의 숫자패드에 '-' 키가 없는 상황 보완)
-// - [FIX] 입력 type="text" + inputMode="decimal" + pattern 유지(안드로이드/아이폰 모두 안정적으로 '.' 가능)
-// - [ADD] 길게 누르는 동안 시스템 컨텍스트 메뉴가 뜨지 않도록 onContextMenu 방지
-// - 나머지 계산/합계/정렬/게이트/레이아웃 로직은 기존 그대로 유지
+// - [FIX] input pattern 정규식 오류 해결: "[0-9.+-]*" (하이픈을 끝에)
+// - [NOTE] 나머지(롱프레스 1초 → '-' 자동입력, 값 커밋 로직 등)는 보내주신 원본 그대로 유지
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -204,30 +200,24 @@ export default function PlayerScoreInput() {
   };
 
   const onChangeScore = (pid, val) => {
-    // [FIX] '.', '-' 허용 + 중간 상태 유지(iOS에서 깜빡임 방지)
     const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
     if (clean === '') persistScore(pid, '');
   };
   const onCommitScore = (pid) => persistScore(pid, draft[String(pid)]);
 
-  // ===== [ADD] Long Press 로 '-' 자동 입력 =====
-  const inputRefs = useRef({});              // 각 입력칸 ref
-  const holdMapRef = useRef({});             // { [pid]: { timer, x, y, fired } }
-  const LONG_PRESS_MS = 1000;                // 1초 이상 길게 눌렀을 때만 발동
-  const MOVE_CANCEL_PX = 10;                 // 손가락이 크게 움직이면 롱프레스 취소
+  // ===== Long Press 로 '-' 자동 입력 ===== (원본 유지)
+  const inputRefs = useRef({});
+  const holdMapRef = useRef({});
+  const LONG_PRESS_MS = 1000;
+  const MOVE_CANCEL_PX = 10;
 
   const ensureMap = (pid) => {
     const key = String(pid);
     if (!holdMapRef.current[key]) holdMapRef.current[key] = { timer: null, x: 0, y: 0, fired: false };
     return holdMapRef.current[key];
   };
-
   const startHold = (pid, e) => {
-    // iOS 컨텍스트 메뉴 방지
-    if (e && typeof e.preventDefault === 'function') {
-      // 입력 포커스는 유지해야 하므로 pointerdown의 기본동작은 막지 않음
-    }
     const m = ensureMap(pid);
     m.fired = false;
     m.x = (e && 'clientX' in e) ? e.clientX : 0;
@@ -238,16 +228,14 @@ export default function PlayerScoreInput() {
       setDraft((d) => {
         const key = String(pid);
         const cur = String(d[key] ?? '');
-        if (cur.startsWith('-')) return d; // 이미 음수면 그대로
+        if (cur.startsWith('-')) return d;
         const next = { ...d, [key]: cur ? `-${cur}` : '-' };
-        // 커서를 끝으로 이동 (시각적 부자연스러움 방지)
         requestAnimationFrame(() => {
           const el = inputRefs.current[key];
           if (el && typeof el.setSelectionRange === 'function') {
             const end = (next[key] || '').length;
             try { el.setSelectionRange(end, end); } catch {}
           }
-          // (선택) 진동 피드백
           try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
         });
         return next;
@@ -259,16 +247,13 @@ export default function PlayerScoreInput() {
     if (!m.timer) return;
     const dx = Math.abs((e.clientX ?? 0) - (m.x ?? 0));
     const dy = Math.abs((e.clientY ?? 0) - (m.y ?? 0));
-    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) {
-      clearTimeout(m.timer); m.timer = null;
-    }
+    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) { clearTimeout(m.timer); m.timer = null; }
   };
   const endHold = (pid) => {
     const m = ensureMap(pid);
     if (m.timer) { clearTimeout(m.timer); m.timer = null; }
   };
 
-  // 컨텍스트 메뉴(길게 눌렀을 때 뜨는 시스템 메뉴) 방지
   const preventContextMenu = (e) => { e.preventDefault(); };
 
   const totals = useMemo(() => {
@@ -333,12 +318,10 @@ export default function PlayerScoreInput() {
                       <span>{p.handicap}</span>
                     </td>
                     <td className={`${styles.td} ${styles.scoreTd}`}>
-                      {/* [FIX] 기존과 동일 UI(± 버튼 제거) + [ADD] Long-Press 제스처 */}
                       <input
-                        // 숫자 입력 호환(기존과 동일한 시각/레이아웃)
-                        type="text"                 // [FIX] Android/iOS 호환을 위해 text 유지
-                        inputMode="decimal"         // [FIX] iOS에서 소수점 표시
-                        pattern="[0-9.\\-+]*"
+                        type="text"
+                        inputMode="decimal"
+                        pattern="[0-9.+-]*"  // [FIX]
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="off"
@@ -348,16 +331,12 @@ export default function PlayerScoreInput() {
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
                         onBlur={() => onCommitScore(p.id)}
                         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-
-                        // [ADD] Long-Press 핸들러
                         onPointerDown={(e) => startHold(p.id, e)}
                         onPointerUp={() => endHold(p.id)}
                         onPointerCancel={() => endHold(p.id)}
                         onPointerLeave={() => endHold(p.id)}
                         onPointerMove={(e) => moveHold(p.id, e)}
-                        onContextMenu={preventContextMenu} // 시스템 메뉴 억제
-
-                        // 입력칸 ref (커서 위치 복구용)
+                        onContextMenu={preventContextMenu}
                         ref={(el) => {
                           if (el) inputRefs.current[key] = el;
                           else delete inputRefs.current[key];
