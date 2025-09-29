@@ -58,7 +58,7 @@ function orderByPair(list) {
       if (p2) {
         const pos = slot[0] ? 2 : 0;
         slot[pos] = p1;
-        slot[pos] + 1;
+        // [FIX-LINT] 불필요한 표현식 제거: slot[pos] + 1;
         slot[pos + 1] = p2;
         used.add(id1); used.add(asNum(p2.id));
       }
