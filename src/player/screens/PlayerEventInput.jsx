@@ -5,6 +5,7 @@
 // - ★MOD: draft와 서버값 동기화: 서버값 갱신됐고 로컬 수정중이 아니면 draft 동기화
 // - ★MOD: [DIRTY-GUARD] 서버 원본과 실제 값 비교해 dirty 판단(포커스만/선택만으론 활성화 금지)
 // - ★MOD: [EMPHASIS] 저장 버튼 활성화 시 약하게 강조
+// - [DIRTY-SCAN] 서버 스냅샷과 draft를 **실시간 재비교**하여 dirty를 정확히 산출(클릭만으론 활성화 X, 원복/삭제 시 비활성화)
 // - 기존 UI/레이아웃/함수명/보너스 팝업/계산 로직/스타일 등은 그대로 유지
 
 import React, { useMemo, useContext, useEffect, useState } from 'react';
@@ -248,16 +249,13 @@ export default function PlayerEventInput(){
     const person = { ...(slot.person || {}) };
     const prev = String(person[pid] ?? '');
     const next = String(value ?? '');
-    if (prev === next) { // [DIRTY-GUARD] 동일 문자열이면 무시
+    if (prev === next) {
       return;
     }
     person[pid] = next;
     slot.person = person; all[evId] = slot;
     setDraft(all);
-    // [DIRTY-GUARD] 서버 원본과 달라졌을 때만 dirty
-    const server = getServerSingle(evId, pid);
-    const nextNum = (next.trim()==='' ? null : (Number(next)));
-    setDirty(prevDirty => prevDirty || ((server ?? null) !== (Number.isFinite(nextNum) ? nextNum : null)));
+    // (dirty는 아래 [DIRTY-SCAN]에서 일괄 재계산)
   };
 
   // ── 수정 2: 누적 입력도 문자열 그대로 draft에 저장
@@ -271,21 +269,13 @@ export default function PlayerEventInput(){
     while (obj.values.length < atts) obj.values.push('');
     const prev = String(obj.values[idx] ?? '');
     const next = String(value ?? '');
-    if (prev === next) { // [DIRTY-GUARD]
+    if (prev === next) {
       return;
     }
     obj.values[idx] = next;
     person[pid]=obj; slot.person=person; all[evId]=slot;
     setDraft(all);
-    // [DIRTY-GUARD] 서버 배열과 비교
-    const baseArr = getServerAccum(evId, pid, atts); // 문자열 배열
-    const curArr  = [...obj.values].map(x => {
-      if (x === '' || x == null) return '';
-      const n = Number(x);
-      return Number.isFinite(n) ? String(n) : '';
-    });
-    const changed = curArr.length!==baseArr.length || curArr.some((v,i)=>v!==baseArr[i]);
-    setDirty(prevDirty => prevDirty || changed);
+    // (dirty는 아래 [DIRTY-SCAN]에서 일괄 재계산)
   };
 
   // ── 추가: onBlur 시 숫자로 정규화하여 draft에만 반영(빈 값은 삭제)
@@ -297,22 +287,12 @@ export default function PlayerEventInput(){
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
 
-    const before = person[pid];
     if (!v || Number.isNaN(num)) delete person[pid];
     else person[pid] = num;
 
-    // [DIRTY-GUARD] 서버 원본과 비교해서 실제 변화 없으면 dirty 유지
-    const server = getServerSingle(evId, pid); // number|null
-    const afterNum = (!v || Number.isNaN(num)) ? null : num;
-    const same = (server ?? null) === (afterNum ?? null);
-
-    // draft 반영
-    if (before === person[pid]) {
-      // draft 변화 없음
-    }
     slot.person = person; all[evId] = slot;
     setDraft(all);
-    if (!same) setDirty(true);
+    // (dirty는 아래 [DIRTY-SCAN]에서 일괄 재계산)
   };
 
   const finalizeAccum = (evId, pid, idx, raw, attemptsOverride) => {
@@ -331,18 +311,9 @@ export default function PlayerEventInput(){
     if (!obj.values.some(s => String(s).trim() !== '')) delete person[pid];
     else person[pid] = obj;
 
-    // [DIRTY-GUARD] 서버 원본과 비교
-    const baseArr = getServerAccum(evId, pid, atts);
-    const curArr  = (person[pid]?.values || []).map(x => {
-      if (x === '' || x == null) return '';
-      const n = Number(x);
-      return Number.isFinite(n) ? String(n) : '';
-    });
-    const changed = curArr.length!==baseArr.length || curArr.some((vv,i)=>vv!==baseArr[i]);
-
     slot.person = person; all[evId] = slot;
     setDraft(all);
-    if (changed) setDirty(true);
+    // (dirty는 아래 [DIRTY-SCAN]에서 일괄 재계산)
   };
 
   // 보너스 저장 (원본 유지, draft만 반영)
@@ -358,8 +329,8 @@ export default function PlayerEventInput(){
       while (arr.length < atts) arr.push('');
       const prev = String(arr[idxOrVal] ?? '');
       const next = String(value ?? '');
-      if (prev === next) { // [DIRTY-GUARD]
-        setDraft(prevAll => prevAll); // 변화 없음
+      if (prev === next) {
+        setDraft(prevAll => prevAll);
         return;
       }
       arr[idxOrVal] = next;
@@ -367,7 +338,7 @@ export default function PlayerEventInput(){
     } else {
       const prev = String(obj.bonus ?? '');
       const next = String(value ?? '');
-      if (prev === next) { // [DIRTY-GUARD]
+      if (prev === next) {
         setDraft(prevAll => prevAll);
         return;
       }
@@ -375,7 +346,7 @@ export default function PlayerEventInput(){
     }
     person[pid] = obj; slot.person = person; all[evId] = slot;
     setDraft(all);
-    setDirty(true); // 보너스는 입력 변경으로 간주
+    // (숫자 입력이 아니므로 dirty에는 영향 안 주도록 [DIRTY-SCAN]에서 숫자만 비교)
   };
 
   // ===== 팝업 폭 계산 (원본 유지) =====
@@ -468,6 +439,66 @@ export default function PlayerEventInput(){
       alert('저장 중 오류가 발생했습니다.');
     }
   };
+
+  // =========================
+  // [DIRTY-SCAN] 실제 숫자 변경 여부만으로 dirty 재계산
+  //  - 클릭/포커스 이동만으로는 false 유지
+  //  - 입력 → 원복/삭제 시 false 복귀
+  //  - 보너스 변경은 dirty에 포함하지 않음(요구사항 2번 반영)
+  // =========================
+  useEffect(() => {
+    const roomPids = new Set(roomMembers.filter(Boolean).map(p => String(p.id)));
+
+    const eq = (a, b) => a === b;
+    const toNumOrNull = (x) => {
+      if (x === '' || x == null) return null;
+      const n = Number(x);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const hasDiff = () => {
+      for (const ev of events) {
+        const evId = ev.id;
+        const isAccum = ev.inputMode === 'accumulate';
+        const attempts = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+
+        const dSlot = draft?.[evId]?.person || {};
+        const sSlot = inputsByEventServer?.[evId]?.person || {};
+
+        for (const pid of roomPids) {
+          if (isAccum) {
+            // 서버 기준 배열(문자열로 통일) 가져오기
+            const baseArr = getServerAccum(evId, pid, attempts); // ['','3','']
+            // 드래프트 배열 정규화
+            const dVals = (() => {
+              const v = dSlot?.[pid]?.values;
+              const arr = Array.isArray(v) ? [...v] : [];
+              while (arr.length < attempts) arr.push('');
+              return arr.map((x) => {
+                if (x === '' || x == null) return '';
+                const n = Number(x);
+                return Number.isFinite(n) ? String(n) : '';
+              });
+            })();
+
+            if (dVals.length !== baseArr.length) return true;
+            for (let i = 0; i < dVals.length; i += 1) {
+              if (!eq(dVals[i], baseArr[i])) return true;
+            }
+          } else {
+            const sNum = getServerSingle(evId, pid);         // number|null
+            const dRaw = dSlot?.[pid];                       // string|number|undefined
+            const dNum = toNumOrNull(dRaw);                  // number|null
+            if (!eq(sNum ?? null, dNum ?? null)) return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    setDirty(hasDiff());
+  }, [draft, inputsByEventServer, roomMembers, events]);
+  // =========================
 
   return (
     <div className={baseCss.page}>

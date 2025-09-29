@@ -10,8 +10,8 @@
   --members-footer-gap: 10px;
 
   /* (요청값 유지) */
-  --member-ctrl-width: 200px;   /* 버튼 3개 래퍼 폭 */
-  --member-ctrl-gap-right: 10px;
+  --member-ctrl-width: 180px;   /* 버튼 3개 래퍼 폭 */
+  --member-ctrl-gap-right: 4px;
   --member-btn-pad-x: 12px;
   --member-btn-border: 0.8px;
 
