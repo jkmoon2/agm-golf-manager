@@ -4,6 +4,7 @@
 // - ★MOD: onBlur 커밋 제거(입력 중에는 draft만 변경) + 저장 버튼 활성화 상태(isDirty) 표시
 // - ★MOD: draft ↔ 서버 동기화: 방 멤버/참가자 변경 시 초기값 세팅
 // - 소수/부호 입력 안정화: pattern="[0-9.+-]*"(하이픈은 문자셋 끝) 포함—기존 유지
+// - ★MOD: [EMPHASIS] 저장 버튼 활성 시 약하게 강조(톤 유지)
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -57,6 +58,7 @@ function orderByPair(list) {
       if (p2) {
         const pos = slot[0] ? 2 : 0;
         slot[pos] = p1;
+        slot[pos] + 1;
         slot[pos + 1] = p2;
         used.add(id1); used.add(asNum(p2.id));
       }
@@ -383,7 +385,11 @@ export default function PlayerScoreInput() {
           onClick={saveScoresDraft}
           disabled={!isDirty}
           aria-disabled={!isDirty}
-          style={!isDirty ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+          // [EMPHASIS] 활성 시만 살짝 강조
+          style={!isDirty
+            ? { opacity: 0.5, pointerEvents: 'none' }
+            : { boxShadow: '0 0 0 2px rgba(59,130,246,.35) inset', fontWeight: 600 }
+          }
         >
           저장
         </button>
