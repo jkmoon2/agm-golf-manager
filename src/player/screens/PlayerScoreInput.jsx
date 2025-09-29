@@ -1,7 +1,9 @@
 // /src/player/screens/PlayerScoreInput.jsx
-// 변경 요약
-// - [FIX] input pattern 정규식 오류 해결: "[0-9.+-]*" (하이픈을 끝에)
-// - [NOTE] 나머지(롱프레스 1초 → '-' 자동입력, 값 커밋 로직 등)는 보내주신 원본 그대로 유지
+// 변경 요약 (첨부 파일 기준 최소 수정)
+// - ★MOD: A안 반영 → '저장' 버튼으로만 커밋(현재 방만 반영, 기존 점수가 있으면 유지 = 운영자/관리자 우선)
+// - ★MOD: onBlur 커밋 제거(입력 중에는 draft만 변경) + 저장 버튼 활성화 상태(isDirty) 표시
+// - ★MOD: draft ↔ 서버 동기화: 방 멤버/참가자 변경 시 초기값 세팅
+// - 소수/부호 입력 안정화: pattern="[0-9.+-]*"(하이픈은 문자셋 끝) 포함—기존 유지
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -157,6 +159,7 @@ export default function PlayerScoreInput() {
     return rows;
   }, [orderedRoomPlayers]);
 
+  // ★MOD: A안 - draft 상태로만 입력 저장(저장 버튼 눌러야 커밋)
   const [draft, setDraft] = useState({});
   useEffect(() => {
     setDraft((prev) => {
@@ -172,41 +175,49 @@ export default function PlayerScoreInput() {
     });
   }, [orderedRoomPlayers]);
 
-  const persistScore = async (pid, valueStr) => {
+  // ★MOD: 저장 필요 여부
+  const isDirty = useMemo(() => {
+    return orderedRoomPlayers.some(p => {
+      const key  = String(p.id);
+      const base = (p.score == null || p.score === 0) ? '' : String(p.score);
+      return draft[key] !== undefined && draft[key] !== base;
+    });
+  }, [orderedRoomPlayers, draft]);
+
+  // ★MOD: 저장(관리자 우선, 현재 방만)
+  const saveScoresDraft = async () => {
     if (!eventId) return;
-    const newScore = toNumberOrNull(valueStr);
+    try{
+      const roomPids = new Set(orderedRoomPlayers.map(p => String(p.id)));
+      const base = Array.isArray(participants) ? participants : [];
+      const next = base.map(p => {
+        const key = String(p.id);
+        if (!roomPids.has(key)) return p; // 현재 방만
+        const raw = draft[key];
+        if (raw === undefined) return p;  // 변경 없음
+        const newScore = toNumberOrNull(raw);
+        // 관리자 우선: 기존 점수가 존재하면 유지
+        if (p.score != null && p.score !== 0) return p;
+        return { ...p, score: newScore };
+      });
 
-    const next = toSafeParticipants(participants).map((p) =>
-      String(p?.id) === String(pid) ? { ...p, score: newScore } : p
-    );
-
-    const payload = (function sanitize(v) {
-      if (Array.isArray(v)) return v.map(sanitize);
-      if (v && typeof v === 'object') {
-        const out = {};
-        for (const k of Object.keys(v)) {
-          const val = v[k];
-          if (val === undefined) continue;
-          if (typeof val === 'number' && Number.isNaN(val)) { out[k] = null; continue; }
-          out[k] = sanitize(val);
-        }
-        return out;
-      }
-      if (typeof v === 'number' && Number.isNaN(v)) return null;
-      return v;
-    })({ participants: next });
-
-    await setDoc(doc(db, 'events', eventId), payload, { merge: true });
+      // 안전 직렬화
+      const payload = JSON.parse(JSON.stringify({ participants: next }, (k, v) => (typeof v === 'function' ? undefined : v)));
+      await setDoc(doc(db, 'events', eventId), payload, { merge: true });
+      alert('저장되었습니다.');
+    }catch(e){
+      console.error('saveScoresDraft failed', e);
+      alert('저장 중 오류가 발생했습니다.');
+    }
   };
 
+  // 입력 핸들러 (draft만 갱신)
   const onChangeScore = (pid, val) => {
     const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
-    if (clean === '') persistScore(pid, '');
   };
-  const onCommitScore = (pid) => persistScore(pid, draft[String(pid)]);
 
-  // ===== Long Press 로 '-' 자동 입력 ===== (원본 유지)
+  // Long Press 로 '-' 자동 입력(기존 유지)
   const inputRefs = useRef({});
   const holdMapRef = useRef({});
   const LONG_PRESS_MS = 1000;
@@ -318,10 +329,11 @@ export default function PlayerScoreInput() {
                       <span>{p.handicap}</span>
                     </td>
                     <td className={`${styles.td} ${styles.scoreTd}`}>
+                      {/* [FIX] 하이픈을 문자셋 끝에: 모바일 IME 충돌 방지 */}
                       <input
                         type="text"
                         inputMode="decimal"
-                        pattern="[0-9.+-]*"  // [FIX]
+                        pattern="[0-9.+-]*"
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="off"
@@ -329,7 +341,7 @@ export default function PlayerScoreInput() {
                         className={styles.cellInput}
                         value={raw}
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
-                        onBlur={() => onCommitScore(p.id)}
+                        onBlur={() => {} /* ★MOD: 저장 버튼으로만 커밋 */}
                         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                         onPointerDown={(e) => startHold(p.id, e)}
                         onPointerUp={() => endHold(p.id)}
@@ -364,6 +376,18 @@ export default function PlayerScoreInput() {
 
       <div className={styles.footerNav}>
         <Link to={`/player/home/${eventId}/3`} className={`${styles.navBtn} ${styles.navPrev}`}>이전</Link>
+
+        {/* ★MOD: 저장 버튼(A안) */}
+        <button
+          className={`${styles.navBtn}`}
+          onClick={saveScoresDraft}
+          disabled={!isDirty}
+          aria-disabled={!isDirty}
+          style={!isDirty ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+        >
+          저장
+        </button>
+
         <Link
           to={nextDisabled ? '#' : `/player/home/${eventId}/5`}
           className={`${styles.navBtn} ${styles.navNext}`}

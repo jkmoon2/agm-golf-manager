@@ -1,15 +1,16 @@
 // /src/player/screens/PlayerEventInput.jsx
-// 변경 요약
-// - [FIX] 입력 중에는 문자열 그대로 저장 → 소수점/마지막 한 글자 삭제 정상 동작
-// - [ADD] onBlur에서만 숫자 정규화(빈 값은 삭제) → 계산 로직과 호환 유지
-// - [FIX] pattern을 양의 소수 전용으로 축소("[0-9.]*") → IME/모바일 호환 안정화
+// 변경 요약 (첨부 파일 기준 최소 수정)
+// - ★MOD: A안 반영 → '저장' 버튼으로만 커밋(현재 방만 반영, 기존 값이 있으면 유지 = 운영자/관리자 우선)
+// - ★MOD: 입력 중에는 문자열(raw) 유지 → onBlur 시 숫자 정규화하여 draft에만 반영(즉시 DB 저장 X)
+// - ★MOD: draft와 서버값 동기화: 서버값 갱신됐고 로컬 수정중이 아니면 draft 동기화
+// - 기존 UI/레이아웃/함수명/보너스 팝업/계산 로직/스타일 등은 그대로 유지
 
 import React, { useMemo, useContext, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 function normalizeGate(raw){
@@ -209,21 +210,31 @@ export default function PlayerEventInput(){
     return orderSlotsByPairs(inRoom, participants);
   }, [participants, roomIdx]);
 
-  const inputsByEvent = eventData?.eventInputs || {};
+  const inputsByEventServer = eventData?.eventInputs || {};
 
-  // ── 수정 1: 입력 중에는 문자열 그대로 저장 ───────────────────────────────
+  // ★MOD: A안 드래프트 상태 추가(입력 중에는 로컬만 갱신, 저장 버튼으로 커밋)
+  const [draft, setDraft] = useState(() => inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    if (!dirty) setDraft(inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
+  }, [inputsByEventServer, dirty]);
+  const inputsByEvent = draft || {};
+
+  // ── 수정 1: 입력 중에는 문자열 그대로 draft에 저장 (DB 즉시 저장 X)
   const patchValue = (evId, pid, value) => {
-    const all  = { ...(eventData?.eventInputs || {}) };
+    // ★MOD: updateEventImmediate → draft 반영
+    const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
     person[pid] = String(value ?? '');
     slot.person = person; all[evId] = slot;
-    updateEventImmediate({ eventInputs: all }, false);
+    setDraft(all); setDirty(true);
   };
 
-  // ── 수정 2: 누적 입력도 문자열 그대로 저장 ───────────────────────────────
+  // ── 수정 2: 누적 입력도 문자열 그대로 draft에 저장
   const patchAccum = (evId, pid, idx, value, attemptsOverride) => {
-    const all  = { ...(eventData?.eventInputs || {}) };
+    // ★MOD: updateEventImmediate → draft 반영
+    const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
     const obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
@@ -232,26 +243,26 @@ export default function PlayerEventInput(){
     while (obj.values.length < atts) obj.values.push('');
     obj.values[idx] = String(value ?? '');
     person[pid]=obj; slot.person=person; all[evId]=slot;
-    updateEventImmediate({ eventInputs: all }, false);
+    setDraft(all); setDirty(true);
   };
 
-  // ── 추가: 포커스 해제 시 숫자로 정규화(빈값은 삭제) ────────────────────────
+  // ── 추가: onBlur 시 숫자로 정규화하여 draft에만 반영(빈 값은 삭제)
   const finalizeValue = (evId, pid, raw) => {
     const v = String(raw ?? '').trim();
     const num = v === '' ? NaN : Number(v);
-    const all  = { ...(eventData?.eventInputs || {}) };
+    const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
     if (!v || Number.isNaN(num)) delete person[pid];
     else person[pid] = num;
     slot.person = person; all[evId] = slot;
-    updateEventImmediate({ eventInputs: all }, false);
+    setDraft(all); setDirty(true);
   };
 
   const finalizeAccum = (evId, pid, idx, raw, attemptsOverride) => {
     const v = String(raw ?? '').trim();
     const num = v === '' ? NaN : Number(v);
-    const all  = { ...(eventData?.eventInputs || {}) };
+    const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
     const obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
@@ -262,12 +273,12 @@ export default function PlayerEventInput(){
     if (!obj.values.some(s => String(s).trim() !== '')) delete person[pid];
     else person[pid] = obj;
     slot.person = person; all[evId] = slot;
-    updateEventImmediate({ eventInputs: all }, false);
+    setDraft(all); setDirty(true);
   };
 
-  // 보너스 저장 (원본 유지)
+  // 보너스 저장 (원본 유지, draft만 반영)
   const patchBonus = (evId, pid, idxOrVal, value, isAccum, attemptsOverride) => {
-    const all = { ...(eventData?.eventInputs || {}) };
+    const all = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
     const obj = person[pid] && typeof person[pid]==='object'
@@ -282,7 +293,7 @@ export default function PlayerEventInput(){
       obj.bonus = value || '';
     }
     person[pid] = obj; slot.person = person; all[evId] = slot;
-    updateEventImmediate({ eventInputs: all }, false);
+    setDraft(all); setDirty(true);
   };
 
   // ===== 팝업 폭 계산 (원본 유지) =====
@@ -324,6 +335,57 @@ export default function PlayerEventInput(){
   };
   const closeBonusPopup = () => setBonusPopup({ open:false, x:0, y:0, evId:null, pid:null, idx:0, attempts:0, w:136 });
   useEffect(()=>{ const onDoc=()=>setBonusPopup(p=>(p.open?{...p,open:false}:p)); document.addEventListener('click',onDoc); return()=>document.removeEventListener('click',onDoc); },[]);
+
+  // ★MOD: 저장(관리자 우선, 현재 방만 반영)
+  const isEmpty = (v) => {
+    if (v == null) return true;
+    if (typeof v === 'string') return v.trim()==='';
+    if (typeof v === 'object'){
+      if (Array.isArray(v.values)) return !v.values.some(s=>String(s).trim()!=='');
+      return Object.keys(v).length===0;
+    }
+    return false;
+  };
+
+  const saveDraft = async () => {
+    try{
+      const base = inputsByEventServer || {};
+      const src  = draft || {};
+      const roomPids = new Set(roomMembers.filter(Boolean).map(p=>String(p.id)));
+      const merged = { ...base };
+
+      Object.entries(src).forEach(([evId, slot])=>{
+        const sPerson = slot?.person || {};
+        if (!merged[evId]) merged[evId] = {};
+        const mSlot = { ...(merged[evId]||{}) };
+        const mPerson = { ...(mSlot.person||{}) };
+
+        Object.entries(sPerson).forEach(([pid, val])=>{
+          if (!roomPids.has(String(pid))) return; // 현재 방만
+          const cur = mPerson[pid];
+          // 관리자(기존 값) 우선: 기존 값이 비어 있지 않으면 유지
+          if (!isEmpty(cur)) return;
+
+          if (isEmpty(val)) delete mPerson[pid];
+          else mPerson[pid] = val;
+        });
+
+        mSlot.person = mPerson;
+        merged[evId] = mSlot;
+      });
+
+      if (typeof updateEventImmediate === 'function') {
+        await updateEventImmediate({ eventInputs: merged }, false);
+      } else {
+        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
+      }
+      setDirty(false);
+      alert('저장되었습니다.');
+    }catch(e){
+      console.error('saveDraft error', e);
+      alert('저장 중 오류가 발생했습니다.');
+    }
+  };
 
   return (
     <div className={baseCss.page}>
@@ -380,13 +442,13 @@ export default function PlayerEventInput(){
                               <input
                                 type="text"
                                 inputMode="decimal"
-                                pattern="[0-9.]*"   // [FIX] 양의 정수/소수만
+                                pattern="[0-9.]*"   // 양의 정수/소수만
                                 autoComplete="off"
                                 autoCorrect="off"
                                 autoCapitalize="off"
                                 spellCheck={false}
                                 className={tCss.cellInput}
-                                value={p ? (eventData?.eventInputs?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''}
+                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''}
                                 onChange={e=> p && patchAccum(ev.id, p.id, i, e.target.value, attempts)}
                                 onBlur={e=> p && finalizeAccum(ev.id, p.id, i, e.target.value, attempts)}
                                 data-focus-evid={ev.id}
@@ -403,13 +465,13 @@ export default function PlayerEventInput(){
                             <input
                               type="text"
                               inputMode="decimal"
-                              pattern="[0-9.]*"   // [FIX] 양의 정수/소수만
+                              pattern="[0-9.]*"   // 양의 정수/소수만
                               autoComplete="off"
                               autoCorrect="off"
                               autoCapitalize="off"
                               spellCheck={false}
                               className={tCss.cellInput}
-                              value={p ? (eventData?.eventInputs?.[ev.id]?.person?.[p.id] ?? '') : ''}
+                              value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '') : ''}
                               onChange={(e)=> p && patchValue(ev.id, p.id, e.target.value)}
                               onBlur={(e)=> p && finalizeValue(ev.id, p.id, e.target.value)}
                               data-focus-evid={ev.id}
@@ -470,8 +532,18 @@ export default function PlayerEventInput(){
           );
         })()}
 
+        {/* ★MOD: 하단 네비게이션 + 저장 버튼(A안) */}
         <div className={baseCss.footerNav}>
           <button className={`${baseCss.navBtn} ${baseCss.navPrev}`} onClick={()=>nav(`/player/home/${eventId}/2`)}>← 이전</button>
+          <button
+            className={`${baseCss.navBtn}`}
+            onClick={saveDraft}
+            disabled={!dirty}
+            aria-disabled={!dirty}
+            style={!dirty ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+          >
+            저장
+          </button>
           <button
             className={`${baseCss.navBtn} ${baseCss.navNext}`}
             onClick={()=>{ if (!nextDisabled) nav(`/player/home/${eventId}/4`); }}

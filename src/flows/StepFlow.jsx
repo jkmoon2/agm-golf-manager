@@ -1,4 +1,4 @@
-// /src/flows/StepFlow.jsx
+// src/flows/StepFlow.jsx
 
 import React, { useState, createContext, useEffect, useContext } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -17,6 +17,29 @@ import Step8    from '../screens/Step8';
 
 export const StepContext = createContext();
 
+// ---------- [추가] 얕은 비교 헬퍼 : 실제 변경이 있을 때만 setState ----------
+const shallowEqualParticipants = (a = [], b = []) => {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i], y = b[i];
+    if (!y) return false;
+    if (
+      x.id       !== y.id       ||
+      x.group    !== y.group    ||
+      x.nickname !== y.nickname ||
+      x.handicap !== y.handicap ||
+      x.score    !== y.score    ||
+      x.room     !== y.room     ||
+      x.partner  !== y.partner  ||
+      x.selected !== y.selected
+    ) return false;
+  }
+  return true;
+};
+// ---------------------------------------------------------------------------
+
 export default function StepFlow() {
   const { eventId, eventData, updateEvent, updateEventImmediate } = useContext(EventContext);
   const { step }    = useParams();
@@ -34,22 +57,50 @@ export default function StepFlow() {
   const [roomNames, setRoomNames]       = useState(Array(4).fill(''));
   const [uploadMethod, setUploadMethod] = useState('');
   const [participants, setParticipants] = useState([]);
+  // ✅ 날짜 필드 동기화 추가(기존 유지)
   const [dateStart, setDateStart]       = useState('');
   const [dateEnd, setDateEnd]           = useState('');
 
+  // ---------- [보완] eventData가 변경될 때 "실제로 달라졌을 때만" setState ----------
   useEffect(() => {
     if (!eventData) return;
-    setMode(eventData.mode);
-    setTitle(eventData.title);
-    setRoomCount(eventData.roomCount);
-    setRoomNames(eventData.roomNames);
-    setUploadMethod(eventData.uploadMethod);
-    setParticipants(eventData.participants);
-    setDateStart(eventData.dateStart || '');
-    setDateEnd(eventData.dateEnd || '');
-  }, [eventData]);
 
-  // 저장 헬퍼 (기존 유지) — 서버에 즉시 머지 저장
+    // mode
+    if (mode !== eventData.mode) setMode(eventData.mode);
+
+    // title
+    if (title !== eventData.title) setTitle(eventData.title);
+
+    // roomCount
+    const nextRoomCount = eventData.roomCount ?? 4;
+    if (roomCount !== nextRoomCount) setRoomCount(nextRoomCount);
+
+    // roomNames
+    const nextRoomNames = eventData.roomNames || Array(nextRoomCount).fill('');
+    if ((roomNames || []).join('|') !== (nextRoomNames || []).join('|')) {
+      setRoomNames(nextRoomNames);
+    }
+
+    // uploadMethod
+    if (uploadMethod !== eventData.uploadMethod) setUploadMethod(eventData.uploadMethod);
+
+    // participants (얕은 비교)
+    const nextParticipants = eventData.participants || [];
+    if (!shallowEqualParticipants(participants, nextParticipants)) {
+      setParticipants(nextParticipants);
+    }
+
+    // dates
+    const nextStart = eventData.dateStart || '';
+    const nextEnd   = eventData.dateEnd   || '';
+    if (dateStart !== nextStart) setDateStart(nextStart);
+    if (dateEnd   !== nextEnd)   setDateEnd(nextEnd);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventData]); // 의존성은 기존과 동일하게 eventData 하나로 유지
+  // ---------------------------------------------------------------------------
+
+  // 저장 헬퍼: 함수 값을 제거하고 순수 JSON만 전달
+  // ★ patch-start: make save async and await remote write to ensure persistence before route changes
   const save = async (updates) => {
     const clean = {};
     Object.entries(updates).forEach(([key, value]) => {
@@ -67,6 +118,7 @@ export default function StepFlow() {
     });
     await (updateEventImmediate ? updateEventImmediate(clean) : updateEvent(clean));
   };
+  // ★ patch-end
 
   // 전체 초기화 (현재 mode 유지)
   const resetAll = () => {
@@ -92,21 +144,22 @@ export default function StepFlow() {
     navigate('/admin/home/0', { replace: true });
   };
 
+  // STEP 네비게이션
   const curr       = Number(step) || 1;
   const strokeFlow = [1,2,3,4,5,6];
   const agmFlow    = [1,2,3,4,7,8];
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
 
-  // [CRITICAL-FIX] participants를 여기서 저장하지 않음 (동시 편집 덮어쓰기 방지)
   const goNext = () => {
-    save({ mode, title, roomCount, roomNames, uploadMethod, dateStart, dateEnd }); // [FIX]
+    // ✅ 날짜 포함 저장
+    save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
   };
 
   const goPrev = () => {
-    save({ mode, title, roomCount, roomNames, uploadMethod, dateStart, dateEnd }); // [FIX]
+    save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
@@ -114,8 +167,17 @@ export default function StepFlow() {
 
   const setStep = n => navigate(`/admin/home/${n}`);
 
-  const changeMode  = newMode => { setMode(newMode); save({ mode: newMode }); };
-  const changeTitle = newTitle => { setTitle(newTitle); save({ title: newTitle }); };
+  // 모드 변경 & 저장
+  const changeMode  = newMode => {
+    setMode(newMode);
+    save({ mode: newMode });
+  };
+
+  // 대회명 변경 & 저장
+  const changeTitle = newTitle => {
+    setTitle(newTitle);
+    save({ title: newTitle });
+  };
 
   // 파일 업로드 처리 (Step4 등)
   const handleFile = async e => {
@@ -140,6 +202,7 @@ export default function StepFlow() {
     save({ participants: data });
   };
 
+  // Step5: 수동 초기화
   const initManual = () => {
     const data = Array.from({ length: roomCount * 4 }, (_, idx) => ({
       id:       idx,
@@ -156,7 +219,7 @@ export default function StepFlow() {
     save({ participants: data });
   };
 
-  // AGM 포볼 관련 (기존 유지)
+  // 🔹 추가: 두 사람을 **한 번의 저장으로** 같은 방/상호 파트너로 확정하는 헬퍼
   const assignPairToRoom = (id1, id2, roomNo) => {
     updateParticipantsBulkNow([
       { id: id1, fields: { room: roomNo, partner: id2 } },
@@ -164,6 +227,7 @@ export default function StepFlow() {
     ]);
   };
 
+  // Step7: AGM 수동 할당
   const handleAgmManualAssign = async (id) => {
     let ps = [...participants];
     const half = ps.length / 2;
@@ -179,19 +243,25 @@ export default function StepFlow() {
           .filter(r => (countByRoom[r] || 0) < 2);
         roomNo = candidates[Math.floor(Math.random() * candidates.length)];
       }
+      // 우선 1조 본인 방만 확정(파트너는 아직)
       ps = ps.map(p => p.id === id ? { ...p, room: roomNo } : p);
       const pool2 = ps.filter(p => p.id >= half && p.room == null);
-      partner = pool2.length ? pool2[Math.floor(Math.random() * pool2.length)] : null;
+      partner = pool2.length
+        ? pool2[Math.floor(Math.random() * pool2.length)]
+        : null;
+      // ✅ 변경점(최소): 파트너가 결정되면 "한 번의 저장"으로 두 사람을 동시에 확정
       if (partner) {
         assignPairToRoom(id, partner.id, roomNo);
         return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
       }
     }
+    // 파트너가 없었을 때만 기존 저장 유지
     setParticipants(ps);
     await save({ participants: ps });
     return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
   };
 
+  // Step7: AGM 수동 할당 취소
   const handleAgmCancel = async (id) => {
     let ps = [...participants];
     const target = ps.find(p => p.id === id);
@@ -206,11 +276,14 @@ export default function StepFlow() {
     await save({ participants: ps });
   };
 
+  // Step8: AGM 자동 할당
   const handleAgmAutoAssign = async () => {
     let ps = [...participants];
     const half = ps.length / 2;
     const roomsArr = Array.from({ length: roomCount }, (_, i) => i+1);
-    let pool1 = shuffle(ps.filter(p => p.id < half && p.room == null).map(p => p.id));
+
+    // 1조(그룹1) 방 채우기
+    let pool1 = ps.filter(p => p.id < half && p.room == null).map(p => p.id);
     roomsArr.forEach(roomNo => {
       const g1 = ps.filter(p => p.id < half && p.room === roomNo);
       for (let i = 0; i < 2 - g1.length && pool1.length; i++) {
@@ -221,6 +294,8 @@ export default function StepFlow() {
         );
       }
     });
+
+    // 파트너 매칭
     roomsArr.forEach(roomNo => {
       const freeG1 = ps.filter(p => p.id < half && p.room === roomNo && p.partner == null);
       freeG1.forEach(p1 => {
@@ -234,6 +309,7 @@ export default function StepFlow() {
         });
       });
     });
+
     setParticipants(ps);
     const cleanList = ps.map(p => ({
       id: p.id, group: p.group, nickname: p.nickname, handicap: p.handicap,
@@ -242,13 +318,14 @@ export default function StepFlow() {
     await save({ participants: cleanList });
   };
 
+  // Step8: AGM 리셋
   const handleAgmReset = async () => {
     const ps = participants.map(p => ({ ...p, room: null, partner: null }));
     setParticipants(ps);
     await save({ participants: ps });
   };
 
-  // STEP5 (스트로크/포볼 공통) 실시간 저장용 보완 함수 (기존 유지)
+  // STEP5 실시간 저장용(기존 유지)
   const updateParticipantNow = async (id, fields) => {
     let next;
     setParticipants(prev => (next = prev.map(p => (p.id === id ? { ...p, ...fields } : p))));
@@ -278,6 +355,7 @@ export default function StepFlow() {
     resetAll, handleFile, initManual,
     updateParticipant:      updateParticipantNow,
     updateParticipantsBulk: updateParticipantsBulkNow,
+    // 날짜 state도 노출
     dateStart, setDateStart,
     dateEnd,   setDateEnd,
   };

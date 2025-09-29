@@ -1,6 +1,6 @@
 // /src/screens/Step7.jsx
 
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useRef } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
 
@@ -18,11 +18,14 @@ export default function Step7() {
     goPrev,
     goNext
   } = useContext(StepContext);
+
   const [loadingId, setLoadingId] = useState(null);
 
-  // [ADD] 점수 입력 드래프트 상태
+  // [ADD] 입력 드래프트 + 롱프레스
   const [scoreDraft, setScoreDraft] = useState({});
+  const pressTimers = useRef({});
   const isPartialNumber = (s) => /^-?\d*\.?\d*$/.test(s);
+
   const handleScoreInputChange = (id, raw) => {
     if (!isPartialNumber(raw)) return;
     setScoreDraft(d => ({ ...d, [id]: raw }));
@@ -33,8 +36,23 @@ export default function Step7() {
   const handleScoreBlur = (id) => {
     const raw = scoreDraft[id];
     if (raw === undefined) return;
-    if (raw === '' || raw === '-' || raw === '.' || raw === '-.') onScoreChange(id, null);
+    if (raw === '' || raw === '-' || raw === '.' || raw === '-.')
+      onScoreChange(id, null);
     setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
+  };
+
+  // 롱프레스 1초 → '-' 삽입
+  const startLongPress = (id, current) => {
+    try { if (pressTimers.current[id]) clearTimeout(pressTimers.current[id]); } catch {}
+    pressTimers.current[id] = setTimeout(() => {
+      const cur = String(current ?? '');
+      const next = cur.startsWith('-') ? cur : (cur ? '-' + cur : '-');
+      handleScoreInputChange(id, next);
+    }, 1000);
+  };
+  const cancelLongPress = (id) => {
+    try { if (pressTimers.current[id]) clearTimeout(pressTimers.current[id]); } catch {}
+    pressTimers.current[id] = null;
   };
 
   const isCompleted = id => {
@@ -42,32 +60,25 @@ export default function Step7() {
     return !!(me && me.room != null && me.partner != null);
   };
 
-  const handleManualClick = id => {
+  const handleManualClick = async (id) => {
     if (isCompleted(id)) return;
     setLoadingId(id);
-    const { roomNo, nickname, partnerNickname } = onManualAssign(id);
+    const res = await onManualAssign(id);
+    const { roomNo, nickname, partnerNickname } = res || {};
     setTimeout(() => {
-      const label = roomNames[roomNo - 1]?.trim() || `${roomNo}번 방`;
-      alert(
-        `${nickname}님은 ${label}에 배정되었습니다.\n` +
-        `팀원을 선택하려면 확인을 눌러주세요.`
-      );
-      setLoadingId(id);
-      setTimeout(() => {
-        if (partnerNickname) {
-          alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
-        }
-        setLoadingId(null);
-      }, 900);
-    }, 900);
+      const label = roomNames[(roomNo ?? 0) - 1]?.trim() || (roomNo ? `${roomNo}번 방` : '');
+      if (roomNo && nickname) {
+        alert(`${nickname}님은 ${label}에 배정되었습니다.`);
+        if (partnerNickname) alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+      }
+      setLoadingId(null);
+    }, 300);
   };
 
-  const handleCancelClick = id => {
+  const handleCancelClick = (id) => {
     const me = participants.find(p => p.id === id);
     onCancel(id);
-    if (me) {
-      alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
-    }
+    if (me) alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
   };
 
   const handleAutoClick = () => { onAutoAssign(); };
@@ -93,7 +104,7 @@ export default function Step7() {
           return (
             <div key={p.id} className={styles.participantRow}>
               <div className={`${styles.cell} ${styles.group}`}>
-                <input type="text" value={isGroup1 ? '1조' : '2조'} disabled />
+                <input type="text" value={`${p.group}조`} disabled />
               </div>
               <div className={`${styles.cell} ${styles.nickname}`}>
                 <input type="text" value={p.nickname} disabled />
@@ -102,7 +113,6 @@ export default function Step7() {
                 <input type="text" value={p.handicap} disabled />
               </div>
 
-              {/* [FIX] 숫자 입력: text + inputMode + draft */}
               <div className={`${styles.cell} ${styles.score}`}>
                 <input
                   type="text"
@@ -112,6 +122,11 @@ export default function Step7() {
                   value={scoreValue}
                   onChange={e => handleScoreInputChange(p.id, e.target.value)}
                   onBlur={() => handleScoreBlur(p.id)}
+                  onMouseDown={() => startLongPress(p.id, scoreValue)}
+                  onTouchStart={() => startLongPress(p.id, scoreValue)}
+                  onMouseUp={() => cancelLongPress(p.id)}
+                  onMouseLeave={() => cancelLongPress(p.id)}
+                  onTouchEnd={() => cancelLongPress(p.id)}
                 />
               </div>
 
