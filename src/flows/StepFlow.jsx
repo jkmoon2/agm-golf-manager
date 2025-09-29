@@ -99,19 +99,56 @@ export default function StepFlow() {
   }, [eventData]); // 의존성은 기존과 동일하게 eventData 하나로 유지
   // ---------------------------------------------------------------------------
 
+  // [COMPAT] Player/STEP8이 읽는 스키마로 동시 저장(dual write)
+  const compatParticipant = (p) => ({
+    ...p,
+    roomNumber: p.room ?? null,          // Player/STEP8 호환
+    teammateId: p.partner ?? null,       // Player/STEP8 호환
+    teammate:   p.partner ?? null        // 혹시 teammate 키를 쓰는 코드 대비
+  });
+  const buildRoomTable = (list=[]) => {
+    // 방 번호 -> 참가자 id 배열(최대 4명) 예시 테이블
+    const table = {};
+    list.forEach(p => {
+      const r = p.room ?? null;
+      if (r == null) return;
+      if (!table[r]) table[r] = [];
+      table[r].push(p.id);
+    });
+    return table;
+  };
+  // [SCORE_SYNC] 방별 점수 배열(집계용 보조 필드, 안 보면 무시됨)
+  const buildRoomScores = (list=[]) => {
+    const scoreByRoom = {};
+    list.forEach(p => {
+      const r = p.room ?? null;
+      if (r == null) return;
+      if (!scoreByRoom[r]) scoreByRoom[r] = [];
+      const v = Number(p.score);
+      scoreByRoom[r].push(Number.isFinite(v) ? v : 0);
+    });
+    return scoreByRoom;
+  };
+
   // 저장 헬퍼: 함수 값을 제거하고 순수 JSON만 전달
   // ★ patch-start: make save async and await remote write to ensure persistence before route changes
   const save = async (updates) => {
     const clean = {};
     Object.entries(updates).forEach(([key, value]) => {
       if (key === 'participants' && Array.isArray(value)) {
-        clean[key] = value.map(item => {
-          const obj = {};
+        // [COMPAT] participants를 호환형으로 변환해서 저장
+        const compat = value.map(item => {
+          const base = {};
           Object.entries(item).forEach(([k, v]) => {
-            if (typeof v !== 'function') obj[k] = v;
+            if (typeof v !== 'function') base[k] = v;
           });
-          return obj;
+          return compatParticipant(base);
         });
+        clean[key] = compat;
+        // [COMPAT] 참고용 roomTable도 같이 저장(읽지 않으면 무시됨)
+        clean.roomTable   = buildRoomTable(compat);
+        // [SCORE_SYNC] 참고용 방별 점수도 같이 저장(읽지 않으면 무시됨)
+        clean.scoreByRoom = buildRoomScores(compat);
       } else if (typeof value !== 'function') {
         clean[key] = value;
       }
@@ -219,6 +256,18 @@ export default function StepFlow() {
     save({ participants: data });
   };
 
+  // [ADD2] 그룹 판정 헬퍼: group 필드 우선, 없으면 id 홀/짝으로 보조
+  const isGroup1 = (p) => {
+    const g = Number(p?.group);
+    if (Number.isFinite(g)) return (g % 2) === 1; // 1,3,5... => 1조/리더
+    return (Number(p?.id) % 2) === 1;
+  };
+  const isGroup2 = (p) => {
+    const g = Number(p?.group);
+    if (Number.isFinite(g)) return (g % 2) === 0; // 2,4,6... => 2조/파트너
+    return (Number(p?.id) % 2) === 0;
+  };
+
   // 🔹 추가: 두 사람을 **한 번의 저장으로** 같은 방/상호 파트너로 확정하는 헬퍼
   const assignPairToRoom = (id1, id2, roomNo) => {
     updateParticipantsBulkNow([
@@ -230,32 +279,41 @@ export default function StepFlow() {
   // Step7: AGM 수동 할당
   const handleAgmManualAssign = async (id) => {
     let ps = [...participants];
-    const half = ps.length / 2;
     let roomNo, target, partner;
-    if (id < half) {
-      target = ps.find(p => p.id === id);
-      roomNo = target.room;
-      if (roomNo == null) {
-        const countByRoom = ps
-          .filter(p => p.id < half && p.room != null)
-          .reduce((acc, p) => { acc[p.room] = (acc[p.room]||0) + 1; return acc; }, {});
-        const candidates = Array.from({ length: roomCount }, (_, i) => i+1)
-          .filter(r => (countByRoom[r] || 0) < 2);
-        roomNo = candidates[Math.floor(Math.random() * candidates.length)];
-      }
-      // 우선 1조 본인 방만 확정(파트너는 아직)
-      ps = ps.map(p => p.id === id ? { ...p, room: roomNo } : p);
-      const pool2 = ps.filter(p => p.id >= half && p.room == null);
-      partner = pool2.length
-        ? pool2[Math.floor(Math.random() * pool2.length)]
-        : null;
-      // ✅ 변경점(최소): 파트너가 결정되면 "한 번의 저장"으로 두 사람을 동시에 확정
-      if (partner) {
-        assignPairToRoom(id, partner.id, roomNo);
-        return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
-      }
+
+    target = ps.find(p => p.id === id);
+    if (!target) return { roomNo: null, nickname: '', partnerNickname: null };
+
+    // [ADD2] 그룹1(리더)만 버튼이 노출되도록 UI가 걸러주지만, 로직도 그룹으로 판정
+    if (!isGroup1(target)) {
+      // 그룹2에서는 아무 것도 하지 않음(안전장치)
+      return { roomNo: target.room ?? null, nickname: target?.nickname || '', partnerNickname: target?.partner ? (ps.find(p=>p.id===target.partner)?.nickname || null) : null };
     }
-    // 파트너가 없었을 때만 기존 저장 유지
+
+    roomNo = target.room;
+    if (roomNo == null) {
+      // 같은 그룹1이 한 방에 최대 2명
+      const countByRoom = ps
+        .filter(p => isGroup1(p) && p.room != null)
+        .reduce((acc, p) => { acc[p.room] = (acc[p.room]||0) + 1; return acc; }, {});
+      const candidates = Array.from({ length: roomCount }, (_, i) => i+1)
+        .filter(r => (countByRoom[r] || 0) < 2);
+      roomNo = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null;
+    }
+
+    // 우선 대상의 방만 확정(파트너는 아직)
+    ps = ps.map(p => p.id === id ? { ...p, room: roomNo } : p);
+
+    // 파트너는 그룹2 중 미배정자에서 선택
+    const pool2 = ps.filter(p => isGroup2(p) && p.room == null);
+    partner = pool2.length ? pool2[Math.floor(Math.random() * pool2.length)] : null;
+
+    if (partner && roomNo != null) {
+      // [ADD2] 두 사람을 **동시에** 확정 → 저장 한 번
+      assignPairToRoom(id, partner.id, roomNo);
+      return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
+    }
+
     setParticipants(ps);
     await save({ participants: ps });
     return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
@@ -271,6 +329,8 @@ export default function StepFlow() {
         ? { ...p, room: null, partner: null }
         : p
       );
+    } else {
+      ps = ps.map(p => p.id === id ? { ...p, room: null, partner: null } : p);
     }
     setParticipants(ps);
     await save({ participants: ps });
@@ -279,29 +339,28 @@ export default function StepFlow() {
   // Step8: AGM 자동 할당
   const handleAgmAutoAssign = async () => {
     let ps = [...participants];
-    const half = ps.length / 2;
     const roomsArr = Array.from({ length: roomCount }, (_, i) => i+1);
 
-    // 1조(그룹1) 방 채우기
-    let pool1 = ps.filter(p => p.id < half && p.room == null).map(p => p.id);
+    // 1) 그룹1(리더) 채우기: 방당 최대 2명
     roomsArr.forEach(roomNo => {
-      const g1 = ps.filter(p => p.id < half && p.room === roomNo);
-      for (let i = 0; i < 2 - g1.length && pool1.length; i++) {
-        const pid1 = pool1.shift();
-        ps = ps.map(p => p.id === pid1
-          ? { ...p, room: roomNo, partner: null }
-          : p
-        );
+      const g1InRoom = ps.filter(p => isGroup1(p) && p.room === roomNo).length;
+      const need = Math.max(0, 2 - g1InRoom);
+      if (need <= 0) return;
+
+      const freeG1 = ps.filter(p => isGroup1(p) && p.room == null);
+      for (let i = 0; i < need && freeG1.length; i += 1) {
+        const pick = freeG1.splice(Math.floor(Math.random() * freeG1.length), 1)[0];
+        ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, partner: null } : p);
       }
     });
 
-    // 파트너 매칭
+    // 2) 그룹1마다 그룹2 파트너 채우기(미배정 그룹2에서)
     roomsArr.forEach(roomNo => {
-      const freeG1 = ps.filter(p => p.id < half && p.room === roomNo && p.partner == null);
+      const freeG1 = ps.filter(p => isGroup1(p) && p.room === roomNo && p.partner == null);
       freeG1.forEach(p1 => {
-        const c2 = ps.filter(p => p.id >= half && p.room == null);
-        if (!c2.length) return;
-        const pick = c2[Math.floor(Math.random() * c2.length)];
+        const freeG2 = ps.filter(p => isGroup2(p) && p.room == null);
+        if (!freeG2.length) return;
+        const pick = freeG2[Math.floor(Math.random() * freeG2.length)];
         ps = ps.map(p => {
           if (p.id === p1.id)   return { ...p, partner: pick.id };
           if (p.id === pick.id) return { ...p, room: roomNo, partner: p1.id };
@@ -320,7 +379,8 @@ export default function StepFlow() {
 
   // Step8: AGM 리셋
   const handleAgmReset = async () => {
-    const ps = participants.map(p => ({ ...p, room: null, partner: null }));
+    // [FIX-SCORE-RESET] 방/파트너뿐 아니라 score도 함께 null로 초기화
+    const ps = participants.map(p => ({ ...p, room: null, partner: null, score: null }));
     setParticipants(ps);
     await save({ participants: ps });
   };
