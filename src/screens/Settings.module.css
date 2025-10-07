@@ -1,83 +1,144 @@
-/* /src/screens/Settings.module.css
-   ✅ 그대로 유지 + [ADD]/[CHG]만 반영
-*/
+/* =======================================================================
+   Settings.module.css (전체 파일, 생략 없음)
+   - 기존 코드 100% 유지 + 회원목록 카드(파란박스)를 "한 화면" 높이에 정확히 맞춤
+   - 수동 조정이 쉬우도록 모든 수치 변수화 + 상세 주석
+   ======================================================================= */
 
+/* ──────────────────────────────────────────────────────────────────────
+   1) 조절용 전역 변수 (숫자만 바꾸면 미세 조정 가능)
+   ────────────────────────────────────────────────────────────────────── */
 :root{
-  /* 회원목록 내부 여유치 */
-  --members-list-offset: 260px;
-  --members-head-pad-y: 7px;
-  --members-head-bw: 1px;
+  /* 공통/기존 */
+  --app-top-header: 80px;          /* 상단 'AGM Golf Manager' 헤더 높이 */
+  --members-list-offset: 260px;     /* (기존 유지) 다른 화면에서 사용 */
+
+  --members-head-pad-y: 7px;        /* 표 타이틀 라인 세로 패딩 */
+  --members-head-bw: 1px;           /* 표 타이틀 라인 테두리 두께 */
   --members-footer-gap: 10px;
 
-  /* (요청값 유지) */
-  --member-ctrl-width: 180px;   /* 버튼 3개 래퍼 폭 */
+  --member-ctrl-width: 180px;
   --member-ctrl-gap-right: 4px;
   --member-btn-pad-x: 12px;
   --member-btn-border: 0.8px;
 
-  /* 일괄 토글 표 열 폭 (합계 100%) */
   --col-event: 56%;
   --col-id:    24%;
   --col-flag:  20%;
 
-  /* 카드/타이틀 여백 */
-  --members-title-gap: 2px;
-  --members-title-pad-y: 8px;
+  --members-title-gap: 2px;         /* 섹션 제목 ↔ 테이블 사이 여백 */
+  --members-title-pad-y: 8px;       /* 섹션 제목 상하 패딩 */
 
-  /* 카드/표 좌우 패딩 */
+  /* ✅ 카드(섹션) 내부 좌/우 패딩 — 카드 안에서 표 전체를 좌우로 이동 */
   --members-card-pad-x: 12px;
-  --members-table-pad-x: 0px;   /* [CHG] 표 좌측 라인과 카드 내측이 딱 맞도록 0px */
 
-  /* 하단 탭바 높이(필요시 숫자만 조정) */
-  --app-bottom-bar: 64px;
+  /* ✅ 표 래퍼 좌/우 패딩 — 회색 테두리 박스 내부의 좌우 여백 */
+  --members-table-pad-x: 0px;
+
+  /* ✅ 하단 탭바(네비게이션 바) 추정 높이 (기기별 56~84px 가변)
+     - 하단이 살짝 가려지면 값을 키우세요(예: 76 → 80 → 84). */
+  --app-bottom-bar: 100px;
+
+  /* 삭제 버튼 치수 */
+  --del-btn-h: 16px;
+  --del-btn-pad-x: 6px;
+  --del-btn-radius: 6px;
+  --del-btn-font: 9px;
+
+  /* 회원목록 테이블 칼럼 너비 */
+  --m-col-email: 34%;
+  --m-col-name:  16%;
+  --m-col-date:  18%;
+  --m-col-ctrl:  12%;
+  --m-row-h:     24px;
+  --m-head-h:    24px;
+
+  /* ✅ 회원목록 전용(한 화면 고정용) */
+  --members-top-offset: 0px;       /* 카드 상단 위치(값 ↓ = 더 위로) */
+  --members-viewport-side-gap: 1px;/* 카드 좌/우 바깥 여백(파란박스 바깥) */
+
+  /* ✅ 하단 3버튼 예상 높이(리스트 바닥 여유 확보) */
+  --members-footer-h: 72px;
 }
 
-/* ===== 페이지 공통 ===== */
+/* ──────────────────────────────────────────────────────────────────────
+   2) 페이지 컨테이너
+   ────────────────────────────────────────────────────────────────────── */
 .page {
   padding: 16px;
   max-width: 900px;
   margin: 0 auto;
 }
 
-/* ===== MembersList 전용: 카드 고정 + 내부 스크롤 ===== */
+/* 문서 전체 스크롤 차단, 내부 섹션만 스크롤 */
 .pageFullViewport{
-  /* [CHG] padding-bottom 제거, 높이를 정확히 뷰포트-탭바로 고정 */
   height: calc(100vh - var(--app-bottom-bar) - env(safe-area-inset-bottom));
   height: calc(100dvh - var(--app-bottom-bar) - env(safe-area-inset-bottom));
   height: calc(100svh - var(--app-bottom-bar) - env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  overflow: hidden; /* 문서 스크롤 차단 -> 내부(리스트)만 스크롤 */
+  overflow: hidden;
 }
 
+/* (기존) 필요시 전체 페이지를 고정할 때 사용 — 현재 화면은 미사용 */
+.pageViewportPinned{
+  position: fixed;
+  top: calc(var(--app-top-header) + env(safe-area-inset-top, 0px));
+  bottom: calc(var(--app-bottom-bar) + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 900px;
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   3) 회원목록 "카드 박스" 한 화면 고정 (★ 핵심 수정)
+   - 기존: position: fixed; top/bottom 으로 맞춤 → 기기별 바텀바 높이 차이로 누락 발생
+   - 변경: "높이(height) 자체를 계산"해 고정 → 기기 차이에도 안정적
+   ────────────────────────────────────────────────────────────────────── */
+.membersViewport{
+  /* ★ 더 이상 fixed를 쓰지 않습니다. (상/하 절대값 대신 높이 계산) */
+  position: relative;
+  /* 좌우 외부 여백(파란박스 바깥쪽) — 값 변경으로 좌우 간격을 조절 */
+  margin-left:  var(--members-viewport-side-gap);
+  margin-right: var(--members-viewport-side-gap);
+  /* 카드 상단 위치 — 값 줄이면 위로 더 올라갑니다 */
+  margin-top:   calc(var(--members-top-offset) + env(safe-area-inset-top, 0px));
+
+  /* 한 화면에 정확히 맞는 높이 계산:
+     전체 화면높이(svh) - 하단 탭바 - 아래 세이프에어리어 - (카드 상단 오프셋) */
+  height:    calc(100svh - var(--app-bottom-bar) - env(safe-area-inset-bottom, 0px) - var(--members-top-offset));
+  max-height:calc(100svh - var(--app-bottom-bar) - env(safe-area-inset-bottom, 0px) - var(--members-top-offset));
+
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* 내부에서만 스크롤 발생 */
+  z-index: 1;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   4) 상단 헤더/캡션 (기존 유지)
+   ────────────────────────────────────────────────────────────────────── */
 .header { display: none; }
 .header h2 { margin: 0 0 6px 0; font-size: 20px; }
 .caption { color: #6b7280; font-size: 12px; }
 
-/* 공통 카드 */
-.card {
-  background:#fff; border-radius:12px; padding:12px;
-  box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:12px;
-}
+/* ──────────────────────────────────────────────────────────────────────
+   5) 카드/일반 UI (기존 유지)
+   ────────────────────────────────────────────────────────────────────── */
+.card { background:#fff; border-radius:12px; padding:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:12px; }
 .cardHeader { display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
 .cardHeader h3 { margin: 0; font-size: 16px; }
 
-/* 대회 선택 */
 .eventRow { display:grid; grid-template-columns: 1fr auto; gap: 10px; }
 .eventSelectWrap { width: 100%; }
-.eventSelect{
-  width:100%; height:40px; padding:0 12px;
-  border:1px solid #d1d5db; border-radius:10px; background:#fff; font-size:14px;
-  transition: border-color .15s, box-shadow .15s;
-}
-.eventSelect:focus, .eventSelect:focus-visible{
-  outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.20);
-}
+.eventSelect{ width:100%; height:40px; padding:0 12px; border:1px solid #d1d5db; border-radius:10px; background:#fff; font-size:14px; transition: border-color .15s, box-shadow .15s; }
+.eventSelect:focus, .eventSelect:focus-visible{ outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.20); }
 .saveBtn{ height:40px; padding:0 14px; border:none; border-radius:10px; background:#2563eb; color:#fff; font-weight:700; box-shadow:0 2px 6px rgba(37,99,235,.25); }
 .eventNote { margin-top:6px; font-size:12px; color:#4b5563; }
 .saveStatus { margin-top:6px; font-size:12px; color:#6b7280; }
 
-/* 프리셋 그리드 */
 .presetGrid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
 .presetBox{
   width:100%; height:44px; border-radius:12px; border:1px solid #d1d5db;
@@ -98,18 +159,17 @@
 .presetBoxLabel .l1{ font-size:13.5px; font-weight:800; }
 .presetBoxLabel .l2{ margin-top:2px; font-size:11.5px; font-weight:700; opacity:.9; }
 
-/* 표 기본 */
+/* 공용 테이블 */
 .table { width:100%; border-collapse:collapse; }
 .table th, .table td { border:1px solid #e5e7eb; padding:7px 8px; text-align:center; font-size:13px; }
 .table thead th { background:#f7f9fc; font-weight:700; }
 
-/* 라디오 */
+/* 라디오/스위치 등 공용 컨트롤 (기존 유지) */
 .radioLabel{ position:relative; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; }
 .radioLabel input{ position:absolute; opacity:0; }
 .radioLabel span{ width:16px; height:16px; border-radius:50%; border:2px solid #9ca3af; display:inline-block; }
 .radioLabel input:checked + span{ border-color:#2563eb; box-shadow:inset 0 0 0 4px #2563eb; }
 
-/* 기타 */
 .optionRow{ display:flex; align-items:center; gap:10px; }
 .optionLabel{ font-size:14px; }
 .switch{ position:relative; display:inline-block; width:44px; height:24px; }
@@ -120,6 +180,7 @@
 .switch input:checked + .slider:before{ transform:translateX(20px); }
 .hint{ margin-top:8px; font-size:12px; color:#666; }
 
+/* 테마 카드/셀렉트 (기존 유지) */
 .themeRow{ display:grid; grid-template-columns:120px 1fr; align-items:center; gap:10px; margin:8px 0; }
 .smallNote{ font-size:12px; color:#4b5563; }
 .inlineRadios label{ margin-right:6px; }
@@ -130,50 +191,80 @@
 .themeCard button:focus-visible{ outline:none; border-color:#2563eb !important; box-shadow:0 0 0 3px rgba(37,99,235,.18); }
 .themeCard .select{ height:40px; padding:0 14px; font-size:14px; border-radius:12px; width:100%; box-sizing:border-box; display:block; }
 .themeCard .saveBtn, .themeCard .eventSelect{ display:inline-flex; align-items:center; justify-content:center; height:40px; min-width:96px; padding:0 18px; border-radius:12px; white-space:nowrap; }
+.themeActions{ padding-right:14px; width:100%; }
+.themeActions .saveBtn, .themeActions .eventSelect{ flex:1 1 0; height:40px; }
 
+/* 포커스 공통 강조 */
 .blueFocus:focus{ outline:none; border-color:#1d4ed8 !important; box-shadow:0 0 0 3px rgba(29,78,216,.25); }
 
-/* 섹션 타이틀 */
+/* 타이틀(섹션 제목) */
 .titleTight { margin-top: 0; }
-.sectionTitle{ margin:0; text-align:left; font-size:18px; font-weight:800; padding: var(--members-title-pad-y) 0 8px; } /* 좌측 정렬 유지 */
-
-/* 카드/표 래퍼(설정 카드 공통) */
-.sectionBox{
-  background:#fff; border:1px solid #e5e7eb; border-radius:12px;
-  padding:16px;
-  padding-left: var(--members-card-pad-x);
-  padding-right: var(--members-card-pad-x);
-  box-shadow:0 1px 2px rgba(0,0,0,.04);
-  flex: 1 1 auto; min-height: 0;
-  display:flex; flex-direction:column;
+.sectionTitle{
+  margin:0;
+  text-align:left;
+  font-size:18px;
+  font-weight:800;
+  padding: var(--members-title-pad-y) 0 8px;
+}
+.sectionTitleSticky{
+  position: sticky;   /* 카드 내부 최상단에 붙음 */
+  top: 0;
+  z-index: 6;
+  background:#fff;
 }
 
-/* 표 박스(헤더 + 목록 스크롤을 위한 플렉스 컨테이너) */
+/* ──────────────────────────────────────────────────────────────────────
+   6) 카드(섹션) 컨테이너 — 테두리/내부 패딩을 여기서 조정
+   ────────────────────────────────────────────────────────────────────── */
+.sectionBox{
+  background:#fff;
+  border:1px solid #e5e7eb;   /* 테두리 두께/색 */
+  border-radius:12px;
+  padding:16px;
+  padding-left: var(--members-card-pad-x);  /* 카드 내부 좌/우 패딩 */
+  padding-right: var(--members-card-pad-x);
+  box-shadow:0 1px 2px rgba(0,0,0,.04);
+  flex: 1 1 auto;
+  min-height: 0;
+  display:flex;
+  flex-direction:column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   7) 테이블 래퍼(회색 테두리 박스) — 테두리/내부 패딩 조정
+   ────────────────────────────────────────────────────────────────────── */
 .tableWrap{
-  overflow-x:auto; border:1px solid #e5e7eb; border-radius:12px;
-  background:#fff; padding:8px;
-  padding-left: var(--members-table-pad-x);
+  border:1px solid #e5e7eb;  /* 래퍼 테두리 두께/색 */
+  border-radius:12px;
+  background:#fff;
+  padding:8px;
+  padding-left: var(--members-table-pad-x); /* 래퍼 내부 좌/우 패딩 */
   padding-right: var(--members-table-pad-x);
-  display:flex; flex-direction:column; flex: 1 1 auto; min-height:0; /* ★ 중요 */
+  display:flex;
+  flex-direction:column;
+  flex: 1 1 auto;
+  min-height:0;
+  overflow: hidden;
 }
 .thead{ background:#f8fafc; }
 
-/* 표 셀(가독성) — 네 설정 유지 */
+/* 공용 테이블(추가 재정의) */
 .table th{ text-align:left; padding:10px 12px; font-weight:700; }
 .table td{ padding:10px 12px; border-top:1px solid #eef2f7; }
 .emptyCell{ color:#64748b; padding:14px 12px; }
 
-/* 버튼 */
+/* 버튼 공통 */
 .ghostBtn{ height:36px; padding:0 12px; border:1px solid #cfd7e6; border-radius:10px; background:#f9fbff; color:#334155; font-weight:600; font-size:14px; cursor:pointer; }
 .ghostBtnSm{ height:32px; padding:0 10px; border:1px solid #cfd7e6; border-radius:10px; background:#f9fbff; font-weight:600; font-size:13px; color:#334155; cursor:pointer; }
 .dangerGhostBtn{ height:22px; padding:0 8px; border:1px solid #ef4444; color:#ef4444; border-radius:8px; background:#fff; font-weight:500; white-space:nowrap; }
 
-/* ───── 회원관리(3개 버튼) — 값 유지 ───── */
+/* 폼/그리드(기존 유지) */
 .optionRowGrid{ display:grid; grid-template-columns:120px 1fr; align-items:center; gap:10px; margin-bottom:10px; }
 .controlBox{ width: var(--member-ctrl-width); display:flex; justify-content:flex-end; margin-right: var(--member-ctrl-gap-right); }
 .linkBtnFullLarge{ width:100%; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; height:32px; padding:0 var(--member-btn-pad-x); border: var(--member-btn-border) solid #cfd7e6; border-radius:10px; background:#f9fbff; color:#334155; font-weight:700; font-size:14px; }
 
-/* ───── 일괄/단일 토글 — 유지 ───── */
 .rowRight{ display:flex; justify-content:flex-end; }
 .rowFill{ display:flex; align-items:center; gap:8px; width:100%; }
 .inputBoxLarge{ flex:1; height:40px; border:1px solid #cfd7e6; border-radius:10px; padding:0 12px; font-size:14px; background:#fff; }
@@ -183,6 +274,8 @@
 .searchInput{ height:40px; border:1px solid #cfd7e6; border-radius:10px; padding:0 12px; font-size:14px; width:100%; transition: border-color .15s, box-shadow .15s; }
 .searchInput:focus,.searchInput:focus-visible{ outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.18); }
 .searchBtn{ height:40px; padding:0 14px; border:1px solid #cfd7e6; border-radius:10px; background:#f9fbff; font-weight:700; }
+
+/* 대량 업로드 테이블(기존 유지) */
 .bulkTable{ width:100%; border-collapse:collapse; }
 .bulkTable th, .bulkTable td{ border:1px solid #e5e7eb; padding:10px 12px; font-size:13px; }
 .bulkTable thead th{ background:#f7f9fc; text-align:center; white-space:nowrap; }
@@ -192,22 +285,76 @@
 .eventCaptionInline{ margin-top: 6px; margin-left: 8px; white-space: nowrap; font-size: 14px; color: #334155; flex: 1; }
 .singleHelp{ white-space: nowrap; margin-left: 8px; align-self: center; font-size: 12.5px; }
 
-/* ───── 회원목록(헤더/하단 고정 + 내부 리스트만 스크롤) ───── */
-.mListScroll{ flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; margin-top: var(--members-title-gap); -webkit-overflow-scrolling: touch; }
-.mTable{ width:100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
-.mTable th, .mTable td{ padding: 4px 10px; line-height: 1.2; border: 1px solid #e5e7eb; }
+/* ──────────────────────────────────────────────────────────────────────
+   8) [회원목록] 전용 — 가운데 리스트만 스크롤
+   ────────────────────────────────────────────────────────────────────── */
+.mTableWrap{
+  display:flex;
+  flex-direction:column;
+  flex:1 1 auto;
+  min-height:0;
+}
+.mListScroll{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin-top: var(--members-title-gap);
+  -webkit-overflow-scrolling: touch;
 
-/* 헤더 고정: 두-테이블 방식 */
+  /* ⬇️ 하단 3버튼 높이만큼 바닥 여유 (겹침 방지)
+     필요 시 --members-footer-h 값을 올리세요. */
+  padding-bottom: calc(var(--members-footer-h) + 12px);
+}
+
+.mTable{
+  width:100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;       /* 칼럼 폭 고정 */
+}
+.mTable th, .mTable td{
+  padding: 4px 10px;
+  line-height: 1.2;
+  border: 1px solid #e5e7eb;
+}
+
+/* 헤더(타이틀 라인) 고정 */
 .mTableHead thead{ position: static; background:#f7f9fc; box-shadow: 0 2px 0 rgba(0,0,0,.04); }
 .mTable thead{ position: sticky; top: 0; z-index: 5; background:#f7f9fc; }
 .mTable thead th{ text-align: center !important; padding: var(--members-head-pad-y) 10px; border-bottom: var(--members-head-bw) solid #e5e7eb; }
 
-/* 헤더 하단 이중선 제거(첫 데이터행 상단 보더 제거) */
+/* 첫 데이터행 상단 보더 제거 */
 .mTableBody tbody tr:first-child td{ border-top: 0 !important; }
 
-/* 하단 버튼(섹션 바닥 고정) */
+/* 하단 3버튼 — 리스트 스크롤 컨테이너 안에서 sticky */
 .tableFooterRight{
-  display:flex; justify-content:flex-end; gap:8px;
-  padding-top: 8px; background:#fff;
-  margin-top: auto;  /* 플렉스 바닥 고정 */
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  background:#fff;
+}
+.tableFooterSticky{
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  background: #fff;
+  padding: 8px 0 10px; /* 버튼 영역 자체 높이(값이 작으면 접힐 수 있음) */
+}
+
+/* 칼럼 너비/정렬 */
+.mColEmail{ width: var(--m-col-email); }
+.mColName { width: var(--m-col-name);  text-align: center; }
+.mColDate { width: var(--m-col-date);  text-align: center; white-space: nowrap; }
+.mColCtrl { width: var(--m-col-ctrl);  text-align: center; }
+
+/* 삭제 버튼(사각형) — 치수 한곳에서 조정 */
+.mDeleteBtn{
+  height: var(--del-btn-h);
+  padding: 0 var(--del-btn-pad-x);
+  border-radius: var(--del-btn-radius);
+  font-size: var(--del-btn-font);
+  border:1px solid #ef4444;
+  background:#fff;
+  color:#ef4444;
 }

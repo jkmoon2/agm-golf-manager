@@ -60,7 +60,6 @@ export default function Settings() {
   useEffect(() => {
     setGate(mergeGate(getDefaultGate(), selectedEvent?.playerGate));
     setSelectedPreset('');
-    // visible 키가 없던 구버전 보정
     setGate(prev => {
       const vis = prev?.step1?.teamConfirmVisible;
       if (typeof vis === 'undefined') {
@@ -143,7 +142,6 @@ export default function Settings() {
   }, [gate?.steps]);
   const activePreset = selectedPreset === 'none' ? '' : (selectedPreset || detectedPreset);
 
-  // ===== 테마 상태/라벨 =====
   const [theme, setTheme] = useState(getThemePrefs());
   const PRESET_TEXT = {
     A: 'A · Soft Neumorph Light',
@@ -157,8 +155,7 @@ export default function Settings() {
     O: 'O · Crisp White / Purple',
   };
   const presets = useMemo(() => listPresets(), []);
-  useEffect(() => { applyTheme('global'); }, []); // 최초 1회만 현재값 적용
-  // 변경 시 저장만 하고 즉시 적용하지 않음
+  useEffect(() => { applyTheme('global'); }, []);
   const updateTheme = (patch) => {
     const merged = setThemePrefs(patch);
     setTheme(merged);
@@ -326,7 +323,6 @@ export default function Settings() {
         {theme.applyMode === 'global' ? (
           <div className={styles.themeRow}>
             <div className={styles.optionLabel}>프리셋(Global)</div>
-            {/* [FIX] 알파벳+설명 출력 */}
             <select className={styles.select} value={theme.presets.global} onChange={e=>setThemePreset('global', e.target.value)}>
               {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
             </select>
@@ -335,21 +331,18 @@ export default function Settings() {
           <>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Admin</div>
-              {/* [FIX] 알파벳+설명 출력 */}
               <select className={styles.select} value={theme.presets.admin} onChange={e=>setThemePreset('admin', e.target.value)}>
                 {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
               </select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>Player</div>
-              {/* [FIX] 알파벳+설명 출력 */}
               <select className={styles.select} value={theme.presets.player} onChange={e=>setThemePreset('player', e.target.value)}>
                 {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
               </select>
             </div>
             <div className={styles.themeRow}>
               <div className={styles.optionLabel}>PlayerOnly</div>
-              {/* [FIX] 알파벳+설명 출력 */}
               <select className={styles.select} value={theme.presets.playerOnly} onChange={e=>setThemePreset('playerOnly', e.target.value)}>
                 {listPresets().map(p => <option key={p} value={p}>{PRESET_TEXT[p] || p}</option>)}
               </select>
@@ -376,7 +369,8 @@ export default function Settings() {
 
         <div className={styles.themeRow}>
           <div />
-          <div style={{display:'flex', gap:8}}>
+          {/* iOS 우측 여백 보정 및 버튼 동일폭 */}
+          <div className={styles.themeActions} style={{display:'flex', gap:8}}>
             <button className={styles.saveBtn} onClick={()=>applyTheme('global')}>적용</button>
             <button className={styles.eventSelect} style={{height:40}} onClick={()=>{
               localStorage.removeItem('agm_theme_prefs_v1');
