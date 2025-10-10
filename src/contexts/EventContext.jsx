@@ -355,7 +355,10 @@ export function EventProvider({ children }) {
         // ★ patch: Step0에서 넘겨주는 접근 구간/타임스탬프도 그대로 저장
         accessStartAt = null,
         accessEndAt = null,
-        accessUpdatedAt = null
+        accessUpdatedAt = null,
+        // ★ patch(time): Step0에서 넘겨줄 수 있는 옵션 시간 문자열 저장
+        timeStart = null,
+        timeEnd   = null
       }) => {
         const colRef = collection(db, 'events');
         const docRef = id ? doc(db, 'events', id) : doc(colRef);
@@ -373,6 +376,9 @@ export function EventProvider({ children }) {
           accessStartAt,
           accessEndAt,
           accessUpdatedAt,
+          // ★ patch(time): 사람이 읽기 좋은 시간 문자열(옵션)
+          timeStart: timeStart ?? null,
+          timeEnd:   timeEnd   ?? null,
           publicView: {
             hiddenRooms: [],
             score: true,
