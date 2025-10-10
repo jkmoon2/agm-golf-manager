@@ -30,11 +30,21 @@ export default function Step0() {
   const [useCustomId, setUseCustomId] = useState(false);
   const [customId, setCustomId] = useState('');
 
+  // ★ patch(time): 생성 모달용 시간 옵션 상태
+  const [newUseTime,   setNewUseTime]   = useState(false);
+  const [newTimeStart, setNewTimeStart] = useState(''); // "HH:mm"
+  const [newTimeEnd,   setNewTimeEnd]   = useState(''); // "HH:mm"
+
   // 편집 모달
   const [editing, setEditing] = useState(null);
   const [editDateStart, setEditDateStart] = useState('');
   const [editDateEnd, setEditDateEnd] = useState('');
   const [editDuringOnly, setEditDuringOnly] = useState(false);
+
+  // ★ patch(time): 편집 모달용 시간 옵션 상태
+  const [editUseTime,   setEditUseTime]   = useState(false);
+  const [editTimeStart, setEditTimeStart] = useState('');
+  const [editTimeEnd,   setEditTimeEnd]   = useState('');
 
   // ⋮ 메뉴
   const [openMenuId, setOpenMenuId] = useState(null);
@@ -61,6 +71,22 @@ export default function Step0() {
     return Number.isFinite(d.getTime()) ? d.getTime() : null;
   };
 
+  // ★ patch(time): 날짜+시간(HH:mm)을 절대시간(ms)로 계산 (체크 안하면 00:00/23:59)
+  const pad2 = (n) => String(n).padStart(2,'0');
+  const toMillisWithTime = (dateStr, timeStr, kind /* 'start'|'end' */) => {
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+    const safe = (timeStr && /^\d{2}:\d{2}$/.test(timeStr))
+      ? timeStr
+      : (kind === 'start' ? '00:00' : '23:59');
+    const d = new Date(`${dateStr}T${safe}:00`);
+    return Number.isFinite(d.getTime()) ? d.getTime() : null;
+  };
+  const msToTimeHHmm = (ms) => {
+    if (!Number.isFinite(ms)) return '';
+    const d = new Date(ms);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  };
+
   const handleLoad = async () => {
     if (!selectedId) { alert('불러올 대회를 선택해주세요.'); return; }
     await loadEvent(selectedId);
@@ -74,10 +100,18 @@ export default function Step0() {
       const s = new Date(`${newDateStart}T00:00:00`);
       const e = new Date(`${newDateEnd}T23:59:59`);
       if (s.getTime() > e.getTime()) { alert('종료일은 시작일 이후여야 합니다.'); return; }
+      // ★ 선택적으로 동일 날짜 + 시간 역전 방지(옵션) — 레이아웃 영향 없음
+      if (newUseTime && newDateStart === newDateEnd && newTimeStart && newTimeEnd) {
+        if (new Date(`${newDateStart}T${newTimeStart}:00`).getTime() >
+            new Date(`${newDateEnd}T${newTimeEnd}:00`).getTime()) {
+          alert('종료 시간은 시작 시간 이후여야 합니다.');
+          return;
+        }
+      }
     }
-    // ★ patch: 접속 가능 절대 구간을 함께 저장(플레이어 차단 로직이 숫자 비교만 하면 되도록)
-    const accessStartAt = toMillis(newDateStart, 'start');
-    const accessEndAt   = toMillis(newDateEnd, 'end');
+    // ★ patch: 접속 가능 절대 구간을 함께 저장(시간 옵션 반영)
+    const accessStartAt = toMillisWithTime(newDateStart, newUseTime ? newTimeStart : '', 'start');
+    const accessEndAt   = toMillisWithTime(newDateEnd,   newUseTime ? newTimeEnd   : '', 'end');
 
     const newId = await createEvent({
       title, mode: viewMode,
@@ -89,10 +123,15 @@ export default function Step0() {
       accessStartAt: accessStartAt ?? null,
       accessEndAt:   accessEndAt   ?? null,
       accessUpdatedAt: serverTimestamp(),
+      // ▼ 사람이 읽기 좋은 시간 문자열(옵션 저장)
+      timeStart: newUseTime ? (newTimeStart || null) : null,
+      timeEnd:   newUseTime ? (newTimeEnd   || null) : null
     });
     setSelectedId(newId);
     setOpenCreate(false);
     setNewTitle(''); setNewDateStart(''); setNewDateEnd(''); setDuringOnly(false); setUseCustomId(false); setCustomId('');
+    // 시간 옵션 상태도 초기화
+    setNewUseTime(false); setNewTimeStart(''); setNewTimeEnd('');
     alert('새 대회가 생성되었습니다. 목록에서 선택 후 불러오기를 눌러주세요.');
   };
 
@@ -112,16 +151,30 @@ export default function Step0() {
     setEditDateStart(evt.dateStart || '');
     setEditDateEnd(evt.dateEnd || '');
     setEditDuringOnly(!!evt.allowDuringPeriodOnly);
+    // ★ patch(time): 저장된 값으로 시간 필드 초기화 (없으면 accessStart/End에서 복원)
+    const hasTime = !!(evt?.timeStart || evt?.timeEnd);
+    const fallbackStart = evt?.accessStartAt ? msToTimeHHmm(evt.accessStartAt) : '';
+    const fallbackEnd   = evt?.accessEndAt   ? msToTimeHHmm(evt.accessEndAt)   : '';
+    setEditUseTime(hasTime);
+    setEditTimeStart(evt?.timeStart ?? fallbackStart);
+    setEditTimeEnd(evt?.timeEnd ?? fallbackEnd);
   };
   const saveEdit = async () => {
     if (editDateStart && editDateEnd) {
       const s = new Date(`${editDateStart}T00:00:00`);
       const e = new Date(`${editDateEnd}T23:59:59`);
       if (s.getTime() > e.getTime()) { alert('종료일은 시작일 이후여야 합니다.'); return; }
+      if (editUseTime && editDateStart === editDateEnd && editTimeStart && editTimeEnd) {
+        if (new Date(`${editDateStart}T${editTimeStart}:00`).getTime() >
+            new Date(`${editDateEnd}T${editTimeEnd}:00`).getTime()) {
+          alert('종료 시간은 시작 시간 이후여야 합니다.');
+          return;
+        }
+      }
     }
-    // ★ patch: 편집 저장 시에도 절대 구간 동기화
-    const accessStartAt = toMillis(editDateStart, 'start');
-    const accessEndAt   = toMillis(editDateEnd, 'end');
+    // ★ patch: 편집 저장 시에도 절대 구간 동기화(시간 옵션 반영)
+    const accessStartAt = toMillisWithTime(editDateStart, editUseTime ? editTimeStart : '', 'start');
+    const accessEndAt   = toMillisWithTime(editDateEnd,   editUseTime ? editTimeEnd   : '', 'end');
 
     await updateEventById(editing.id, {
       dateStart: editDateStart || '',
@@ -131,6 +184,9 @@ export default function Step0() {
       accessStartAt: accessStartAt ?? null,
       accessEndAt:   accessEndAt   ?? null,
       accessUpdatedAt: serverTimestamp(),
+      // ▼ 사람이 읽기 좋은 시간 문자열(옵션 저장)
+      timeStart: editUseTime ? (editTimeStart || null) : null,
+      timeEnd:   editUseTime ? (editTimeEnd   || null) : null
     });
     setEditing(null);
   };
@@ -249,6 +305,36 @@ export default function Step0() {
                      value={newDateEnd} onChange={e=>setNewDateEnd(e.target.value)} />
             </div>
 
+            {/* ★ patch(time): 시간도 설정(옵션) */}
+            <div style={modal.row}>
+              <label style={modal.label}>시간</label>
+              <div style={{display:'flex',alignItems:'center',gap:'.4rem',flexWrap:'wrap'}}>
+                <label style={{display:'inline-flex',alignItems:'center',gap:'.4rem'}}>
+                  <input
+                    type="checkbox"
+                    checked={newUseTime}
+                    onChange={e=>setNewUseTime(e.target.checked)}
+                  />
+                  <span style={modal.help}>시간도 설정</span>
+                </label>
+                <input
+                  type="time"
+                  value={newTimeStart}
+                  onChange={e=>setNewTimeStart(e.target.value)}
+                  disabled={!newUseTime}
+                  style={{minWidth:120}}
+                />
+                <span style={{opacity:.7}}>~</span>
+                <input
+                  type="time"
+                  value={newTimeEnd}
+                  onChange={e=>setNewTimeEnd(e.target.value)}
+                  disabled={!newUseTime}
+                  style={{minWidth:120}}
+                />
+              </div>
+            </div>
+
             <div style={modal.row}>
               <label style={modal.label}>옵션</label>
               <label style={{display:'inline-flex', alignItems:'center', gap:'.4rem'}}>
@@ -293,6 +379,36 @@ export default function Step0() {
               <label style={modal.label}>종료일</label>
               <input type="date" style={modal.input}
                      value={editDateEnd} onChange={e=>setEditDateEnd(e.target.value)} />
+            </div>
+
+            {/* ★ patch(time): 시간도 설정(옵션) */}
+            <div style={modal.row}>
+              <label style={modal.label}>시간</label>
+              <div style={{display:'flex',alignItems:'center',gap:'.4rem',flexWrap:'wrap'}}>
+                <label style={{display:'inline-flex',alignItems:'center',gap:'.4rem'}}>
+                  <input
+                    type="checkbox"
+                    checked={editUseTime}
+                    onChange={e=>setEditUseTime(e.target.checked)}
+                  />
+                  <span style={modal.help}>시간도 설정</span>
+                </label>
+                <input
+                  type="time"
+                  value={editTimeStart}
+                  onChange={e=>setEditTimeStart(e.target.value)}
+                  disabled={!editUseTime}
+                  style={{minWidth:120}}
+                />
+                <span style={{opacity:.7}}>~</span>
+                <input
+                  type="time"
+                  value={editTimeEnd}
+                  onChange={e=>setEditTimeEnd(e.target.value)}
+                  disabled={!editUseTime}
+                  style={{minWidth:120}}
+                />
+              </div>
             </div>
 
             <div style={modal.row}>
