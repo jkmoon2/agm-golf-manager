@@ -119,7 +119,7 @@ export default function PlayerEventList() {
               <div className={styles.titleRow}>
                 <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>
                 <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
-                  {isFour ? 'AGM 포맷' : '스트로크'}
+                  {isFour ? 'AGM 포볼' : '스트로크'}
                 </span>
                 {/* 종료(한 줄, 줄바꿈 없음) */}
                 {ended && <span style={endedBadgeStyle}>종료</span>}
