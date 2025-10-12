@@ -1,11 +1,4 @@
 // /src/screens/Dashboard.jsx
-// ✅ 바꾼 요점만 요약
-// 1) 참가자 체크인 판정식 보강(entered/enteredAt/lastSeen/codeUsed/room 배정/점수 입력 등 다양한 신호 인식)
-// 2) 방 인덱스 계산을 roomNames 기준으로 정확히 매핑(방 번호가 1..N 아닌 3,5,6,7,9 형태여도 정확히 매칭)
-// 3) rooms 서브컬렉션의 다양한 스키마를 폭넓게 지원(members/players/list/team/people/a,b/p1,p2 등)
-// 4) 포볼 팀결성/방배정/핸디도 동일한 실시간 로직을 타도록 통일
-//
-// 👉 UI/레이아웃/스타일/나머지 계산 로직은 기존 그대로 유지하고, 필요한 부분만 주석 달아 보강했습니다.
 
 import React, { useMemo, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -64,16 +57,16 @@ export default function Dashboard() {
   const [playersLive, setPlayersLive]             = useState(null); // events/{id}/players
   const [playerStatesLive, setPlayerStatesLive]   = useState(null); // events/{id}/playerStates
   const [roomsLive, setRoomsLive]                 = useState(null); // events/{id}/rooms
+  const [fourballRoomsLive, setFourballRoomsLive] = useState(null); // events/{id}/fourballRooms
   const [eventInputsLive, setEventInputsLive]     = useState(null); // events/{id}/eventInputs
 
   useEffect(() => {
     const targetId = selectedId || ctxEventId;
-    let unsubDoc = null, unsubParts = null, unsubPlayers = null, unsubPStates = null, unsubRooms = null, unsubInputs = null;
+    let unsubDoc = null, unsubParts = null, unsubPlayers = null, unsubPStates = null, unsubRooms = null, unsub4Rooms = null, unsubInputs = null;
     let mounted = true;
     const safeSet = (setter, v) => { if (mounted) setter(v); };
 
     if (targetId) {
-      // 이벤트 문서
       unsubDoc = onSnapshot(
         doc(db, 'events', targetId),
         (ds) => safeSet(setSelectedData, ds.exists() ? ds.data() : null),
@@ -86,7 +79,6 @@ export default function Dashboard() {
         }
       );
 
-      // participants
       try {
         unsubParts = onSnapshot(
           collection(db, 'events', targetId, 'participants'),
@@ -98,7 +90,6 @@ export default function Dashboard() {
         );
       } catch {}
 
-      // players (일부 프로젝트에서는 players 사용)
       try {
         unsubPlayers = onSnapshot(
           collection(db, 'events', targetId, 'players'),
@@ -110,7 +101,6 @@ export default function Dashboard() {
         );
       } catch {}
 
-      // playerStates (상태만 별도)
       try {
         unsubPStates = onSnapshot(
           collection(db, 'events', targetId, 'playerStates'),
@@ -122,7 +112,6 @@ export default function Dashboard() {
         );
       } catch {}
 
-      // rooms (방 배정)
       try {
         unsubRooms = onSnapshot(
           collection(db, 'events', targetId, 'rooms'),
@@ -134,7 +123,17 @@ export default function Dashboard() {
         );
       } catch {}
 
-      // eventInputs (점수 입력)
+      try {
+        unsub4Rooms = onSnapshot(
+          collection(db, 'events', targetId, 'fourballRooms'),
+          (snap) => {
+            const arr = snap.docs.map(d => ({ rid: d.id, ...d.data() }));
+            safeSet(setFourballRoomsLive, arr);
+          },
+          () => safeSet(setFourballRoomsLive, null)
+        );
+      } catch {}
+
       try {
         unsubInputs = onSnapshot(
           collection(db, 'events', targetId, 'eventInputs'),
@@ -152,6 +151,7 @@ export default function Dashboard() {
       safeSet(setPlayersLive, null);
       safeSet(setPlayerStatesLive, null);
       safeSet(setRoomsLive, null);
+      safeSet(setFourballRoomsLive, null);
       safeSet(setEventInputsLive, null);
     }
 
@@ -162,6 +162,7 @@ export default function Dashboard() {
       if (unsubPlayers)  unsubPlayers();
       if (unsubPStates)  unsubPStates();
       if (unsubRooms)    unsubRooms();
+      if (unsub4Rooms)   unsub4Rooms();
       if (unsubInputs)   unsubInputs();
     };
   }, [selectedId, ctxEventId, ctxEventData]);
@@ -173,15 +174,19 @@ export default function Dashboard() {
   const title        = selectedData?.title || 'Untitled Event';
   const roomCount    = Number(selectedData?.roomCount) || 0;
   const roomNames    = Array.isArray(selectedData?.roomNames) ? selectedData.roomNames : [];
+  const roomsEffective = useMemo(
+    () => (mode === 'fourball' && Array.isArray(fourballRoomsLive) && fourballRoomsLive.length
+      ? fourballRoomsLive
+      : roomsLive),
+    [mode, fourballRoomsLive, roomsLive]
+  );
   const participantsFromDoc = Array.isArray(selectedData?.participants) ? selectedData.participants : []; // 업로드 총원
   const pv           = selectedData?.publicView || {};
   const hiddenRooms  = Array.isArray(pv.hiddenRooms) ? pv.hiddenRooms.map(Number) : [];
   const showScore    = (pv.visibleMetrics?.score ?? pv.score ?? true);
   const showBand     = (pv.visibleMetrics?.banddang ?? pv.banddang ?? true);
 
-  // === [보강] 방 이름/번호 → 배열 인덱스 매핑 도우미 =========================
-  //  - roomNames가 [3,5,6,7,9] 같은 “번호 배열”일 수도 있고
-  //  - ["3번방","5번방", ...] 같은 텍스트일 수도 있음 → 숫자만 뽑아 비교
+  // === 방 이름/번호 → 배열 인덱스 매핑
   const parseRoomNo = (v) => {
     if (v == null) return NaN;
     if (typeof v === 'number') return v;
@@ -198,7 +203,6 @@ export default function Dashboard() {
     }
     return NaN;
   };
-  // ========================================================================
 
   // [A] 참가자 실시간 소스 통합(우선순위: participantsLive > playersLive > playerStatesLive)
   const livePeople = useMemo(() => {
@@ -208,7 +212,7 @@ export default function Dashboard() {
     return null;
   }, [participantsLive, playersLive, playerStatesLive]);
 
-  // [B] 참가자 병합: 문서 배열을 기준(총원 유지), 같은 id는 실시간 필드로 덮어쓰기
+  // [B] 참가자 병합
   const participants = useMemo(() => {
     const base = participantsFromDoc || [];
     const live = livePeople;
@@ -221,7 +225,6 @@ export default function Dashboard() {
       const ov  = liveMap.get(key);
       return ov ? { ...p, ...ov } : p;
     });
-    // live에만 있는 추가 인원도 보존
     live.forEach(lp => {
       const key = String(lp.id ?? lp.uid ?? lp.userId ?? lp.code ?? '');
       const found = base.find(p => String(p.id ?? p.uid ?? p.userId ?? p.code ?? '') === key);
@@ -239,31 +242,34 @@ export default function Dashboard() {
 
   // ===== 진행률 계산 =====
 
-  // === [보강] 체크인 판정: 더 많은 필드 인식 ===========================
-  const isCheckedIn = (p) => {
-    const s  = String(p?.status || '').toLowerCase();
-    const st = String(p?.state  || '').toLowerCase();
-    const hasTs =
-      !!p?.joinedAt || !!p?.checkedInAt || !!p?.enterCodeAt ||
-      !!p?.enteredAt || !!p?.lastSeen || !!p?.lastSeenAt;
-    const boolHit =
-      p?.checkedIn === true || p?.checkIn === true ||
-      p?.joined    === true || p?.entered  === true ||
-      p?.codeEntered === true || p?.codeUsed === true ||
-      p?.online === true;
-    const textHit = (s === 'joined' || s === 'active' || st === 'joined' || st === 'active');
-    const viaRoom = Number.isFinite(Number(p?.room)) || Number.isFinite(Number(p?.roomNo));
-    const viaScore = !!eventInputs && Object.values(eventInputs).some(slot => {
-      const person = slot?.person || {};
-      return !!person[String(p.id)];
+  // ★ Strict check-in: “코드입장/체크인” 만 인정 ==========================
+  const idOf = (p) => String(p?.id ?? p?.uid ?? p?.userId ?? p?.code ?? '');
+
+  // 실시간 서브컬렉션에서 들어온 사용자 중, 코드입장/체크인 신호가 있는 uid 모음
+  const checkedInSet = useMemo(() => {
+    const set = new Set();
+    const srcs = [participantsLive, playersLive, playerStatesLive].filter(Array.isArray);
+    srcs.forEach(arr => {
+      arr.forEach(p => {
+        const hasCodeJoin =
+          p?.codeEntered === true || p?.entered === true || p?.checkedIn === true ||
+          !!p?.enterCodeAt || !!p?.enteredAt || !!p?.joinedAt || !!p?.checkedInAt;
+        if (hasCodeJoin) set.add(idOf(p));
+      });
     });
-    return boolHit || textHit || hasTs || viaRoom || viaScore;
-  };
-  // =======================================================================
-  const checkedInCount = useMemo(
-    () => participants.filter(isCheckedIn).length,
-    [participants, eventInputs]
-  );
+    return set;
+  }, [participantsLive, playersLive, playerStatesLive]);
+
+  // 참가자 배열 기준으로, 본인 필드나 checkedInSet에 해당하면 “참석”
+  const checkedInCount = useMemo(() => {
+    return participants.reduce((n, p) => {
+      const hasCodeJoin =
+        p?.codeEntered === true || p?.entered === true || p?.checkedIn === true ||
+        !!p?.enterCodeAt || !!p?.enteredAt || !!p?.joinedAt || !!p?.checkedInAt;
+      return n + ((hasCodeJoin || checkedInSet.has(idOf(p))) ? 1 : 0);
+    }, 0);
+  }, [participants, checkedInSet]);
+  // =====================================================================
 
   // 이벤트 내 person 대상 종목
   const activeEvents = useMemo(
@@ -281,19 +287,19 @@ export default function Dashboard() {
     return Math.max(1, Math.min(n, 20));
   };
 
-  // 배정 판정(문서 participants의 room / roomNo 등 다양한 필드 수용)
+  // 배정 판정(기존 유지)
   const isCommittedAssignment = (p) => {
     const byIndex = Number.isFinite(Number(p?.roomIndex));
     const byNo    = Number.isFinite(Number(p?.roomNo));
     const byRaw   = Number.isFinite(Number(p?.room));
     const hasRoom = byIndex || byNo || byRaw;
-    const yes =
+    const flagged =
       p?.assigned === true ||
       ['self','admin'].includes(String(p?.assignmentState || '').toLowerCase()) ||
       ['self','admin'].includes(String(p?.assignSource || '').toLowerCase()) ||
       p?.confirmed === true ||
-      hasRoom;
-    return yes;
+      p?.roomLocked === true || p?.finalized === true || p?.roomCommitted === true;
+    return flagged || (hasRoom && flagged);
   };
 
   // 총원(분모) = 업로드 인원
@@ -326,32 +332,23 @@ export default function Dashboard() {
     [participants, personEvents, eventInputs]
   );
 
-  // === [보강] rooms 서브컬렉션 → 멤버 추출(여러 스키마 대응) ===============
+  // 방 멤버 추출
   const extractMembers = (roomDoc) => {
-    // 기본: 배열 형태
     let arr = roomDoc?.members || roomDoc?.players || roomDoc?.list || roomDoc?.team || roomDoc?.people;
     if (Array.isArray(arr)) return arr;
-
-    // a,b / p1,p2 형태(포볼 등)
     const m = [];
-    const tryPush = (x) => {
-      if (!x) return;
-      if (typeof x === 'object') m.push(x);
-      else m.push({ id: x });
-    };
+    const tryPush = (x) => { if (!x) return; if (typeof x === 'object') m.push(x); else m.push({ id: x }); };
     if (roomDoc?.a || roomDoc?.b) { tryPush(roomDoc.a); tryPush(roomDoc.b); }
     if (roomDoc?.p1 || roomDoc?.p2) { tryPush(roomDoc.p1); tryPush(roomDoc.p2); }
     if (m.length) return m;
-
     return [];
   };
-  // =======================================================================
 
   // [D] rooms 기반 “배정 인원 수” (실시간)
   const assignedCountFromRooms = useMemo(() => {
-    if (!Array.isArray(roomsLive) || roomsLive.length === 0) return null;
+    if (!Array.isArray(roomsEffective) || roomsEffective.length === 0) return null;
     const seen = new Set();
-    roomsLive.forEach(r => {
+    roomsEffective.forEach(r => {
       extractMembers(r).forEach(m => {
         const pid = typeof m === 'object'
           ? String(m.id ?? m.uid ?? m.userId ?? m.code ?? '')
@@ -359,8 +356,8 @@ export default function Dashboard() {
         if (pid) seen.add(pid);
       });
     });
-    return seen.size; // 중복 제거된 실시간 배정 인원
-  }, [roomsLive]);
+    return seen.size;
+  }, [roomsEffective]);
 
   const assignedList = useMemo(
     () => participants.filter(isCommittedAssignment),
@@ -371,16 +368,15 @@ export default function Dashboard() {
     [assignedCountFromRooms, assignedList.length]
   );
 
-  // [E] byRoom(방별 구성) 계산: rooms가 있으면 우선 사용, 없으면 참가자 room/roomNo 매핑
+  // [E] byRoom(방별 구성)
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     const pIndex = new Map(
       participants.map(p => [String(p.id ?? p.uid ?? p.userId ?? p.code ?? ''), p])
     );
 
-    if (Array.isArray(roomsLive) && roomsLive.length) {
-      roomsLive.forEach(r => {
-        // 우선순위: r.index(1-base) → r.order → r.roomNo → r.room → r.name → rid
+    if (Array.isArray(roomsEffective) && roomsEffective.length) {
+      roomsEffective.forEach(r => {
         let idx = NaN;
         const i1 = Number(r.index ?? r.order);
         if (Number.isFinite(i1)) idx = i1 - 1;
@@ -411,17 +407,13 @@ export default function Dashboard() {
       return arr;
     }
 
-    // rooms가 없는 경우: 참가자 문서의 room/roomNo/roomIndex를 이용해 roomNames와 매칭
     participants.forEach(p => {
       if (!isCommittedAssignment(p)) return;
       let idx = NaN;
-
-      // roomIndex가 이미 “배열 인덱스”인 경우(1-base/0-base 모두 시도)
       const ri = Number(p?.roomIndex);
       if (Number.isFinite(ri)) {
         idx = (ri >= 1 && ri <= roomCount) ? (ri - 1) : ((ri >= 0 && ri < roomCount) ? ri : NaN);
       }
-      // 번호 기반(roomNo/room) → roomNames에서 위치 찾기
       if (!Number.isFinite(idx)) {
         const no = parseRoomNo(p?.roomNo ?? p?.room ?? p?.roomLabel);
         const j  = roomNoToIndex(no);
@@ -431,7 +423,7 @@ export default function Dashboard() {
       arr[idx].push(p);
     });
     return arr;
-  }, [roomCount, roomsLive, participants, roomNames]);
+  }, [roomCount, roomsEffective, participants, roomNames]);
 
   // 방별 G핸디 합계
   const roomHandiSum = useMemo(
@@ -487,20 +479,19 @@ export default function Dashboard() {
     [scoreFilledPeople, totalParticipants]
   );
 
-  // 포볼 팀결성: 분모=총원의 절반
+  // 포볼 팀결성: 분모=총원의 절반 (JSX에서 즉시 계산)
   const pairCount = useMemo(() => {
     if (mode !== 'fourball') return 0;
     const seen = new Set();
-    // roomsLive가 있으면 rooms로 계산(더 정확)
-    if (Array.isArray(roomsLive) && roomsLive.length) {
-      roomsLive.forEach(r => {
+    if (Array.isArray(roomsEffective) && roomsEffective.length) {
+      roomsEffective.forEach(r => {
         extractMembers(r).forEach(m => {
           const pid = typeof m === 'object'
             ? String(m.id ?? m.uid ?? m.userId ?? m.code ?? '')
             : String(m);
           const partner = typeof m === 'object' ? m.partner : undefined;
           if (pid && partner != null) {
-            const a = Number(pid); const b = Number(partner);
+            const a = String(pid), b = String(partner);
             const key = a < b ? `${a}:${b}` : `${b}:${a}`;
             seen.add(key);
           }
@@ -508,21 +499,15 @@ export default function Dashboard() {
       });
       return seen.size;
     }
-    // rooms가 없으면 참가자 배열로 계산
     participants.forEach(p => {
       if (p?.partner != null) {
-        const a = Number(p.id); const b = Number(p.partner);
+        const a = String(p.id), b = String(p.partner);
         const key = a < b ? `${a}:${b}` : `${b}:${a}`;
         seen.add(key);
       }
     });
     return seen.size;
-  }, [roomsLive, participants, mode]);
-
-  const expectedPairs = useMemo(
-    () => (mode !== 'fourball' ? 0 : Math.floor((totalParticipants || 0) / 2)),
-    [totalParticipants, mode]
-  );
+  }, [roomsEffective, participants, mode]);
 
   // publicView 갱신(기존 유지)
   const writePublicView = async (patch) => {
@@ -604,7 +589,13 @@ export default function Dashboard() {
         <KpiCard label="참가자"  value={checkedInCount}    total={totalParticipants} />
         <KpiCard label="방배정"  value={assignedCount}     total={totalParticipants || 1} />
         <KpiCard label="점수입력" value={scoreFilledPeople} total={Math.max(1, totalParticipants)} />
-        {mode === 'fourball' && <KpiCard label="팀결성" value={pairCount} total={expectedPairs || 1} />}
+        {mode === 'fourball' && (
+          <KpiCard
+            label="팀결성"
+            value={pairCount}
+            total={Math.max(1, Math.floor((totalParticipants || 0) / 2))}
+          />
+        )}
       </section>
 
       {/* 표시 옵션(공유 뷰) */}
@@ -632,7 +623,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* 방별 배정 현황 (실시간 반영) */}
+      {/* 방별 배정 현황 */}
       <section className={styles.panel}>
         <div className={styles.panelHead}>방별 배정 현황</div>
         <ul className={styles.assignList}>
@@ -652,7 +643,7 @@ export default function Dashboard() {
         </ul>
       </section>
 
-      {/* 방별 G핸디 합계 (실시간 반영) */}
+      {/* 방별 G핸디 합계 */}
       <section className={styles.panel}>
         <div className={styles.panelHead}>방별 G핸디 합계</div>
         <ul className={styles.bars}>
@@ -715,7 +706,7 @@ export default function Dashboard() {
   );
 }
 
-/* 내부 컴포넌트: KPI 카드 (기존 유지) */
+/* 내부 컴포넌트: KPI 카드 */
 function KpiCard({ label, value, total }) {
   const pct = Math.max(0, Math.min(1, total ? value / total : 0));
   return (
@@ -733,10 +724,24 @@ function Donut({ percent = 0 }) {
   return (
     <svg width={size} height={size} className={styles.donut}>
       <circle cx={size/2} cy={size/2} r={r} stroke="#eee" strokeWidth={stroke} fill="none" />
-      <circle cx={size/2} cy={size/2} r={r} stroke="#4f46e5" strokeWidth={stroke} fill="none"
-              strokeLinecap="round" strokeDasharray={`${dash} ${c - dash}`}
-              transform={`rotate(-90 ${size/2} ${size/2})`} />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className={styles.donutText}>
+      <circle
+        cx={size/2}
+        cy={size/2}
+        r={r}
+        stroke="#4f46e5"
+        strokeWidth={stroke}
+        fill="none"
+        strokeLinecap="round"
+        strokeDasharray={`${dash} ${c - dash}`}
+        transform={`rotate(-90 ${size/2} ${size/2})`}
+      />
+      <text
+        x="50%"
+        y="50%"
+        dominantBaseline="central"
+        textAnchor="middle"
+        className={styles.donutText}
+      >
         {Math.round(percent * 100)}%
       </text>
     </svg>

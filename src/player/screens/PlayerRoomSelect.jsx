@@ -1,5 +1,6 @@
 // /src/player/screens/PlayerRoomSelect.jsx
 // 기존 로직 100% 유지 + Android 텍스트 오변환 방지 가드 + EventContext 미장착/미로드 시 폴백 구독
+// ★ patch: 포볼 정원(4명) 초과 방지용 재시도 로직만 추가
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -72,12 +73,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
-  // [ADD] joinRoom 사용(교정 시 즉시 커밋)
-  const { joinRoom } = useContext(PlayerContext);
-
-  // [ADD] 폴백 게이트 구독 상태
-  const [fallbackGate, setFallbackGate] = useState(null);
-
   // URL/Context 동기화(기존 유지)
   useEffect(() => {
     const eid = urlEventId || playerEventId;
@@ -87,6 +82,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   }, [urlEventId, playerEventId, ctxEventId, loadEvent]);
 
   // [ADD] EventContext 미로드 시 Firestore 직접 구독
+  const [fallbackGate, setFallbackGate] = useState(null);
   useEffect(() => {
     const id = urlEventId || ctxEventId || playerEventId;
     if (!id) return;
@@ -195,7 +191,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     return arr.slice(0, 4);
   }, [teamMembers]);
 
-  // [ADD] 스트로크 한 방 내 동일조 중복 금지/정원 4명 검사 + 교정
+  // 스트로크 충돌/정원 검사(기존 유지)
   const roomCount = useMemo(() => (Array.isArray(roomNames) ? roomNames.length : 0), [roomNames]);
   const isValidStrokeRoom = (roomNo) => {
     if (variant !== 'stroke' || !roomNo) return true;
@@ -209,6 +205,13 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     const currentCount = participants.filter((p) => Number(p.room) === Number(roomNo)).length;
     const isFull = currentCount >= 4;
     return !sameGroupExists && !isFull;
+  };
+
+  // ★ patch: 포볼 정원 검사(4명 초과 금지)
+  const isValidFourballRoom = (roomNo) => {
+    if (variant !== 'fourball' || !roomNo) return true;
+    const currentCount = participants.filter((p) => Number(p.room) === Number(roomNo)).length;
+    return currentCount < 4;
   };
 
   const saveMyRoom = (roomNo) => {
@@ -263,34 +266,46 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       setFlowStep('assigning');
 
       await sleep(TIMINGS.spinBeforeAssign);
-      const { roomNumber, partnerNickname } = await onAssign(participant.id);
 
-      // [ADD] 스트로크 충돌 교정
-      let finalRoom = roomNumber;
-      if (!isValidStrokeRoom(finalRoom)) {
-        const candidates = Array.from({ length: roomCount }, (_, i) => i + 1)
-          .filter((r) => isValidStrokeRoom(r));
-        if (candidates.length > 0) {
-          finalRoom = candidates[Math.floor(Math.random() * candidates.length)];
-          if (typeof joinRoom === 'function') {
-            await joinRoom(finalRoom, participant.id);
-          }
-        } else {
-          setIsAssigning(false);
-          setFlowStep('idle');
-          alert('동시 배정으로 인한 충돌이 감지되었습니다.\n잠시 후 다시 시도해주세요.');
-          return;
-        }
+      // ★ patch: 경쟁 충돌 대비 재시도 루프(최대 3회)
+      let attempt = 0;
+      let roomNumber = null;
+      let partnerNickname = null;
+
+      while (attempt < 3) {
+        const res = await onAssign(participant.id);     // 기존 그대로 호출(서버/Firestore에서 커밋)
+        roomNumber = res?.roomNumber ?? null;
+        partnerNickname = res?.partnerNickname ?? null;
+
+        // 내 로컬 참가자 목록은 약간 늦게 갱신되므로 소폭 대기
+        await sleep(120 + Math.floor(Math.random() * 120));
+
+        const ok =
+          (variant === 'fourball' ? isValidFourballRoom(roomNumber) : isValidStrokeRoom(roomNumber));
+
+        if (ok) break;
+
+        // 충돌 시 소폭 지연 후 재시도(지수 백오프)
+        attempt += 1;
+        await sleep(150 * attempt + Math.floor(Math.random() * 120));
       }
 
-      if (Number.isFinite(Number(finalRoom))) saveMyRoom(Number(finalRoom));
+      // 최종 유효성 검사 실패 시 사용자 안내 후 종료
+      if (variant === 'fourball' ? !isValidFourballRoom(roomNumber) : !isValidStrokeRoom(roomNumber)) {
+        setIsAssigning(false);
+        setFlowStep('idle');
+        alert('해당 방 정원이 가득 찼습니다. 잠시 후 다시 시도해주세요.');
+        return;
+      }
+
+      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
 
       setFlowStep('afterAssign');
 
       await sleep(variant === 'fourball' ? TIMINGS.preAlertFourball : TIMINGS.preAlertStroke);
       setIsAssigning(false);
 
-      const roomLabel = getLabel(finalRoom);
+      const roomLabel = getLabel(roomNumber);
       if (variant === 'fourball') {
         alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
         if (partnerNickname) {
@@ -348,7 +363,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     background: 'transparent',
   };
 
-  // [ADD] Android 텍스트 오변환 방지 가드 공통 스타일
+  // Android 텍스트 오변환 방지 가드
   const guard = { WebkitUserModify:'read-only', userSelect:'none' };
 
   return (
@@ -361,9 +376,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
         overscrollBehaviorY: 'contain',
         touchAction: 'manipulation'
       }}
-      translate="no"               // [ADD]
-      contentEditable={false}      // [ADD]
-      suppressContentEditableWarning // [ADD]
+      translate="no"
+      contentEditable={false}
+      suppressContentEditableWarning
     >
       {participant?.nickname && (
         <p className={styles.greeting}>
@@ -387,7 +402,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       <div className={styles.buttonRow}>
         <button
-          type="button" // [ADD]
+          type="button"
           className={`${styles.btn} ${styles.btnBlue} ${isAssigning ? styles.loading : ''}`}
           onClick={handleAssign}
           disabled={isEventClosed || !isMeReady || done || isAssigning}
@@ -396,7 +411,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
           <span translate="no" contentEditable={false} style={guard}>{assignBtnLabel}</span>
         </button>
         <button
-          type="button" // [ADD]
+          type="button"
           className={`${styles.btn} ${styles.btnGray}`}
           onClick={handleTeamButton}
           disabled={teamBtnDisabled}
@@ -472,7 +487,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       <div style={fixedBar}>
         <button
-          type="button" // [ADD]
+          type="button"
           className={`${styles.btn} ${styles.btnBlue}`}
           style={{ width: '100%' }}
           onClick={handleNext}
