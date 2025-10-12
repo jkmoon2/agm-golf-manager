@@ -1,11 +1,10 @@
 // /src/contexts/PlayerContext.jsx
 //
 // ✅ 변경 핵심 (원본 100% 유지 + 필요한 부분만 추가):
-// A) Firestore 저장 전 sanitizeForFirestore() 로 undefined/NaN 제거 → 400 에러 방지
-// B) onSnapshot/transaction 맵핑 시 null 안전 스프레드( ...((p && typeof p==='object') ? p : {}) )
-//    → participants 배열에 null 섞여도 안전
-//
-// ※ 함수/레이아웃/주석/이름은 기존 그대로 두고, 추가/보완만 반영했습니다.
+// 1) Firestore 저장 전 sanitizeForFirestore() 적용 → 400 에러 방지
+// 2) onSnapshot 매핑 시 null 안전 스프레드
+// 3) "같은 세션에서 인증된 이벤트" 만 자동 매칭 허용 → 교차 이벤트 오검출 방지
+// 4) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 새 규칙과 호환
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -80,12 +79,10 @@ const minRooms = (participants, roomCount) => {
     .map((x) => x.n);
 };
 
-// ✅ 추가: Firestore 저장 전 sanitize (중첩 undefined 제거, NaN → null)
+// ✅ Firestore 저장 전 sanitize (중첩 undefined/NaN 제거)
 function sanitizeForFirestore(v) {
   if (Array.isArray(v)) {
-    return v
-      .map(sanitizeForFirestore)
-      .filter((x) => x !== undefined);
+    return v.map(sanitizeForFirestore).filter((x) => x !== undefined);
   }
   if (v && typeof v === 'object') {
     const out = {};
@@ -101,7 +98,7 @@ function sanitizeForFirestore(v) {
   return v;
 }
 
-// ✅ 추가: 인증 상태를 “세션에만” 기록(재시작 시 초기화)
+// ✅ 세션 단위 인증 플래그(이 이벤트에 대해 인증됨)
 function markEventAuthed(id, code, meObj) {
   if (!id) return;
   try {
@@ -109,7 +106,6 @@ function markEventAuthed(id, code, meObj) {
     if (code != null) sessionStorage.setItem(`authcode_${id}`, String(code));
     if (meObj) {
       sessionStorage.setItem(`participant_${id}`, JSON.stringify(meObj));
-      // 이벤트별 참가자 캐시(세션): myId/nickname
       sessionStorage.setItem(`myId_${id}`, normId(meObj.id || ''));
       sessionStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
     }
@@ -129,12 +125,12 @@ export function PlayerProvider({ children }) {
   const [participant, setParticipant]     = useState(null);
   const [allowTeamView, setAllowTeamView] = useState(false);
 
-  // 인증코드 — 세션 기반으로만 복원
+  // 인증코드 — 세션 기반 복원
   const [authCode, setAuthCode] = useState('');
 
   const { pathname } = useLocation();
 
-  // URL에서 /player/home/:eventId 패턴을 만나면 비어있는 eventId 복원 (원본 유지)
+  // URL에서 /player/home/:eventId 감지(원본 유지)
   useEffect(() => {
     if (!eventId && typeof pathname === 'string') {
       const m = pathname.match(/\/player\/home\/([^/]+)/);
@@ -145,7 +141,7 @@ export function PlayerProvider({ children }) {
     }
   }, [pathname, eventId]);
 
-  // ✅ eventId 변경 시 세션의 authcode 복원(같은 세션 내 재인증 방지)
+  // ✅ eventId 변경 시 같은 세션의 authcode 복원
   useEffect(() => {
     if (!eventId) return;
     try {
@@ -161,7 +157,7 @@ export function PlayerProvider({ children }) {
     } catch {}
   }, [eventId]);
 
-  // authCode 변경 시 캐시 정리(원본 유지) + 이벤트별 세션 캐시도 정리
+  // authCode 변경 시 캐시 정리(원본 유지) + 이벤트별 세션 캐시 정리
   useEffect(() => {
     if (authCode && authCode.trim()) {
       localStorage.removeItem('myId');
@@ -176,7 +172,7 @@ export function PlayerProvider({ children }) {
     }
   }, [authCode, eventId]);
 
-  // ── 실시간 구독 (원본 유지 + 가드/저장 추가) ─────────────────────────
+  // ── 실시간 구독 (원본 유지 + 가드/추가) ─────────────────────────────
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
@@ -186,7 +182,7 @@ export function PlayerProvider({ children }) {
       // ✅ null 안전 스프레드 + 안전 기본값
       const rawParts = Array.isArray(data.participants) ? data.participants : [];
       const partArr = rawParts.map((p, i) => ({
-        ...((p && typeof p === 'object') ? p : {}),       // ⬅️ 여기만 보강
+        ...((p && typeof p === 'object') ? p : {}),
         id:       normId(p?.id ?? i),
         nickname: normName(p?.nickname),
         handicap: toInt(p?.handicap, 0),
@@ -208,24 +204,20 @@ export function PlayerProvider({ children }) {
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
-      // ── me 매칭: ① authCode 최우선 ② (가드 추가) 같은 세션에서 해당 eventId가 '인증됨'일 때만 이벤트별 캐시 사용
+      // ── me 매칭: ① authCode 최우선 ② 같은 세션에서 인증된 이벤트만 캐시 사용
       let me = null;
 
       if (authCode && authCode.trim()) {
         me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
-        // ✅ 세션 가드: 이 이벤트에 대해 인증된 세션이 아니면, 캐시 매칭 금지
         const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
         if (authedThisEvent) {
-          // 이벤트별 세션 캐시 우선
           let idCached  = '';
           let nickCache = '';
           try {
             idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
             nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
           } catch {}
-
-          // (하위 호환) 과거에 남아있을 수 있는 이벤트별 로컬 키 폴백
           if (!idCached) {
             try { idCached = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {}
           }
@@ -245,17 +237,15 @@ export function PlayerProvider({ children }) {
         localStorage.setItem('myId', normId(me.id));
         localStorage.setItem('nickname', normName(me.nickname));
 
-        // ✅ 추가 — 이벤트별 세션 키도 함께 기록(교차 이벤트 자동인증 차단)
+        // ✅ 이벤트별 세션 키도 기록
         try {
           sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
           sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
         } catch {}
 
-        if (me.authCode) {
-          setAuthCode(me.authCode);
-        }
+        if (me.authCode) setAuthCode(me.authCode);
 
-        // 인증 성립 시 세션 플래그/코드/참가자 기록
+        // 세션 인증 플래그 기록
         markEventAuthed(eventId, me.authCode, me);
       } else {
         setParticipant(null);
@@ -265,13 +255,11 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // ── Firestore write helper (원본 유지 + sanitize 추가) ────────────────
+  // ── Firestore write helper (원본 유지 + sanitize) ───────────────────
   async function writeParticipants(next) {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
-    // ✅ 추가: 저장 전 sanitize
-    const payload = sanitizeForFirestore({ participants: Array.isArray(next) ? next : [] });
-    await setDoc(ref, payload, { merge: true });
+    await setDoc(ref, sanitizeForFirestore({ participants: Array.isArray(next) ? next : [] }), { merge: true });
   }
 
   // ── API (원본 유지) ──────────────────────────────────────────────────
@@ -357,6 +345,7 @@ export function PlayerProvider({ children }) {
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
+    // 1조가 아니면 기존 배정 그대로 리턴(원본 유지)
     if (toInt(me.group) !== 1) {
       const partnerNickname =
         (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
@@ -364,6 +353,7 @@ export function PlayerProvider({ children }) {
     }
 
     if (FOURBALL_USE_TRANSACTION) {
+      // (우선) 외부 유틸 트랜잭션 시도
       try {
         if (typeof transactionalAssignFourball === 'function') {
           const result = await transactionalAssignFourball({
@@ -393,13 +383,14 @@ export function PlayerProvider({ children }) {
         console.warn('[fourball tx util] fallback to manual tx:', e?.message);
       }
 
+      // (대안) 직접 트랜잭션
       try {
         const result = await runTransaction(db, async (tx) => {
           const eref = doc(db, 'events', eventId);
           const snap = await tx.get(eref);
           const data = snap.exists() ? (snap.data() || {}) : {};
           const parts = (data.participants || []).map((p, i) => ({
-            ...((p && typeof p === 'object') ? p : {}),  // ⬅️ null 안전 스프레드
+            ...((p && typeof p === 'object') ? p : {}),
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
