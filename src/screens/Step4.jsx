@@ -1,4 +1,5 @@
 // /src/screens/Step4.jsx
+
 import React, { useContext, useState, useEffect, useRef } from "react";
 import styles from "./Step4.module.css";
 import { StepContext } from "../flows/StepFlow";
@@ -30,9 +31,18 @@ export default function Step4(props) {
 
   const { eventId } = useContext(EventContext);
 
-  const [selectedFileName, setSelectedFileName] = useState(
-    () => sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY) || ''
-  );
+  // ⬇ 파일명: 재시작 후에도 유지 (localStorage 우선, 없으면 sessionStorage)
+  const [selectedFileName, setSelectedFileName] = useState(() => {
+    try {
+      return (
+        localStorage.getItem(LAST_SELECTED_FILENAME_KEY) ||
+        sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY) ||
+        ''
+      );
+    } catch {
+      return '';
+    }
+  });
 
   const [hdInput, setHdInput] = useState({});
   useEffect(() => {
@@ -165,15 +175,20 @@ export default function Step4(props) {
   // preMembers 저장 토글 상태
   const [savePII, setSavePII] = useState(true);
 
+  // 파일 업로드 + preMembers 반영(관리자)
   const handleFileExtended = async (e) => {
     try {
       const f = e?.target?.files?.[0];
       const name = f?.name || '';
       setSelectedFileName(name);
-      sessionStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
+      try {
+        // ⬇ 파일명은 영구 저장
+        localStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
+        sessionStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
+      } catch {}
 
       if (typeof handleFile === 'function') {
-        await handleFile(e);
+        await handleFile(e); // 기존 로직
       }
 
       const user = getAuth().currentUser;
@@ -215,7 +230,7 @@ export default function Step4(props) {
     }
   };
 
-  // ── “선택” 롱프레스: 전체 선택/해제 토글 ──
+  // “선택” 롱프레스: 전체 선택/해제 토글
   const longPressTimer = useRef(null);
   const startLongSelectAll = () => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
@@ -230,15 +245,12 @@ export default function Step4(props) {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
   };
 
+  // 우측 토글: 버튼 기반(전역 체크박스 CSS 영향 없음)
   const ToggleBtn = ({ checked, onChange }) => (
     <button
       type="button"
       onClick={() => onChange(!checked)}
-      style={{
-        display:'inline-flex', alignItems:'center', gap:6,
-        background:'transparent', border:'1px solid #d1d5db',
-        borderRadius:8, padding:'4px 8px', lineHeight:1, cursor:'pointer'
-      }}
+      className={styles.pmToggleBtn}
       title="preMembers 저장 여부"
     >
       <span aria-hidden>{checked ? '☑' : '☐'}</span>
@@ -248,43 +260,25 @@ export default function Step4(props) {
 
   return (
     <div className={`${styles.step} ${styles.step4}`}>
-      <div
-        className={`${styles.excelHeader} ${uploadMethod === "manual" ? styles.manual : ""}`}
-        style={{ marginBottom: 12 }}
-      >
+      <div className={`${styles.excelHeader} ${uploadMethod === "manual" ? styles.manual : ""}`} style={{ marginBottom: 12 }}>
         {uploadMethod === "auto" && (
-          <div
-            className={styles.headerGrid}
-            style={{ display:'grid', gridTemplateColumns:'1fr auto', alignItems:'start', columnGap:12 }}
-          >
+          <div className={styles.headerGrid} style={{ display:'grid', gridTemplateColumns:'1fr auto', alignItems:'start', columnGap:12 }}>
+            {/* 왼쪽 */}
             <div className={styles.leftCol} style={{ display:'flex', gap:8, alignItems:'center', minWidth:0 }}>
               <input type="file" accept=".xlsx,.xls" onChange={handleFileExtended} />
               <span
-                style={{
-                  display:'inline-block',
-                  padding:'0 12px',
-                  height:32,
-                  lineHeight:'32px',
-                  border:'1px solid #d1d5db',
-                  borderRadius:10,
-                  background:'#fff',
-                  whiteSpace:'nowrap',
-                  overflow:'hidden',
-                  textOverflow:'ellipsis',
-                  maxWidth:220
-                }}
+                className={styles.filenameBadge}
                 title={selectedFileName || '선택된 파일 없음'}
               >
                 {selectedFileName || '선택된 파일 없음'}
               </span>
             </div>
 
-            {/* 오른쪽: 총 슬롯(축소 폰트) + preMembers 버튼.
-                ⬇︎ Step4.module.css에서 우측 컬럼 내부 checkbox를 강제로 숨겨 ‘유령 체크박스’ 차단 */}
+            {/* 오른쪽: 총 슬롯 + preMembers 버튼 (유령요소 완전 차단) */}
             <div className={styles.rightCol}>
-              <span className={styles.totalInline} style={{ whiteSpace:'nowrap' }}>
-                총 슬롯: {roomCount * 4}명
-              </span>
+              {/* 상단 라인 */}
+              <span className={styles.totalInline}>총 슬롯: {roomCount * 4}명</span>
+              {/* 하단 라인 */}
               <ToggleBtn checked={savePII} onChange={setSavePII} />
             </div>
           </div>
@@ -324,6 +318,7 @@ export default function Step4(props) {
                 ))}
               </select>
             </div>
+
             <div className={`${styles.cell} ${styles.nickname}`}>
               <input
                 type="text"
@@ -332,6 +327,7 @@ export default function Step4(props) {
                 onChange={(e) => changeNickname(i, e.target.value)}
               />
             </div>
+
             <div className={`${styles.cell} ${styles.handicap}`}>
               <input
                 type="text"
@@ -343,6 +339,7 @@ export default function Step4(props) {
                 onKeyDown={(e) => onHdKeyDown(e, i)}
               />
             </div>
+
             <div className={`${styles.cell} ${styles.delete}`}>
               <input
                 type="checkbox"
