@@ -1,7 +1,7 @@
 // /src/AppRouter.jsx
 
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PlayerProvider }        from './contexts/PlayerContext';
 import { EventProvider }         from './contexts/EventContext';
@@ -47,21 +47,22 @@ export default function AppRouter() {
                 </PlayerProvider>
               }
             >
-              {/* 리스트 */}
+              {/* 리스트(기본) */}
               <Route index element={<PlayerEventList />} />
+              {/* 리스트 별칭: /player/events */}
+              <Route path="events" element={<PlayerEventList />} />
 
               {/* 참가자 공용 로그인(이메일/코드) */}
               <Route path="login-or-code" element={<LoginOrCode />} />
-
-              {/* 특정 이벤트 로그인(코드 전용 화면) */}
+              {/* 특정 이벤트 로그인(코드 전용) */}
               <Route path="login/:eventId" element={<PlayerLoginScreen />} />
 
-              {/* 플레이어 앱 (기존) */}
+              {/* 플레이어 앱(기존) */}
               <Route path="app/*" element={<PlayerApp />} />
             </Route>
 
-            {/* ✅ /player/events 로 들어오면 '로그인 먼저' */}
-            <Route path="/player/events" element={<Navigate to="/player/login-or-code" replace />} />
+            {/* 🔁 플레이어 전용 캐치올: 잘못된 /player/* 는 참가자 로그인으로 */}
+            <Route path="/player/*" element={<Navigate to="/player/login-or-code" replace />} />
 
             {/* ───────── 운영자 영역 ───────── */}
             <Route
@@ -89,6 +90,7 @@ export default function AppRouter() {
               </Route>
             </Route>
 
+            {/* 마지막 캐치올: 그 외는 운영자 로그인 */}
             <Route path="*" element={<Navigate to="/login?role=admin" replace />} />
           </Routes>
         </EventProvider>
