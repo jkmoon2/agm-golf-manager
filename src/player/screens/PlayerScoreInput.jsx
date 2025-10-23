@@ -1,15 +1,9 @@
 // /src/player/screens/PlayerScoreInput.jsx
-// 변경 요약 (첨부 파일 기준 최소 수정)
-// - ★MOD: A안 반영 → '저장' 버튼으로만 커밋(현재 방만 반영, 기존 점수가 있으면 유지 = 운영자/관리자 우선)
-// - ★MOD: onBlur 커밋 제거(입력 중에는 draft만 변경) + 저장 버튼 활성화 상태(isDirty) 표시
-// - ★MOD: draft ↔ 서버 동기화: 방 멤버/참가자 변경 시 초기값 세팅
-// - 소수/부호 입력 안정화: pattern="[0-9.+-]*"(하이픈은 문자셋 끝) 포함—기존 유지
-// - ★MOD: [EMPHASIS] 저장 버튼 활성 시 약하게 강조(톤 유지)
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { doc, setDoc, onSnapshot, collection } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerScoreInput.module.css';
@@ -58,7 +52,6 @@ function orderByPair(list) {
       if (p2) {
         const pos = slot[0] ? 2 : 0;
         slot[pos] = p1;
-        // [FIX-LINT] 불필요한 표현식 제거: slot[pos] + 1;
         slot[pos + 1] = p2;
         used.add(id1); used.add(asNum(p2.id));
       }
@@ -84,6 +77,18 @@ const toNumberOrNull = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+// 규칙의 writerRoom() 검사 통과를 위해 내 memberships 문서를 보장
+async function ensureMembership(eventId, myRoom) {
+  try {
+    const uid = auth?.currentUser?.uid || null;
+    if (!uid || !eventId || !myRoom) return;
+    const ref = doc(db, 'events', eventId, 'memberships', uid);
+    await setDoc(ref, { room: myRoom }, { merge: true });
+  } catch (e) {
+    console.warn('ensureMembership failed', e);
+  }
+}
 
 export default function PlayerScoreInput() {
   const {
@@ -126,6 +131,13 @@ export default function PlayerScoreInput() {
   const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
   const myRoom = participant?.room ?? null;
+
+  useEffect(() => {
+    if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
+  }, [eventId, myRoom]);
+
+  const myKeyCandidates = [participant?.uid, participant?.id, participant?._id].map(v=>String(v ?? '')).filter(Boolean);
+
   const roomLabel =
     myRoom && roomNames[myRoom - 1]?.trim()
       ? roomNames[myRoom - 1].trim()
@@ -161,51 +173,68 @@ export default function PlayerScoreInput() {
     return rows;
   }, [orderedRoomPlayers]);
 
-  // ★MOD: A안 - draft 상태로만 입력 저장(저장 버튼 눌러야 커밋)
+  // 실시간 점수 맵 { [pid]: score }
+  const [scoresMap, setScoresMap] = useState({});
+  useEffect(() => {
+    if (!eventId) return;
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub = onSnapshot(colRef, (snap) => {
+      const m = {};
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        m[String(d.id)] = data.score == null ? null : data.score;
+      });
+      setScoresMap(m);
+    });
+    return unsub;
+  }, [eventId]);
+
   const [draft, setDraft] = useState({});
   useEffect(() => {
     setDraft((prev) => {
       const next = { ...prev };
       orderedRoomPlayers.forEach((p) => {
         const key = String(p.id);
-        if (next[key] === undefined) {
-          const base = (p.score == null || p.score === 0) ? '' : String(p.score);
-          next[key] = base;
-        }
+        const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
+        const base = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
+        if (next[key] === undefined) next[key] = base;
       });
       return next;
     });
-  }, [orderedRoomPlayers]);
+  }, [orderedRoomPlayers, scoresMap]);
 
-  // ★MOD: 저장 필요 여부
   const isDirty = useMemo(() => {
     return orderedRoomPlayers.some(p => {
       const key  = String(p.id);
-      const base = (p.score == null || p.score === 0) ? '' : String(p.score);
+      const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
+      const base = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
       return draft[key] !== undefined && draft[key] !== base;
     });
-  }, [orderedRoomPlayers, draft]);
+  }, [orderedRoomPlayers, draft, scoresMap]);
 
-  // ★MOD: 저장(관리자 우선, 현재 방만)
   const saveScoresDraft = async () => {
     if (!eventId) return;
     try{
+      await ensureMembership(eventId, myRoom);
+      const ops = [];
       const roomPids = new Set(orderedRoomPlayers.map(p => String(p.id)));
-      const base = Array.isArray(participants) ? participants : [];
-      const next = base.map(p => {
+
+      orderedRoomPlayers.forEach((p) => {
         const key = String(p.id);
-        if (!roomPids.has(key)) return p; // 현재 방만
+        if (!roomPids.has(key)) return;
         const raw = draft[key];
-        if (raw === undefined) return p;  // 변경 없음
         const newScore = toNumberOrNull(raw);
-        // 관리자 우선: 기존 점수가 존재하면 유지
-        if (p.score != null && p.score !== 0) return p;
-        return { ...p, score: newScore };
+
+        const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
+        const base = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
+        if (raw === undefined || String(raw) === base) return;
+
+        const ref = doc(db, 'events', eventId, 'scores', key);
+        ops.push(setDoc(ref, { room: myRoom, score: newScore }, { merge: true }));
       });
 
-      // 안전 직렬화
-      const payload = JSON.parse(JSON.stringify({ participants: next }, (k, v) => (typeof v === 'function' ? undefined : v)));
-      await setDoc(doc(db, 'events', eventId), payload, { merge: true });
+      await Promise.all(ops);
+      setDraft({});
       alert('저장되었습니다.');
     }catch(e){
       console.error('saveScoresDraft failed', e);
@@ -213,13 +242,11 @@ export default function PlayerScoreInput() {
     }
   };
 
-  // 입력 핸들러 (draft만 갱신)
   const onChangeScore = (pid, val) => {
     const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
   };
 
-  // Long Press 로 '-' 자동 입력(기존 유지)
   const inputRefs = useRef({});
   const holdMapRef = useRef({});
   const LONG_PRESS_MS = 1000;
@@ -266,20 +293,21 @@ export default function PlayerScoreInput() {
     const m = ensureMap(pid);
     if (m.timer) { clearTimeout(m.timer); m.timer = null; }
   };
-
   const preventContextMenu = (e) => { e.preventDefault(); };
 
   const totals = useMemo(() => {
     let sumH = 0, sumS = 0, sumR = 0;
     orderedRoomPlayers.forEach((p) => {
-      const s = toNumberOrNull(draft[String(p.id)] ?? ((p.score == null) ? '' : p.score));
+      const key = String(p.id);
+      const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
+      const s = toNumberOrNull(draft[key] ?? ((baseScore == null) ? '' : baseScore));
       const h = Number(p.handicap || 0);
       sumH += h;
       sumS += (s ?? 0);
       sumR += (s ?? 0) - h;
     });
     return { sumH, sumS, sumR };
-  }, [orderedRoomPlayers, draft]);
+  }, [orderedRoomPlayers, draft, scoresMap]);
 
   return (
     <div className={styles.page}>
@@ -316,11 +344,13 @@ export default function PlayerScoreInput() {
                 }
 
                 const key = String(p.id);
-                const raw =
-                  draft[key] ?? (p.score == null ? '' : (p.score === 0 ? '' : String(p.score)));
+                const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
+                const raw = draft[key] ?? (baseScore == null ? '' : (baseScore === 0 ? '' : String(baseScore)));
                 const s = toNumberOrNull(raw);
                 const h = Number(p.handicap || 0);
                 const r = (s ?? 0) - h;
+
+                const inputDisabled = false;
 
                 return (
                   <tr key={p.id}>
@@ -331,11 +361,10 @@ export default function PlayerScoreInput() {
                       <span>{p.handicap}</span>
                     </td>
                     <td className={`${styles.td} ${styles.scoreTd}`}>
-                      {/* [FIX] 하이픈을 문자셋 끝에: 모바일 IME 충돌 방지 */}
                       <input
                         type="text"
                         inputMode="decimal"
-                        pattern="[0-9.+-]*"
+                        pattern="[0-9.+\-]*"
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="off"
@@ -343,7 +372,7 @@ export default function PlayerScoreInput() {
                         className={styles.cellInput}
                         value={raw}
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
-                        onBlur={() => {} /* ★MOD: 저장 버튼으로만 커밋 */}
+                        onBlur={() => {}}
                         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                         onPointerDown={(e) => startHold(p.id, e)}
                         onPointerUp={() => endHold(p.id)}
@@ -355,6 +384,9 @@ export default function PlayerScoreInput() {
                           if (el) inputRefs.current[key] = el;
                           else delete inputRefs.current[key];
                         }}
+                        disabled={inputDisabled}
+                        aria-disabled={inputDisabled}
+                        style={inputDisabled ? { opacity:.55, background:'#f9fafb' } : undefined}
                       />
                     </td>
                     <td className={`${styles.td} ${styles.resultTd}`}>
@@ -379,13 +411,11 @@ export default function PlayerScoreInput() {
       <div className={styles.footerNav}>
         <Link to={`/player/home/${eventId}/3`} className={`${styles.navBtn} ${styles.navPrev}`}>이전</Link>
 
-        {/* ★MOD: 저장 버튼(A안) */}
         <button
           className={`${styles.navBtn}`}
           onClick={saveScoresDraft}
           disabled={!isDirty}
           aria-disabled={!isDirty}
-          // [EMPHASIS] 활성 시만 살짝 강조
           style={!isDirty
             ? { opacity: 0.5, pointerEvents: 'none' }
             : { boxShadow: '0 0 0 2px rgba(59,130,246,.35) inset', fontWeight: 600 }

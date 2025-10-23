@@ -1,13 +1,12 @@
 // /src/player/screens/EventSelectScreen.jsx
-// ※ 기존 코드 100% 유지 + 필요한 부분만 추가(★ patch 주석)
-// - 기간 제한 시 클릭은 막되, 라벨은 "종료"일 때만 표시(한 줄, 줄바꿈 없음)
 
 import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc } from 'firebase/firestore';
 import styles from './EventSelectScreen.module.css';
+import PlayerAuthGate from '../components/PlayerAuthGate'; // [ADD]
 
 export default function EventSelectScreen() {
   const nav = useNavigate();
@@ -31,13 +30,12 @@ export default function EventSelectScreen() {
       ? s.replaceAll('-', '.')
       : '미정';
 
-  // 같은 세션에서만 인증 유지
   const wasAuthed = (id) => {
     try { return sessionStorage.getItem(`auth_${id}`) === 'true'; }
     catch { return false; }
   };
 
-  // ★ patch: 안전한 시간 변환 유틸
+  // 안전 변환 유틸
   const tsToMillis = (ts) => {
     if (ts == null) return null;
     if (typeof ts === 'number') return ts;
@@ -45,7 +43,7 @@ export default function EventSelectScreen() {
     if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
     return null;
   };
-  const dateStrToMillis = (s, kind /* 'start'|'end' */) => {
+  const dateStrToMillis = (s, kind) => {
     if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
     const t = kind === 'start' ? '00:00:00' : '23:59:59';
     const d = new Date(`${s}T${t}`);
@@ -56,7 +54,6 @@ export default function EventSelectScreen() {
     endAt:   tsToMillis(ev?.accessEndAt)   ?? dateStrToMillis(ev?.dateEnd, 'end'),
   });
 
-  // 접속 허용 여부(제한은 막되, 라벨은 "종료"에만)
   const isAccessAllowed = (ev) => {
     if (!ev?.allowDuringPeriodOnly) return true;
     const { startAt, endAt } = getStartEnd(ev);
@@ -70,6 +67,26 @@ export default function EventSelectScreen() {
     return !!(endAt && Date.now() > endAt);
   };
 
+  // [ADD] pending_code가 있으면 이벤트 클릭 시 즉석 검증
+  const tryPendingCode = async (eventId) => {
+    try {
+      const code = sessionStorage.getItem('pending_code') || '';
+      if (!code) return false;
+      const snap = await getDoc(doc(db, 'events', eventId));
+      if (!snap.exists()) return false;
+      const part = (snap.data().participants || []).find(p => String(p.authCode) === code);
+      if (!part) return false;
+
+      sessionStorage.setItem(`auth_${eventId}`, 'true');
+      sessionStorage.setItem(`authcode_${eventId}`, code);
+      sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(part));
+      try { localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code, ts: Date.now() })); } catch {}
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const goNext = async (ev) => {
     if (!isAccessAllowed(ev)) {
       alert('대회 기간이 아닙니다.\n대회 기간 중에만 참가자 접속이 허용됩니다.');
@@ -78,11 +95,15 @@ export default function EventSelectScreen() {
     try { localStorage.setItem('eventId', ev.id); } catch {}
     setEventId?.(ev.id);
     if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
-    if (wasAuthed(ev.id)) nav(`/player/home/${ev.id}`);
-    else nav(`/player/home/${ev.id}/login`);
+
+    if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}`); return; }
+
+    // [ADD] pending_code 자동 검증
+    const ok = await tryPendingCode(ev.id);
+    if (ok) nav(`/player/home/${ev.id}`);
+    else    nav(`/player/home/${ev.id}/login`);
   };
 
-  // ★ patch: 모듈이 없어도 동일 스타일을 보장하기 위한 인라인 배지 스타일
   const endedBadgeStyle = {
     marginLeft: 6,
     padding: '2px 6px',
@@ -94,45 +115,47 @@ export default function EventSelectScreen() {
     whiteSpace: 'nowrap'
   };
 
+  // [ADD] PlayerAuthGate로 감싸서 "로그인 먼저" 강제
   return (
-    <div className={styles.container}>
-      {!events.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
+    <PlayerAuthGate>
+      <div className={styles.container}>
+        {!events.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
 
-      <ul className={styles.list}>
-        {events.map(ev => {
-          const dateStart = ev.dateStart ?? ev.startDate ?? '';
-          const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
-          const count = Array.isArray(ev.participants) ? ev.participants.length : 0;
-          const isFour = (ev.mode === 'agm' || ev.mode === 'fourball');
+        <ul className={styles.list}>
+          {events.map(ev => {
+            const dateStart = ev.dateStart ?? ev.startDate ?? '';
+            const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
+            const count = Array.isArray(ev.participants) ? ev.participants.length : 0;
+            const isFour = (ev.mode === 'agm' || ev.mode === 'fourball');
 
-          const accessOk = isAccessAllowed(ev);
-          const ended    = isEnded(ev); // ★ 종료 여부
+            const accessOk = isAccessAllowed(ev);
+            const ended    = isEnded(ev);
 
-          return (
-            <li
-              key={ev.id}
-              className={styles.card}
-              onClick={() => goNext(ev)}
-              style={accessOk ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
-              title={accessOk ? undefined : '대회 기간 외 접속 제한'}
-            >
-              <div className={styles.titleRow}>
-                <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>
-                <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
-                  {isFour ? 'AGM 포볼' : '스트로크'}
-                </span>
-                {/* ★ patch: 종료 시에만 한 줄 "종료" 배지 */}
-                {ended && <span style={endedBadgeStyle}>종료</span>}
-              </div>
+            return (
+              <li
+                key={ev.id}
+                className={styles.card}
+                onClick={() => goNext(ev)}
+                style={accessOk ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
+                title={accessOk ? undefined : '대회 기간 외 접속 제한'}
+              >
+                <div className={styles.titleRow}>
+                  <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>
+                  <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
+                    {isFour ? 'AGM 포볼' : '스트로크'}
+                  </span>
+                  {ended && <span style={endedBadgeStyle}>종료</span>}
+                </div>
 
-              <div className={styles.subline}>
-                <span>👥 참가자 {count}명</span>
-                {(dateStart || dateEnd) && <span>📅 {fmt(dateStart)} ~ {fmt(dateEnd)}</span>}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+                <div className={styles.subline}>
+                  <span>👥 참가자 {count}명</span>
+                  {(dateStart || dateEnd) && <span>📅 {fmt(dateStart)} ~ {fmt(dateEnd)}</span>}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </PlayerAuthGate>
   );
 }

@@ -9,8 +9,8 @@ import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
 
 // [ADD] Firestore 폴백 구독
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
 
 const TIMINGS = {
   spinBeforeAssign: 1000,
@@ -18,6 +18,18 @@ const TIMINGS = {
   preAlertFourball: 300,
   spinDuringPartnerPick: 1800,
 };
+
+async function ensureMembership(eventId, myRoom) {
+  try {
+    const uid = auth?.currentUser?.uid || null;
+    if (!uid || !eventId || !myRoom) return;
+    const ref = doc(db, 'events', eventId, 'memberships', uid);
+    await setDoc(ref, { room: Number(myRoom) }, { merge: true });
+  } catch (e) {
+    console.warn('[PlayerRoomSelect] ensureMembership failed', e);
+  }
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function normalizeGate(g) {
@@ -106,6 +118,15 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
   const done = !!participant?.room;
   const assignedRoom = participant?.room ?? null;
+
+  // [ADD] 내 room 값이 바뀌는 순간 memberships도 동기화
+  useEffect(() => {
+    const eid = playerEventId || ctxEventId || urlEventId;
+    const r = Number(assignedRoom);
+    if (eid && Number.isFinite(r) && r >= 1) {
+      ensureMembership(eid, r);
+    }
+  }, [assignedRoom, playerEventId, ctxEventId, urlEventId]);
 
   const [showTeam, setShowTeam] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
@@ -299,6 +320,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       }
 
       if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
+
+      await ensureMembership((playerEventId || ctxEventId || urlEventId), Number(roomNumber));
 
       setFlowStep('afterAssign');
 

@@ -10,23 +10,22 @@ import LoginScreen         from './screens/LoginScreen';
 import AdminApp            from './AdminApp';
 import Dashboard           from './screens/Dashboard';
 import Settings            from './screens/Settings';
+// (삭제) import PreMembersList      from './admin/screens/PreMembersList';
 import PlayerEventList     from './player/screens/PlayerEventList';
 import PlayerLoginScreen   from './player/screens/PlayerLoginScreen';
 import PlayerApp           from './player/PlayerApp';
 import MainLayout          from './layouts/MainLayout';
 
-// ── [ADD] 플레이어: 로그인/인증코드 탭 UI
 import LoginOrCode         from './player/screens/LoginOrCode';
-// ── [ADD] 운영자: 회원 전용 이벤트 토글 화면
 import EventMembersOnlyToggle from './admin/screens/EventMembersOnlyToggle';
-// ── [ADD] 운영자: 회원 목록(다운로드/삭제)
-import MembersList from './admin/screens/MembersList';
-// ── [ADD] 운영자: 여러 이벤트 일괄 토글 (신규)
+import MembersList            from './admin/screens/MembersList';
 import EventMembersBulkToggle from './admin/screens/EventMembersBulkToggle';
+// ▼ 새 preMembers 페이지(팝업 + ‘신규만 가져오기’)
+import PreMembers          from './admin/screens/PreMembers';
 
-function Protected({ children, roles }) {
+function Protected({ roles, children }) {
   const { firebaseUser, appRole } = useAuth();
-  if (!firebaseUser)                     return <Navigate to="/login?role=admin" replace />;
+  if (!firebaseUser) return <Navigate to="/login?role=admin" replace />;
   if (roles && !roles.includes(appRole)) return <Navigate to="/login?role=admin" replace />;
   return children;
 }
@@ -49,15 +48,10 @@ export default function AppRouter() {
                 </PlayerProvider>
               }
             >
-              <Route index element={<Navigate to="events" replace />} />
-              <Route path="events" element={<PlayerEventList />} />
-              <Route path="home/:eventId/*" element={<PlayerApp />} />
-
-              {/* [ADD] 탭형 로그인/인증코드 UI */}
-              <Route path="home/:eventId/login" element={<LoginOrCode />} />
-
-              {/* (레거시 유지) 인증코드 전용 */}
-              <Route path="home/:eventId/join" element={<PlayerLoginScreen />} />
+              <Route index element={<PlayerEventList />} />
+              <Route path="login" element={<PlayerLoginScreen />} />
+              <Route path="app/*" element={<PlayerApp />} />
+              <Route path="login-or-code" element={<LoginOrCode />} />
             </Route>
 
             {/* ─────────────── 운영자 영역(보호) ─────────────── */}
@@ -80,14 +74,13 @@ export default function AppRouter() {
                 <Route path="/admin/dashboard" element={<Dashboard />} />
                 <Route path="/admin/settings"  element={<Settings />} />
 
-                {/* [유지] 이벤트별 토글 라우트가 이미 사용 중이면 살려둠 */}
-                <Route path="/admin/events/:eventId/members-only" element={<EventMembersOnlyToggle />} />
-
-                {/* [ADD] 설정 하위 메뉴 라우트 */}
+                {/* 기존 메뉴들 유지 */}
                 <Route path="/admin/settings/members-only" element={<EventMembersOnlyToggle />} />
                 <Route path="/admin/settings/members"      element={<MembersList />} />
-                {/* [ADD] 여러 이벤트 일괄 토글 */}
                 <Route path="/admin/settings/members-bulk" element={<EventMembersBulkToggle />} />
+
+                {/* ✅ pre-members는 새 페이지로 통일 */}
+                <Route path="/admin/settings/pre-members"  element={<PreMembers />} />
               </Route>
             </Route>
 

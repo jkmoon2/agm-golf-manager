@@ -26,12 +26,26 @@ export default function PlayerApp() {
   const navigate    = useNavigate();
   const { eventId: ctxEventId, participant } = useContext(PlayerContext);
 
-  // Guard: context.eventId과 URL이 같고, participant가 있어야 STEP 메뉴 접근
+  // 기존 가드(컨텍스트/참가자)
   useEffect(() => {
     if (ctxEventId !== eventId || !participant) {
       navigate(`/player/home/${eventId}/login`, { replace: true });
     }
   }, [ctxEventId, eventId, participant, navigate]);
+
+  // [ADD] 보조 가드: deep-link로 바로 STEP URL에 들어온 경우 대비
+  useEffect(() => {
+    const hasTicket = (() => {
+      try { return sessionStorage.getItem(`auth_${eventId}`) === 'true'; } catch { return false; }
+    })();
+    const hasPending = (() => {
+      try { return !!sessionStorage.getItem('pending_code'); } catch { return false; }
+    })();
+    // 참가자 컨텍스트가 아직 준비 전이거나, 인증 티켓/코드가 전혀 없는 경우 로그인 페이지로
+    if (!participant && !hasTicket && !hasPending) {
+      navigate(`/player/home/${eventId}/login`, { replace: true });
+    }
+  }, [eventId, participant, navigate]);
 
   return (
     // [ADD] STEP 공용 흐름 컨텍스트로 감싸기 (기존 라우트는 그대로)
