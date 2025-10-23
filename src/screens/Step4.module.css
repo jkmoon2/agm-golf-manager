@@ -2,7 +2,7 @@
 
 .step { display:flex; flex-direction:column; height:100%; }
 
-/* 1차 헤더: 제목 */
+/* 1차 헤더 */
 .stepHeader{ margin:0 0 4px 0; }
 .stepHeader h3{ margin:0; font-size:18px; text-align:center; padding-bottom:4px; border-bottom:1px solid #ccc; }
 
@@ -16,43 +16,79 @@
 }
 .manual{ visibility:hidden; }
 
-/* 파일선택(좌) + 총 슬롯/토글(우) */
+/* 레이아웃 */
 .headerGrid{ display:grid; grid-template-columns:1fr auto; align-items:center; gap:8px; width:100%; }
 .leftCol{ min-width:0; }
 
-/* ⬇️ 우측 컬럼: 유입되는 유령 요소 완전 차단 */
+/* 파일명 뱃지(줄바꿈/겹침 방지) */
+.filenameBadge{
+  display:inline-block;
+  padding:0 12px;
+  height:32px;
+  line-height:32px;
+  border:1px solid #d1d5db;
+  border-radius:10px;
+  background:#fff;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:220px;
+}
+
+/* ✅ 유령요소 완전 차단: 헤더 영역에서 생성되는 ::before/::after/배경이미지/체크박스 DOM 제거 */
+.excelHeader *::before,
+.excelHeader *::after{ content:none !important; }
+.excelHeader,
+.excelHeader *,
+.excelHeader *:before,
+.excelHeader *:after{
+  background-image:none !important;
+}
+.excelHeader input[type="checkbox"]{ display:none !important; }
+
+/* 우측 컬럼(두 줄) + 안전한 오버레이 */
 .rightCol{
   display:grid;
   grid-template-rows:auto auto;
   row-gap:6px;
   justify-items:end;
   position:relative;
-  overflow:hidden;      /* 보이는 잔상 차단 */
-  isolation:isolate;    /* 독립 스택 생성 → 외부 absolute/tracks 겹침 차단 */
+  overflow:hidden;
+  isolation:isolate;
 }
-/* 우측 컬럼 내부에 checkbox가 들어오면 강제 숨김 (유령 체크박스 제거) */
-.rightCol input[type="checkbox"]{ display:none !important; }
+/* 배경 유령을 가리는 오버레이 (컨텐츠 위계: overlay<content) */
+.rightCol::before{
+  content:'';
+  position:absolute;
+  right:0; top:0; left:auto;
+  width:140px; height:24px;
+  background:#f7f7f7;
+  border-radius:8px;
+  z-index:1;
+}
+.rightCol > *{ position:relative; z-index:2; }
 
-/* 총 슬롯: 인라인 + 축소 폰트 */
-.total{ position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:14px; white-space:nowrap; text-align:right; }
+/* 총 슬롯: 요청대로 축소 */
 .totalInline{
-  position:static; right:auto; top:auto; transform:none;
-  font-size:13px;               /* ✅ 요청: 글자 크기 축소 */
+  position:static;
+  font-size:12px;
   color:#333;
   white-space:nowrap;
 }
 
-/* preMembers 토글 버튼을 감싸는 곳이 버튼 기반이므로 별도 스타일 불필요 */
+/* 버튼 기반 preMembers 토글 */
+.pmToggleBtn{
+  display:inline-flex; align-items:center; gap:6px;
+  background:transparent; border:1px solid #d1d5db;
+  border-radius:8px; padding:4px 8px; line-height:1; cursor:pointer;
+}
 
-/* 3차 헤더: 컬럼 타이틀 */
+/* 3차 헤더 */
 .participantRowHeader{ display:flex; gap:8px; margin:0 0 8px 0; padding-bottom:6px; border-bottom:1px solid #ccc; background:#f7f7f7; font-weight:600; }
 .participantRowHeader .group{ flex:0 0 40px; }
 .participantRowHeader .nickname{ flex:2.5; }
 .participantRowHeader .handicap{ flex:0 0 50px; }
 .participantRowHeader .delete{ flex:0 0 40px; font-size:12px; }
-
-/* 그룹 선택 드롭다운 */
-.groupSelect{ width:100%; height:32px; border:1px solid #ccc; border-radius:4px; background:#fff; font-size:14px; text-align:center; cursor:pointer; padding:0 4px; }
 
 /* 리스트 */
 .participantTable{ flex:1; overflow-y:auto; background:#fff; }
@@ -62,7 +98,7 @@
 .participantRow .handicap{ flex:0 0 50px; }
 .participantRow .delete{ flex:0 0 40px; }
 
-/* 공통 cell */
+/* 공통 */
 .cell{ display:flex; align-items:center; justify-content:center; padding:4px 8px; white-space:nowrap; }
 
 /* 입력 */
