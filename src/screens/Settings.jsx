@@ -1,7 +1,7 @@
 // /src/screens/Settings.jsx
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom'; // [ADD] useLocation 추가
 import styles from './Settings.module.css';
 import { EventContext } from '../contexts/EventContext';
 import { collection, doc, onSnapshot, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
@@ -38,6 +38,12 @@ export default function Settings() {
     updateEvent,
     updateEventImmediate,
   } = useContext(EventContext) || {};
+
+  // [ADD] 현재 경로가 /admin으로 시작하면 admin 경로로, 아니면 일반 경로로 열리도록 분기
+  const location = useLocation();
+  const preMembersPath = location.pathname.startsWith('/admin')
+    ? '/admin/settings/pre-members'
+    : '/settings/pre-members';
 
   const [events, setEvents] = useState([]);
   useEffect(() => {
@@ -305,7 +311,7 @@ export default function Settings() {
         <div className={styles.hint}>※ 현재 STEP2가 비활성 또는 숨김이라면, STEP1의 “다음” 버튼은 자동으로 비활성화됩니다.</div>
       </section>
 
-      {/* ⑤ 테마 설정 */}
+      {/* ⑤ 테마 설정 (원본 유지) */}
       <section className={`${styles.card} ${styles.themeCard}`}>
         <div className={styles.cardHeader}>
           <h3>⑤ 테마 설정</h3>
@@ -369,7 +375,6 @@ export default function Settings() {
 
         <div className={styles.themeRow}>
           <div />
-          {/* iOS 우측 여백 보정 및 버튼 동일폭 */}
           <div className={styles.themeActions} style={{display:'flex', gap:8}}>
             <button className={styles.saveBtn} onClick={()=>applyTheme('global')}>적용</button>
             <button className={styles.eventSelect} style={{height:40}} onClick={()=>{
@@ -412,6 +417,19 @@ export default function Settings() {
             </div>
           </div>
         </div> 
+
+        {/* [CHG] preMembers 버튼: 현재 경로에 맞춰 자동 분기 */}
+        <div className={`${styles.optionRow} ${styles.optionRowGrid}`}>
+          <div className={styles.optionLabel}>preMembers</div>
+          <div className={styles.rowRight}>
+            <div className={styles.controlBox}>
+              <Link to={preMembersPath} className={`${styles.linkBtnFullLarge} ${styles.blueFocus}`}>
+                이메일/이름 관리
+              </Link>
+            </div>
+          </div>
+        </div>
+
       </section>
     </div>
   );

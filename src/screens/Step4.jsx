@@ -1,6 +1,9 @@
-// src/screens/Step4.jsx
+// /src/screens/Step4.jsx
+// - 우측 preMembers 토글의 문제 CSS(className=styles.preMembersToggle) 제거 → 겹침 원천 차단
+// - 헤더를 display:grid; gridTemplateColumns:'1fr auto'로 고정
+// - "선택" 롱프레스: 전체 선택/해제 토글 유지
 
-import React, { useContext, useState, useEffect } from "react";
+import React, { useContext, useState, useEffect, useRef } from "react";
 import styles from "./Step4.module.css";
 import { StepContext } from "../flows/StepFlow";
 import { EventContext } from "../contexts/EventContext";
@@ -13,6 +16,10 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import * as XLSX from 'xlsx';
+import { getAuth } from 'firebase/auth';
+
+const LAST_SELECTED_FILENAME_KEY = 'agm_step4_filename';
 
 export default function Step4(props) {
   const {
@@ -27,11 +34,12 @@ export default function Step4(props) {
 
   const { eventId } = useContext(EventContext);
 
-  // ✅ G핸디 입력용 임시 문자열 상태 (id -> string)
-  //    - ''(빈 문자열), '-'(마이너스) 허용
-  const [hdInput, setHdInput] = useState({});
+  // 파일명 표시(리마운트에도 유지)
+  const [selectedFileName, setSelectedFileName] = useState(
+    () => sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY) || ''
+  );
 
-  // participants가 바뀔 때, 아직 draft가 없는 id만 초기화
+  const [hdInput, setHdInput] = useState({});
   useEffect(() => {
     setHdInput(prev => {
       const next = { ...prev };
@@ -45,35 +53,27 @@ export default function Step4(props) {
     });
   }, [participants]);
 
-  // ✅ 공통 업서트 헬퍼: updateDoc 실패 시 setDoc(merge)로 안전 생성
   const upsertParticipantFields = async (pid, baseObj, patch) => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId, 'participants', String(pid));
     try {
-      await updateDoc(ref, {
-        ...patch,
-        updatedAt: serverTimestamp(),
-      });
+      await updateDoc(ref, { ...patch, updatedAt: serverTimestamp() });
     } catch (e) {
       const msg = String(e?.message || '');
       const notFound = e?.code === 'not-found' || msg.includes('No document to update');
       if (notFound) {
-        await setDoc(
-          ref,
-          {
-            id: baseObj?.id ?? pid,
-            group: baseObj?.group ?? 1,
-            nickname: baseObj?.nickname ?? '',
-            handicap: baseObj?.handicap ?? null,
-            score: baseObj?.score ?? null,
-            room: baseObj?.room ?? null,
-            partner: baseObj?.partner ?? null,
-            selected: baseObj?.selected ?? false,
-            ...patch,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
+        await setDoc(ref, {
+          id: baseObj?.id ?? pid,
+          group: baseObj?.group ?? 1,
+          nickname: baseObj?.nickname ?? '',
+          handicap: baseObj?.handicap ?? null,
+          score: baseObj?.score ?? null,
+          room: baseObj?.room ?? null,
+          partner: baseObj?.partner ?? null,
+          selected: baseObj?.selected ?? false,
+          ...patch,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
       } else {
         console.error('[Step4] upsertParticipantFields error:', e);
         throw e;
@@ -81,14 +81,12 @@ export default function Step4(props) {
     }
   };
 
-  // 1) 참가자 선택 토글 (기존)
   const toggleSelect = (i) => {
     const c = [...participants];
     c[i].selected = !c[i].selected;
     setParticipants(c);
   };
 
-  // 2) 참가자 추가 (기존)
   const addParticipant = async () => {
     if (!eventId) return alert('이벤트가 설정되지 않았습니다.');
     const newId = participants.length;
@@ -96,27 +94,22 @@ export default function Step4(props) {
       id:       newId,
       group:    1,
       nickname: "",
-      handicap: null, // 새 슬롯은 기본 null
+      handicap: null,
       score:    null,
       room:     null,
       partner:  null,
       selected: false,
       updatedAt: serverTimestamp(),
     };
-
     const docRef = doc(db, 'events', eventId, 'participants', String(newId));
     await setDoc(docRef, newObj, { merge: true });
     setParticipants((p) => [...p, newObj]);
     setHdInput(prev => ({ ...prev, [String(newId)]: '' }));
   };
 
-  // 3) 선택된 참가자 삭제 (기존)
   const delSelected = async () => {
     if (!eventId) return alert('이벤트가 설정되지 않았습니다.');
-    const toDeleteIds = participants
-      .filter((x) => x.selected)
-      .map((x) => x.id);
-
+    const toDeleteIds = participants.filter((x) => x.selected).map((x) => x.id);
     const batch = writeBatch(db);
     const collRef = collection(db, 'events', eventId, 'participants');
     toDeleteIds.forEach((id) => {
@@ -131,7 +124,6 @@ export default function Step4(props) {
     });
   };
 
-  // 4) 그룹 변경 — 업서트 유지
   const changeGroup = async (i, newGroup) => {
     if (!eventId) return;
     const c = [...participants];
@@ -140,7 +132,6 @@ export default function Step4(props) {
     await upsertParticipantFields(c[i].id, c[i], { group: newGroup });
   };
 
-  // 5) 닉네임 변경 — 업서트 유지
   const changeNickname = async (i, newName) => {
     if (!eventId) return;
     const c = [...participants];
@@ -149,66 +140,177 @@ export default function Step4(props) {
     await upsertParticipantFields(c[i].id, c[i], { nickname: newName });
   };
 
-  // 6-A) G핸디 입력(onChange): 숫자 확정 전까지는 문자열로만 보관 ('' / '-' 허용)
   const changeHandicapDraft = (pid, raw) => {
     setHdInput(prev => ({ ...prev, [String(pid)]: raw }));
   };
 
-  // 6-B) G핸디 확정(commit): blur 또는 Enter에서만 숫자/ null 로 저장 + 업서트
   const commitHandicap = async (i) => {
     if (!eventId) return;
     const pid = participants[i].id;
     const raw = (hdInput[String(pid)] ?? '').trim();
-
-    // 허용 패턴: '', '-', 또는 정수/소수(마이너스 허용)
-    // '' 또는 '-' → null 로 확정
     let finalVal = null;
     if (raw !== '' && raw !== '-') {
       const num = Number(raw);
       finalVal = Number.isFinite(num) ? num : null;
     }
-
-    // 로컬 상태 반영
     const c = [...participants];
     c[i] = { ...c[i], handicap: finalVal };
     setParticipants(c);
-
-    // Firestore 업서트
     await upsertParticipantFields(pid, c[i], { handicap: finalVal });
-
-    // 확정 후 표시 문자열도 동기화
     setHdInput(prev => ({
       ...prev,
       [String(pid)]: finalVal === null ? '' : String(finalVal)
     }));
   };
 
-  // Enter로 확정
   const onHdKeyDown = (e, i) => {
-    if (e.key === 'Enter') {
-      e.currentTarget.blur(); // onBlur에서 commitHandicap 호출
+    if (e.key === 'Enter') e.currentTarget.blur();
+  };
+
+  const [savePII, setSavePII] = useState(true);
+
+  // 파일 업로드 + preMembers 반영(관리자)
+  const handleFileExtended = async (e) => {
+    try {
+      const f = e?.target?.files?.[0];
+      const name = f?.name || '';
+      setSelectedFileName(name);
+      sessionStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
+
+      if (typeof handleFile === 'function') {
+        await handleFile(e); // 기존 로직
+      }
+
+      const user = getAuth().currentUser;
+      const isAdmin = !!user && user.email === 'a@a.com';
+
+      if (!savePII || !eventId || !isAdmin) return; // 관리자 아닐 땐 생략
+      if (!f) return;
+
+      const ab = await f.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      const batch = writeBatch(db);
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i] || [];
+        const email = String(r[4] || '').trim().toLowerCase();
+        const nameCell  = String(r[5] || '').trim();
+        const nickname = String(r[1] || '').trim();
+        const group = Number(r[0]) || null;
+        if (!email) continue;
+
+        batch.set(
+          doc(db, 'events', eventId, 'preMembers', email),
+          {
+            name: nameCell || null,
+            nickname: nickname || null,
+            group: Number.isFinite(group) ? group : null,
+            uploadedAt: serverTimestamp(),
+            importedFrom: 'excel'
+          },
+          { merge: true }
+        );
+      }
+      await batch.commit();
+    } catch (err) {
+      console.warn('[Step4] handleFileExtended error', err);
+      alert(`엑셀 업로드 중 preMembers 반영에 실패했습니다.\n(${err?.code || 'error'})`);
+    } finally {
+      // 파일명 유지를 위해 input 초기화는 하지 않음
+      // try { e.target.value = ''; } catch {}
     }
+  };
+
+  // ───── 롱프레스(선택 전체 토글) ─────
+  const longPressTimer = useRef(null);
+  const startLongSelectAll = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = setTimeout(() => {
+      setParticipants(prev => {
+        const allSelected = prev.every(p => !!p.selected);
+        return prev.map(p => ({ ...p, selected: !allSelected }));
+      });
+    }, 600);
+  };
+  const cancelLong = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
   };
 
   return (
     <div className={`${styles.step} ${styles.step4}`}>
-      {/* 2차 헤더: 파일 선택 / 총 슬롯 */}
-      <div className={`${styles.excelHeader} ${uploadMethod === "manual" ? styles.manual : ""}`}>
+      {/* 헤더: grid로 좌/우 분리, 간격 확보 */}
+      <div
+        className={`${styles.excelHeader} ${uploadMethod === "manual" ? styles.manual : ""}`}
+        style={{ marginBottom: 12 }}
+      >
         {uploadMethod === "auto" && (
-          <input type="file" accept=".xlsx,.xls" onChange={handleFile} />
+          <div
+            className={styles.headerGrid}
+            style={{ display:'grid', gridTemplateColumns:'1fr auto', alignItems:'start', columnGap:12 }}
+          >
+            <div className={styles.leftCol} style={{ display:'flex', gap:8, alignItems:'center', minWidth:0 }}>
+              <input type="file" accept=".xlsx,.xls" onChange={handleFileExtended} />
+              <span
+                style={{
+                  display:'inline-block',
+                  padding:'0 12px',
+                  height:32,
+                  lineHeight:'32px',
+                  border:'1px solid #d1d5db',
+                  borderRadius:10,
+                  background:'#fff',
+                  whiteSpace:'nowrap',
+                  overflow:'hidden',
+                  textOverflow:'ellipsis',
+                  maxWidth:220
+                }}
+                title={selectedFileName || '선택된 파일 없음'}
+              >
+                {selectedFileName || '선택된 파일 없음'}
+              </span>
+            </div>
+
+            {/* ⬇ 문제 CSS(className=styles.preMembersToggle) 미적용 → 겹침 근본 차단 */}
+            <div className={styles.rightCol} style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
+              <span className={styles.total} style={{ whiteSpace:'nowrap' }}>
+                총 슬롯: {roomCount * 4}명
+              </span>
+              <label style={{ display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
+                <input
+                  type="checkbox"
+                  checked={savePII}
+                  onChange={(e) => setSavePII(e.target.checked)}
+                />
+                preMembers
+              </label>
+            </div>
+          </div>
         )}
-        <span className={styles.total}>총 슬롯: {roomCount * 4}명</span>
       </div>
 
-      {/* 3차 헤더: 컬럼 타이틀 */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
         <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
-        <div className={`${styles.cell} ${styles.delete}`}>선택</div>
+
+        {/* "선택"을 길게 누르면 전체 선택/해제 토글 */}
+        <div className={`${styles.cell} ${styles.delete}`}>
+          <span
+            onMouseDown={startLongSelectAll}
+            onMouseUp={cancelLong}
+            onMouseLeave={cancelLong}
+            onTouchStart={startLongSelectAll}
+            onTouchEnd={cancelLong}
+            style={{ userSelect:'none', cursor:'pointer' }}
+            title="길게 누르면 전체 선택/해제"
+          >
+            선택
+          </span>
+        </div>
       </div>
 
-      {/* 리스트 영역 */}
       <div className={styles.participantTable}>
         {participants.map((p, i) => (
           <div key={p.id} className={styles.participantRow}>
@@ -234,10 +336,9 @@ export default function Step4(props) {
             </div>
 
             <div className={`${styles.cell} ${styles.handicap}`}>
-              {/* ⬇️ type='text'로 변경, 입력 단계는 문자열 유지 */}
               <input
                 type="text"
-                inputMode="decimal"        // 모바일 키패드 유도
+                inputMode="decimal"
                 placeholder="G핸디"
                 value={hdInput[String(p.id)] ?? (p.handicap ?? '')}
                 onChange={(e) => changeHandicapDraft(p.id, e.target.value)}
@@ -257,7 +358,6 @@ export default function Step4(props) {
         ))}
       </div>
 
-      {/* 하단 버튼 (이전/추가/삭제/다음) */}
       <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
         <button onClick={addParticipant}>추가</button>

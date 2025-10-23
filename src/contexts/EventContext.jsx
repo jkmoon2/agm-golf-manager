@@ -8,7 +8,8 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
-  serverTimestamp   // ★ patch
+  serverTimestamp,   // ★ patch
+  getDoc            // ★ ADD: preMembers 조회용
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -337,6 +338,46 @@ export function EventProvider({ children }) {
     saveGateToLocal(next);
     await updateEventImmediate({ playerGate: next, gateUpdatedAt: serverTimestamp() }, false); // ★ patch: timestamp + 강제 저장
   };
+
+  // ───────────────────────────────────────────────
+  // [ADD] 이메일 화이트리스트(preMembers) 자동 클레임
+  // ───────────────────────────────────────────────
+  useEffect(() => {
+    const uidRaw   = auth?.currentUser?.uid || null;
+    const emailRaw = auth?.currentUser?.email || null;
+    const uid = uidRaw || null;
+    const email = emailRaw ? String(emailRaw).toLowerCase() : null; // 소문자 정규화
+    const eid = eventId || null;
+    if (!uid || !eid) return;
+
+    (async () => {
+      try {
+        if (email) {
+          // 1) preMembers에 있으면 → 인증코드 없이 입장(verified: true)
+          const preRef  = doc(db, 'events', eid, 'preMembers', email);
+          const preSnap = await getDoc(preRef);
+          if (preSnap.exists()) {
+            const pre = preSnap.data(); // { name, nickname?, group? ... }
+            await setDoc(doc(db, 'events', eid, 'memberships', uid), {
+              email,
+              name: pre?.name ?? (auth?.currentUser?.displayName ?? null),
+              nickname: pre?.nickname ?? null,
+              verified: true,
+              claimedAt: serverTimestamp()
+            }, { merge: true });
+            return;
+          }
+        }
+        // 2) preMembers가 없으면: 최소한의 PII만 병합(verified는 넣지 않음)
+        await setDoc(doc(db, 'events', eid, 'memberships', uid), {
+          email: email || null,
+          name : auth?.currentUser?.displayName ?? null
+        }, { merge: true });
+      } catch (e) {
+        console.warn('[EventContext] preMembers claim failed', e);
+      }
+    })();
+  }, [eventId, auth?.currentUser?.uid, auth?.currentUser?.email]);
 
   return (
     <EventContext.Provider value={{
