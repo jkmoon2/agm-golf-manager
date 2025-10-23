@@ -1,8 +1,4 @@
 // /src/screens/Step4.jsx
-// - 우측 preMembers 토글의 문제 CSS(className=styles.preMembersToggle) 제거 → 겹침 원천 차단
-// - 헤더를 display:grid; gridTemplateColumns:'1fr auto'로 고정
-// - "선택" 롱프레스: 전체 선택/해제 토글 유지
-
 import React, { useContext, useState, useEffect, useRef } from "react";
 import styles from "./Step4.module.css";
 import { StepContext } from "../flows/StepFlow";
@@ -34,7 +30,6 @@ export default function Step4(props) {
 
   const { eventId } = useContext(EventContext);
 
-  // 파일명 표시(리마운트에도 유지)
   const [selectedFileName, setSelectedFileName] = useState(
     () => sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY) || ''
   );
@@ -67,9 +62,9 @@ export default function Step4(props) {
           group: baseObj?.group ?? 1,
           nickname: baseObj?.nickname ?? '',
           handicap: baseObj?.handicap ?? null,
-          score: baseObj?.score ?? null,
-          room: baseObj?.room ?? null,
-          partner: baseObj?.partner ?? null,
+          score:    baseObj?.score ?? null,
+          room:     baseObj?.room ?? null,
+          partner:  baseObj?.partner ?? null,
           selected: baseObj?.selected ?? false,
           ...patch,
           updatedAt: serverTimestamp(),
@@ -167,9 +162,9 @@ export default function Step4(props) {
     if (e.key === 'Enter') e.currentTarget.blur();
   };
 
+  // preMembers 저장 토글 상태
   const [savePII, setSavePII] = useState(true);
 
-  // 파일 업로드 + preMembers 반영(관리자)
   const handleFileExtended = async (e) => {
     try {
       const f = e?.target?.files?.[0];
@@ -178,13 +173,13 @@ export default function Step4(props) {
       sessionStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
 
       if (typeof handleFile === 'function') {
-        await handleFile(e); // 기존 로직
+        await handleFile(e);
       }
 
       const user = getAuth().currentUser;
       const isAdmin = !!user && user.email === 'a@a.com';
 
-      if (!savePII || !eventId || !isAdmin) return; // 관리자 아닐 땐 생략
+      if (!savePII || !eventId || !isAdmin) return;
       if (!f) return;
 
       const ab = await f.arrayBuffer();
@@ -197,8 +192,8 @@ export default function Step4(props) {
         const r = rows[i] || [];
         const email = String(r[4] || '').trim().toLowerCase();
         const nameCell  = String(r[5] || '').trim();
-        const nickname = String(r[1] || '').trim();
-        const group = Number(r[0]) || null;
+        const nickname  = String(r[1] || '').trim();
+        const group     = Number(r[0]) || null;
         if (!email) continue;
 
         batch.set(
@@ -217,13 +212,10 @@ export default function Step4(props) {
     } catch (err) {
       console.warn('[Step4] handleFileExtended error', err);
       alert(`엑셀 업로드 중 preMembers 반영에 실패했습니다.\n(${err?.code || 'error'})`);
-    } finally {
-      // 파일명 유지를 위해 input 초기화는 하지 않음
-      // try { e.target.value = ''; } catch {}
     }
   };
 
-  // ───── 롱프레스(선택 전체 토글) ─────
+  // ── “선택” 롱프레스: 전체 선택/해제 토글 ──
   const longPressTimer = useRef(null);
   const startLongSelectAll = () => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
@@ -238,9 +230,24 @@ export default function Step4(props) {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
   };
 
+  const ToggleBtn = ({ checked, onChange }) => (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      style={{
+        display:'inline-flex', alignItems:'center', gap:6,
+        background:'transparent', border:'1px solid #d1d5db',
+        borderRadius:8, padding:'4px 8px', lineHeight:1, cursor:'pointer'
+      }}
+      title="preMembers 저장 여부"
+    >
+      <span aria-hidden>{checked ? '☑' : '☐'}</span>
+      <span>preMembers</span>
+    </button>
+  );
+
   return (
     <div className={`${styles.step} ${styles.step4}`}>
-      {/* 헤더: grid로 좌/우 분리, 간격 확보 */}
       <div
         className={`${styles.excelHeader} ${uploadMethod === "manual" ? styles.manual : ""}`}
         style={{ marginBottom: 12 }}
@@ -272,19 +279,13 @@ export default function Step4(props) {
               </span>
             </div>
 
-            {/* ⬇ 문제 CSS(className=styles.preMembersToggle) 미적용 → 겹침 근본 차단 */}
-            <div className={styles.rightCol} style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
-              <span className={styles.total} style={{ whiteSpace:'nowrap' }}>
+            {/* 오른쪽: 총 슬롯(축소 폰트) + preMembers 버튼.
+                ⬇︎ Step4.module.css에서 우측 컬럼 내부 checkbox를 강제로 숨겨 ‘유령 체크박스’ 차단 */}
+            <div className={styles.rightCol}>
+              <span className={styles.totalInline} style={{ whiteSpace:'nowrap' }}>
                 총 슬롯: {roomCount * 4}명
               </span>
-              <label style={{ display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>
-                <input
-                  type="checkbox"
-                  checked={savePII}
-                  onChange={(e) => setSavePII(e.target.checked)}
-                />
-                preMembers
-              </label>
+              <ToggleBtn checked={savePII} onChange={setSavePII} />
             </div>
           </div>
         )}
@@ -294,8 +295,6 @@ export default function Step4(props) {
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
         <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
-
-        {/* "선택"을 길게 누르면 전체 선택/해제 토글 */}
         <div className={`${styles.cell} ${styles.delete}`}>
           <span
             onMouseDown={startLongSelectAll}
@@ -325,7 +324,6 @@ export default function Step4(props) {
                 ))}
               </select>
             </div>
-
             <div className={`${styles.cell} ${styles.nickname}`}>
               <input
                 type="text"
@@ -334,7 +332,6 @@ export default function Step4(props) {
                 onChange={(e) => changeNickname(i, e.target.value)}
               />
             </div>
-
             <div className={`${styles.cell} ${styles.handicap}`}>
               <input
                 type="text"
@@ -346,7 +343,6 @@ export default function Step4(props) {
                 onKeyDown={(e) => onHdKeyDown(e, i)}
               />
             </div>
-
             <div className={`${styles.cell} ${styles.delete}`}>
               <input
                 type="checkbox"
