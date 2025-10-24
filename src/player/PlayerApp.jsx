@@ -13,8 +13,8 @@ import PlayerEventConfirm from './screens/PlayerEventConfirm';
 
 import { EventContext }   from '../contexts/EventContext';
 import { PlayerContext }  from '../contexts/PlayerContext';
+import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 안전망
 
-// ✅ 변경: 홈 진입 시 세션에 저장된 나의 정보/코드를 컨텍스트에 복원(네비게이션 없음)
 export default function PlayerApp() {
   const { eventId } = useParams();
   const { loadEvent } = useContext(EventContext) || {};
@@ -23,19 +23,24 @@ export default function PlayerApp() {
   useEffect(() => {
     if (!eventId) return;
 
+    // ✅ 안전망: 항상 인증 보장(없는 경우만 익명 로그인)
+    try {
+      const auth = getAuth();
+      if (!auth.currentUser) {
+        signInAnonymously(auth).catch(()=>{});
+      }
+    } catch {}
+
     // 컨텍스트 동기화
     try {
       setEventId?.(eventId);
       const code = sessionStorage.getItem(`authcode_${eventId}`) || '';
       if (code) setAuthCode?.(code);
-
       const partRaw = sessionStorage.getItem(`participant_${eventId}`);
-      if (partRaw) {
-        try { setParticipant?.(JSON.parse(partRaw)); } catch {}
-      }
+      if (partRaw) { try { setParticipant?.(JSON.parse(partRaw)); } catch {} }
     } catch {}
 
-    // 이벤트 데이터 로딩 (비동기, 라우팅 영향 없음)
+    // 이벤트 데이터 로딩
     try { if (typeof loadEvent === 'function') loadEvent(eventId); } catch {}
   }, [eventId, loadEvent, setEventId, setAuthCode, setParticipant]);
 

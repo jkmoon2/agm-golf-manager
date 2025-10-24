@@ -4,8 +4,9 @@ import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
-import { collection, getDocs, getDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
 import styles from './EventSelectScreen.module.css';
+import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장
 
 export default function PlayerEventList() {
   const nav = useNavigate();
@@ -90,7 +91,9 @@ export default function PlayerEventList() {
         qs.forEach(d => {
           const v = d.data() || {};
           const vv = String(v?.authCode ?? v?.code ?? v?.auth_code ?? v?.authcode ?? '').trim();
-          if (!participant && vv.toUpperCase() === code.toUpperCase()) participant = { id: d.id, ...v };
+          if (!participant && vv.toUpperCase() === (sessionStorage.getItem('pending_code') || '').toUpperCase()) {
+            participant = { id: d.id, ...v };
+          }
         });
       }
       if (!participant) return { ok:false };
@@ -106,14 +109,30 @@ export default function PlayerEventList() {
     }
   };
 
+  // ✅ 변경: 익명 로그인 보장 + (옵션) membership 문서 생성
+  const ensureAnonymousAndMembership = async (eventId) => {
+    const auth = getAuth();
+    if (!auth.currentUser) {
+      await signInAnonymously(auth);
+    }
+    try {
+      await setDoc(
+        doc(db, 'events', eventId, 'memberships', auth.currentUser.uid),
+        { uid: auth.currentUser.uid, via: 'code', updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch {}
+  };
+
   const goNext = async (ev) => {
     if (!isAccessAllowed(ev)) { alert('대회 기간이 아닙니다.'); return; }
     setEventId?.(ev.id);
     try { localStorage.setItem('eventId', ev.id); } catch {}
 
-    // ✅ 변경 1: 이 대회가 이미 인증돼 있으면 코드 없이 바로 입장 (세션 유지)
+    // 이미 인증된 대회면 코드 없이 바로 입장
     try {
       if (sessionStorage.getItem(`auth_${ev.id}`) === 'true') {
+        await ensureAnonymousAndMembership(ev.id); // ✅ 변경
         if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
         nav(`/player/home/${ev.id}`, { replace: true });
         return;
@@ -130,6 +149,7 @@ export default function PlayerEventList() {
 
     const { ok } = await verifyPendingCode(ev.id);
     if (ok) {
+      await ensureAnonymousAndMembership(ev.id); // ✅ 변경
       if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
       nav(`/player/home/${ev.id}`, { replace: true });
     } else {
