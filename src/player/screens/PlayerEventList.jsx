@@ -23,6 +23,17 @@ export default function PlayerEventList() {
     })();
   }, [allEvents]);
 
+  // ✅ 처음 /player/events 로 직접 들어온 경우: 코드 없으면 로그인으로 즉시 이동
+  useEffect(() => {
+    try {
+      const hasPending = !!sessionStorage.getItem('pending_code');
+      const authedSome = Object.keys(sessionStorage).some(k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true');
+      if (!hasPending && !authedSome) {
+        nav('/player/login-or-code', { replace: true });
+      }
+    } catch {}
+  }, [nav]);
+
   const fmt = (s) =>
     (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s))
       ? s.replaceAll('-', '.')
@@ -58,18 +69,16 @@ export default function PlayerEventList() {
     return !!(endAt && Date.now() > endAt);
   };
 
-  // 선택한 이벤트에서 pending_code 유효성 검사
   const verifyPendingCode = async (eventId) => {
     try {
       const code = sessionStorage.getItem('pending_code') || '';
-      if (!code) return { ok: false };
+      if (!code) return { ok:false };
       const snap = await getDoc(doc(db, 'events', eventId));
-      if (!snap.exists()) return { ok: false };
+      if (!snap.exists()) return { ok:false };
       const findInArray = (arr) => Array.isArray(arr) && arr.find(p => {
         const v = String(p?.authCode ?? p?.code ?? p?.auth_code ?? p?.authcode ?? '').trim();
         return v && v.toUpperCase() === code.toUpperCase();
       });
-
       let participant = findInArray(snap.data().participants);
       if (!participant) {
         const qs = await getDocs(collection(db, 'events', eventId, 'participants'));
@@ -80,35 +89,26 @@ export default function PlayerEventList() {
         });
       }
       if (!participant) return { ok:false };
-
-      // 통과 처리
       sessionStorage.setItem(`auth_${eventId}`, 'true');
       sessionStorage.setItem(`authcode_${eventId}`, code);
       sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(participant));
       localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code, ts: Date.now() }));
       return { ok:true, participant };
-    } catch {
-      return { ok:false };
-    }
+    } catch { return { ok:false }; }
   };
 
   const goNext = async (ev) => {
-    if (!isAccessAllowed(ev)) {
-      alert('대회 기간이 아닙니다.\n대회 기간 중에만 참가자 접속이 허용됩니다.');
-      return;
-    }
+    if (!isAccessAllowed(ev)) { alert('대회 기간이 아닙니다.'); return; }
     setEventId?.(ev.id);
     try { localStorage.setItem('eventId', ev.id); } catch {}
 
-    // ✅ 코드가 반드시 먼저 — 없으면 로그인 페이지로
-    const pending = sessionStorage.getItem('pending_code');
-    if (!pending) {
+    const code = sessionStorage.getItem('pending_code');
+    if (!code) {
       alert('먼저 참가자 로그인 화면에서 인증코드를 입력해 주세요.');
       nav('/player/login-or-code', { replace: true });
       return;
     }
 
-    // ✅ 코드 검증
     const { ok } = await verifyPendingCode(ev.id);
     if (ok) {
       if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
@@ -121,14 +121,8 @@ export default function PlayerEventList() {
   };
 
   const endedBadgeStyle = {
-    marginLeft: 6,
-    padding: '2px 6px',
-    borderRadius: 8,
-    background: '#fee2e2',
-    color: '#b91c1c',
-    fontSize: 12,
-    fontWeight: 700,
-    whiteSpace: 'nowrap'
+    marginLeft: 6, padding: '2px 6px', borderRadius: 8,
+    background: '#fee2e2', color: '#b91c1c', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap'
   };
 
   return (

@@ -23,6 +23,15 @@ export default function EventSelectScreen() {
     })();
   }, [allEvents]);
 
+  // ✅ /player/events와 동일: 코드 없으면 로그인으로 즉시 이동
+  useEffect(() => {
+    try {
+      const hasPending = !!sessionStorage.getItem('pending_code');
+      const authedSome = Object.keys(sessionStorage).some(k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true');
+      if (!hasPending && !authedSome) nav('/player/login-or-code', { replace: true });
+    } catch {}
+  }, [nav]);
+
   const fmt = (s) =>
     (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s))
       ? s.replaceAll('-', '.')
@@ -34,12 +43,10 @@ export default function EventSelectScreen() {
       if (!code) return false;
       const snap = await getDoc(doc(db, 'events', eventId));
       if (!snap.exists()) return false;
-
       const findInArray = (arr) => Array.isArray(arr) && arr.find(p => {
         const v = String(p?.authCode ?? p?.code ?? p?.auth_code ?? p?.authcode ?? '').trim();
         return v && v.toUpperCase() === code.toUpperCase();
       });
-
       let ok = !!findInArray(snap.data().participants);
       if (!ok) {
         const qs = await getDocs(collection(db, 'events', eventId, 'participants'));
@@ -56,13 +63,8 @@ export default function EventSelectScreen() {
   const goNext = async (ev) => {
     setEventId?.(ev.id);
     try { localStorage.setItem('eventId', ev.id); } catch {}
-
     const code = sessionStorage.getItem('pending_code');
-    if (!code) {
-      alert('먼저 참가자 로그인 화면에서 인증코드를 입력해 주세요.');
-      nav('/player/login-or-code', { replace: true });
-      return;
-    }
+    if (!code) { nav('/player/login-or-code', { replace: true }); return; }
     const ok = await verifyPendingCode(ev.id);
     if (ok) {
       if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }

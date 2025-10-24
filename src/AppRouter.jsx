@@ -6,7 +6,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PlayerProvider }        from './contexts/PlayerContext';
 import { EventProvider }         from './contexts/EventContext';
 
-import MainLayout          from './layouts/MainLayout';           // ✅ 레이아웃 복원
+import MainLayout          from './layouts/MainLayout';
 import LoginScreen         from './screens/LoginScreen';
 import AdminApp            from './AdminApp';
 import Dashboard           from './screens/Dashboard';
@@ -27,6 +27,7 @@ function Protected({ roles, children }) {
   return children;
 }
 
+// '/player/home/:eventId/login' → '/player/home/:eventId'
 function RedirectPlayerHomeNoLogin() {
   const { eventId } = useParams();
   return <Navigate to={`/player/home/${eventId || ''}`} replace />;
@@ -46,20 +47,20 @@ export default function AppRouter() {
               path="/player"
               element={
                 <PlayerProvider>
-                  <MainLayout />   {/* ✅ 상/하단 메뉴가 있는 레이아웃 */}
+                  <MainLayout />
                 </PlayerProvider>
               }
             >
               {/* ✅ 첫 화면은 '참가자 전용 로그인(코드/이메일)' */}
               <Route index element={<LoginOrCode />} />
 
-              {/* 대회 리스트(코드 입력 후 이동) */}
+              {/* ✅ 코드 입력 후 이동하는 리스트 */}
               <Route path="events" element={<PlayerEventList />} />
 
-              {/* 로그인(코드/이메일) 화면 직접 접근 */}
+              {/* 로그인 화면 직접 접근 */}
               <Route path="login-or-code" element={<LoginOrCode />} />
 
-              {/* 비정상 경로 보호 및 과거 경로 정정 */}
+              {/* 잘못된/레거시 경로 보호 */}
               <Route path="home/undefined/*"    element={<Navigate to="/player/login-or-code" replace />} />
               <Route path="home/:eventId/login" element={<RedirectPlayerHomeNoLogin />} />
 
@@ -68,7 +69,7 @@ export default function AppRouter() {
               <Route path="app/*"  element={<PlayerApp />} />
             </Route>
 
-            {/* ❌ 루프 원인: /player/* → /player/login-or-code 와일드카드는 두지 않습니다. */}
+            {/* ⚠️ '/player/*' 와일드카드 리다이렉트는 절대 추가하지 않습니다(루프 원인). */}
 
             {/* ───────── 운영자 영역 ───────── */}
             <Route
