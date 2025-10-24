@@ -53,13 +53,15 @@ export default function AppRouter() {
               <Route path="login-or-code" element={<LoginOrCode />} />
               {/* 특정 이벤트 로그인(코드 전용 화면) */}
               <Route path="login/:eventId" element={<PlayerLoginScreen />} />
-              {/* 플레이어 앱 (기존) */}
+              {/* ✅ [ADD] 플레이어 홈(스텝 플로우) — 여기로 이동해야 무한 루프가 안 생깁니다 */}
+              <Route path="home/*" element={<PlayerApp />} />
+              {/* 기존: 앱 네임스페이스 */}
               <Route path="app/*" element={<PlayerApp />} />
             </Route>
 
-            {/* ✅ /player/events 로 들어오면 '항상' 참가자 로그인 먼저 */}
+            {/* /player/events 로 들어오면 '항상' 참가자 로그인 먼저 */}
             <Route path="/player/events" element={<Navigate to="/player/login-or-code" replace />} />
-            {/* ✅ /player/* 잘못된 경로도 참가자 로그인으로 보냄(운영자 로그인으로 튀는 일 방지) */}
+            {/* /player/* 잘못된 경로도 참가자 로그인으로 보냄(운영자 로그인으로 튀는 일 방지) */}
             <Route path="/player/*" element={<Navigate to="/player/login-or-code" replace />} />
 
             {/* ───────── 운영자 영역 ───────── */}
