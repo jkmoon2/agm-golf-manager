@@ -4,7 +4,8 @@
 // 1) Firestore 저장 전 sanitizeForFirestore() 적용 → 400 에러 방지
 // 2) onSnapshot 매핑 시 null 안전 스프레드
 // 3) "같은 세션에서 인증된 이벤트" 만 자동 매칭 허용 → 교차 이벤트 오검출 방지
-// 4) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 새 규칙과 호환
+// 4) events/{eventId} 루트 문서에는 participants(+updatedAt)만 저장
+// 5) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 새 규칙과 호환
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -13,6 +14,7 @@ import {
   arrayUnion,
   onSnapshot,
   runTransaction,
+  serverTimestamp,           // ✅ updatedAt 허용 필드 사용
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
@@ -259,7 +261,12 @@ export function PlayerProvider({ children }) {
   async function writeParticipants(next) {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
-    await setDoc(ref, sanitizeForFirestore({ participants: Array.isArray(next) ? next : [] }), { merge: true });
+    // 규칙 허용 키만 저장: participants + updatedAt
+    await setDoc(
+      ref,
+      sanitizeForFirestore({ participants: Array.isArray(next) ? next : [], updatedAt: serverTimestamp() }), // ✅
+      { merge: true }
+    );
   }
 
   // ── API (원본 유지) ──────────────────────────────────────────────────
@@ -421,8 +428,8 @@ export function PlayerProvider({ children }) {
             return p;
           });
 
-          // ✅ 저장 전 sanitize
-          tx.set(eref, sanitizeForFirestore({ participants: next }), { merge: true });
+          // ✅ 저장 전 sanitize + 허용 키만 merge
+          tx.set(eref, sanitizeForFirestore({ participants: next, updatedAt: serverTimestamp() }), { merge: true });
 
           const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
           if (mateId) tx.set(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }) }, { merge: true });
