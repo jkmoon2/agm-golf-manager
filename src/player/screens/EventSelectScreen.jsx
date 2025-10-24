@@ -1,11 +1,13 @@
 // /src/player/screens/EventSelectScreen.jsx
+// (PlayerEventList와 동일한 보완을 적용 — 이 파일을 쓰는 화면이 있다면 동일 동작 보장)
 
 import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
-import { collection, getDocs, getDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅
 import styles from './EventSelectScreen.module.css';
+import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅
 
 export default function EventSelectScreen() {
   const nav = useNavigate();
@@ -23,19 +25,15 @@ export default function EventSelectScreen() {
     })();
   }, [allEvents]);
 
-  // ✅ /player/events와 동일: 코드 없으면 로그인으로 즉시 이동
   useEffect(() => {
     try {
       const hasPending = !!sessionStorage.getItem('pending_code');
-      const authedSome = Object.keys(sessionStorage).some(k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true');
+      const authedSome = Object.keys(sessionStorage).some(
+        k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true'
+      );
       if (!hasPending && !authedSome) nav('/player/login-or-code', { replace: true });
     } catch {}
   }, [nav]);
-
-  const fmt = (s) =>
-    (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s))
-      ? s.replaceAll('-', '.')
-      : '미정';
 
   const verifyPendingCode = async (eventId) => {
     try {
@@ -60,13 +58,36 @@ export default function EventSelectScreen() {
     } catch { return false; }
   };
 
+  const ensureAnonymousAndMembership = async (eventId) => {
+    const auth = getAuth();
+    if (!auth.currentUser) {
+      await signInAnonymously(auth);
+    }
+    try {
+      await setDoc(
+        doc(db, 'events', eventId, 'memberships', auth.currentUser.uid),
+        { uid: auth.currentUser.uid, via: 'code', updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch {}
+  };
+
   const goNext = async (ev) => {
     setEventId?.(ev.id);
     try { localStorage.setItem('eventId', ev.id); } catch {}
+
+    if (sessionStorage.getItem(`auth_${ev.id}`) === 'true') {
+      await ensureAnonymousAndMembership(ev.id); // ✅
+      if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
+      nav(`/player/home/${ev.id}`, { replace: true });
+      return;
+    }
+
     const code = sessionStorage.getItem('pending_code');
     if (!code) { nav('/player/login-or-code', { replace: true }); return; }
     const ok = await verifyPendingCode(ev.id);
     if (ok) {
+      await ensureAnonymousAndMembership(ev.id); // ✅
       if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
       nav(`/player/home/${ev.id}`, { replace: true });
     } else {
