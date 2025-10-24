@@ -8,6 +8,8 @@ import {
   onSnapshot,
   runTransaction,
   serverTimestamp,
+  updateDoc,        // ✅ 추가
+  getDoc,           // ✅ 추가 (이벤트 문서 존재 확인용)
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
@@ -235,10 +237,19 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // participants 저장 (화이트리스트)
+  // participants 저장 (화이트리스트 + updateDoc)
   async function writeParticipants(next) {
     if (!eventId) return;
     await ensureAuthReady(); // ✅
+
+    const eref = doc(db, 'events', eventId);
+
+    // 이벤트 문서 존재 보장(없으면 create 금지 규칙 때문에 거부됨)
+    const exists = (await getDoc(eref)).exists();
+    if (!exists) {
+      alert('이벤트 문서가 존재하지 않습니다. 관리자에게 문의해 주세요.');
+      throw new Error('Event document does not exist');
+    }
 
     const ALLOWED = ['id','group','nickname','handicap','score','room','partner','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
@@ -268,16 +279,16 @@ export function PlayerProvider({ children }) {
       return out;
     });
 
-    await setDoc(
-      doc(db, 'events', eventId),
-      sanitizeForFirestore({ participants: cleaned, updatedAt: serverTimestamp() }),
-      { merge: true }
+    // ✅ setDoc(merge) → updateDoc 으로 고정 (항상 update 규칙만 타게)
+    await updateDoc(
+      eref,
+      sanitizeForFirestore({ participants: cleaned, updatedAt: serverTimestamp() })
     );
   }
 
   // ─ API ─
   async function joinRoom(roomNumber, id) {
-    await ensureAuthReady(); // ✅ 시작에서 보장
+    await ensureAuthReady(); // ✅
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
     const next = participants.map((p) =>
@@ -297,7 +308,7 @@ export function PlayerProvider({ children }) {
   }
 
   async function joinFourBall(roomNumber, p1, p2) {
-    await ensureAuthReady(); // ✅ 시작에서 보장
+    await ensureAuthReady(); // ✅
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
@@ -318,7 +329,7 @@ export function PlayerProvider({ children }) {
   }
 
   async function assignStrokeForOne(participantId) {
-    await ensureAuthReady(); // ✅ 시작에서 보장
+    await ensureAuthReady(); // ✅
 
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
@@ -358,7 +369,7 @@ export function PlayerProvider({ children }) {
   }
 
   async function assignFourballForOneAndPartner(participantId) {
-    await ensureAuthReady(); // ✅ 시작에서 보장 (중요)
+    await ensureAuthReady(); // ✅
 
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
@@ -374,7 +385,6 @@ export function PlayerProvider({ children }) {
     if (FOURBALL_USE_TRANSACTION) {
       try {
         if (typeof transactionalAssignFourball === 'function') {
-          // 외부 유틸이 내부에서 트랜잭션을 사용하므로, 호출 전 인증 보장 필요(위에서 보장)
           const result = await transactionalAssignFourball({
             db, eventId, participants, roomCount, selfId: pid,
           });
