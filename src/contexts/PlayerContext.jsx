@@ -5,7 +5,8 @@
 // 2) onSnapshot 매핑 시 null 안전 스프레드
 // 3) "같은 세션에서 인증된 이벤트" 만 자동 매칭 허용 → 교차 이벤트 오검출 방지
 // 4) events/{eventId} 루트 문서에는 participants(+updatedAt)만 저장
-// 5) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 새 규칙과 호환
+// 5) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 규칙 호환
+// 6) ✅ 모든 Firestore 쓰기 전에 ensureAuthReady() 호출(익명 로그인 + ID 토큰 보장)
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -14,10 +15,13 @@ import {
   arrayUnion,
   onSnapshot,
   runTransaction,
-  serverTimestamp,           // ✅ updatedAt 허용 필드 사용
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
+
+// ✅ 토큰 보장 유틸
+import { getAuth, signInAnonymously } from 'firebase/auth';
 
 import { pickRoomForStroke } from '../player/logic/assignStroke';
 import {
@@ -112,6 +116,17 @@ function markEventAuthed(id, code, meObj) {
       sessionStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
     }
   } catch {}
+}
+
+// ✅ 모든 쓰기 직전에 호출(익명 로그인 + 토큰 확보)
+async function ensureAuthReady() {
+  const auth = getAuth();
+  if (!auth.currentUser) {
+    const cred = await signInAnonymously(auth);
+    await cred.user.getIdToken(true);
+  } else {
+    await auth.currentUser.getIdToken(true);
+  }
 }
 
 export function PlayerProvider({ children }) {
@@ -257,14 +272,15 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // ── Firestore write helper (원본 유지 + sanitize) ───────────────────
+  // ── Firestore write helper (원본 유지 + sanitize + 토큰 보장) ────────
   async function writeParticipants(next) {
     if (!eventId) return;
+    await ensureAuthReady(); // ✅
     const ref = doc(db, 'events', eventId);
     // 규칙 허용 키만 저장: participants + updatedAt
     await setDoc(
       ref,
-      sanitizeForFirestore({ participants: Array.isArray(next) ? next : [], updatedAt: serverTimestamp() }), // ✅
+      sanitizeForFirestore({ participants: Array.isArray(next) ? next : [], updatedAt: serverTimestamp() }),
       { merge: true }
     );
   }
@@ -283,6 +299,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
+      await ensureAuthReady(); // ✅
       const rref = doc(db, 'events', eventId, 'rooms', String(rid));
       await setDoc(rref, { members: arrayUnion(targetId) }, { merge: true });
     } catch (_) {}
@@ -302,6 +319,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
+      await ensureAuthReady(); // ✅
       const fbref = doc(db, 'events', eventId, 'fourballRooms', String(rid));
       await setDoc(fbref, { pairs: arrayUnion({ p1: a, p2: b }) }, { merge: true });
     } catch (_) {}
@@ -339,6 +357,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
+      await ensureAuthReady(); // ✅
       const rref = doc(db, 'events', eventId, 'rooms', String(chosenRoom));
       await setDoc(rref, { members: arrayUnion(pid) }, { merge: true });
     } catch (_) {}
@@ -428,7 +447,7 @@ export function PlayerProvider({ children }) {
             return p;
           });
 
-          // ✅ 저장 전 sanitize + 허용 키만 merge
+          // ✅ 허용 키만 merge + sanitize
           tx.set(eref, sanitizeForFirestore({ participants: next, updatedAt: serverTimestamp() }), { merge: true });
 
           const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
@@ -505,6 +524,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
+      await ensureAuthReady(); // ✅
       const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
       if (mateId) await setDoc(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }) }, { merge: true });
       else await setDoc(fbref, { singles: arrayUnion(pid) }, { merge: true });
