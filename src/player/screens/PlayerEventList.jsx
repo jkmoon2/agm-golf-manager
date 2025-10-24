@@ -1,8 +1,4 @@
 // /src/player/screens/PlayerEventList.jsx
-//
-// 안내: 이 파일은 "추가 수정 없이" 그대로 사용하시면 됩니다.
-// - /player/events 로 직접 들어오면 pending_code(또는 기존 auth)가 없을 때 로그인 화면으로 안내
-// - 리스트에서 대회를 선택하면 pending_code를 해당 대회 명단에서 검증 → 있으면 /player/home/:eventId, 없으면 로그인으로 복귀
 
 import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -27,12 +23,16 @@ export default function PlayerEventList() {
     })();
   }, [allEvents]);
 
-  // /player/events 직접 접근 시: 코드도 없고 이전 인증도 없으면 로그인으로
+  // /player/events로 바로 들어온 경우: 코드도 없고 이전 인증도 없으면 로그인으로
   useEffect(() => {
     try {
       const hasPending = !!sessionStorage.getItem('pending_code');
-      const authedSome = Object.keys(sessionStorage).some(k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true');
-      if (!hasPending && !authedSome) nav('/player/login-or-code', { replace: true });
+      const authedSome = Object.keys(sessionStorage).some(
+        k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true'
+      );
+      if (!hasPending && !authedSome) {
+        nav('/player/login-or-code', { replace: true });
+      }
     } catch {}
   }, [nav]);
 
@@ -77,10 +77,13 @@ export default function PlayerEventList() {
       if (!code) return { ok:false };
       const snap = await getDoc(doc(db, 'events', eventId));
       if (!snap.exists()) return { ok:false };
-      const findInArray = (arr) => Array.isArray(arr) && arr.find(p => {
-        const v = String(p?.authCode ?? p?.code ?? p?.auth_code ?? p?.authcode ?? '').trim();
-        return v && v.toUpperCase() === code.toUpperCase();
-      });
+
+      const findInArray = (arr) =>
+        Array.isArray(arr) && arr.find(p => {
+          const v = String(p?.authCode ?? p?.code ?? p?.auth_code ?? p?.authcode ?? '').trim();
+          return v && v.toUpperCase() === code.toUpperCase();
+        });
+
       let participant = findInArray(snap.data().participants);
       if (!participant) {
         const qs = await getDocs(collection(db, 'events', eventId, 'participants'));
@@ -91,12 +94,16 @@ export default function PlayerEventList() {
         });
       }
       if (!participant) return { ok:false };
+
+      // 통과 처리 (세션 보존)
       sessionStorage.setItem(`auth_${eventId}`, 'true');
-      sessionStorage.setItem(`authcode_${eventId}`, code);
+      sessionStorage.setItem(`authcode_${eventId}`, sessionStorage.getItem('pending_code') || '');
       sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(participant));
-      localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code, ts: Date.now() }));
+      localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code: sessionStorage.getItem('pending_code') || '', ts: Date.now() }));
       return { ok:true, participant };
-    } catch { return { ok:false }; }
+    } catch {
+      return { ok:false };
+    }
   };
 
   const goNext = async (ev) => {
@@ -104,6 +111,16 @@ export default function PlayerEventList() {
     setEventId?.(ev.id);
     try { localStorage.setItem('eventId', ev.id); } catch {}
 
+    // ✅ 변경 1: 이 대회가 이미 인증돼 있으면 코드 없이 바로 입장 (세션 유지)
+    try {
+      if (sessionStorage.getItem(`auth_${ev.id}`) === 'true') {
+        if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
+        nav(`/player/home/${ev.id}`, { replace: true });
+        return;
+      }
+    } catch {}
+
+    // 아직 인증되지 않은 대회는 pending_code로 검증
     const code = sessionStorage.getItem('pending_code');
     if (!code) {
       alert('먼저 참가자 로그인 화면에서 인증코드를 입력해 주세요.');
@@ -123,8 +140,14 @@ export default function PlayerEventList() {
   };
 
   const endedBadgeStyle = {
-    marginLeft: 6, padding: '2px 6px', borderRadius: 8,
-    background: '#fee2e2', color: '#b91c1c', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap'
+    marginLeft: 6,
+    padding: '2px 6px',
+    borderRadius: 8,
+    background: '#fee2e2',
+    color: '#b91c1c',
+    fontSize: 12,
+    fontWeight: 700,
+    whiteSpace: 'nowrap'
   };
 
   return (
