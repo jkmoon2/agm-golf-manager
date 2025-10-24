@@ -28,11 +28,6 @@ export default function PlayerEventList() {
       ? s.replaceAll('-', '.')
       : '미정';
 
-  const wasAuthed = (id) => {
-    try { return sessionStorage.getItem(`auth_${id}`) === 'true'; }
-    catch { return false; }
-  };
-
   const tsToMillis = (ts) => {
     if (ts == null) return null;
     if (typeof ts === 'number') return ts;
@@ -50,7 +45,6 @@ export default function PlayerEventList() {
     startAt: tsToMillis(ev?.accessStartAt) ?? dateStrToMillis(ev?.dateStart, 'start'),
     endAt:   tsToMillis(ev?.accessEndAt)   ?? dateStrToMillis(ev?.dateEnd, 'end'),
   });
-
   const isAccessAllowed = (ev) => {
     if (!ev?.allowDuringPeriodOnly) return true;
     const { startAt, endAt } = getStartEnd(ev);
@@ -64,21 +58,38 @@ export default function PlayerEventList() {
     return !!(endAt && Date.now() > endAt);
   };
 
-  // 로그인 없이 미리 입력한 인증코드를 자동 검증
-  const tryPendingCode = async (eventId) => {
+  // 선택한 이벤트에서 pending_code 유효성 검사
+  const verifyPendingCode = async (eventId) => {
     try {
       const code = sessionStorage.getItem('pending_code') || '';
-      if (!code) return false;
+      if (!code) return { ok: false };
       const snap = await getDoc(doc(db, 'events', eventId));
-      if (!snap.exists()) return false;
-      const part = (snap.data().participants || []).find(p => String(p.authCode) === code);
-      if (!part) return false;
+      if (!snap.exists()) return { ok: false };
+      const findInArray = (arr) => Array.isArray(arr) && arr.find(p => {
+        const v = String(p?.authCode ?? p?.code ?? p?.auth_code ?? p?.authcode ?? '').trim();
+        return v && v.toUpperCase() === code.toUpperCase();
+      });
+
+      let participant = findInArray(snap.data().participants);
+      if (!participant) {
+        const qs = await getDocs(collection(db, 'events', eventId, 'participants'));
+        qs.forEach(d => {
+          const v = d.data() || {};
+          const vv = String(v?.authCode ?? v?.code ?? v?.auth_code ?? v?.authcode ?? '').trim();
+          if (!participant && vv.toUpperCase() === code.toUpperCase()) participant = { id: d.id, ...v };
+        });
+      }
+      if (!participant) return { ok:false };
+
+      // 통과 처리
       sessionStorage.setItem(`auth_${eventId}`, 'true');
       sessionStorage.setItem(`authcode_${eventId}`, code);
-      sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(part));
-      try { localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code, ts: Date.now() })); } catch {}
-      return true;
-    } catch { return false; }
+      sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(participant));
+      localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code, ts: Date.now() }));
+      return { ok:true, participant };
+    } catch {
+      return { ok:false };
+    }
   };
 
   const goNext = async (ev) => {
@@ -86,15 +97,27 @@ export default function PlayerEventList() {
       alert('대회 기간이 아닙니다.\n대회 기간 중에만 참가자 접속이 허용됩니다.');
       return;
     }
-    try { localStorage.setItem('eventId', ev.id); } catch {}
     setEventId?.(ev.id);
-    if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
+    try { localStorage.setItem('eventId', ev.id); } catch {}
 
-    if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}/1`); return; }
+    // ✅ 코드가 반드시 먼저 — 없으면 로그인 페이지로
+    const pending = sessionStorage.getItem('pending_code');
+    if (!pending) {
+      alert('먼저 참가자 로그인 화면에서 인증코드를 입력해 주세요.');
+      nav('/player/login-or-code', { replace: true });
+      return;
+    }
 
-    const ok = await tryPendingCode(ev.id);
-    if (ok) nav(`/player/home/${ev.id}/1`);
-    else    nav(`/player/login/${ev.id}`);
+    // ✅ 코드 검증
+    const { ok } = await verifyPendingCode(ev.id);
+    if (ok) {
+      if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
+      nav(`/player/home/${ev.id}`, { replace: true });
+    } else {
+      alert('이 대회 참가 명단에 해당 인증코드가 없습니다. 다시 입력해 주세요.');
+      try { sessionStorage.removeItem('pending_code'); } catch {}
+      nav('/player/login-or-code', { replace: true });
+    }
   };
 
   const endedBadgeStyle = {
