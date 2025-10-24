@@ -2,11 +2,12 @@
 //
 // ✅ 변경 핵심 (원본 100% 유지 + 필요한 부분만 추가):
 // 1) Firestore 저장 전 sanitizeForFirestore() 적용 → 400 에러 방지
-// 2) onSnapshot 매핑 시 null 안전 스프레드
-// 3) "같은 세션에서 인증된 이벤트" 만 자동 매칭 허용 → 교차 이벤트 오검출 방지
-// 4) events/{eventId} 루트 문서에는 participants(+updatedAt)만 저장
-// 5) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 규칙 호환
-// 6) ✅ 모든 Firestore 쓰기 전에 ensureAuthReady() 호출(익명 로그인 + ID 토큰 보장)
+// 2) writeParticipants()에서 허용 필드만 남기고 타입 정리 후 저장(가장 중요)
+// 3) onSnapshot 매핑 시 null 안전 스프레드
+// 4) "같은 세션에서 인증된 이벤트" 만 자동 매칭 허용 → 교차 이벤트 오검출 방지
+// 5) events/{eventId} 루트 문서에는 participants(+updatedAt)만 저장
+// 6) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 규칙 호환
+// 7) ✅ 모든 Firestore 쓰기 전에 ensureAuthReady() 호출(익명 로그인 + ID 토큰 보장)
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -272,15 +273,46 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // ── Firestore write helper (원본 유지 + sanitize + 토큰 보장) ────────
+  // ── Firestore write helper (원본 유지 + sanitize + 토큰 보장 + 허용키 필터) ──
   async function writeParticipants(next) {
     if (!eventId) return;
     await ensureAuthReady(); // ✅
-    const ref = doc(db, 'events', eventId);
-    // 규칙 허용 키만 저장: participants + updatedAt
+
+    // ✅ 규칙이 허용한 키만 남기기 (email, name 등 업로드용 키 제거)
+    const ALLOWED = ['id','group','nickname','handicap','score','room','partner','authCode','selected'];
+    const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
+      const out = {};
+      for (const k of ALLOWED) {
+        if (p[k] !== undefined) out[k] = p[k] ?? null;
+      }
+      // 타입 정리(규칙 친화)
+      if (out.id === undefined) out.id = String(p?.id ?? i);
+      if (out.group !== undefined) out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
+      if (out.handicap !== undefined) {
+        const n = Number(out.handicap);
+        out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
+      }
+      if (out.score !== undefined) {
+        const n = Number(out.score);
+        out.score = Number.isFinite(n) ? n : (out.score == null ? null : String(out.score));
+      }
+      if (out.room !== undefined && out.room !== null) {
+        const n = Number(out.room);
+        out.room = Number.isFinite(n) ? n : String(out.room);
+      }
+      if (out.partner !== undefined && out.partner !== null) {
+        const n = Number(out.partner);
+        out.partner = Number.isFinite(n) ? n : String(out.partner);
+      }
+      if (typeof out.selected !== 'boolean' && out.selected != null) {
+        out.selected = !!out.selected;
+      }
+      return out;
+    });
+
     await setDoc(
-      ref,
-      sanitizeForFirestore({ participants: Array.isArray(next) ? next : [], updatedAt: serverTimestamp() }),
+      doc(db, 'events', eventId),
+      sanitizeForFirestore({ participants: cleaned, updatedAt: serverTimestamp() }),
       { merge: true }
     );
   }
