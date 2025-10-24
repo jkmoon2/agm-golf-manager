@@ -51,27 +51,29 @@ export default function AppRouter() {
                 </PlayerProvider>
               }
             >
-              {/* ✅ 첫 화면은 '참가자 전용 로그인(코드/이메일)' */}
+              {/* 첫 화면은 참가자 로그인(코드/이메일) */}
               <Route index element={<LoginOrCode />} />
 
-              {/* ✅ 코드 입력 후 이동하는 리스트 */}
+              {/* 코드 입력 후 이동하는 리스트 */}
               <Route path="events" element={<PlayerEventList />} />
 
               {/* 로그인 화면 직접 접근 */}
               <Route path="login-or-code" element={<LoginOrCode />} />
 
-              {/* 잘못된/레거시 경로 보호 */}
+              {/* 비정상/레거시 경로 보호 */}
               <Route path="home/undefined/*"    element={<Navigate to="/player/login-or-code" replace />} />
               <Route path="home/:eventId/login" element={<RedirectPlayerHomeNoLogin />} />
 
-              {/* 진입 후 앱(스텝 플로우) */}
-              <Route path="home/*" element={<PlayerApp />} />
-              <Route path="app/*"  element={<PlayerApp />} />
+              {/* ✅ 핵심 수정: 이벤트 ID가 반드시 포함되도록 경로 복원 */}
+              <Route path="home/:eventId/*" element={<PlayerApp />} />
+              <Route path="app/:eventId/*"  element={<PlayerApp />} />
+
+              {/* ✅ 실수로 '/player/home/*'로 들어오면 로그인 화면으로 돌려보내는 안전망 */}
+              <Route path="home/*" element={<Navigate to="/player/login-or-code" replace />} />
+              <Route path="app/*"  element={<Navigate to="/player/login-or-code" replace />} />
             </Route>
 
-            {/* ⚠️ '/player/*' 와일드카드 리다이렉트는 절대 추가하지 않습니다(루프 원인). */}
-
-            {/* ───────── 운영자 영역 ───────── */}
+            {/* 운영자 영역 */}
             <Route
               element={
                 <Protected roles={['admin','player']}>
