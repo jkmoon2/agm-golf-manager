@@ -1,4 +1,8 @@
 // /src/player/screens/LoginOrCode.jsx
+//
+// 변경 요약
+// - (삭제) 진입 시 auth_* 존재하면 바로 홈으로 가던 자동 이동 로직
+// - (변경) 코드 입력 시 언제나 pending_code 저장 → /player/events 로 이동(즉시 검증/입장 X)
 
 import React, { useState, useContext, useEffect } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -29,16 +33,8 @@ function InnerLoginOrCode({ onEnter }) {
   const membersOnly = !!eventData?.membersOnly;
   const goHome = (id) => navigate(`/player/home/${id}`, { replace: true });
 
-  // 이미 통과한 이벤트가 있으면 바로 홈으로
-  useEffect(() => {
-    try {
-      const keys = Object.keys(sessionStorage).filter(k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true');
-      if (keys.length) {
-        const id = keys[0].replace(/^auth_/, '');
-        if (id && id !== 'undefined') goHome(id);
-      }
-    } catch {}
-  }, []);
+  // ❌ (삭제) auth_* 존재 시 자동 이동 → 리스트 먼저 보여야 하므로 제거
+  // useEffect(() => { ... }, []);
 
   const ensureUserDoc = async (u) => {
     try {
@@ -109,6 +105,7 @@ function InnerLoginOrCode({ onEnter }) {
       const cred = await signInEmail(email.trim(), pw);
       await ensureUserDoc(cred?.user);
       try { localStorage.setItem(`ticket:${eventId || 'global'}`, JSON.stringify({ via:'login', ts:Date.now() })); } catch {}
+      // 이벤트가 지정되지 않은 일반 로그인은 리스트로
       if (eventId) goHome(eventId);
       else navigate('/player/events', { replace: true });
     } catch (err) {
@@ -116,35 +113,12 @@ function InnerLoginOrCode({ onEnter }) {
     } finally { setBusy(false); }
   };
 
-  // ✅ 코드 입력 → pending_code 저장 → 리스트로 이동 (eventId 있을 땐 즉시 검증도 허용)
+  // ✅ 변경: 코드 입력 → 항상 pending_code 저장 → /player/events 로 이동(즉시 검증/입장 X)
   const handleCode = async () => {
     const raw = code.trim();
     if (!raw) { alert('인증코드를 입력해 주세요.'); return; }
     try { sessionStorage.setItem('pending_code', raw); } catch {}
-
-    if (eventId && !membersOnly) {
-      setBusy(true);
-      try {
-        await ensureAnonymous();
-        const ok = await verifyCode(eventId, raw);
-        if (ok) {
-          const part = await findParticipantByCode(eventId, raw);
-          try {
-            sessionStorage.setItem(`auth_${eventId}`, 'true');
-            sessionStorage.setItem(`authcode_${eventId}`, raw);
-            if (part) sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(part));
-          } catch {}
-          try { localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code: raw, ts: Date.now() })); } catch {}
-          setEventId?.(eventId);
-          setAuthCode?.(raw);
-          if (part) setParticipant?.(part);
-          goHome(eventId);
-          return;
-        }
-      } catch {}
-      finally { setBusy(false); }
-    }
-    navigate('/player/events', { replace: true });
+    navigate('/player/events', { replace: true }); // ✅ 변경
   };
 
   return (

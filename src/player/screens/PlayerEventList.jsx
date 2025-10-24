@@ -1,4 +1,8 @@
 // /src/player/screens/PlayerEventList.jsx
+//
+// 안내: 이 파일은 "추가 수정 없이" 그대로 사용하시면 됩니다.
+// - /player/events 로 직접 들어오면 pending_code(또는 기존 auth)가 없을 때 로그인 화면으로 안내
+// - 리스트에서 대회를 선택하면 pending_code를 해당 대회 명단에서 검증 → 있으면 /player/home/:eventId, 없으면 로그인으로 복귀
 
 import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -23,14 +27,12 @@ export default function PlayerEventList() {
     })();
   }, [allEvents]);
 
-  // ✅ 처음 /player/events 로 직접 들어온 경우: 코드 없으면 로그인으로 즉시 이동
+  // /player/events 직접 접근 시: 코드도 없고 이전 인증도 없으면 로그인으로
   useEffect(() => {
     try {
       const hasPending = !!sessionStorage.getItem('pending_code');
       const authedSome = Object.keys(sessionStorage).some(k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true');
-      if (!hasPending && !authedSome) {
-        nav('/player/login-or-code', { replace: true });
-      }
+      if (!hasPending && !authedSome) nav('/player/login-or-code', { replace: true });
     } catch {}
   }, [nav]);
 
