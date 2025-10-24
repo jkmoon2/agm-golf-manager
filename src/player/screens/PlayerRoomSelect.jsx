@@ -1,6 +1,6 @@
 // /src/player/screens/PlayerRoomSelect.jsx
 // 기존 로직 100% 유지 + Android 텍스트 오변환 방지 가드 + EventContext 미장착/미로드 시 폴백 구독
-// ★ patch: 포볼 정원(4명) 초과 방지용 재시도 로직 + [핵심] 배정 전 익명로그인/멤버십 선작성
+// ★ patch: 포볼 정원(4명) 초과 방지용 재시도 로직 + [핵심] 배정 전 익명로그인/멤버십 선작성 + 토큰 보장
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -11,7 +11,7 @@ import styles from './PlayerRoomSelect.module.css';
 // [ADD] Firestore 폴백 구독
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
-// ✅ 추가: 익명 로그인 보장
+// ✅ 추가: 익명 로그인/토큰 보장
 import { signInAnonymously } from 'firebase/auth';
 
 const TIMINGS = {
@@ -21,8 +21,23 @@ const TIMINGS = {
   spinDuringPartnerPick: 1800,
 };
 
+// ✅ 토큰이 실제로 준비될 때까지 보장
+async function ensureAuthReady() {
+  try {
+    if (!auth?.currentUser) {
+      const cred = await signInAnonymously(auth);
+      await cred.user.getIdToken(true);
+    } else {
+      await auth.currentUser.getIdToken(true);
+    }
+  } catch (e) {
+    console.warn('[PlayerRoomSelect] ensureAuthReady', e);
+  }
+}
+
 async function ensureMembership(eventId, myRoom) {
   try {
+    await ensureAuthReady(); // ✅ 토큰 보장
     const uid = auth?.currentUser?.uid || null;
     if (!uid || !eventId) return;
     const payload = {
@@ -264,12 +279,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     }
   }, [participant?.room]);
 
-  // ✅ 추가: 배정 시작 전에 익명 로그인 + membership 선작성(규칙 회피)
+  // ✅ 추가: 배정 시작 전에 익명 로그인 + membership 선작성(규칙 선행 충족) + 토큰 보장
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
     try {
-      if (!auth?.currentUser) {
-        await signInAnonymously(auth);
-      }
+      await ensureAuthReady(); // ✅ 토큰 준비
       await ensureMembership(eventId, null); // room은 아직 모름 → 기본 정보만 merge
     } catch (e) {
       console.warn('[PlayerRoomSelect] ensureAuthAndMembershipBeforeAssign failed', e);
@@ -315,7 +328,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       await sleep(TIMINGS.spinBeforeAssign);
 
-      // ✅ 핵심: 배정 전에 인증/멤버십을 보장(규칙 선제 충족)
+      // ✅ 핵심: 배정 전에 인증/멤버십을 보장(규칙 선행 충족)
       const eid = (playerEventId || ctxEventId || urlEventId);
       await ensureAuthAndMembershipBeforeAssign(eid);
 
