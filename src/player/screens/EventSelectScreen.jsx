@@ -6,13 +6,11 @@ import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
 import { collection, getDocs, getDoc, doc } from 'firebase/firestore';
 import styles from './EventSelectScreen.module.css';
-import PlayerAuthGate from '../components/PlayerAuthGate'; // [ADD]
 
 export default function EventSelectScreen() {
   const nav = useNavigate();
   const { allEvents = [], loadEvent, setEventId } = useContext(EventContext) || {};
   const [cache, setCache] = useState([]);
-
   const events = useMemo(() => (allEvents?.length ? allEvents : cache), [allEvents, cache]);
 
   useEffect(() => {
@@ -35,7 +33,6 @@ export default function EventSelectScreen() {
     catch { return false; }
   };
 
-  // 안전 변환 유틸
   const tsToMillis = (ts) => {
     if (ts == null) return null;
     if (typeof ts === 'number') return ts;
@@ -67,7 +64,6 @@ export default function EventSelectScreen() {
     return !!(endAt && Date.now() > endAt);
   };
 
-  // [ADD] pending_code가 있으면 이벤트 클릭 시 즉석 검증
   const tryPendingCode = async (eventId) => {
     try {
       const code = sessionStorage.getItem('pending_code') || '';
@@ -76,15 +72,12 @@ export default function EventSelectScreen() {
       if (!snap.exists()) return false;
       const part = (snap.data().participants || []).find(p => String(p.authCode) === code);
       if (!part) return false;
-
       sessionStorage.setItem(`auth_${eventId}`, 'true');
       sessionStorage.setItem(`authcode_${eventId}`, code);
       sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(part));
       try { localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code, ts: Date.now() })); } catch {}
       return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   };
 
   const goNext = async (ev) => {
@@ -96,7 +89,6 @@ export default function EventSelectScreen() {
     setEventId?.(ev.id);
     if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
 
-    // ✅ [FIX] 라우팅 경로만 최소 수정
     if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}/1`); return; }
 
     const ok = await tryPendingCode(ev.id);
@@ -115,47 +107,41 @@ export default function EventSelectScreen() {
     whiteSpace: 'nowrap'
   };
 
-  // [ADD] PlayerAuthGate로 감싸서 "로그인 먼저" 강제
   return (
-    <PlayerAuthGate>
-      <div className={styles.container}>
-        {!events.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
+    <div className={styles.container}>
+      {!events.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
+      <ul className={styles.list}>
+        {events.map(ev => {
+          const dateStart = ev.dateStart ?? ev.startDate ?? '';
+          const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
+          const count = Array.isArray(ev.participants) ? ev.participants.length : 0;
+          const isFour = (ev.mode === 'agm' || ev.mode === 'fourball');
+          const accessOk = isAccessAllowed(ev);
+          const ended = isEnded(ev);
 
-        <ul className={styles.list}>
-          {events.map(ev => {
-            const dateStart = ev.dateStart ?? ev.startDate ?? '';
-            const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
-            const count = Array.isArray(ev.participants) ? ev.participants.length : 0;
-            const isFour = (ev.mode === 'agm' || ev.mode === 'fourball');
-
-            const accessOk = isAccessAllowed(ev);
-            const ended    = isEnded(ev);
-
-            return (
-              <li
-                key={ev.id}
-                className={styles.card}
-                onClick={() => goNext(ev)}
-                style={accessOk ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
-                title={accessOk ? undefined : '대회 기간 외 접속 제한'}
-              >
-                <div className={styles.titleRow}>
-                  <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>
-                  <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
-                    {isFour ? 'AGM 포볼' : '스트로크'}
-                  </span>
-                  {ended && <span style={endedBadgeStyle}>종료</span>}
-                </div>
-
-                <div className={styles.subline}>
-                  <span>👥 참가자 {count}명</span>
-                  {(dateStart || dateEnd) && <span>📅 {fmt(dateStart)} ~ {fmt(dateEnd)}</span>}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </PlayerAuthGate>
+          return (
+            <li
+              key={ev.id}
+              className={styles.card}
+              onClick={() => goNext(ev)}
+              style={accessOk ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
+              title={accessOk ? undefined : '대회 기간 외 접속 제한'}
+            >
+              <div className={styles.titleRow}>
+                <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>
+                <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
+                  {isFour ? 'AGM 포볼' : '스트로크'}
+                </span>
+                {ended && <span style={endedBadgeStyle}>종료</span>}
+              </div>
+              <div className={styles.subline}>
+                <span>👥 참가자 {count}명</span>
+                {(dateStart || dateEnd) && <span>📅 {fmt(dateStart)} ~ {fmt(dateEnd)}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

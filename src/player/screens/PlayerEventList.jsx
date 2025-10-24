@@ -6,7 +6,6 @@ import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
 import { collection, getDocs, getDoc, doc } from 'firebase/firestore';
 import styles from './EventSelectScreen.module.css';
-import PlayerAuthGate from '../components/PlayerAuthGate';
 
 export default function PlayerEventList() {
   const nav = useNavigate();
@@ -91,7 +90,6 @@ export default function PlayerEventList() {
     setEventId?.(ev.id);
     if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
 
-    // ✅ 최소 수정: 라우터와 동일 경로로 맞춤
     if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}/1`); return; }
 
     const ok = await tryPendingCode(ev.id);
@@ -111,45 +109,40 @@ export default function PlayerEventList() {
   };
 
   return (
-    <PlayerAuthGate>
-      <div className={styles.container}>
-        {!events.length && <div style={{ color:'#6b7280', padding: 12 }}>등록된 대회가 없습니다.</div>}
+    <div className={styles.container}>
+      {!events.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
+      <ul className={styles.list}>
+        {events.map(ev => {
+          const dateStart = ev.dateStart ?? ev.startDate ?? '';
+          const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
+          const count = Array.isArray(ev.participants) ? ev.participants.length : 0;
+          const isFour = (ev.mode === 'agm' || ev.mode === 'fourball');
+          const accessOk = isAccessAllowed(ev);
+          const ended = isEnded(ev);
 
-        <ul className={styles.list}>
-          {events.map(ev => {
-            const dateStart = ev.dateStart ?? ev.startDate ?? '';
-            const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
-            const count = Array.isArray(ev.participants) ? ev.participants.length : 0;
-            const isFour = (ev.mode === 'agm' || ev.mode === 'fourball');
-            const accessOk = isAccessAllowed(ev);
-            const ended = isEnded(ev);
-
-            return (
-              <li
-                key={ev.id}
-                className={styles.card}
-                onClick={() => goNext(ev)}
-                style={accessOk ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
-                title={accessOk ? undefined : '대회 기간 외 접속 제한'}
-              >
-                <div className={styles.titleRow}>
-                  <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>
-                  <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
-                    {isFour ? 'AGM 포볼' : '스트로크'}
-                  </span>
-                  {ended && <span style={endedBadgeStyle}>종료</span>}
-                </div>
-
-                {/* [ADD] 서브 정보(참가자 수/대회 기간) 복원 */}
-                <div className={styles.subline}>
-                  <span>👥 참가자 {count}명</span>
-                  {(dateStart || dateEnd) && <span>📅 {fmt(dateStart)} ~ {fmt(dateEnd)}</span>}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </PlayerAuthGate>
+          return (
+            <li
+              key={ev.id}
+              className={styles.card}
+              onClick={() => goNext(ev)}
+              style={accessOk ? undefined : { opacity: 0.55, cursor: 'not-allowed' }}
+              title={accessOk ? undefined : '대회 기간 외 접속 제한'}
+            >
+              <div className={styles.titleRow}>
+                <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>
+                <span className={`${styles.badge} ${isFour ? styles.badgeFour : styles.badgeStroke}`}>
+                  {isFour ? 'AGM 포볼' : '스트로크'}
+                </span>
+                {ended && <span style={endedBadgeStyle}>종료</span>}
+              </div>
+              <div className={styles.subline}>
+                <span>👥 참가자 {count}명</span>
+                {(dateStart || dateEnd) && <span>📅 {fmt(dateStart)} ~ {fmt(dateEnd)}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
