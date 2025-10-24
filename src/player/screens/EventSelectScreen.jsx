@@ -96,12 +96,12 @@ export default function EventSelectScreen() {
     setEventId?.(ev.id);
     if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
 
-    if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}`); return; }
+    // ✅ [FIX] 라우팅 경로만 최소 수정
+    if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}/1`); return; }
 
-    // [ADD] pending_code 자동 검증
     const ok = await tryPendingCode(ev.id);
-    if (ok) nav(`/player/home/${ev.id}`);
-    else    nav(`/player/home/${ev.id}/login`);
+    if (ok) nav(`/player/home/${ev.id}/1`);
+    else    nav(`/player/login/${ev.id}`);
   };
 
   const endedBadgeStyle = {

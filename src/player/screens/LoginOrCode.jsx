@@ -4,7 +4,7 @@
 // - [FIX] 훅을 조건부로 호출하지 않도록 조기 return 제거 (ready 체크는 JSX에서 렌더 분기)
 // - [ADD] 이미 세션 인증된 eventId는 로그인 화면을 건너뛰고 즉시 STEP1로 이동
 // - [ADD] 세션에 저장된 참가자/코드 값을 PlayerContext에 즉시 복원
-// - 나머지 기존 로직(코드 인증/이메일 로그인/회원가입 등)은 그대로 유지
+// - [FIX] 인증 성공 후 이동 경로를 '/player' 로 통일(무한 리다이렉트 차단)
 
 import React, { useState, useContext, useEffect } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -39,10 +39,11 @@ function InnerLoginOrCode({ onEnter }) {
   // 공용 헬퍼
   const normalize = (v) => String(v ?? '').trim().toLowerCase();
 
+  // [FIX] 인증 성공 후 이동은 리스트로 통일 → 무한 루프 방지
   const goNext = () => {
     if (typeof onEnter === 'function') onEnter();
     else if (eventId) navigate(`/player/home/${eventId}/1`, { replace: true });
-    else navigate('/player/events', { replace: true }); // 폴백
+    else navigate('/player', { replace: true }); // 여기! (기존 '/player/events' 아님)
   };
 
   const setLoginTicket = (evtId) => {
@@ -52,7 +53,7 @@ function InnerLoginOrCode({ onEnter }) {
     try { localStorage.setItem(`ticket:${evtId}`, JSON.stringify({ code: String(c || ''), ts: Date.now() })); } catch {}
   };
 
-  // [★★★ ADD] 이미 세션에 인증 흔적이 있으면 자동 통과
+  // [ADD] 이미 세션 인증 흔적이 있으면 자동 통과
   useEffect(() => {
     if (!eventId) return;
     try {
@@ -68,7 +69,7 @@ function InnerLoginOrCode({ onEnter }) {
       // 곧바로 STEP1로 이동
       goNext();
     } catch { /* no-op */ }
-  }, [eventId]); // ← 이벤트를 바꿔도 즉시 반응
+  }, [eventId]);
 
   // 로그인 후 멤버십/참가자 매핑
   const syncMembershipAndLinkParticipant = async (firebaseUser, evtId) => {
@@ -223,7 +224,6 @@ function InnerLoginOrCode({ onEnter }) {
   // 🔁 JSX 렌더
   return (
     <div className={styles.wrap}>
-      {/* ready가 false일 때 훅을 조건부 호출하지 않고, 렌더만 분기 */}
       {!ready ? (
         <div className={styles.card}>
           <h2 className={styles.title}>로그인</h2>
