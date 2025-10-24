@@ -38,7 +38,7 @@ export default function PlayerApp() {
     }
   }, [eventId, ctxEventId, loadEvent]);
 
-  // 🆕 회원 전용 이벤트 가드
+  // 🆕 membersOnly 이벤트 가드
   // - 운영자가 events/{eventId}.membersOnly = true 로 설정하면
   //   ➜ /player/home/:eventId/* 진입 시 '로그인 탭'으로 유도
   //   ➜ 인증코드만으로는 입장 불가
@@ -59,15 +59,15 @@ export default function PlayerApp() {
     } catch {}
 
     if (!hasLoginTicket) {
-      // 로그인 탭으로 보냄 (운영자 스타일의 로그인/회원가입 탭)
-      navigate(`/player/home/${eventId}/login`, { replace: true });
+      // ✅ 최소 수정: /login 세그먼트 제거
+      navigate(`/player/home/${eventId}`, { replace: true });
     }
   }, [eventId, eventData?.membersOnly, navigate]);
 
   // 🆕 회원 로그인이라면: 대회 업로드 명단에 본인이 없으면 입장 차단
   //    - UID 또는 이메일로 participants 배열/서브컬렉션에서 검색
   useEffect(() => {
-    if (!eventId) return;
+    if (!eventId || !firebaseUser) return;
 
     let loginVia = false;
     try {
@@ -119,7 +119,8 @@ export default function PlayerApp() {
           // 업로드 명단에 없으면 입장 불가: 티켓 삭제 후 로그인 화면으로
           try { localStorage.removeItem(`ticket:${eventId}`); } catch {}
           alert('아직 대회 참가 명단에 등록되지 않았습니다. 운영자에게 문의해 주세요.');
-          navigate(`/player/home/${eventId}/login`, { replace: true });
+          // ✅ 최소 수정: /login 세그먼트 제거
+          navigate(`/player/home/${eventId}`, { replace: true });
         }
       } catch (e) {
         console.warn('participant presence check failed:', e);
@@ -134,7 +135,7 @@ export default function PlayerApp() {
           {/* index를 홈으로 */}
           <Route index element={<PlayerHome />} />
 
-          {/* (레거시) 인증코드 화면 - 필요 시 유지, 회원 전용 ON일 때는 위 가드가 /login 으로 리다이렉트 */}
+          {/* (레거시) 인증코드 화면 - 필요 시 유지, 회원 전용 ON일 때는 위 가드가 홈으로 리다이렉트 */}
           <Route path="join" element={<PlayerLoginScreen />} />
 
           {/* 단계 라우트 */}

@@ -1,4 +1,4 @@
-// src/player/PlayerApp.jsx
+// /src/player/PlayerApp.jsx
 
 import React, { useEffect, useContext } from 'react';
 import {
@@ -16,34 +16,48 @@ import PlayerRoomTable   from './screens/PlayerRoomTable';
 import PlayerEventInput  from './screens/PlayerEventInput';
 import PlayerScoreInput  from './screens/PlayerScoreInput';
 import PlayerResults     from './screens/PlayerResults';
-// [ADD] STEP6 화면 임포트
 import PlayerEventConfirm from './screens/PlayerEventConfirm';
-// [ADD] STEP 흐름 컨텍스트 (이전/다음/홈 네비게이션 공통 제공)
-import StepFlowProvider   from './flows/StepFlow';
+import { StepFlowProvider } from '../player/flows/StepFlow';
 
 export default function PlayerApp() {
   const { eventId } = useParams();
   const navigate    = useNavigate();
   const { eventId: ctxEventId, participant } = useContext(PlayerContext);
 
+  // ✅ 추가: eventId가 없거나 'undefined'로 들어오면 플레이어 로그인(코드)로 안내
+  useEffect(() => {
+    if (!eventId || eventId === 'undefined') {
+      navigate('/player/login-or-code', { replace: true });
+    }
+  }, [eventId, navigate]);
+
   // 기존 가드(컨텍스트/참가자)
   useEffect(() => {
     if (ctxEventId !== eventId || !participant) {
-      navigate(`/player/home/${eventId}/login`, { replace: true });
+      // ✅ 최소 수정: /login 세그먼트 제거
+      navigate(`/player/home/${eventId}`, { replace: true });
     }
   }, [ctxEventId, eventId, participant, navigate]);
 
   // [ADD] 보조 가드: deep-link로 바로 STEP URL에 들어온 경우 대비
   useEffect(() => {
     const hasTicket = (() => {
-      try { return sessionStorage.getItem(`auth_${eventId}`) === 'true'; } catch { return false; }
+      try {
+        const raw = localStorage.getItem(`ticket:${eventId}`);
+        if (!raw) return false;
+        const t = JSON.parse(raw);
+        return !!t?.via || !!t?.code;
+      } catch {
+        return false;
+      }
     })();
     const hasPending = (() => {
       try { return !!sessionStorage.getItem('pending_code'); } catch { return false; }
     })();
     // 참가자 컨텍스트가 아직 준비 전이거나, 인증 티켓/코드가 전혀 없는 경우 로그인 페이지로
     if (!participant && !hasTicket && !hasPending) {
-      navigate(`/player/home/${eventId}/login`, { replace: true });
+      // ✅ 최소 수정: /login 세그먼트 제거
+      navigate(`/player/home/${eventId}`, { replace: true });
     }
   }, [eventId, participant, navigate]);
 

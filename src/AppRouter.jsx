@@ -1,7 +1,7 @@
 // /src/AppRouter.jsx
 
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PlayerProvider }        from './contexts/PlayerContext';
 import { EventProvider }         from './contexts/EventContext';
@@ -29,6 +29,13 @@ function Protected({ roles, children }) {
   return children;
 }
 
+/** [ADD] 혹시 남아있는 '/player/home/:eventId/login' 진입을
+ *  모두 '/player/home/:eventId' 로 돌려보내는 안전 리디렉터 */
+function RedirectPlayerHomeNoLogin() {
+  const { eventId } = useParams();
+  return <Navigate to={`/player/home/${eventId || ''}`} replace />;
+}
+
 export default function AppRouter() {
   return (
     <BrowserRouter>
@@ -53,7 +60,13 @@ export default function AppRouter() {
               <Route path="login-or-code" element={<LoginOrCode />} />
               {/* 특정 이벤트 로그인(코드 전용 화면) */}
               <Route path="login/:eventId" element={<PlayerLoginScreen />} />
-              {/* ✅ [ADD] 플레이어 홈(스텝 플로우) — 여기로 이동해야 무한 루프가 안 생깁니다 */}
+
+              {/* [ADD] '/player/home/:eventId/login' 으로 오면 '/player/home/:eventId'로 즉시 리디렉션 */}
+              <Route path="home/:eventId/login" element={<RedirectPlayerHomeNoLogin />} />
+              {/* [ADD] 혹시 'undefined'가 섞인 경우 로그인(코드)로 유도 */}
+              <Route path="home/undefined/*" element={<Navigate to="/player/login-or-code" replace />} />
+
+              {/* 플레이어 홈(스텝 플로우) */}
               <Route path="home/*" element={<PlayerApp />} />
               {/* 기존: 앱 네임스페이스 */}
               <Route path="app/*" element={<PlayerApp />} />
