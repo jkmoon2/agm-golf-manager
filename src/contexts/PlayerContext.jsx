@@ -1,13 +1,4 @@
 // /src/contexts/PlayerContext.jsx
-//
-// ✅ 변경 핵심 (원본 100% 유지 + 필요한 부분만 추가):
-// 1) Firestore 저장 전 sanitizeForFirestore() 적용 → 400 에러 방지
-// 2) writeParticipants()에서 허용 필드만 남기고 타입 정리 후 저장(가장 중요)
-// 3) onSnapshot 매핑 시 null 안전 스프레드
-// 4) "같은 세션에서 인증된 이벤트" 만 자동 매칭 허용 → 교차 이벤트 오검출 방지
-// 5) events/{eventId} 루트 문서에는 participants(+updatedAt)만 저장
-// 6) rooms / fourballRooms 문서 병합 저장(merge) 유지 → 규칙 호환
-// 7) ✅ 모든 Firestore 쓰기 전에 ensureAuthReady() 호출(익명 로그인 + ID 토큰 보장)
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -20,8 +11,6 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
-
-// ✅ 토큰 보장 유틸
 import { getAuth, signInAnonymously } from 'firebase/auth';
 
 import { pickRoomForStroke } from '../player/logic/assignStroke';
@@ -46,7 +35,7 @@ const FOURBALL_USE_TRANSACTION = (() => {
   }
 })();
 
-// ── helpers (원본 유지) ────────────────────────────────────────────────
+// ─ helpers ─
 const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
@@ -72,8 +61,7 @@ const shuffle = (arr) => {
   return a;
 };
 
-const pickUniform = (roomCount) =>
-  1 + Math.floor(cryptoRand() * roomCount);
+const pickUniform = (roomCount) => 1 + Math.floor(cryptoRand() * roomCount);
 
 const minRooms = (participants, roomCount) => {
   const counts = Array.from({ length: roomCount }, (_, i) =>
@@ -86,7 +74,7 @@ const minRooms = (participants, roomCount) => {
     .map((x) => x.n);
 };
 
-// ✅ Firestore 저장 전 sanitize (중첩 undefined/NaN 제거)
+// Firestore sanitize
 function sanitizeForFirestore(v) {
   if (Array.isArray(v)) {
     return v.map(sanitizeForFirestore).filter((x) => x !== undefined);
@@ -105,7 +93,7 @@ function sanitizeForFirestore(v) {
   return v;
 }
 
-// ✅ 세션 단위 인증 플래그(이 이벤트에 대해 인증됨)
+// 세션 인증 플래그
 function markEventAuthed(id, code, meObj) {
   if (!id) return;
   try {
@@ -119,7 +107,7 @@ function markEventAuthed(id, code, meObj) {
   } catch {}
 }
 
-// ✅ 모든 쓰기 직전에 호출(익명 로그인 + 토큰 확보)
+// ✅ 모든 쓰기 전에 인증 보장
 async function ensureAuthReady() {
   const auth = getAuth();
   if (!auth.currentUser) {
@@ -131,7 +119,6 @@ async function ensureAuthReady() {
 }
 
 export function PlayerProvider({ children }) {
-  // ── 상태 (원본 유지) ────────────────────────────────────────────────
   const [eventId, setEventId]             = useState(() => {
     try { return localStorage.getItem('eventId') || ''; } catch { return ''; }
   });
@@ -142,13 +129,10 @@ export function PlayerProvider({ children }) {
   const [participants, setParticipants]   = useState([]);
   const [participant, setParticipant]     = useState(null);
   const [allowTeamView, setAllowTeamView] = useState(false);
-
-  // 인증코드 — 세션 기반 복원
-  const [authCode, setAuthCode] = useState('');
+  const [authCode, setAuthCode]           = useState('');
 
   const { pathname } = useLocation();
 
-  // URL에서 /player/home/:eventId 감지(원본 유지)
   useEffect(() => {
     if (!eventId && typeof pathname === 'string') {
       const m = pathname.match(/\/player\/home\/([^/]+)/);
@@ -159,7 +143,6 @@ export function PlayerProvider({ children }) {
     }
   }, [pathname, eventId]);
 
-  // ✅ eventId 변경 시 같은 세션의 authcode 복원
   useEffect(() => {
     if (!eventId) return;
     try {
@@ -168,14 +151,10 @@ export function PlayerProvider({ children }) {
     } catch {}
   }, [eventId]);
 
-  // eventId 동기화(원본 유지)
   useEffect(() => {
-    try {
-      if (eventId) localStorage.setItem('eventId', eventId);
-    } catch {}
+    try { if (eventId) localStorage.setItem('eventId', eventId); } catch {}
   }, [eventId]);
 
-  // authCode 변경 시 캐시 정리(원본 유지) + 이벤트별 세션 캐시 정리
   useEffect(() => {
     if (authCode && authCode.trim()) {
       localStorage.removeItem('myId');
@@ -190,14 +169,12 @@ export function PlayerProvider({ children }) {
     }
   }, [authCode, eventId]);
 
-  // ── 실시간 구독 (원본 유지 + 가드/추가) ─────────────────────────────
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
 
-      // ✅ null 안전 스프레드 + 안전 기본값
       const rawParts = Array.isArray(data.participants) ? data.participants : [];
       const partArr = rawParts.map((p, i) => ({
         ...((p && typeof p === 'object') ? p : {}),
@@ -222,9 +199,7 @@ export function PlayerProvider({ children }) {
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
-      // ── me 매칭: ① authCode 최우선 ② 같은 세션에서 인증된 이벤트만 캐시 사용
       let me = null;
-
       if (authCode && authCode.trim()) {
         me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
@@ -236,58 +211,43 @@ export function PlayerProvider({ children }) {
             idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
             nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
           } catch {}
-          if (!idCached) {
-            try { idCached = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {}
-          }
-          if (!nickCache) {
-            try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {}
-          }
-
-          if (idCached)  me = partArr.find((p) => normId(p.id) === idCached) || null;
+          if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+          if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+          if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
           if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
         }
       }
 
       if (me) {
         setParticipant(me);
-
-        // (원본 유지) — 전역 키 기록
         localStorage.setItem('myId', normId(me.id));
         localStorage.setItem('nickname', normName(me.nickname));
-
-        // ✅ 이벤트별 세션 키도 기록
         try {
           sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
           sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
         } catch {}
-
         if (me.authCode) setAuthCode(me.authCode);
-
-        // 세션 인증 플래그 기록
         markEventAuthed(eventId, me.authCode, me);
       } else {
         setParticipant(null);
       }
     });
-
     return () => unsub();
   }, [eventId, authCode]);
 
-  // ── Firestore write helper (원본 유지 + sanitize + 토큰 보장 + 허용키 필터) ──
+  // participants 저장 (화이트리스트)
   async function writeParticipants(next) {
     if (!eventId) return;
     await ensureAuthReady(); // ✅
 
-    // ✅ 규칙이 허용한 키만 남기기 (email, name 등 업로드용 키 제거)
     const ALLOWED = ['id','group','nickname','handicap','score','room','partner','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
       const out = {};
-      for (const k of ALLOWED) {
-        if (p[k] !== undefined) out[k] = p[k] ?? null;
-      }
-      // 타입 정리(규칙 친화)
+      for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
       if (out.id === undefined) out.id = String(p?.id ?? i);
-      if (out.group !== undefined) out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
+      if (out.group !== undefined) {
+        out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
+      }
       if (out.handicap !== undefined) {
         const n = Number(out.handicap);
         out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
@@ -304,9 +264,7 @@ export function PlayerProvider({ children }) {
         const n = Number(out.partner);
         out.partner = Number.isFinite(n) ? n : String(out.partner);
       }
-      if (typeof out.selected !== 'boolean' && out.selected != null) {
-        out.selected = !!out.selected;
-      }
+      if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
       return out;
     });
 
@@ -317,8 +275,9 @@ export function PlayerProvider({ children }) {
     );
   }
 
-  // ── API (원본 유지) ──────────────────────────────────────────────────
+  // ─ API ─
   async function joinRoom(roomNumber, id) {
+    await ensureAuthReady(); // ✅ 시작에서 보장
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
     const next = participants.map((p) =>
@@ -338,6 +297,7 @@ export function PlayerProvider({ children }) {
   }
 
   async function joinFourBall(roomNumber, p1, p2) {
+    await ensureAuthReady(); // ✅ 시작에서 보장
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
@@ -358,22 +318,22 @@ export function PlayerProvider({ children }) {
   }
 
   async function assignStrokeForOne(participantId) {
+    await ensureAuthReady(); // ✅ 시작에서 보장
+
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
     let chosenRoom = 0;
-
     try {
       const r = pickRoomForStroke ? pickRoomForStroke(participants, roomCount, me) : null;
       chosenRoom = toInt(typeof r === 'number' ? r : (r?.roomNumber ?? r?.room), 0);
-    } catch (_) {}
+    } catch {}
 
     if (!chosenRoom) {
-      if (ASSIGN_STRATEGY_STROKE === 'uniform') {
-        chosenRoom = pickUniform(roomCount);
-      } else {
+      if (ASSIGN_STRATEGY_STROKE === 'uniform') chosenRoom = pickUniform(roomCount);
+      else {
         const candidates = minRooms(participants, roomCount);
         chosenRoom = shuffle(candidates)[0] || pickUniform(roomCount);
       }
@@ -398,12 +358,13 @@ export function PlayerProvider({ children }) {
   }
 
   async function assignFourballForOneAndPartner(participantId) {
+    await ensureAuthReady(); // ✅ 시작에서 보장 (중요)
+
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
-    // 1조가 아니면 기존 배정 그대로 리턴(원본 유지)
     if (toInt(me.group) !== 1) {
       const partnerNickname =
         (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
@@ -411,15 +372,11 @@ export function PlayerProvider({ children }) {
     }
 
     if (FOURBALL_USE_TRANSACTION) {
-      // (우선) 외부 유틸 트랜잭션 시도
       try {
         if (typeof transactionalAssignFourball === 'function') {
+          // 외부 유틸이 내부에서 트랜잭션을 사용하므로, 호출 전 인증 보장 필요(위에서 보장)
           const result = await transactionalAssignFourball({
-            db,
-            eventId,
-            participants,
-            roomCount,
-            selfId: pid,
+            db, eventId, participants, roomCount, selfId: pid,
           });
           if (result?.nextParticipants) {
             setParticipants(result.nextParticipants);
@@ -441,7 +398,6 @@ export function PlayerProvider({ children }) {
         console.warn('[fourball tx util] fallback to manual tx:', e?.message);
       }
 
-      // (대안) 직접 트랜잭션
       try {
         const result = await runTransaction(db, async (tx) => {
           const eref = doc(db, 'events', eventId);
@@ -479,7 +435,6 @@ export function PlayerProvider({ children }) {
             return p;
           });
 
-          // ✅ 허용 키만 merge + sanitize
           tx.set(eref, sanitizeForFirestore({ participants: next, updatedAt: serverTimestamp() }), { merge: true });
 
           const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
@@ -505,7 +460,7 @@ export function PlayerProvider({ children }) {
       }
     }
 
-    // 비트랜잭션 버전 (원본 유지)
+    // 비트랜잭션
     let roomNumber = 0;
     let mateId = '';
 
@@ -522,26 +477,20 @@ export function PlayerProvider({ children }) {
                      participants.find((p) => normName(p.nickname) === normName(partnerRaw));
         mateId = cand ? normId(cand.id) : '';
       }
-    } catch (_) {}
+    } catch {}
 
     if (!roomNumber) {
-      if (ASSIGN_STRATEGY_FOURBALL === 'uniform') {
-        roomNumber = pickUniform(roomCount);
-      } else {
+      if (ASSIGN_STRATEGY_FOURBALL === 'uniform') roomNumber = pickUniform(roomCount);
+      else {
         const candidates = minRooms(participants, roomCount);
         roomNumber = shuffle(candidates)[0] || pickUniform(roomCount);
       }
     }
-
     if (!mateId) {
       const pool = participants.filter(
         (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
       );
-      if (pool.length) {
-        mateId = normId(shuffle(pool)[0].id);
-      } else {
-        mateId = ''; // 싱글
-      }
+      mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
     }
 
     const next = participants.map((p) => {
@@ -559,7 +508,7 @@ export function PlayerProvider({ children }) {
       await ensureAuthReady(); // ✅
       const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
       if (mateId) await setDoc(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }) }, { merge: true });
-      else await setDoc(fbref, { singles: arrayUnion(pid) }, { merge: true });
+      else        await setDoc(fbref, { singles: arrayUnion(pid) }, { merge: true });
     } catch (_) {}
 
     const partnerNickname = (participants.find((p) => normId(p.id) === mateId) || {})?.nickname || '';
