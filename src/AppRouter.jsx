@@ -1,11 +1,12 @@
 // /src/AppRouter.jsx
 
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PlayerProvider }        from './contexts/PlayerContext';
 import { EventProvider }         from './contexts/EventContext';
 
+import MainLayout          from './layouts/MainLayout';           // ✅ 플레이어 레이아웃 복원
 import LoginScreen         from './screens/LoginScreen';
 import AdminApp            from './AdminApp';
 import Dashboard           from './screens/Dashboard';
@@ -27,12 +28,10 @@ function Protected({ roles, children }) {
   return children;
 }
 
-// '/player/home/:eventId/login' 으로 오면 '/player/home/:eventId'로 돌려보내는 리디렉트
+// '/player/home/:eventId/login' → '/player/home/:eventId' 로 정정
 function RedirectPlayerHomeNoLogin() {
-  const params = new URLSearchParams(window.location.search);
-  const p = window.location.pathname.split('/');
-  const eventId = p[3] || params.get('eventId') || '';
-  return <Navigate to={`/player/home/${eventId}`} replace />;
+  const { eventId } = useParams();
+  return <Navigate to={`/player/home/${eventId || ''}`} replace />;
 }
 
 export default function AppRouter() {
@@ -49,15 +48,17 @@ export default function AppRouter() {
               path="/player"
               element={
                 <PlayerProvider>
-                  <Outlet />
+                  <MainLayout />   {/* ✅ 레이아웃 복원: 헤더/하단 탭 다시 보이게 */}
                 </PlayerProvider>
               }
             >
-              {/* 참가자 초기 진입(리스트) */}
-              <Route index element={<PlayerEventList />} />
+              {/* ✅ 기본 진입은 참가자 로그인(코드/이메일) 화면 */}
+              <Route index element={<LoginOrCode />} />
+
+              {/* 이벤트 리스트(로그인 화면의 '대회 선택하기'에서 이동) */}
               <Route path="events" element={<PlayerEventList />} />
 
-              {/* 로그인/코드 입력 */}
+              {/* 로그인(이벤트 지정 방식 유지) */}
               <Route path="login-or-code" element={<LoginOrCode />} />
               <Route path="login/:eventId" element={<PlayerLoginScreen />} />
 
@@ -67,19 +68,19 @@ export default function AppRouter() {
               {/* 과거 경로 정정 */}
               <Route path="home/:eventId/login" element={<RedirectPlayerHomeNoLogin />} />
 
-              {/* 진입 후 앱 */}
+              {/* 진입 후 앱(스텝 플로우) */}
               <Route path="home/*" element={<PlayerApp />} />
               <Route path="app/*"  element={<PlayerApp />} />
             </Route>
 
-            {/* ❌ (삭제) 루프의 원인: /player/* → /player/login-or-code 자기-리다이렉트 */}
-            {/* <Route path="/player/*" element={<Navigate to="/player/login-or-code" replace />} /> */}
+            {/* ❌ 주의: 아래와 같은 와일드카드 리다이렉트는 루프의 원인이라 추가하지 않습니다.
+                <Route path="/player/*" element={<Navigate to="/player/login-or-code" replace />} /> */}
 
             {/* ───────── 운영자 영역 ───────── */}
             <Route
               element={
                 <Protected roles={['admin','player']}>
-                  <Outlet />
+                  <MainLayout />
                 </Protected>
               }
             >
@@ -101,7 +102,7 @@ export default function AppRouter() {
               </Route>
             </Route>
 
-            {/* 마지막 캐치올: 그 외는 운영자 로그인 */}
+            {/* 마지막 캐치올 */}
             <Route path="*" element={<Navigate to="/login?role=admin" replace />} />
           </Routes>
         </EventProvider>
