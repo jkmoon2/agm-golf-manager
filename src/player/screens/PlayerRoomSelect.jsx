@@ -1,6 +1,6 @@
 // /src/player/screens/PlayerRoomSelect.jsx
 // 기존 로직 100% 유지 + Android 텍스트 오변환 방지 가드 + EventContext 미장착/미로드 시 폴백 구독
-// ★ patch: 포볼 정원(4명) 초과 방지용 재시도 로직만 추가
+// ★ patch: 포볼 정원(4명) 초과 방지용 재시도 로직 + [핵심] 배정 전 익명로그인/멤버십 선작성
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -11,6 +11,8 @@ import styles from './PlayerRoomSelect.module.css';
 // [ADD] Firestore 폴백 구독
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+// ✅ 추가: 익명 로그인 보장
+import { signInAnonymously } from 'firebase/auth';
 
 const TIMINGS = {
   spinBeforeAssign: 1000,
@@ -22,9 +24,22 @@ const TIMINGS = {
 async function ensureMembership(eventId, myRoom) {
   try {
     const uid = auth?.currentUser?.uid || null;
-    if (!uid || !eventId || !myRoom) return;
-    const ref = doc(db, 'events', eventId, 'memberships', uid);
-    await setDoc(ref, { room: Number(myRoom) }, { merge: true });
+    if (!uid || !eventId) return;
+    const payload = {
+      uid,
+      via: 'code',
+      updatedAt: new Date().toISOString(),
+    };
+    if (Number.isFinite(Number(myRoom))) payload.room = Number(myRoom);
+    // 인증코드/참가자 정보가 있으면 함께 병합(규칙에서 참조할 수 있음)
+    try {
+      const code =
+        sessionStorage.getItem(`authcode_${eventId}`) ||
+        sessionStorage.getItem('pending_code') ||
+        '';
+      if (code) payload.code = String(code);
+    } catch {}
+    await setDoc(doc(db, 'events', eventId, 'memberships', uid), payload, { merge: true });
   } catch (e) {
     console.warn('[PlayerRoomSelect] ensureMembership failed', e);
   }
@@ -249,6 +264,18 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     }
   }, [participant?.room]);
 
+  // ✅ 추가: 배정 시작 전에 익명 로그인 + membership 선작성(규칙 회피)
+  const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
+    try {
+      if (!auth?.currentUser) {
+        await signInAnonymously(auth);
+      }
+      await ensureMembership(eventId, null); // room은 아직 모름 → 기본 정보만 merge
+    } catch (e) {
+      console.warn('[PlayerRoomSelect] ensureAuthAndMembershipBeforeAssign failed', e);
+    }
+  };
+
   const handleAssign = async () => {
     if (!participant?.id) return;
     if (done || isAssigning) return;
@@ -288,6 +315,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       await sleep(TIMINGS.spinBeforeAssign);
 
+      // ✅ 핵심: 배정 전에 인증/멤버십을 보장(규칙 선제 충족)
+      const eid = (playerEventId || ctxEventId || urlEventId);
+      await ensureAuthAndMembershipBeforeAssign(eid);
+
       // ★ patch: 경쟁 충돌 대비 재시도 루프(최대 3회)
       let attempt = 0;
       let roomNumber = null;
@@ -321,7 +352,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
 
-      await ensureMembership((playerEventId || ctxEventId || urlEventId), Number(roomNumber));
+      // 완료 후 membership에 room 반영(병합)
+      await ensureMembership(eid, Number(roomNumber));
 
       setFlowStep('afterAssign');
 
