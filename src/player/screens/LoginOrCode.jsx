@@ -1,10 +1,9 @@
 // /src/player/screens/LoginOrCode.jsx
 //
-// (중요) 기존 코드 100% 유지하고 필요한 부분만 보완했습니다.
-// - [FIX] 훅을 조건부로 호출하지 않도록 조기 return 제거 (ready 체크는 JSX에서 렌더 분기)
-// - [ADD] 이미 세션 인증된 eventId는 로그인 화면을 건너뛰고 즉시 STEP1로 이동
-// - [ADD] 세션에 저장된 참가자/코드 값을 PlayerContext에 즉시 복원
-// - [FIX] 인증 성공 후 이동 경로를 '/player' 로 통일(무한 리다이렉트 차단)
+// 변경 요약
+// - eventId 없으면 '인증코드 입장' 비활성(핵심)
+// - 코드/로그인 성공 후 이동 경로 goNext로 통일
+// - 세션에 저장된 참가자/코드 복원, 기 인증 시 바로 진입
 
 import React, { useState, useContext, useEffect } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -35,15 +34,12 @@ function InnerLoginOrCode({ onEnter }) {
   const [showSignup, setShowSignup] = useState(false);
   const [showReset,  setShowReset]  = useState(false);
 
-  // ──────────────────────────────────────────────────────────────
-  // 공용 헬퍼
   const normalize = (v) => String(v ?? '').trim().toLowerCase();
 
-  // [FIX] 인증 성공 후 이동은 리스트로 통일 → 무한 루프 방지
   const goNext = () => {
     if (typeof onEnter === 'function') onEnter();
     else if (eventId) navigate(`/player/home/${eventId}/1`, { replace: true });
-    else navigate('/player', { replace: true }); // 여기! (기존 '/player/events' 아님)
+    else navigate('/player', { replace: true });
   };
 
   const setLoginTicket = (evtId) => {
@@ -53,7 +49,6 @@ function InnerLoginOrCode({ onEnter }) {
     try { localStorage.setItem(`ticket:${evtId}`, JSON.stringify({ code: String(c || ''), ts: Date.now() })); } catch {}
   };
 
-  // [ADD] 이미 세션 인증 흔적이 있으면 자동 통과
   useEffect(() => {
     if (!eventId) return;
     try {
@@ -64,14 +59,11 @@ function InnerLoginOrCode({ onEnter }) {
       setEventId?.(eventId);
       if (savedCode) setAuthCode?.(savedCode);
       if (savedPart) setParticipant?.(JSON.parse(savedPart));
-      // StepFlow 게이트 통과용 로컬 티켓(있으면 갱신)
       setCodeTicket(eventId, savedCode);
-      // 곧바로 STEP1로 이동
       goNext();
-    } catch { /* no-op */ }
+    } catch {}
   }, [eventId]);
 
-  // 로그인 후 멤버십/참가자 매핑
   const syncMembershipAndLinkParticipant = async (firebaseUser, evtId) => {
     if (!firebaseUser || !evtId) return;
     const { uid, email: uEmail } = firebaseUser;
@@ -194,48 +186,40 @@ function InnerLoginOrCode({ onEnter }) {
   };
 
   const handleCode = async () => {
+    if (!eventId) { alert('대회를 먼저 선택해 주세요. (리스트에서 대회 선택 후 입장)'); return; }
     if (!code.trim()) { alert('인증코드를 입력해 주세요.'); return; }
     setBusy(true);
     try {
       await ensureAnonymous();
-      if (!eventId) { alert('이벤트가 선택되지 않았습니다.'); return; }
       const ok = await verifyCode(eventId, code);
       if (!ok) { alert('인증코드가 올바르지 않습니다.'); return; }
 
       const part = await findParticipantByCode(eventId, code);
       try {
-        sessionStorage.setItem(`auth_${eventId}`, 'true');              // ← 세션 인증 플래그
-        sessionStorage.setItem(`authcode_${eventId}`, String(code));    // ← 세션 저장
+        sessionStorage.setItem(`auth_${eventId}`, 'true');
+        sessionStorage.setItem(`authcode_${eventId}`, String(code));
         if (part) sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(part));
       } catch {}
       setEventId?.(eventId);
       setAuthCode?.(String(code));
       if (part) setParticipant?.(part);
 
-      setCodeTicket(eventId, code); // StepFlow 게이트용 로컬 티켓
+      setCodeTicket(eventId, code);
       goNext();
     } catch (err) {
       alert(`코드 확인 중 오류: ${err?.message || err}`);
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const membersOnly = !!eventData?.membersOnly;
 
-  // 🔁 JSX 렌더
   return (
     <div className={styles.wrap}>
       {!ready ? (
         <div className={styles.card}>
           <h2 className={styles.title}>로그인</h2>
-          <div className={styles.form} style={{ opacity: 0.6 }}>
-            <div className={styles.input} style={{ height: 40, background: '#f3f4f6' }} />
-            <div className={styles.input} style={{ height: 40, background: '#f3f4f6', marginTop: 8 }} />
-            <div className={styles.actions} style={{ marginTop: 12 }}>
-              <button className={styles.primary} disabled>로딩중…</button>
-              <button className={styles.ghost} disabled>회원가입</button>
-              <button className={styles.ghost} disabled>비번 재설정</button>
-            </div>
-          </div>
         </div>
       ) : (
         <>
@@ -254,8 +238,9 @@ function InnerLoginOrCode({ onEnter }) {
                 type="button"
                 className={`${styles.tab} ${tab==='code' ? styles.active : ''} selectable`}
                 onClick={()=>setTab('code')}
-                disabled={membersOnly}
-                title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
+                disabled={!eventId || membersOnly}
+                title={!eventId ? '대회를 먼저 선택해야 인증코드 입장이 가능합니다.'
+                      : (membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined)}
               >
                 인증코드 입장
               </button>
@@ -289,23 +274,22 @@ function InnerLoginOrCode({ onEnter }) {
                   placeholder="인증코드 6자리"
                   value={code}
                   onChange={(e)=>setCode(e.target.value)}
-                  disabled={membersOnly}
-                  title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
+                  disabled={!eventId || membersOnly}
                 />
                 <div className={styles.actions}>
                   <button
                     type="button"
                     className={`${styles.primary} selectable`}
                     onClick={handleCode}
-                    disabled={busy || membersOnly}
-                    title={membersOnly ? '회원 전용 이벤트에서는 인증코드 입장이 제한됩니다.' : undefined}
-                  >코드로 입장</button>
+                    disabled={busy || !eventId || membersOnly}
+                  >
+                    코드로 입장
+                  </button>
                 </div>
               </div>
             )}
           </div>
 
-          {/* 팝업들 */}
           {showSignup && (
             <SignupModal
               defaultEmail={email}
@@ -322,15 +306,7 @@ function InnerLoginOrCode({ onEnter }) {
                   }, { merge: true });
                   alert('회원가입이 완료되었습니다.');
                 } catch (err) {
-                  const msg = err?.message || '';
-                  const code = err?.code || '';
-                  if (code === 'auth/email-already-in-use' || /email-already-in-use/i.test(msg)) {
-                    alert('이미 가입된 이메일입니다. 로그인하거나 비밀번호 재설정을 진행해 주세요.');
-                    setShowSignup(false);
-                    setShowReset(true);
-                  } else {
-                    alert(`회원가입 실패: ${msg}`);
-                  }
+                  alert(`회원가입 실패: ${err?.message || err}`);
                 }
               }}
             />
