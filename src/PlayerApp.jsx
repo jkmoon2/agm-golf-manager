@@ -31,6 +31,13 @@ export default function PlayerApp() {
   // 🆕 로그인 유저(이메일/UID 사용)
   const { firebaseUser } = useAuth();
 
+  // ✅ 추가: eventId가 문자열 'undefined'로 들어온 경우 로그인(코드) 화면으로 안내
+  useEffect(() => {
+    if (eventId === 'undefined') {
+      navigate('/player/login-or-code', { replace: true });
+    }
+  }, [eventId, navigate]);
+
   // 이벤트 로딩 (기존 유지)
   useEffect(() => {
     if (eventId && ctxEventId !== eventId && typeof loadEvent === 'function') {
