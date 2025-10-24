@@ -2,7 +2,7 @@
 //
 // 변경 요약
 // - eventId 없으면 '인증코드 입장' 비활성(핵심)
-// - 코드/로그인 성공 후 이동 경로 goNext로 통일
+// - 코드/로그인 성공 후 이동 경로 goNext를 `/player/home/:eventId` 로 통일  // ✅ 변경
 // - 세션에 저장된 참가자/코드 복원, 기 인증 시 바로 진입
 
 import React, { useState, useContext, useEffect } from 'react';
@@ -38,7 +38,8 @@ function InnerLoginOrCode({ onEnter }) {
 
   const goNext = () => {
     if (typeof onEnter === 'function') onEnter();
-    else if (eventId) navigate(`/player/home/${eventId}/1`, { replace: true });
+    // ✅ 변경: '/1' 세그먼트 제거 → 진입 후 라우터가 기본(Index) 또는 Step1로 안내
+    else if (eventId) navigate(`/player/home/${eventId}`, { replace: true });
     else navigate('/player', { replace: true });
   };
 

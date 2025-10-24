@@ -1,7 +1,7 @@
 // /src/AppRouter.jsx
 
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PlayerProvider }        from './contexts/PlayerContext';
 import { EventProvider }         from './contexts/EventContext';
@@ -14,8 +14,6 @@ import Settings            from './screens/Settings';
 import PlayerEventList     from './player/screens/PlayerEventList';
 import PlayerLoginScreen   from './player/screens/PlayerLoginScreen';
 import PlayerApp           from './player/PlayerApp';
-import MainLayout          from './layouts/MainLayout';
-
 import LoginOrCode         from './player/screens/LoginOrCode';
 import EventMembersOnlyToggle from './admin/screens/EventMembersOnlyToggle';
 import MembersList            from './admin/screens/MembersList';
@@ -29,11 +27,12 @@ function Protected({ roles, children }) {
   return children;
 }
 
-/** [ADD] 혹시 남아있는 '/player/home/:eventId/login' 진입을
- *  모두 '/player/home/:eventId' 로 돌려보내는 안전 리디렉터 */
+// '/player/home/:eventId/login' 으로 오면 '/player/home/:eventId'로 돌려보내는 리디렉트
 function RedirectPlayerHomeNoLogin() {
-  const { eventId } = useParams();
-  return <Navigate to={`/player/home/${eventId || ''}`} replace />;
+  const params = new URLSearchParams(window.location.search);
+  const p = window.location.pathname.split('/');
+  const eventId = p[3] || params.get('eventId') || '';
+  return <Navigate to={`/player/home/${eventId}`} replace />;
 }
 
 export default function AppRouter() {
@@ -50,38 +49,37 @@ export default function AppRouter() {
               path="/player"
               element={
                 <PlayerProvider>
-                  <MainLayout />
+                  <Outlet />
                 </PlayerProvider>
               }
             >
-              {/* 리스트(기본) */}
+              {/* 참가자 초기 진입(리스트) */}
               <Route index element={<PlayerEventList />} />
-              {/* 참가자 공용 로그인(이메일/코드) */}
+              <Route path="events" element={<PlayerEventList />} />
+
+              {/* 로그인/코드 입력 */}
               <Route path="login-or-code" element={<LoginOrCode />} />
-              {/* 특정 이벤트 로그인(코드 전용 화면) */}
               <Route path="login/:eventId" element={<PlayerLoginScreen />} />
 
-              {/* [ADD] '/player/home/:eventId/login' 으로 오면 '/player/home/:eventId'로 즉시 리디렉션 */}
-              <Route path="home/:eventId/login" element={<RedirectPlayerHomeNoLogin />} />
-              {/* [ADD] 혹시 'undefined'가 섞인 경우 로그인(코드)로 유도 */}
+              {/* 잘못된 'undefined' 진입 보호 */}
               <Route path="home/undefined/*" element={<Navigate to="/player/login-or-code" replace />} />
 
-              {/* 플레이어 홈(스텝 플로우) */}
+              {/* 과거 경로 정정 */}
+              <Route path="home/:eventId/login" element={<RedirectPlayerHomeNoLogin />} />
+
+              {/* 진입 후 앱 */}
               <Route path="home/*" element={<PlayerApp />} />
-              {/* 기존: 앱 네임스페이스 */}
-              <Route path="app/*" element={<PlayerApp />} />
+              <Route path="app/*"  element={<PlayerApp />} />
             </Route>
 
-            {/* /player/events 로 들어오면 '항상' 참가자 로그인 먼저 */}
-            <Route path="/player/events" element={<Navigate to="/player/login-or-code" replace />} />
-            {/* /player/* 잘못된 경로도 참가자 로그인으로 보냄(운영자 로그인으로 튀는 일 방지) */}
-            <Route path="/player/*" element={<Navigate to="/player/login-or-code" replace />} />
+            {/* ❌ (삭제) 루프의 원인: /player/* → /player/login-or-code 자기-리다이렉트 */}
+            {/* <Route path="/player/*" element={<Navigate to="/player/login-or-code" replace />} /> */}
 
             {/* ───────── 운영자 영역 ───────── */}
             <Route
               element={
                 <Protected roles={['admin','player']}>
-                  <MainLayout />
+                  <Outlet />
                 </Protected>
               }
             >
