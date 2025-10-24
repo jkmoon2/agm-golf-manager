@@ -90,10 +90,13 @@ export default function PlayerEventList() {
     try { localStorage.setItem('eventId', ev.id); } catch {}
     setEventId?.(ev.id);
     if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
-    if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}`); return; }
+
+    // ✅ 최소 수정: 라우터와 동일 경로로 맞춤
+    if (wasAuthed(ev.id)) { nav(`/player/home/${ev.id}/1`); return; }
+
     const ok = await tryPendingCode(ev.id);
-    if (ok) nav(`/player/home/${ev.id}`);
-    else    nav(`/player/home/${ev.id}/login`);
+    if (ok) nav(`/player/home/${ev.id}/1`);
+    else    nav(`/player/login/${ev.id}`);
   };
 
   const endedBadgeStyle = {
