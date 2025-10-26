@@ -1,6 +1,7 @@
-// /src/player/screens/PlayerRoomSelect.jsx
-// 기존 로직 100% 유지 + Android 텍스트 오변환 방지 가드 + EventContext 미장착/미로드 시 폴백 구독
-// ★ patch: 포볼 정원(4명) 초과 방지용 재시도 로직 + [핵심] 배정 전 익명로그인/멤버십 선작성 + 토큰 보장
+// 기존 로직 유지 + 중요 버그 픽스:
+// 1) memberships 문서에 규칙에 없는 필드(uid, via, updatedAt, code) 쓰던 문제 → 허용 필드만 기록(room, authCode, joinedAt)
+// 2) 배정 전 익명 로그인/멤버십 선작성 보장
+// 3) 유효성 가드 및 안내
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -8,7 +9,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
 
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { signInAnonymously } from 'firebase/auth';
 
@@ -32,26 +33,27 @@ async function ensureAuthReady() {
   }
 }
 
+// ✅ Firestore 규칙 허용 필드만 기록( room, authCode, joinedAt )
 async function ensureMembership(eventId, myRoom) {
   try {
     await ensureAuthReady();
     const uid = auth?.currentUser?.uid || null;
     if (!uid || !eventId) return;
-    const payload = {
-      uid,
-      via: 'code',
-      updatedAt: new Date().toISOString(),
-    };
+
+    const payload = { joinedAt: serverTimestamp() };
     if (Number.isFinite(Number(myRoom))) payload.room = Number(myRoom);
+
     try {
       const code =
         sessionStorage.getItem(`authcode_${eventId}`) ||
         sessionStorage.getItem('pending_code') ||
         '';
-      if (code) payload.code = String(code);
+      if (code) payload.authCode = String(code);
     } catch {}
+
     await setDoc(doc(db, 'events', eventId, 'memberships', uid), payload, { merge: true });
   } catch (e) {
+    // 규칙 불일치 시 여기서 멈추지 않도록 경고만
     console.warn('[PlayerRoomSelect] ensureMembership failed', e);
   }
 }

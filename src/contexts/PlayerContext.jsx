@@ -1,4 +1,3 @@
-// /src/contexts/PlayerContext.jsx
 import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
@@ -23,9 +22,7 @@ import {
 export const PlayerContext = createContext(null);
 
 // ──────────────────────────────────────────────────────────────
-// ✅ [추가] 콘솔에서 3가지를 바로 볼 수 있는 초소형 디버그(기본 off)
-//   - 켜는 법: 콘솔에 localStorage.setItem('AGM_DEBUG','1'); 후 새로고침
-//   - 보는 법: 콘솔에서 __AGM_DIAG 입력
+// ✅ 콘솔 진단 도구 (켜는 법: 콘솔에서 localStorage.setItem('AGM_DEBUG','1'); 후 새로고침)
 const DEBUG = (() => {
   try { return (localStorage.getItem('AGM_DEBUG') === '1'); } catch { return false; }
 })();
@@ -80,15 +77,38 @@ const shuffle = (arr) => {
 
 const pickUniform = (roomCount) => 1 + Math.floor(cryptoRand() * roomCount);
 
-const minRooms = (participants, roomCount) => {
-  const counts = Array.from({ length: roomCount }, (_, i) =>
-    participants.filter((p) => toInt(p.room) === i + 1).length
-  );
-  const min = Math.min(...counts);
-  return counts
-    .map((c, i) => ({ n: i + 1, c }))
-    .filter((x) => x.c === min)
-    .map((x) => x.n);
+// 현재 participants 기준으로 방별 인원수 (1-indexed room)
+const countInRoom = (list, roomCount) => {
+  const counts = Array.from({ length: roomCount }, () => 0);
+  list.forEach(p => {
+    const r = toInt(p?.room, 0);
+    if (r >= 1 && r <= roomCount) counts[r - 1] += 1;
+  });
+  return counts;
+};
+
+// 스트로크용: “같은 조 중복 금지 + 정원 4미만”을 만족하는 방 목록
+const validRoomsForStroke = (list, roomCount, me) => {
+  const myGroup = toInt(me?.group, 0);
+  const counts = countInRoom(list, roomCount);
+  const rooms = [];
+  for (let r = 1; r <= roomCount; r++) {
+    const sameGroupExists = list.some(p => toInt(p.room) === r && toInt(p.group) === myGroup && normId(p.id) !== normId(me?.id));
+    if (!sameGroupExists && counts[r - 1] < 4) rooms.push(r);
+  }
+  // 모두 막혀 있으면 “정원 4미만”만 조건으로 다시 시도
+  if (rooms.length === 0) {
+    for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < 4) rooms.push(r);
+  }
+  return rooms;
+};
+
+// 포볼용: “정원 4미만”을 만족하는 방 목록
+const validRoomsForFourball = (list, roomCount) => {
+  const counts = countInRoom(list, roomCount);
+  const rooms = [];
+  for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < 4) rooms.push(r);
+  return rooms.length ? rooms : Array.from({ length: roomCount }, (_, i) => i + 1);
 };
 
 // Firestore sanitize
@@ -263,11 +283,11 @@ export function PlayerProvider({ children }) {
   // participants 저장 (화이트리스트 + updateDoc)
   async function writeParticipants(next) {
     if (!eventId) return;
-    await ensureAuthReady(); // ✅
+    await ensureAuthReady();
 
     const eref = doc(db, 'events', eventId);
 
-    // 이벤트 문서 존재 보장(없으면 create 금지 규칙 때문에 거부됨)
+    // 이벤트 문서 존재 확인
     const exists = (await getDoc(eref)).exists();
     if (DEBUG) exposeDiag({ eventId, eventExists: exists });
     if (!exists) {
@@ -304,13 +324,11 @@ export function PlayerProvider({ children }) {
     });
 
     try {
-      // ✅ setDoc(merge) → updateDoc 으로 고정 (항상 update 규칙만 타게)
       await updateDoc(
         eref,
         sanitizeForFirestore({ participants: cleaned, updatedAt: serverTimestamp() })
       );
     } catch (e) {
-      // 디버그시 콘솔로 직접 확인 가능
       exposeDiag({ lastWriteError: e?.message || String(e) });
       throw e;
     }
@@ -318,7 +336,7 @@ export function PlayerProvider({ children }) {
 
   // ─ API ─
   async function joinRoom(roomNumber, id) {
-    await ensureAuthReady(); // ✅
+    await ensureAuthReady();
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
     const next = participants.map((p) =>
@@ -338,7 +356,7 @@ export function PlayerProvider({ children }) {
   }
 
   async function joinFourBall(roomNumber, p1, p2) {
-    await ensureAuthReady(); // ✅
+    await ensureAuthReady();
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
@@ -358,27 +376,19 @@ export function PlayerProvider({ children }) {
     } catch (_) {}
   }
 
+  // ─ 스트로크: “조건 만족 방들 중 균등 랜덤”
   async function assignStrokeForOne(participantId) {
-    await ensureAuthReady(); // ✅
+    await ensureAuthReady();
 
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
-    let chosenRoom = 0;
-    try {
-      const r = pickRoomForStroke ? pickRoomForStroke(participants, roomCount, me) : null;
-      chosenRoom = toInt(typeof r === 'number' ? r : (r?.roomNumber ?? r?.room), 0);
-    } catch {}
-
-    if (!chosenRoom) {
-      if (ASSIGN_STRATEGY_STROKE === 'uniform') chosenRoom = pickUniform(roomCount);
-      else {
-        const candidates = minRooms(participants, roomCount);
-        chosenRoom = shuffle(candidates)[0] || pickUniform(roomCount);
-      }
-    }
+    // pickRoomForStroke가 있더라도 “균등 랜덤”을 우선 적용
+    let candidates = validRoomsForStroke(participants, roomCount, me);
+    if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+    const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
     const next = participants.map((p) =>
       normId(p.id) === pid ? { ...p, room: chosenRoom } : p
@@ -398,8 +408,9 @@ export function PlayerProvider({ children }) {
     return { roomNumber: chosenRoom, roomLabel: makeLabel(roomNames, chosenRoom) };
   }
 
+  // ─ 포볼: “정원 4미만 방들 중 균등 랜덤” + (1조가 파트너 자동 선택)
   async function assignFourballForOneAndPartner(participantId) {
-    await ensureAuthReady(); // ✅
+    await ensureAuthReady();
 
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
@@ -455,19 +466,16 @@ export function PlayerProvider({ children }) {
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');
 
+          // 균등 랜덤
           let roomNumber = 0;
-          let mateId = '';
+          const rooms = validRoomsForFourball(parts, roomCount);
+          roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
-          if (ASSIGN_STRATEGY_FOURBALL === 'uniform') {
-            roomNumber = pickUniform(roomCount);
-          } else {
-            const candidates = minRooms(parts, roomCount);
-            roomNumber = shuffle(candidates)[0] || pickUniform(roomCount);
-          }
+          // 파트너: 2조 중 아직 파트너 없는 사람
           const pool = parts.filter(
             (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
           );
-          mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
+          const mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
           const next = parts.map((p) => {
             if (normId(p.id) === pid) return { ...p, room: roomNumber, partner: mateId || null };
@@ -500,7 +508,7 @@ export function PlayerProvider({ children }) {
       }
     }
 
-    // 비트랜잭션
+    // 비트랜잭션 (동일 정책)
     let roomNumber = 0;
     let mateId = '';
 
@@ -519,13 +527,9 @@ export function PlayerProvider({ children }) {
       }
     } catch {}
 
-    if (!roomNumber) {
-      if (ASSIGN_STRATEGY_FOURBALL === 'uniform') roomNumber = pickUniform(roomCount);
-      else {
-        const candidates = minRooms(participants, roomCount);
-        roomNumber = shuffle(candidates)[0] || pickUniform(roomCount);
-      }
-    }
+    // 균등 랜덤 다시 적용
+    const rooms = validRoomsForFourball(participants, roomCount);
+    roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
     if (!mateId) {
       const pool = participants.filter(
         (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
