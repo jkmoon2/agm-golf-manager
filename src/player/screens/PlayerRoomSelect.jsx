@@ -8,10 +8,8 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
 
-// [ADD] Firestore 폴백 구독
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
-// ✅ 추가: 익명 로그인/토큰 보장
 import { signInAnonymously } from 'firebase/auth';
 
 const TIMINGS = {
@@ -21,7 +19,6 @@ const TIMINGS = {
   spinDuringPartnerPick: 1800,
 };
 
-// ✅ 토큰이 실제로 준비될 때까지 보장
 async function ensureAuthReady() {
   try {
     if (!auth?.currentUser) {
@@ -37,7 +34,7 @@ async function ensureAuthReady() {
 
 async function ensureMembership(eventId, myRoom) {
   try {
-    await ensureAuthReady(); // ✅ 토큰 보장
+    await ensureAuthReady();
     const uid = auth?.currentUser?.uid || null;
     if (!uid || !eventId) return;
     const payload = {
@@ -46,7 +43,6 @@ async function ensureMembership(eventId, myRoom) {
       updatedAt: new Date().toISOString(),
     };
     if (Number.isFinite(Number(myRoom))) payload.room = Number(myRoom);
-    // 인증코드/참가자 정보가 있으면 함께 병합(규칙에서 참조할 수 있음)
     try {
       const code =
         sessionStorage.getItem(`authcode_${eventId}`) ||
@@ -115,7 +111,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
-  // URL/Context 동기화(기존 유지)
   useEffect(() => {
     const eid = urlEventId || playerEventId;
     if (eid && ctxEventId !== eid && typeof loadEvent === 'function') {
@@ -123,7 +118,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     }
   }, [urlEventId, playerEventId, ctxEventId, loadEvent]);
 
-  // [ADD] EventContext 미로드 시 Firestore 직접 구독
   const [fallbackGate, setFallbackGate] = useState(null);
   useEffect(() => {
     const id = urlEventId || ctxEventId || playerEventId;
@@ -142,14 +136,12 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const step2Enabled = (gate?.steps?.[2] || 'enabled') === 'enabled';
   const teamConfirmEnabled = !!(gate?.step1?.teamConfirmEnabled ?? true);
 
-  // [ADD] 숨김 옵션 반영
   const teamConfirmVisible =
     !(gate?.step1?.teamConfirmHidden === true) && !!(gate?.step1?.teamConfirmVisible ?? true);
 
   const done = !!participant?.room;
   const assignedRoom = participant?.room ?? null;
 
-  // [ADD] 내 room 값이 바뀌는 순간 memberships도 동기화
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
     const r = Number(assignedRoom);
@@ -182,7 +174,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       ? roomNames[num - 1].trim()
       : `${num}번방`;
 
-  // 팀/배정 표시는 기존 로직 유지
   const compactMembers = useMemo(() => {
     if (!done || assignedRoom == null || !participant) return [];
     if (variant === 'fourball') {
@@ -242,7 +233,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     return arr.slice(0, 4);
   }, [teamMembers]);
 
-  // 스트로크 충돌/정원 검사(기존 유지)
   const roomCount = useMemo(() => (Array.isArray(roomNames) ? roomNames.length : 0), [roomNames]);
   const isValidStrokeRoom = (roomNo) => {
     if (variant !== 'stroke' || !roomNo) return true;
@@ -258,7 +248,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     return !sameGroupExists && !isFull;
   };
 
-  // ★ patch: 포볼 정원 검사(4명 초과 금지)
   const isValidFourballRoom = (roomNo) => {
     if (variant !== 'fourball' || !roomNo) return true;
     const currentCount = participants.filter((p) => Number(p.room) === Number(roomNo)).length;
@@ -279,11 +268,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     }
   }, [participant?.room]);
 
-  // ✅ 추가: 배정 시작 전에 익명 로그인 + membership 선작성(규칙 선행 충족) + 토큰 보장
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
     try {
-      await ensureAuthReady(); // ✅ 토큰 준비
-      await ensureMembership(eventId, null); // room은 아직 모름 → 기본 정보만 merge
+      await ensureAuthReady();
+      await ensureMembership(eventId, null);
     } catch (e) {
       console.warn('[PlayerRoomSelect] ensureAuthAndMembershipBeforeAssign failed', e);
     }
@@ -305,7 +293,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       return;
     }
 
-    // 2조는 확인 전용
     if (variant === 'fourball' && Number(participant?.group) === 2) {
       setIsAssigning(true);
       await sleep(500);
@@ -328,21 +315,18 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       await sleep(TIMINGS.spinBeforeAssign);
 
-      // ✅ 핵심: 배정 전에 인증/멤버십을 보장(규칙 선행 충족)
       const eid = (playerEventId || ctxEventId || urlEventId);
       await ensureAuthAndMembershipBeforeAssign(eid);
 
-      // ★ patch: 경쟁 충돌 대비 재시도 루프(최대 3회)
       let attempt = 0;
       let roomNumber = null;
       let partnerNickname = null;
 
       while (attempt < 3) {
-        const res = await onAssign(participant.id);     // 기존 그대로 호출(서버/Firestore에서 커밋)
+        const res = await onAssign(participant.id);
         roomNumber = res?.roomNumber ?? null;
         partnerNickname = res?.partnerNickname ?? null;
 
-        // 내 로컬 참가자 목록은 약간 늦게 갱신되므로 소폭 대기
         await sleep(120 + Math.floor(Math.random() * 120));
 
         const ok =
@@ -350,12 +334,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
         if (ok) break;
 
-        // 충돌 시 소폭 지연 후 재시도(지수 백오프)
         attempt += 1;
         await sleep(150 * attempt + Math.floor(Math.random() * 120));
       }
 
-      // 최종 유효성 검사 실패 시 사용자 안내 후 종료
       if (variant === 'fourball' ? !isValidFourballRoom(roomNumber) : !isValidStrokeRoom(roomNumber)) {
         setIsAssigning(false);
         setFlowStep('idle');
@@ -365,7 +347,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
 
-      // 완료 후 membership에 room 반영(병합)
       await ensureMembership(eid, Number(roomNumber));
 
       setFlowStep('afterAssign');
@@ -407,7 +388,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
   const sumHd = (list) => list.reduce((s, p) => s + (Number(p?.handicap) || 0), 0);
 
-  // 버튼 라벨(기존 유지)
   const assignBtnLabel =
     (variant === 'fourball' && Number(participant?.group) === 2) ? '방확인'
       : isEventClosed ? '종료됨'
@@ -431,7 +411,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     background: 'transparent',
   };
 
-  // Android 텍스트 오변환 방지 가드
   const guard = { WebkitUserModify:'read-only', userSelect:'none' };
 
   return (

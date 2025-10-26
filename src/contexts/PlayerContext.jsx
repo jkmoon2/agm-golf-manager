@@ -1,5 +1,4 @@
 // /src/contexts/PlayerContext.jsx
-
 import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
@@ -8,8 +7,8 @@ import {
   onSnapshot,
   runTransaction,
   serverTimestamp,
-  updateDoc,        // ✅ 추가
-  getDoc,           // ✅ 추가 (이벤트 문서 존재 확인용)
+  updateDoc,        // ✅ update만 사용 (create 금지)
+  getDoc,           // ✅ 이벤트 문서 존재 확인
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
@@ -301,7 +300,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
-      await ensureAuthReady(); // ✅
+      await ensureAuthReady();
       const rref = doc(db, 'events', eventId, 'rooms', String(rid));
       await setDoc(rref, { members: arrayUnion(targetId) }, { merge: true });
     } catch (_) {}
@@ -322,7 +321,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
-      await ensureAuthReady(); // ✅
+      await ensureAuthReady();
       const fbref = doc(db, 'events', eventId, 'fourballRooms', String(rid));
       await setDoc(fbref, { pairs: arrayUnion({ p1: a, p2: b }) }, { merge: true });
     } catch (_) {}
@@ -360,7 +359,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
-      await ensureAuthReady(); // ✅
+      await ensureAuthReady();
       const rref = doc(db, 'events', eventId, 'rooms', String(chosenRoom));
       await setDoc(rref, { members: arrayUnion(pid) }, { merge: true });
     } catch (_) {}
@@ -515,7 +514,7 @@ export function PlayerProvider({ children }) {
     await writeParticipants(next);
 
     try {
-      await ensureAuthReady(); // ✅
+      await ensureAuthReady();
       const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
       if (mateId) await setDoc(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }) }, { merge: true });
       else        await setDoc(fbref, { singles: arrayUnion(pid) }, { merge: true });
