@@ -22,6 +22,22 @@ import {
 
 export const PlayerContext = createContext(null);
 
+// ──────────────────────────────────────────────────────────────
+// ✅ [추가] 콘솔에서 3가지를 바로 볼 수 있는 초소형 디버그(기본 off)
+//   - 켜는 법: 콘솔에 localStorage.setItem('AGM_DEBUG','1'); 후 새로고침
+//   - 보는 법: 콘솔에서 __AGM_DIAG 입력
+const DEBUG = (() => {
+  try { return (localStorage.getItem('AGM_DEBUG') === '1'); } catch { return false; }
+})();
+function exposeDiag(part) {
+  try {
+    const prev = (window.__AGM_DIAG || {});
+    window.__AGM_DIAG = { ...prev, ...part };
+    if (DEBUG) console.log('[AGM][diag]', window.__AGM_DIAG);
+  } catch {}
+}
+// ──────────────────────────────────────────────────────────────
+
 const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
 
@@ -108,7 +124,7 @@ function markEventAuthed(id, code, meObj) {
   } catch {}
 }
 
-// ✅ 모든 쓰기 전에 인증 보장
+// ✅ 모든 쓰기 전에 인증 보장 + 콘솔 점검용 노출
 async function ensureAuthReady() {
   const auth = getAuth();
   if (!auth.currentUser) {
@@ -116,6 +132,14 @@ async function ensureAuthReady() {
     await cred.user.getIdToken(true);
   } else {
     await auth.currentUser.getIdToken(true);
+  }
+  if (DEBUG) {
+    const a = getAuth();
+    exposeDiag({
+      projectId: a?.app?.options?.projectId ?? null,
+      uid: a?.currentUser?.uid ?? null,
+      isAnonymous: !!a?.currentUser?.isAnonymous,
+    });
   }
 }
 
@@ -245,6 +269,7 @@ export function PlayerProvider({ children }) {
 
     // 이벤트 문서 존재 보장(없으면 create 금지 규칙 때문에 거부됨)
     const exists = (await getDoc(eref)).exists();
+    if (DEBUG) exposeDiag({ eventId, eventExists: exists });
     if (!exists) {
       alert('이벤트 문서가 존재하지 않습니다. 관리자에게 문의해 주세요.');
       throw new Error('Event document does not exist');
@@ -278,11 +303,17 @@ export function PlayerProvider({ children }) {
       return out;
     });
 
-    // ✅ setDoc(merge) → updateDoc 으로 고정 (항상 update 규칙만 타게)
-    await updateDoc(
-      eref,
-      sanitizeForFirestore({ participants: cleaned, updatedAt: serverTimestamp() })
-    );
+    try {
+      // ✅ setDoc(merge) → updateDoc 으로 고정 (항상 update 규칙만 타게)
+      await updateDoc(
+        eref,
+        sanitizeForFirestore({ participants: cleaned, updatedAt: serverTimestamp() })
+      );
+    } catch (e) {
+      // 디버그시 콘솔로 직접 확인 가능
+      exposeDiag({ lastWriteError: e?.message || String(e) });
+      throw e;
+    }
   }
 
   // ─ API ─
