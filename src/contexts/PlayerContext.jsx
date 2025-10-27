@@ -15,7 +15,8 @@ import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 
-import { pickRoomForStroke } from '../player/logic/assignStroke';
+// (선택) 남아 있던 import — 사용하지 않아도 빌드 가능한 상태라면 그대로 두셔도 됩니다.
+// import { pickRoomForStroke } from '../player/logic/assignStroke';
 import {
   pickRoomAndPartnerForFourball,
   transactionalAssignFourball,
@@ -297,7 +298,8 @@ export function PlayerProvider({ children }) {
       throw new Error('Event document does not exist');
     }
 
-    const ALLOWED = ['id','group','nickname','handicap','score','room','partner','authCode','selected'];
+    // ✅ roomNumber도 허용(데이터에 존재할 수 있음)
+    const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
       const out = {};
       for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
@@ -316,6 +318,10 @@ export function PlayerProvider({ children }) {
       if (out.room !== undefined && out.room !== null) {
         const n = Number(out.room);
         out.room = Number.isFinite(n) ? n : String(out.room);
+      }
+      if (out.roomNumber !== undefined && out.roomNumber !== null) {
+        const n = Number(out.roomNumber);
+        out.roomNumber = Number.isFinite(n) ? n : String(out.roomNumber);
       }
       if (out.partner !== undefined && out.partner !== null) {
         const n = Number(out.partner);
@@ -387,7 +393,7 @@ export function PlayerProvider({ children }) {
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
-    // pickRoomForStroke가 있더라도 “균등 랜덤”을 우선 적용
+    // 균등 랜덤
     let candidates = validRoomsForStroke(participants, roomCount, me);
     if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
     const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
