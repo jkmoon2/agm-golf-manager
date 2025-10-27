@@ -1,3 +1,5 @@
+// /src/contexts/PlayerContext.jsx
+
 import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
@@ -467,9 +469,8 @@ export function PlayerProvider({ children }) {
           if (!self) throw new Error('Participant not found');
 
           // 균등 랜덤
-          let roomNumber = 0;
           const rooms = validRoomsForFourball(parts, roomCount);
-          roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
+          const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
           // 파트너: 2조 중 아직 파트너 없는 사람
           const pool = parts.filter(
@@ -509,33 +510,14 @@ export function PlayerProvider({ children }) {
     }
 
     // 비트랜잭션 (동일 정책)
-    let roomNumber = 0;
-    let mateId = '';
-
-    try {
-      const r = pickRoomAndPartnerForFourball
-        ? pickRoomAndPartnerForFourball(participants, roomCount, me)
-        : null;
-      roomNumber = toInt(r?.roomNumber ?? r?.room, 0);
-      const partnerRaw = r?.partner ?? r?.mate ?? r?.partnerId ?? r?.partnerID;
-      if (partnerRaw && typeof partnerRaw === 'object') {
-        mateId = normId(partnerRaw.id);
-      } else if (partnerRaw) {
-        const cand = participants.find((p) => normId(p.id) === normId(partnerRaw)) ||
-                     participants.find((p) => normName(p.nickname) === normName(partnerRaw));
-        mateId = cand ? normId(cand.id) : '';
-      }
-    } catch {}
-
-    // 균등 랜덤 다시 적용
     const rooms = validRoomsForFourball(participants, roomCount);
-    roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
-    if (!mateId) {
-      const pool = participants.filter(
-        (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
-      );
-      mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
-    }
+    const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
+
+    let mateId = '';
+    const pool = participants.filter(
+      (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
+    );
+    mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
     const next = participants.map((p) => {
       if (normId(p.id) === pid)    return { ...p, room: roomNumber, partner: mateId || null };

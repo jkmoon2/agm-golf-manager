@@ -1,7 +1,4 @@
-// 기존 로직 유지 + 중요 버그 픽스:
-// 1) memberships 문서에 규칙에 없는 필드(uid, via, updatedAt, code) 쓰던 문제 → 허용 필드만 기록(room, authCode, joinedAt)
-// 2) 배정 전 익명 로그인/멤버십 선작성 보장
-// 3) 유효성 가드 및 안내
+// /src/player/screens/PlayerRoomSelect.jsx
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -53,7 +50,6 @@ async function ensureMembership(eventId, myRoom) {
 
     await setDoc(doc(db, 'events', eventId, 'memberships', uid), payload, { merge: true });
   } catch (e) {
-    // 규칙 불일치 시 여기서 멈추지 않도록 경고만
     console.warn('[PlayerRoomSelect] ensureMembership failed', e);
   }
 }
