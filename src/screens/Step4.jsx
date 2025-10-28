@@ -1,4 +1,5 @@
 // /src/screens/Step4.jsx
+
 import React, { useContext, useState, useEffect, useRef } from "react";
 import styles from "./Step4.module.css";
 import { StepContext } from "../flows/StepFlow";
@@ -13,6 +14,27 @@ import { getAuth } from 'firebase/auth';
 const LAST_SELECTED_FILENAME_KEY = 'agm_step4_filename';
 
 export default function Step4(props) {
+
+  // ── iOS Safe-Bottom & BottomTab 대응 (footer 고정 + 컨텐츠 스크롤) ─────────
+  const [__bottomGap, __setBottomGap] = React.useState(64);
+  React.useEffect(() => {
+    const probe = () => {
+      try {
+        const el = document.querySelector('[data-bottom-nav]') 
+               || document.querySelector('#bottomTabBar') 
+               || document.querySelector('.bottomTabBar') 
+               || document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H = 56;
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle  = { minHeight:'100dvh', boxSizing:'border-box', paddingBottom:`calc(${__FOOTER_H}px + ${__safeBottom})` };
+
   const { uploadMethod, participants, setParticipants, roomCount, handleFile, goPrev, goNext } = useContext(StepContext);
   const { eventId } = useContext(EventContext);
 
@@ -167,7 +189,7 @@ export default function Step4(props) {
   );
 
   return (
-    <div className={`${styles.step} ${styles.step4}`}>
+    <div className={`${styles.step} ${styles.step4}`} style={__pageStyle}>
       <div className={`${styles.excelHeader} ${uploadMethod==="manual"?styles.manual:""}`} style={{marginBottom:12}}>
         {uploadMethod==="auto" && (
           <div className={styles.headerGrid} style={{display:'grid',gridTemplateColumns:'1fr auto',alignItems:'start',columnGap:12}}>
@@ -225,7 +247,7 @@ export default function Step4(props) {
         ))}
       </div>
 
-      <div className={styles.stepFooter}>
+      <div className={styles.stepFooter} style={{position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5}}>
         <button onClick={goPrev}>← 이전</button>
         <button onClick={addParticipant}>추가</button>
         <button onClick={delSelected}>삭제</button>

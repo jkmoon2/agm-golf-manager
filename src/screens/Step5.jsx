@@ -20,6 +20,20 @@ export default function Step5() {
     updateParticipantsBulk,   // (changes[])
   } = useContext(StepContext);
 
+  // ★ 레이아웃 보강: iOS-safe-area + sticky footer
+  const SAFE_PAD = 'calc(84px + env(safe-area-inset-bottom, 0px))';
+  const STEP_STYLE = { display:'flex', flexDirection:'column', minHeight:'100dvh' };
+  const WRAPPER_STYLE = {
+    flex:1, overflow:'auto', WebkitOverflowScrolling:'touch',
+    padding:'0 0 0 0', paddingBottom: SAFE_PAD
+  };
+  const FOOTER_STYLE = {
+    position:'sticky', bottom:0, background:'#fff',
+    padding:'12px 8px', borderTop:'1px solid #eee',
+    display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:8,
+    paddingBottom:'calc(12px + env(safe-area-inset-bottom, 0px))'
+  };
+
   // ★ Firestore 즉시 커밋 헬퍼 (기존 유지)
   const { eventId, updateEventImmediate } = useContext(EventContext) || {};
   const buildNextFromChanges = (baseList, changes) => {
@@ -334,105 +348,108 @@ export default function Step5() {
   // ───────────────────────────────────────────────────────────────
 
   return (
-    <div className={styles.step}>
-      {/* 컬럼 헤더 */}
-      <div className={styles.participantRowHeader}>
-        <div className={`${styles.cell} ${styles.group}`}>조</div>
-        <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
-        <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
-        <div className={`${styles.cell} ${styles.score}`}>점수</div>
-        <div className={`${styles.cell} ${styles.manual}`}>수동</div>
-        <div className={`${styles.cell} ${styles.force}`}>강제</div>
-      </div>
+    <div className={styles.step} style={STEP_STYLE}>
+      {/* 본문 전체 스크롤 가능 영역 */}
+      <div style={WRAPPER_STYLE}>
+        {/* 컬럼 헤더 */}
+        <div className={styles.participantRowHeader}>
+          <div className={`${styles.cell} ${styles.group}`}>조</div>
+          <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
+          <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
+          <div className={`${styles.cell} ${styles.score}`}>점수</div>
+          <div className={`${styles.cell} ${styles.manual}`}>수동</div>
+          <div className={`${styles.cell} ${styles.force}`}>강제</div>
+        </div>
 
-      {/* 참가자 리스트 */}
-      <div className={styles.participantTable}>
-        {participants.map(p => {
-          const isDisabled = loadingId === p.id || p.room != null;
-          const scoreValue = scoreDraft[p.id] ?? (p.score != null ? String(p.score) : '');
-          return (
-            <div key={p.id} className={styles.participantRow}>
-              <div className={`${styles.cell} ${styles.group}`}>
-                <input type="text" value={`${p.group}조`} disabled />
-              </div>
-              <div className={`${styles.cell} ${styles.nickname}`}>
-                <input type="text" value={p.nickname} disabled />
-              </div>
-              <div className={`${styles.cell} ${styles.handicap}`}>
-                <input type="text" value={p.handicap} disabled />
-              </div>
+        {/* 참가자 리스트 */}
+        <div className={styles.participantTable}>
+          {participants.map(p => {
+            const isDisabled = loadingId === p.id || p.room != null;
+            const scoreValue = scoreDraft[p.id] ?? (p.score != null ? String(p.score) : '');
+            return (
+              <div key={p.id} className={styles.participantRow}>
+                <div className={`${styles.cell} ${styles.group}`}>
+                  <input type="text" value={`${p.group}조`} disabled />
+                </div>
+                <div className={`${styles.cell} ${styles.nickname}`}>
+                  <input type="text" value={p.nickname} disabled />
+                </div>
+                <div className={`${styles.cell} ${styles.handicap}`}>
+                  <input type="text" value={p.handicap} disabled />
+                </div>
 
-              {/* [FIX] 숫자 입력: text + inputMode + draft */}
-              <div className={`${styles.cell} ${styles.score}`}>
-                <input
-                  type="text"               // [FIX] number → text
-                  inputMode="decimal"       // [ADD] 안드로이드 키보드에 소수점 표시
-                  pattern="[0-9.\\-]*"      // [ADD] 허용 문자
-                  autoComplete="off"
-                  value={scoreValue}
-                  onChange={e => onScoreInputChange(p.id, e.target.value)}
-                  onBlur={() => onScoreBlur(p.id)}
-                  // [ADD] 롱프레스 1초 → '-' 삽입
-                  onPointerDown={(e) => startHold(p.id, e)}
-                  onPointerUp={() => endHold(p.id)}
-                  onPointerCancel={() => endHold(p.id)}
-                  onPointerLeave={() => endHold(p.id)}
-                  onPointerMove={(e) => moveHold(p.id, e)}
-                  onContextMenu={preventContextMenu}
-                />
-              </div>
+                {/* [FIX] 숫자 입력: text + inputMode + draft */}
+                <div className={`${styles.cell} ${styles.score}`}>
+                  <input
+                    type="text"               // [FIX] number → text
+                    inputMode="decimal"       // [ADD] 안드로이드 키보드에 소수점 표시
+                    pattern="[0-9.\\-]*"      // [ADD] 허용 문자
+                    autoComplete="off"
+                    value={scoreValue}
+                    onChange={e => onScoreInputChange(p.id, e.target.value)}
+                    onBlur={() => onScoreBlur(p.id)}
+                    // [ADD] 롱프레스 1초 → '-' 삽입
+                    onPointerDown={(e) => startHold(p.id, e)}
+                    onPointerUp={() => endHold(p.id)}
+                    onPointerCancel={() => endHold(p.id)}
+                    onPointerLeave={() => endHold(p.id)}
+                    onPointerMove={(e) => moveHold(p.id, e)}
+                    onContextMenu={preventContextMenu}
+                  />
+                </div>
 
-              {/* 수동 버튼 */}
-              <div className={`${styles.cell} ${styles.manual}`}>
-                <button
-                  className={styles.smallBtn}
-                  disabled={isDisabled}
-                  onClick={() => onManualAssign(p.id)}
-                >
-                  {loadingId === p.id ? <span className={styles.spinner} /> : '수동'}
-                </button>
-              </div>
+                {/* 수동 버튼 */}
+                <div className={`${styles.cell} ${styles.manual}`}>
+                  <button
+                    className={styles.smallBtn}
+                    disabled={isDisabled}
+                    onClick={() => onManualAssign(p.id)}
+                  >
+                    {loadingId === p.id ? <span className={styles.spinner} /> : '수동'}
+                  </button>
+                </div>
 
-              {/* 강제 버튼 & 메뉴 */}
-              <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
-                <button
-                  className={styles.smallBtn}
-                  onClick={() =>
-                    setForceSelectingId(forceSelectingId === p.id ? null : p.id)
-                  }
-                >
-                  강제
-                </button>
-                {forceSelectingId === p.id && (
-                  <div className={styles.forceMenu}>
-                    {rooms.map(r => {
-                      const name = roomNames[r - 1]?.trim() || `${r}번 방`;
-                      return (
-                        <div
-                          key={r}
-                          className={styles.forceOption}
-                          onClick={() => onForceAssign(p.id, r)}
-                        >
-                          {name}
-                        </div>
-                      );
-                    })}
-                    <div
-                      className={styles.forceOption}
-                      onClick={() => onForceAssign(p.id, null)}
-                    >
-                      취소
+                {/* 강제 버튼 & 메뉴 */}
+                <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
+                  <button
+                    className={styles.smallBtn}
+                    onClick={() =>
+                      setForceSelectingId(forceSelectingId === p.id ? null : p.id)
+                    }
+                  >
+                    강제
+                  </button>
+                  {forceSelectingId === p.id && (
+                    <div className={styles.forceMenu}>
+                      {rooms.map(r => {
+                        const name = roomNames[r - 1]?.trim() || `${r}번 방`;
+                        return (
+                          <div
+                            key={r}
+                            className={styles.forceOption}
+                            onClick={() => onForceAssign(p.id, r)}
+                          >
+                            {name}
+                          </div>
+                        );
+                      })}
+                      <div
+                        className={styles.forceOption}
+                        onClick={() => onForceAssign(p.id, null)}
+                      >
+                        취소
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
-      {/* 하단 내비게이션 */}
-      <div className={styles.stepFooter}>
+      {/* 하단 내비게이션 (최하단 고정) */}
+      <div className={styles.stepFooter} style={FOOTER_STYLE}>
         <button onClick={goPrev}>← 이전</button>
         <button onClick={onAutoAssign} className={styles.textOnly}>자동배정</button>
         <button onClick={onReset} className={styles.textOnly}>초기화</button>

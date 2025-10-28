@@ -9,6 +9,28 @@ import { doc, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 export default function Step1() {
+
+  // ── iOS Safe-Bottom & BottomTab 대응 (footer 고정 + 컨텐츠 스크롤) ─────────
+  const [__bottomGap, __setBottomGap] = React.useState(64); // 바텀탭 높이 폴백
+  React.useEffect(() => {
+    const probe = () => {
+      try {
+        const el = document.querySelector('[data-bottom-nav]') 
+               || document.querySelector('#bottomTabBar') 
+               || document.querySelector('.bottomTabBar') 
+               || document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H = 56; // 스텝 footer 높이(대략)
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle  = { minHeight: '100dvh', boxSizing:'border-box', paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})` };
+  const __footerStyle= { position:'fixed', left:0, right:0, bottom: __safeBottom, zIndex: 5 };
+
   // StepContext: mode, setMode, title, setTitle, resetAll, goNext
   const { mode, setMode, title, setTitle, resetAll, goNext } = useContext(StepContext);
   // EventContext: eventId, loadEvent
@@ -63,7 +85,7 @@ export default function Step1() {
   };
 
   return (
-    <div className={`${styles.step} ${styles.step1}`}>      
+    <div className={`${styles.step} ${styles.step1}`} style={__pageStyle}>      
       <div className={styles.stepBody}>
         {/* 모드 선택 */}
         <div className={styles.btnGroup}>
@@ -97,7 +119,7 @@ export default function Step1() {
         />
       </div>
 
-      <div className={styles.stepFooter}>
+      <div className={styles.stepFooter} style={{position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5}}>
         {/* 전체 초기화 */}
         <button
           style={{ background: "#d32f2f", color: "#fff", marginRight: 8 }}

@@ -20,6 +20,20 @@ export default function Step6() {
     setStep
   } = useContext(StepContext);
 
+  // ★ 레이아웃 보강: iOS-safe-area + sticky footer + 중간영역 전체 스크롤
+  const SAFE_PAD = 'calc(84px + env(safe-area-inset-bottom, 0px))';
+  const STEP_STYLE = { display:'flex', flexDirection:'column', minHeight:'100dvh' };
+  const CONTENT_STYLE = {
+    flex:1, overflow:'auto', WebkitOverflowScrolling:'touch',
+    padding:'0 0 0 0', paddingBottom: SAFE_PAD
+  };
+  const FOOTER_STYLE = {
+    position:'sticky', bottom:0, background:'#fff',
+    padding:'12px 8px', borderTop:'1px solid #eee',
+    display:'grid', gridTemplateColumns:'1fr 1fr', gap:8,
+    paddingBottom:'calc(12px + env(safe-area-inset-bottom, 0px))'
+  };
+
   // 이벤트 컨텍스트
   const { eventId, eventData, updateEventImmediate } = useContext(EventContext) || {};
   // [ADD] 라이브 이벤트 데이터(있으면 컨텍스트보다 우선)
@@ -237,8 +251,8 @@ export default function Step6() {
   }, [resultByRoom, hiddenRooms]);
 
   return (
-    <div className={styles.step}>
-      {/* 선택 메뉴 */}
+    <div className={styles.step} style={STEP_STYLE}>
+      {/* 선택 메뉴 (상단 고정 영역) */}
       <div className={styles.selectWrapper}>
         <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
         {menuOpen && (
@@ -274,154 +288,157 @@ export default function Step6() {
         )}
       </div>
 
-      {/* 방배정표 */}
-      <div ref={allocRef} className={styles.tableContainer}>
-        <h4 className={styles.tableTitle}>🏠 방배정표</h4>
-        <table className={`${styles.table} ${styles.fixedRows}`}>
-          <thead>
-            <tr>
-              {headers.map((h, i) =>
-                !isHiddenIdx(i) && (
-                  <th key={i} colSpan={2} className={styles.header}>{h}</th>
-                )
-              )}
-            </tr>
-            <tr>
-              {headers.map((_, i) =>
-                !isHiddenIdx(i) && (
-                  <React.Fragment key={i}>
-                    <th className={styles.header}>닉네임</th>
-                    <th className={styles.header}>G핸디</th>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {allocRows.map((row, ri) => (
-              <tr key={ri}>
-                {row.map((c, ci) =>
-                  !isHiddenIdx(ci) && (
-                    <React.Fragment key={ci}>
-                      <td className={styles.cell}>{c.nickname}</td>
-                      <td className={styles.cell} style={{ color: 'blue' }}>{c.handicap}</td>
+      {/* ── 중간 컨텐츠(전체 스크롤) ── */}
+      <div style={CONTENT_STYLE}>
+        {/* 방배정표 */}
+        <div ref={allocRef} className={styles.tableContainer}>
+          <h4 className={styles.tableTitle}>🏠 방배정표</h4>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
+            <thead>
+              <tr>
+                {headers.map((h, i) =>
+                  !isHiddenIdx(i) && (
+                    <th key={i} colSpan={2} className={styles.header}>{h}</th>
+                  )
+                )}
+              </tr>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <th className={styles.header}>닉네임</th>
+                      <th className={styles.header}>G핸디</th>
                     </React.Fragment>
                   )
                 )}
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              {byRoom.map((roomArr, ci) =>
-                !isHiddenIdx(ci) && (
-                  <React.Fragment key={ci}>
-                    <td className={styles.footerLabel}>합계</td>
-                    <td className={styles.footerValue} style={{ color: 'blue' }}>
-                      {roomArr.reduce((sum, p) => sum + (p.handicap || 0), 0)}
-                    </td>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <div className={styles.actionButtons}>
-        <button onClick={() => downloadTable(allocRef, 'allocation', 'jpg')}>JPG로 저장</button>
-        <button onClick={() => downloadTable(allocRef, 'allocation', 'pdf')}>PDF로 저장</button>
-      </div>
+            </thead>
+            <tbody>
+              {allocRows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((c, ci) =>
+                    !isHiddenIdx(ci) && (
+                      <React.Fragment key={ci}>
+                        <td className={styles.cell}>{c.nickname}</td>
+                        <td className={styles.cell} style={{ color: 'blue' }}>{c.handicap}</td>
+                      </React.Fragment>
+                    )
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                {byRoom.map((roomArr, ci) =>
+                  !isHiddenIdx(ci) && (
+                    <React.Fragment key={ci}>
+                      <td className={styles.footerLabel}>합계</td>
+                      <td className={styles.footerValue} style={{ color: 'blue' }}>
+                        {roomArr.reduce((sum, p) => sum + (p.handicap || 0), 0)}
+                      </td>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div className={styles.actionButtons}>
+          <button onClick={() => downloadTable(allocRef, 'allocation', 'jpg')}>JPG로 저장</button>
+          <button onClick={() => downloadTable(allocRef, 'allocation', 'pdf')}>PDF로 저장</button>
+        </div>
 
-      {/* 최종결과표 */}
-      <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
-        <h4 className={styles.tableTitle}>📊 최종결과표</h4>
-        <table className={`${styles.table} ${styles.fixedRows}`}>
-          <thead>
-            <tr>
-              {headers.map((h, i) =>
-                !isHiddenIdx(i) && (
-                  <th
-                    key={i}
-                    colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0) + 1}
-                    className={styles.header}
-                  >
-                    {h}
-                  </th>
-                )
-              )}
-            </tr>
-            <tr>
-              {headers.map((_, i) =>
-                !isHiddenIdx(i) && (
-                  <React.Fragment key={i}>
-                    <th className={styles.header}>닉네임</th>
-                    <th className={styles.header}>G핸디</th>
-                    {showScore   && <th className={styles.header}>점수</th>}
-                    {showHalved  && <th className={styles.header}>반땅</th>}
-                    <th className={styles.header}>결과</th>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: MAX }).map((_, ri) => (
-              <tr key={ri}>
+        {/* 최종결과표 */}
+        <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
+          <h4 className={styles.tableTitle}>📊 최종결과표</h4>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
+            <thead>
+              <tr>
+                {headers.map((h, i) =>
+                  !isHiddenIdx(i) && (
+                    <th
+                      key={i}
+                      colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0) + 1}
+                      className={styles.header}
+                    >
+                      {h}
+                    </th>
+                  )
+                )}
+              </tr>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <th className={styles.header}>닉네임</th>
+                      <th className={styles.header}>G핸디</th>
+                      {showScore   && <th className={styles.header}>점수</th>}
+                      {showHalved  && <th className={styles.header}>반땅</th>}
+                      <th className={styles.header}>결과</th>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: MAX }).map((_, ri) => (
+                <tr key={ri}>
+                  {resultByRoom.map((roomObj, ci) =>
+                    !isHiddenIdx(ci) && (
+                      <React.Fragment key={ci}>
+                        <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
+                        <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
+                        {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
+                        {showHalved && <td className={styles.cell} style={{ color: 'blue' }}>
+                          {roomObj.detail[ri].banddang}
+                        </td>}
+                        <td className={styles.cell} style={{ color: 'red' }}>{roomObj.detail[ri].result}</td>
+                      </React.Fragment>
+                    )
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
                 {resultByRoom.map((roomObj, ci) =>
                   !isHiddenIdx(ci) && (
                     <React.Fragment key={ci}>
-                      <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
-                      <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
-                      {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
-                      {showHalved && <td className={styles.cell} style={{ color: 'blue' }}>
-                        {roomObj.detail[ri].banddang}
-                      </td>}
-                      <td className={styles.cell} style={{ color: 'red' }}>{roomObj.detail[ri].result}</td>
+                      <td className={styles.footerLabel}>합계</td>
+                      <td className={styles.footerValue}>{roomObj.sumHandicap}</td>
+                      {showScore  && <td className={styles.footerValue}>{roomObj.sumScore}</td>}
+                      {showHalved && <td className={styles.footerBanddang}>{roomObj.sumBanddang}</td>}
+                      <td className={styles.footerResult}>{roomObj.sumResult}</td>
                     </React.Fragment>
                   )
                 )}
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              {resultByRoom.map((roomObj, ci) =>
-                !isHiddenIdx(ci) && (
-                  <React.Fragment key={ci}>
-                    <td className={styles.footerLabel}>합계</td>
-                    <td className={styles.footerValue}>{roomObj.sumHandicap}</td>
-                    {showScore  && <td className={styles.footerValue}>{roomObj.sumScore}</td>}
-                    {showHalved && <td className={styles.footerBanddang}>{roomObj.sumBanddang}</td>}
-                    <td className={styles.footerResult}>{roomObj.sumResult}</td>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-            <tr>
-              {headers.map((_, i) =>
-                !isHiddenIdx(i) && (
-                  <React.Fragment key={i}>
-                    <td
-                      colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
-                      className={styles.footerBlank}
-                    />
-                    <td className={styles.footerRank} style={{ background: '#fff8d1' }}>
-                      {rankMap[i]}등
-                    </td>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <div className={styles.actionButtons}>
-        <button onClick={() => downloadTable(resultRef, 'results', 'jpg')}>JPG로 저장</button>
-        <button onClick={() => downloadTable(resultRef, 'results', 'pdf')}>PDF로 저장</button>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <td
+                        colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
+                        className={styles.footerBlank}
+                      />
+                      <td className={styles.footerRank} style={{ background: '#fff8d1' }}>
+                        {rankMap[i]}등
+                      </td>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div className={styles.actionButtons}>
+          <button onClick={() => downloadTable(resultRef, 'results', 'jpg')}>JPG로 저장</button>
+          <button onClick={() => downloadTable(resultRef, 'results', 'pdf')}>PDF로 저장</button>
+        </div>
       </div>
 
-      {/* 하단 버튼 */}
-      <div className={styles.stepFooter}>
+      {/* 하단 버튼 (최하단 고정) */}
+      <div className={styles.stepFooter} style={FOOTER_STYLE}>
         <button onClick={goPrev}>← 이전</button>
         <button
           onClick={() => { try { localStorage.setItem('homeViewMode', 'stroke'); } catch {} setStep(0); }}
