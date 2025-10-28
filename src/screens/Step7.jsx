@@ -23,17 +23,6 @@ export default function Step7() {
     updateParticipant,
   } = useContext(StepContext);
 
-  // ★ 레이아웃 보강
-  const SAFE_PAD = 'calc(84px + env(safe-area-inset-bottom, 0px))';
-  const STEP_STYLE = { display:'flex', flexDirection:'column', minHeight:'100dvh' };
-  const WRAPPER_STYLE = { flex:1, overflow:'auto', WebkitOverflowScrolling:'touch', paddingBottom: SAFE_PAD };
-  const FOOTER_STYLE = {
-    position:'sticky', bottom:0, background:'#fff',
-    padding:'12px 8px', borderTop:'1px solid #eee',
-    display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:8,
-    paddingBottom:'calc(12px + env(safe-area-inset-bottom, 0px))'
-  };
-
   // ★ patch: 방 우선순위/이벤트 데이터
   const { eventId, updateEventImmediate, eventData } = useContext(EventContext) || {};
 
@@ -519,101 +508,99 @@ export default function Step7() {
   const renderList = getList(); // ★ patch: 화면은 항상 유효 목록으로
 
   return (
-    <div className={styles.step} style={STEP_STYLE}>
-      <div style={WRAPPER_STYLE}>
-        <div className={styles.participantRowHeader}>
-          <div className={`${styles.cell} ${styles.group}`}>조</div>
-          <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
-          <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
-          <div className={`${styles.cell} ${styles.score}`}>점수</div>
-          <div className={`${styles.cell} ${styles.manual}`}>수동</div>
-          <div className={`${styles.cell} ${styles.force}`}>취소</div>
-        </div>
-
-        <div className={styles.participantTable}>
-          {renderList.map(p => {
-            const done     = isGroup1(p) && isCompleted(p.id);
-            const scoreValue = scoreDraft[p.id] ?? (p.score ?? '');
-
-            return (
-              <div key={p.id} className={styles.participantRow}>
-                <div className={`${styles.cell} ${styles.group}`}>
-                  <input type="text" value={`${p.group}조`} disabled />
-                </div>
-
-                {/* 닉네임: Alt 클릭 + 우클릭/롱프레스 지원 (readOnly로 이벤트 수신) */}
-                <div
-                  className={`${styles.cell} ${styles.nickname}`}
-                  onClick={(e)=>handleAltOnNickname(p, e)}
-                  onContextMenu={nameContext(p)}
-                  title="Alt/롱프레스: 개인 이동/트레이드 (1조↔1조, 2조↔2조)"
-                >
-                  <input type="text" value={p.nickname} readOnly />
-                </div>
-
-                <div className={`${styles.cell} ${styles.handicap}`}>
-                  <input type="text" value={p.handicap} disabled />
-                </div>
-
-                <div className={`${styles.cell} ${styles.score}`}>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    pattern="[0-9.\\-]*"
-                    autoComplete="off"
-                    value={scoreValue}
-                    onChange={e => handleScoreInputChange(p.id, e.target.value)}
-                    onBlur={() => handleScoreBlur(p.id)}
-                    onMouseDown={() => startLongPress(p.id, scoreValue)}
-                    onTouchStart={() => startLongPress(p.id, scoreValue)}
-                    onMouseUp={() => cancelLongPress(p.id)}
-                    onMouseLeave={() => cancelLongPress(p.id)}
-                    onTouchEnd={() => cancelLongPress(p.id)}
-                  />
-                </div>
-
-                <div className={`${styles.cell} ${styles.manual}`}>
-                  {isGroup1(p) ? (
-                    <button
-                      className={styles.smallBtn}
-                      onClick={(e) => {
-                        // 완료면 일반 클릭 무시(비활성화), Alt/롱프레스만 허용
-                        if (done && !e.altKey) return;
-                        handleManualClick(p.id, e);
-                      }}
-                      onContextMenu={manualContext(p.id)} // 모바일 롱프레스
-                      aria-disabled={done || (loadingId === p.id)}
-                      style={{
-                        opacity: (done || loadingId === p.id) ? 0.5 : 1,
-                        cursor: (done && !loadingId) ? 'not-allowed' : 'pointer'
-                      }}
-                      title="Alt/롱프레스: 페어(2명) 강제 이동/트레이드"
-                    >
-                      {loadingId === p.id
-                        ? <span className={styles.spinner}/>
-                        : done ? '완료' : '수동'}
-                    </button>
-                  ) : (
-                    <div style={{ width: 28, height: 28 }} />
-                  )}
-                </div>
-
-                <div className={`${styles.cell} ${styles.force}`}>
-                  {isGroup1(p) ? (
-                    <button className={styles.smallBtn} onClick={() => handleCancelClick(p.id)}>
-                      취소
-                    </button>
-                  ) : (
-                    <div style={{ width: 28, height: 28 }} />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+    <div className={styles.step}>
+      <div className={styles.participantRowHeader}>
+        <div className={`${styles.cell} ${styles.group}`}>조</div>
+        <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
+        <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
+        <div className={`${styles.cell} ${styles.score}`}>점수</div>
+        <div className={`${styles.cell} ${styles.manual}`}>수동</div>
+        <div className={`${styles.cell} ${styles.force}`}>취소</div>
       </div>
 
-      <div className={styles.stepFooter} style={FOOTER_STYLE}>
+      <div className={styles.participantTable}>
+        {renderList.map(p => {
+          const done     = isGroup1(p) && isCompleted(p.id);
+          const scoreValue = scoreDraft[p.id] ?? (p.score ?? '');
+
+          return (
+            <div key={p.id} className={styles.participantRow}>
+              <div className={`${styles.cell} ${styles.group}`}>
+                <input type="text" value={`${p.group}조`} disabled />
+              </div>
+
+              {/* 닉네임: Alt 클릭 + 우클릭/롱프레스 지원 (readOnly로 이벤트 수신) */}
+              <div
+                className={`${styles.cell} ${styles.nickname}`}
+                onClick={(e)=>handleAltOnNickname(p, e)}
+                onContextMenu={nameContext(p)}
+                title="Alt/롱프레스: 개인 이동/트레이드 (1조↔1조, 2조↔2조)"
+              >
+                <input type="text" value={p.nickname} readOnly />
+              </div>
+
+              <div className={`${styles.cell} ${styles.handicap}`}>
+                <input type="text" value={p.handicap} disabled />
+              </div>
+
+              <div className={`${styles.cell} ${styles.score}`}>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9.\\-]*"
+                  autoComplete="off"
+                  value={scoreValue}
+                  onChange={e => handleScoreInputChange(p.id, e.target.value)}
+                  onBlur={() => handleScoreBlur(p.id)}
+                  onMouseDown={() => startLongPress(p.id, scoreValue)}
+                  onTouchStart={() => startLongPress(p.id, scoreValue)}
+                  onMouseUp={() => cancelLongPress(p.id)}
+                  onMouseLeave={() => cancelLongPress(p.id)}
+                  onTouchEnd={() => cancelLongPress(p.id)}
+                />
+              </div>
+
+              <div className={`${styles.cell} ${styles.manual}`}>
+                {isGroup1(p) ? (
+                  <button
+                    className={styles.smallBtn}
+                    onClick={(e) => {
+                      // 완료면 일반 클릭 무시(비활성화), Alt/롱프레스만 허용
+                      if (done && !e.altKey) return;
+                      handleManualClick(p.id, e);
+                    }}
+                    onContextMenu={manualContext(p.id)} // 모바일 롱프레스
+                    aria-disabled={done || (loadingId === p.id)}
+                    style={{
+                      opacity: (done || loadingId === p.id) ? 0.5 : 1,
+                      cursor: (done && !loadingId) ? 'not-allowed' : 'pointer'
+                    }}
+                    title="Alt/롱프레스: 페어(2명) 강제 이동/트레이드"
+                  >
+                    {loadingId === p.id
+                      ? <span className={styles.spinner}/>
+                      : done ? '완료' : '수동'}
+                  </button>
+                ) : (
+                  <div style={{ width: 28, height: 28 }} />
+                )}
+              </div>
+
+              <div className={`${styles.cell} ${styles.force}`}>
+                {isGroup1(p) ? (
+                  <button className={styles.smallBtn} onClick={() => handleCancelClick(p.id)}>
+                    취소
+                  </button>
+                ) : (
+                  <div style={{ width: 28, height: 28 }} />
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className={styles.stepFooter}>
         <button onClick={goPrev}>← 이전</button>
         <button onClick={handleAutoClick} className={styles.textOnly}>자동배정</button>
         <button onClick={handleResetClick} className={styles.textOnly}>초기화</button>
