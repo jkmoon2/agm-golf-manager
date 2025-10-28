@@ -27,6 +27,17 @@ export default function Step8() {
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
+  // ★ 레이아웃 보강
+  const SAFE_PAD = 'calc(84px + env(safe-area-inset-bottom, 0px))';
+  const STEP_STYLE = { display:'flex', flexDirection:'column', minHeight:'100dvh' };
+  const CONTENT_STYLE = { flex:1, overflow:'auto', WebkitOverflowScrolling:'touch', paddingBottom: SAFE_PAD };
+  const FOOTER_STYLE = {
+    position:'sticky', bottom:0, background:'#fff',
+    padding:'12px 8px', borderTop:'1px solid #eee',
+    display:'grid', gridTemplateColumns:'1fr 1fr', gap:8,
+    paddingBottom:'calc(12px + env(safe-area-inset-bottom, 0px))'
+  };
+
   // ── 1) UI 상태 ───────────────────────────────────────────
   // ※ hiddenRooms를 **1-based(방번호)** 세트로 유지합니다.
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
@@ -357,7 +368,7 @@ export default function Step8() {
   }, [teamsByRoom, hiddenRooms]);
 
   return (
-    <div className={styles.step}>
+    <div className={styles.step} style={STEP_STYLE}>
       {/* ─── “선택” 버튼 + 드롭다운 ─── */}
       <div className={styles.selectWrapper}>
         <button
@@ -398,8 +409,8 @@ export default function Step8() {
         )}
       </div>
 
-      {/* ─── 중간 컨텐츠(스크롤) ─── */}
-      <div className={styles.contentWrapper}>
+      {/* ─── 중간 컨텐츠(전체 스크롤) ─── */}
+      <div className={styles.contentWrapper} style={CONTENT_STYLE}>
 
         {/* ── [Allocation Table] 방배정표 ── */}
         <div ref={allocRef} className={styles.tableContainer}>
@@ -850,7 +861,7 @@ export default function Step8() {
       </div>
 
       {/* ─── 하단 버튼 ─── */}
-      <div className={styles.stepFooter}>
+      <div className={styles.stepFooter} style={FOOTER_STYLE}>
         <button onClick={goPrev}>← 이전</button>
         <button onClick={() => { try{localStorage.setItem('homeViewMode','fourball')}catch{}; setStep(0); }}>홈</button>
       </div>

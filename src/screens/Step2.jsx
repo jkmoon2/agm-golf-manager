@@ -8,6 +8,27 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export default function Step2() {
+
+  // ── iOS Safe-Bottom & BottomTab 대응 (footer 고정 + 컨텐츠 스크롤) ─────────
+  const [__bottomGap, __setBottomGap] = React.useState(64);
+  React.useEffect(() => {
+    const probe = () => {
+      try {
+        const el = document.querySelector('[data-bottom-nav]') 
+               || document.querySelector('#bottomTabBar') 
+               || document.querySelector('.bottomTabBar') 
+               || document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H = 56;
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle  = { minHeight:'100dvh', boxSizing:'border-box', paddingBottom:`calc(${__FOOTER_H}px + ${__safeBottom})` };
+
   // Context에서 방 정보와 네비게이션 함수 가져오기
   const {
     roomCount,
@@ -108,7 +129,7 @@ export default function Step2() {
   };
 
   return (
-    <div className={styles.step}>
+    <div className={styles.step} style={__pageStyle}>
       {/* 방 개수 설정 UI */}
       <div className={styles.roomCountSelector}>
         <button
@@ -150,7 +171,7 @@ export default function Step2() {
       </div>
 
       {/* 이전/다음 버튼 */}
-      <div className={styles.stepFooter}>
+      <div className={styles.stepFooter} style={{position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5}}>
         <button onClick={goPrev}>← 이전</button>
         <button onClick={handleNext}>다음 →</button>
       </div>
