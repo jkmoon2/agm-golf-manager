@@ -1,4 +1,4 @@
-// /src/screens/Step4.jsx
+// src/screens/Step4.jsx
 
 import React, { useContext, useState, useEffect, useRef } from "react";
 import styles from "./Step4.module.css";
@@ -12,6 +12,8 @@ import * as XLSX from 'xlsx';
 import { getAuth } from 'firebase/auth';
 
 const LAST_SELECTED_FILENAME_KEY = 'agm_step4_filename';
+// ▼ 페이지 간 이동 시에도 유지되도록 메모리 캐시 추가(최소수정)
+let __STEP4_FILE_CACHE = '';
 
 export default function Step4(props) {
 
@@ -38,18 +40,25 @@ export default function Step4(props) {
   const { uploadMethod, participants, setParticipants, roomCount, handleFile, goPrev, goNext } = useContext(StepContext);
   const { eventId } = useContext(EventContext);
 
-  // 파일명: 재시작 후에도 유지 (localStorage 우선)
+  // 파일명: 페이지 이동 후에도 유지 (메모리 캐시 → local → session 순)
   const [selectedFileName, setSelectedFileName] = useState(() => {
     try {
-      return localStorage.getItem(LAST_SELECTED_FILENAME_KEY)
+      return __STEP4_FILE_CACHE
+          || localStorage.getItem(LAST_SELECTED_FILENAME_KEY)
           || sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY)
           || '';
-    } catch { return ''; }
+    } catch { return __STEP4_FILE_CACHE || ''; }
   });
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(LAST_SELECTED_FILENAME_KEY);
-      if (saved && saved !== selectedFileName) setSelectedFileName(saved);
+      const fromStore =
+        __STEP4_FILE_CACHE
+        || localStorage.getItem(LAST_SELECTED_FILENAME_KEY)
+        || sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY)
+        || '';
+      if (fromStore && fromStore !== selectedFileName) {
+        setSelectedFileName(fromStore);
+      }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -124,14 +133,17 @@ export default function Step4(props) {
   };
   const onHdKeyDown = (e)=>{ if(e.key==='Enter') e.currentTarget.blur(); };
 
-  const [savePII,setSavePII]=useState(true);
+  // ✅ 관리자일 때만 기본 ON (권한 오류 예방용 최소 수정)
+  const [savePII,setSavePII] = useState(() => (getAuth().currentUser?.email === 'a@a.com'));
 
   const handleFileExtended = async (e) => {
     try {
       const f = e?.target?.files?.[0];
       const name = f?.name || '';
       setSelectedFileName(name);
+      // ▼ 파일명 영속 저장 + 메모리 캐시
       try {
+        __STEP4_FILE_CACHE = name;
         localStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
         sessionStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
       } catch {}
@@ -195,8 +207,8 @@ export default function Step4(props) {
           <div className={styles.headerGrid} style={{display:'grid',gridTemplateColumns:'1fr auto',alignItems:'start',columnGap:12}}>
             <div className={styles.leftCol} style={{display:'flex',gap:8,alignItems:'center',minWidth:0}}>
               <input type="file" accept=".xlsx,.xls" onChange={handleFileExtended} />
-              <span className={styles.filenameBadge} title={selectedFileName||'선택된 파일 없음'}>
-                {selectedFileName || '선택된 파일 없음'}
+              <span className={styles.filenameBadge} title={selectedFileName||'선택한 파일 없음'}>
+                {selectedFileName || '선택한 파일 없음'}
               </span>
             </div>
 
@@ -247,7 +259,14 @@ export default function Step4(props) {
         ))}
       </div>
 
-      <div className={styles.stepFooter} style={{position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5}}>
+      {/* ▼ 하단 버튼: 좌/우 여백 추가 */}
+      <div
+        className={styles.stepFooter}
+        style={{
+          position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5,
+          boxSizing:'border-box', padding:'12px 16px'
+        }}
+      >
         <button onClick={goPrev}>← 이전</button>
         <button onClick={addParticipant}>추가</button>
         <button onClick={delSelected}>삭제</button>

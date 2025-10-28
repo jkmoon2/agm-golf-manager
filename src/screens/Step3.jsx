@@ -60,8 +60,14 @@ export default function Step3() {
         </div>
       </div>
 
-      {/* 하단 네비게이션 버튼 */}
-      <div className={styles.stepFooter} style={{position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5}}>
+      {/* ▼ 하단 버튼: 좌/우 여백 추가 */}
+      <div
+        className={styles.stepFooter}
+        style={{
+          position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5,
+          boxSizing:'border-box', padding:'12px 16px'
+        }}
+      >
         <button onClick={goPrev}>← 이전</button>
         <button disabled={!canNext} onClick={goNext}>
           다음 →

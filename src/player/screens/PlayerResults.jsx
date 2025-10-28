@@ -276,6 +276,25 @@ export default function PlayerResults() {
 
   const metricsPerRoom = 2 + (visibleMetrics.score ? 1 : 0) + (visibleMetrics.banddang ? 1 : 0);
 
+  /* ★★★ 안전한 네비게이션 폴백(컨텍스트가 없을 때도 동작) */
+  const handlePrev = () => {
+    if (typeof goPrev === 'function') return goPrev();
+    try { window.history.back(); } catch (e) {}
+  };
+  const handleNext = () => {
+    if (nextDisabled) return;
+    if (typeof goNext === 'function') return goNext();
+    try {
+      const { pathname, search, hash } = window.location;
+      const replaced = pathname.replace(/(\/step)(\d+)/i, (m, p, n) => `${p}${Number(n) + 1}`);
+      if (replaced !== pathname) {
+        window.location.assign(replaced + search + hash);
+      } else {
+        window.history.forward();
+      }
+    } catch (e) {}
+  };
+
   return (
     <div
       className={styles.page}
@@ -463,10 +482,10 @@ export default function PlayerResults() {
       </div>
 
       <div className={styles.footerNav}>
-        <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={goPrev}>← 이전</button>
+        <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={handlePrev}>← 이전</button>
         <button
           className={`${styles.navBtn} ${styles.navNext}`}
-          onClick={() => { if (!nextDisabled && typeof goNext === 'function') goNext(); }}
+          onClick={handleNext}
           disabled={nextDisabled}
           aria-disabled={nextDisabled}
           data-disabled={nextDisabled ? '1' : '0'}

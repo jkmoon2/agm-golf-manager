@@ -29,7 +29,6 @@ export default function Step1() {
   const __FOOTER_H = 56; // 스텝 footer 높이(대략)
   const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
   const __pageStyle  = { minHeight: '100dvh', boxSizing:'border-box', paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})` };
-  const __footerStyle= { position:'fixed', left:0, right:0, bottom: __safeBottom, zIndex: 5 };
 
   // StepContext: mode, setMode, title, setTitle, resetAll, goNext
   const { mode, setMode, title, setTitle, resetAll, goNext } = useContext(StepContext);
@@ -119,7 +118,14 @@ export default function Step1() {
         />
       </div>
 
-      <div className={styles.stepFooter} style={{position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5}}>
+      {/* ▼ 하단 버튼: 좌/우 여백 추가 */}
+      <div
+        className={styles.stepFooter}
+        style={{
+          position:"fixed", left:0, right:0, bottom: __safeBottom, zIndex: 5,
+          boxSizing:'border-box', padding:'12px 16px'
+        }}
+      >
         {/* 전체 초기화 */}
         <button
           style={{ background: "#d32f2f", color: "#fff", marginRight: 8 }}
