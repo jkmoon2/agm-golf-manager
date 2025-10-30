@@ -15,20 +15,20 @@ export default function Step5() {
     roomNames,   // ★ 반드시 꺼내오기
     goPrev,
     goNext,
-
-    updateParticipant,        // (id, patch)
-    updateParticipantsBulk,   // (changes[])
+    updateParticipant,        // (id, patch) => Promise<void> | void
+    updateParticipantsBulk,   // (changes: Array<{id, fields}>) => Promise<void> | void
   } = useContext(StepContext);
 
-  // ★ Firestore 즉시 커밋 헬퍼 (기존 유지)
   const { eventId, updateEventImmediate } = useContext(EventContext) || {};
+
+  // ── helper: 변경분을 기존 리스트에 반영해 이벤트 문서로 커밋할 payload 구성 ──
   const buildNextFromChanges = (baseList, changes) => {
     try {
       const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
       (changes || []).forEach(({ id, fields }) => {
-        const key = String(id);
-        const cur = map.get(key) || {};
-        map.set(key, { ...cur, ...(fields || {}) });
+        const k = String(id);
+        const cur = map.get(k) || {};
+        map.set(k, { ...cur, ...(fields || {}) });
       });
       return Array.from(map.values());
     } catch (e) {
@@ -40,24 +40,15 @@ export default function Step5() {
   const [loadingId, setLoadingId] = useState(null);
   const [forceSelectingId, setForceSelectingId] = useState(null);
 
-  // [ADD] 점수 입력 드래프트 상태(안드로이드 키보드 대응: -, . 중간상태 허용)
+  // ── 모바일 숫자 입력 안정화를 위한 draft 상태 ──
   const [scoreDraft, setScoreDraft] = useState({}); // { [id]: '입력중 문자열' }
 
-  // [ADD] 다른 디바이스에서 초기화가 일어나면 여기 draft도 바로 정리
+  // participants 외부 갱신 시 draft 정리
   useEffect(() => {
     if (!Array.isArray(participants)) return;
-    const allNull =
-      participants.length > 0 &&
-      participants.every(p => p == null || p.score == null || String(p.score).trim() === '');
-    if (allNull) {
-      // 전체가 초기화된 상태라면 로컬 draft도 싹 비움
-      setScoreDraft({});
-      return;
-    }
-    // 일부만 변경된 경우: 서버값이 null로 내려온 사람의 draft는 제거
     setScoreDraft(prev => {
-      let changed = false;
       const next = { ...prev };
+      let changed = false;
       participants.forEach(p => {
         const key = p?.id;
         if (key == null) return;
@@ -89,7 +80,7 @@ export default function Step5() {
     } catch (e) {
       console.warn('[Step5] syncChanges failed:', e);
     }
-    // ★ 이벤트 문서 participants[]를 단일 소스로 즉시 커밋
+    // 이벤트 문서 participants[]에도 반영(단, 우리가 만든 변경 시점에만 호출)
     try {
       if (typeof updateEventImmediate === 'function' && eventId) {
         const base = participants || [];
@@ -101,71 +92,26 @@ export default function Step5() {
     }
   };
 
-  // ── 1) 점수 변경(텍스트 입력 + 중간 상태 허용) ──
-  const isPartialNumber = (s) => /^-?\d*\.?\d*$/.test(s); // -, -., 3. 등 허용
-  const onScoreInputChange = (id, raw) => {
-    if (!isPartialNumber(raw)) return;           // 허용하지 않는 문자는 무시
-    setScoreDraft(d => ({ ...d, [id]: raw }));   // 먼저 로컬 드래프트 반영
-    if (raw === '' || raw === '-' || raw === '.' || raw === '-.') {
-      // 중간상태는 아직 커밋하지 않음 → 깜빡임/튕김 방지
-      return;
-    }
-    const v = Number(raw);
-    if (!Number.isNaN(v)) {
-      setParticipants(ps => ps.map(p => (p.id === id ? { ...p, score: v } : p)));
-      syncChanges([{ id, fields: { score: v } }]);
-    }
+  // ── 1) 점수 변경(드래프트 유지 + blur/Enter 시 커밋) ──
+  const isPartialNumber = (v) => /^-?\d*\.?\d*$/.test(v);
+  const onScoreChange = (id, raw) => {
+    if (!isPartialNumber(raw)) return;            // 허용치 외 무시
+    setScoreDraft(d => ({ ...d, [id]: raw }));    // 입력 중엔 draft에만 유지
   };
   const onScoreBlur = (id) => {
     const raw = scoreDraft[id];
     if (raw === undefined) return;
-    if (raw === '' || raw === '-' || raw === '.' || raw === '-.') {
-      // 비어있는 상태로 종료 → 점수 null 처리
-      setParticipants(ps => ps.map(p => (p.id === id ? { ...p, score: null } : p)));
-      syncChanges([{ id, fields: { score: null } }]);
+    let v = null;
+    if (!(raw === '' || raw === '-' || raw === '.' || raw === '-.')) {
+      const num = Number(raw);
+      v = Number.isNaN(num) ? null : num;
     }
+    setParticipants(ps => ps.map(p => (p.id === id ? { ...p, score: v } : p)));
+    syncChanges([{ id, fields: { score: v } }]);
     setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
   };
 
-  // [ADD] 롱프레스(1초)로 '-' 삽입
-  const holdRef = useRef({}); // { [id]: { timer, x, y } }
-  const LONG_PRESS_MS = 1000;
-  const MOVE_CANCEL_PX = 10;
-  const ensureHold = (id) => {
-    if (!holdRef.current[id]) holdRef.current[id] = { timer: null, x:0, y:0 };
-    return holdRef.current[id];
-  };
-  const startHold = (id, e) => {
-    const h = ensureHold(id);
-    if (h.timer) clearTimeout(h.timer);
-    h.x = (e && 'clientX' in e) ? e.clientX : 0;
-    h.y = (e && 'clientY' in e) ? e.clientY : 0;
-    h.timer = setTimeout(() => {
-      setScoreDraft(d => {
-        const cur = String(d?.[id] ?? '');
-        if (cur.startsWith('-')) return d;
-        const next = { ...d, [id]: cur ? `-${cur}` : '-' };
-        return next;
-      });
-      try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
-    }, LONG_PRESS_MS);
-  };
-  const moveHold = (id, e) => {
-    const h = ensureHold(id);
-    if (!h.timer) return;
-    const dx = Math.abs((e.clientX ?? 0) - h.x);
-    const dy = Math.abs((e.clientY ?? 0) - h.y);
-    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) {
-      clearTimeout(h.timer); h.timer = null;
-    }
-  };
-  const endHold = (id) => {
-    const h = ensureHold(id);
-    if (h.timer) { clearTimeout(h.timer); h.timer = null; }
-  };
-  const preventContextMenu = (e) => { e.preventDefault(); };
-
-  // ── 2) 수동 배정 ── (기존 유지)
+  // ── 2) 수동 배정 ──
   const onManualAssign = (id) => {
     setLoadingId(id);
     setTimeout(async () => {
@@ -177,10 +123,12 @@ export default function Step5() {
         if (!target) return ps;
         targetNickname = target.nickname;
 
+        // 동일 조에서 이미 배정된 방 번호
         const usedRooms = ps
           .filter(p => p.group === target.group && p.room != null)
           .map(p => p.room);
 
+        // 남은 방 (무작위)
         const available = rooms.filter(r => !usedRooms.includes(r));
         chosen = available.length
           ? available[Math.floor(Math.random() * available.length)]
@@ -199,10 +147,10 @@ export default function Step5() {
         alert('남은 방이 없습니다.');
         await syncChanges([{ id, fields: { room: null } }]);
       }
-    }, 600); // 기존 딜레이 유지
+    }, 600); // 기존 딜레이 존중
   };
 
-  // ── 3) 강제 배정/취소 ── (기존 유지)
+  // ── 3) 강제 배정/취소 ──
   const onForceAssign = async (id, room) => {
     let targetNickname = null;
     let prevRoom = null;
@@ -217,18 +165,13 @@ export default function Step5() {
       let next = ps.map(p => (p.id === id ? { ...p, room } : p));
       changes.push({ id, fields: { room } });
 
-      if (room == null) {
-        return next;
-      }
-
-      const occupant = ps.find(
-        p => p.group === target.group && p.room === room && p.id !== id
-      );
-      if (occupant) {
-        next = next.map(p =>
-          p.id === occupant.id ? { ...p, room: prevRoom } : p
-        );
-        changes.push({ id: occupant.id, fields: { room: prevRoom } });
+      // 같은 조에서 이미 room을 쓰고 있으면 서로 스왑
+      if (room != null) {
+        const occupant = ps.find(p => p.group === target.group && p.room === room && p.id !== id);
+        if (occupant) {
+          next = next.map(p => (p.id === occupant.id ? { ...p, room: prevRoom } : p));
+          changes.push({ id: occupant.id, fields: { room: prevRoom } });
+        }
       }
       return next;
     });
@@ -245,7 +188,7 @@ export default function Step5() {
     await syncChanges(changes);
   };
 
-  // ── 4) 자동 배정 ── (기존 유지)
+  // ── 4) 자동 배정 ──
   const onAutoAssign = async () => {
     let nextSnapshot = null;
     setParticipants(ps => {
@@ -256,9 +199,7 @@ export default function Step5() {
         const assigned = updated
           .filter(p => p.group === group && p.room != null)
           .map(p => p.room);
-        const unassigned = updated.filter(
-          p => p.group === group && p.room == null
-        );
+        const unassigned = updated.filter(p => p.group === group && p.room == null);
         const slots = rooms.filter(r => !assigned.includes(r));
         const shuffled = [...slots].sort(() => Math.random() - 0.5);
 
@@ -284,17 +225,14 @@ export default function Step5() {
     }
   };
 
-  // ── 5) 초기화 ── (기존 유지 + draft도 즉시 삭제)
+  // ── 5) 초기화 ──
   const onReset = async () => {
-    setParticipants(ps =>
-      ps.map(p => ({ ...p, room: null, score: null, selected: false }))
-    );
+    setParticipants(ps => ps.map(p => ({ ...p, room: null, score: null, selected: false })));
     const changes = participants.map(p => ({
       id: p.id,
       fields: { room: null, score: null, selected: false },
     }));
-    // [ADD] 로컬 드래프트도 즉시 비움 → 이 디바이스에서도 바로 리셋 표시
-    setScoreDraft({});
+    setScoreDraft({}); // draft도 즉시 비움
     await syncChanges(changes);
   };
 
@@ -302,39 +240,36 @@ export default function Step5() {
     console.log('[Step5] participants:', participants);
   }, [participants]);
 
-  // ───────────────────────────────────────────────────────────────
-  // [ADD2] participants 변경 감지 → 이벤트 문서에 "전체 배열" 즉시 커밋 (안전한 디바이스간 동기화)
-  //  - 기존 syncChanges는 이 컴포넌트가 변경을 일으킬 때만 개별 patch를 보냄
-  //  - 외부(다른 컴포넌트/디바이스)로 인해 participants가 갱신된 경우에도
-  //    본 컴포넌트가 즉시 전체 participants를 커밋하여 일관성 강화
-  //  - 과도한 쓰기를 막기 위해 deep-equal 대신 해시(JSON 문자열) 비교 + 디바운스 적용
-  // ───────────────────────────────────────────────────────────────
-  const lastCommittedHashRef = useRef('');
-  const commitTimerRef = useRef(null);
-
+  // ★ NEW: 강제 메뉴 바깥 클릭 시 닫힘
   useEffect(() => {
-    if (typeof updateEventImmediate !== 'function' || !eventId || !Array.isArray(participants)) return;
-
-    const nextHash = (() => {
-      try { return JSON.stringify(participants); } catch { return String(Date.now()); }
-    })();
-
-    if (nextHash === lastCommittedHashRef.current) return;
-
-    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
-    commitTimerRef.current = setTimeout(async () => {
-      try {
-        await updateEventImmediate({ participants });
-        lastCommittedHashRef.current = nextHash;
-      } catch (e) {
-        console.warn('[Step5][commit-on-change] failed:', e);
+    if (forceSelectingId == null) return;
+    const handler = (e) => {
+      const mid = String(forceSelectingId);
+      const t = e.target;
+      if (!t) return;
+      const inMenu  = t.closest && t.closest(`[data-force-menu-for="${mid}"]`);
+      const isToggle = t.closest && t.closest(`[data-force-toggle-for="${mid}"]`);
+      if (!inMenu && !isToggle) {
+        setForceSelectingId(null);
       }
-    }, 250); // 디바운스(과도한 쓰기 방지)
-  }, [participants, updateEventImmediate, eventId]);
-  // ───────────────────────────────────────────────────────────────
+    };
+    document.addEventListener('pointerdown', handler, true);
+    document.addEventListener('click', handler, true);
+    return () => {
+      document.removeEventListener('pointerdown', handler, true);
+      document.removeEventListener('click', handler, true);
+    };
+  }, [forceSelectingId]);
+
+  // iOS 하단 고정용 스페이서 높이 (bottom tab + footer + gap)
+  const APP_BOTTOM_BAR = 64;      // 전역에서 --app-bottom-bar-height로 재정의 가능
+  const STEP5_FOOTER_H = 56;      // 버튼 영역 추정 높이
+  const FOOTER_GAP     = 8;       // ★ NEW: 아이콘 탭과의 간격
+  const FOOTER_SPACE   = APP_BOTTOM_BAR + STEP5_FOOTER_H + FOOTER_GAP + 12;
 
   return (
-    <div className={styles.step}>
+    // ★ NEW: 컬럼 레이아웃 + 100dvh
+    <div className={styles.step} style={{ display:'flex', flexDirection:'column', minHeight:'100dvh' }}>
       {/* 컬럼 헤더 */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
@@ -352,6 +287,7 @@ export default function Step5() {
           const scoreValue = scoreDraft[p.id] ?? (p.score != null ? String(p.score) : '');
           return (
             <div key={p.id} className={styles.participantRow}>
+              {/* 그룹, 닉네임, 핸디캡, 점수 */}
               <div className={`${styles.cell} ${styles.group}`}>
                 <input type="text" value={`${p.group}조`} disabled />
               </div>
@@ -361,24 +297,15 @@ export default function Step5() {
               <div className={`${styles.cell} ${styles.handicap}`}>
                 <input type="text" value={p.handicap} disabled />
               </div>
-
-              {/* [FIX] 숫자 입력: text + inputMode + draft */}
               <div className={`${styles.cell} ${styles.score}`}>
                 <input
-                  type="text"               // [FIX] number → text
-                  inputMode="decimal"       // [ADD] 안드로이드 키보드에 소수점 표시
-                  pattern="[0-9.\\-]*"      // [ADD] 허용 문자
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9.\\-]*"
                   autoComplete="off"
                   value={scoreValue}
-                  onChange={e => onScoreInputChange(p.id, e.target.value)}
+                  onChange={e => onScoreChange(p.id, e.target.value)}
                   onBlur={() => onScoreBlur(p.id)}
-                  // [ADD] 롱프레스 1초 → '-' 삽입
-                  onPointerDown={(e) => startHold(p.id, e)}
-                  onPointerUp={() => endHold(p.id)}
-                  onPointerCancel={() => endHold(p.id)}
-                  onPointerLeave={() => endHold(p.id)}
-                  onPointerMove={(e) => moveHold(p.id, e)}
-                  onContextMenu={preventContextMenu}
                 />
               </div>
 
@@ -397,30 +324,22 @@ export default function Step5() {
               <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
                 <button
                   className={styles.smallBtn}
-                  onClick={() =>
-                    setForceSelectingId(forceSelectingId === p.id ? null : p.id)
-                  }
+                  data-force-toggle-for={p.id}
+                  onClick={() => setForceSelectingId(forceSelectingId === p.id ? null : p.id)}
                 >
                   강제
                 </button>
                 {forceSelectingId === p.id && (
-                  <div className={styles.forceMenu}>
+                  <div className={styles.forceMenu} data-force-menu-for={p.id}>
                     {rooms.map(r => {
                       const name = roomNames[r - 1]?.trim() || `${r}번 방`;
                       return (
-                        <div
-                          key={r}
-                          className={styles.forceOption}
-                          onClick={() => onForceAssign(p.id, r)}
-                        >
+                        <div key={r} className={styles.forceOption} onClick={() => onForceAssign(p.id, r)}>
                           {name}
                         </div>
                       );
                     })}
-                    <div
-                      className={styles.forceOption}
-                      onClick={() => onForceAssign(p.id, null)}
-                    >
+                    <div className={styles.forceOption} onClick={() => onForceAssign(p.id, null)}>
                       취소
                     </div>
                   </div>
@@ -431,8 +350,24 @@ export default function Step5() {
         })}
       </div>
 
+      {/* ★ NEW: 푸터가 본문을 가리지 않도록 스페이서 */}
+      <div aria-hidden="true" style={{ height: FOOTER_SPACE }} />
+
       {/* 하단 내비게이션 */}
-      <div className={styles.stepFooter}>
+      <div
+        className={styles.stepFooter}
+        style={{
+          position: 'fixed',
+          // ★ MARGIN FIX: 좌/우 여백(전역 변수 지원)
+          left: 'var(--page-side-gutter, 12px)',
+          right: 'var(--page-side-gutter, 12px)',
+          // ★ MARGIN FIX: 아이콘 탭과의 간격(전역 변수 지원)
+          bottom: 'calc(var(--app-bottom-bar-height, 64px) + env(safe-area-inset-bottom) + var(--footer-gap, 8px))',
+          background: '#fff',
+          borderTop: '1px solid #e5e5e5',
+          zIndex: 20,
+        }}
+      >
         <button onClick={goPrev}>← 이전</button>
         <button onClick={onAutoAssign} className={styles.textOnly}>자동배정</button>
         <button onClick={onReset} className={styles.textOnly}>초기화</button>
