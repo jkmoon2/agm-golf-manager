@@ -2,24 +2,53 @@
 
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { StepContext } from '../flows/StepFlow';
-import { EventContext } from '../contexts/EventContext'; // ★ patch
+import { EventContext } from '../contexts/EventContext';
 import styles from './Step5.module.css';
 
-if (process.env.NODE_ENV!=='production') console.log('[AGM] Step5 render');
+if (process.env.NODE_ENV !== 'production') console.log('[AGM] Step5 render');
 
 export default function Step5() {
   const {
     participants,
     setParticipants,
     roomCount,
-    roomNames,   // ★ 반드시 꺼내오기
+    roomNames,
     goPrev,
     goNext,
-    updateParticipant,        // (id, patch) => Promise<void> | void
-    updateParticipantsBulk,   // (changes: Array<{id, fields}>) => Promise<void> | void
+    updateParticipant,
+    updateParticipantsBulk,
   } = useContext(StepContext);
 
   const { eventId, updateEventImmediate } = useContext(EventContext) || {};
+
+  // ─────────────────────────────────────────────────────────────
+  // ① 하단 여백: STEP4와 동일한 계산식 사용(최하단 아이콘탭 높이 + 안전영역)
+  //    - 페이지 컨테이너에 padding-bottom을 주고, footer는 bottom: __safeBottom 고정
+  //    - 좌/우는 내부 padding(16px)으로 동일하게 보이게 함
+  // ─────────────────────────────────────────────────────────────
+  const [__bottomGap, __setBottomGap] = useState(64);
+  useEffect(() => {
+    const probe = () => {
+      try {
+        const el =
+          document.querySelector('[data-bottom-nav]') ||
+          document.querySelector('#bottomTabBar') ||
+          document.querySelector('.bottomTabBar') ||
+          document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H = 56; // 버튼바 높이(프로젝트 공통 추정값)
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle = {
+    minHeight: '100dvh',
+    boxSizing: 'border-box',
+    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`, // 리스트가 footer와 겹치지 않게
+  };
 
   // ── helper: 변경분을 기존 리스트에 반영해 이벤트 문서로 커밋할 payload 구성 ──
   const buildNextFromChanges = (baseList, changes) => {
@@ -42,6 +71,8 @@ export default function Step5() {
 
   // ── 모바일 숫자 입력 안정화를 위한 draft 상태 ──
   const [scoreDraft, setScoreDraft] = useState({}); // { [id]: '입력중 문자열' }
+  const inputRefs = useRef({});       // 점수 input DOM 참조(롱프레스용)
+  const longTimerRef = useRef(null);  // 롱프레스 타이머
 
   // participants 외부 갱신 시 draft 정리
   useEffect(() => {
@@ -73,14 +104,12 @@ export default function Step5() {
       if (canBulk) {
         await updateParticipantsBulk(changes);
       } else if (canOne) {
-        for (const ch of changes) {
-          await updateParticipant(ch.id, ch.fields);
-        }
+        for (const ch of changes) await updateParticipant(ch.id, ch.fields);
       }
     } catch (e) {
       console.warn('[Step5] syncChanges failed:', e);
     }
-    // 이벤트 문서 participants[]에도 반영(단, 우리가 만든 변경 시점에만 호출)
+    // 이벤트 문서 participants[]에도 반영(우리가 만든 변경 시점에만 호출)
     try {
       if (typeof updateEventImmediate === 'function' && eventId) {
         const base = participants || [];
@@ -92,11 +121,11 @@ export default function Step5() {
     }
   };
 
-  // ── 1) 점수 변경(드래프트 유지 + blur/Enter 시 커밋) ──
+  // ── 점수 입력: draft 유지 + blur/Enter 시 커밋 ──
   const isPartialNumber = (v) => /^-?\d*\.?\d*$/.test(v);
   const onScoreChange = (id, raw) => {
-    if (!isPartialNumber(raw)) return;            // 허용치 외 무시
-    setScoreDraft(d => ({ ...d, [id]: raw }));    // 입력 중엔 draft에만 유지
+    if (!isPartialNumber(raw)) return;
+    setScoreDraft(d => ({ ...d, [id]: raw }));
   };
   const onScoreBlur = (id) => {
     const raw = scoreDraft[id];
@@ -111,7 +140,30 @@ export default function Step5() {
     setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
   };
 
-  // ── 2) 수동 배정 ──
+  // ── “-” 롱프레스 입력(복구) ──
+  const startMinusLongPress = (id) => {
+    try { if (longTimerRef.current) clearTimeout(longTimerRef.current); } catch {}
+    longTimerRef.current = setTimeout(() => {
+      setScoreDraft(d => {
+        const cur = d[id] ?? (() => {
+          const p = (participants || []).find(x => x.id === id);
+          return p && p.score != null ? String(p.score) : '';
+        })();
+        if (String(cur).startsWith('-')) return d;           // 이미 '-'면 유지
+        const nextVal = cur === '' ? '-' : `-${String(cur).replace(/^-/, '')}`;
+        const next = { ...d, [id]: nextVal };
+        // 커서/포커스 유지
+        const el = inputRefs.current[id];
+        if (el) { try { el.focus(); el.setSelectionRange(nextVal.length, nextVal.length); } catch {} }
+        return next;
+      });
+    }, 600); // STEP4와 맞춘 600ms 롱프레스
+  };
+  const cancelMinusLongPress = () => {
+    try { if (longTimerRef.current) clearTimeout(longTimerRef.current); } catch {}
+  };
+
+  // ── 수동 배정 ──
   const onManualAssign = (id) => {
     setLoadingId(id);
     setTimeout(async () => {
@@ -123,12 +175,10 @@ export default function Step5() {
         if (!target) return ps;
         targetNickname = target.nickname;
 
-        // 동일 조에서 이미 배정된 방 번호
         const usedRooms = ps
           .filter(p => p.group === target.group && p.room != null)
           .map(p => p.room);
 
-        // 남은 방 (무작위)
         const available = rooms.filter(r => !usedRooms.includes(r));
         chosen = available.length
           ? available[Math.floor(Math.random() * available.length)]
@@ -147,10 +197,10 @@ export default function Step5() {
         alert('남은 방이 없습니다.');
         await syncChanges([{ id, fields: { room: null } }]);
       }
-    }, 600); // 기존 딜레이 존중
+    }, 600);
   };
 
-  // ── 3) 강제 배정/취소 ──
+  // ── 강제 배정/취소 ──
   const onForceAssign = async (id, room) => {
     let targetNickname = null;
     let prevRoom = null;
@@ -165,7 +215,6 @@ export default function Step5() {
       let next = ps.map(p => (p.id === id ? { ...p, room } : p));
       changes.push({ id, fields: { room } });
 
-      // 같은 조에서 이미 room을 쓰고 있으면 서로 스왑
       if (room != null) {
         const occupant = ps.find(p => p.group === target.group && p.room === room && p.id !== id);
         if (occupant) {
@@ -188,7 +237,7 @@ export default function Step5() {
     await syncChanges(changes);
   };
 
-  // ── 4) 자동 배정 ──
+  // ── 자동 배정 ──
   const onAutoAssign = async () => {
     let nextSnapshot = null;
     setParticipants(ps => {
@@ -225,14 +274,14 @@ export default function Step5() {
     }
   };
 
-  // ── 5) 초기화 ──
+  // ── 초기화 ──
   const onReset = async () => {
     setParticipants(ps => ps.map(p => ({ ...p, room: null, score: null, selected: false })));
     const changes = participants.map(p => ({
       id: p.id,
       fields: { room: null, score: null, selected: false },
     }));
-    setScoreDraft({}); // draft도 즉시 비움
+    setScoreDraft({});
     await syncChanges(changes);
   };
 
@@ -240,7 +289,7 @@ export default function Step5() {
     console.log('[Step5] participants:', participants);
   }, [participants]);
 
-  // ★ NEW: 강제 메뉴 바깥 클릭 시 닫힘
+  // ★ 강제 메뉴 바깥 클릭 시 닫힘(유지)
   useEffect(() => {
     if (forceSelectingId == null) return;
     const handler = (e) => {
@@ -249,9 +298,7 @@ export default function Step5() {
       if (!t) return;
       const inMenu  = t.closest && t.closest(`[data-force-menu-for="${mid}"]`);
       const isToggle = t.closest && t.closest(`[data-force-toggle-for="${mid}"]`);
-      if (!inMenu && !isToggle) {
-        setForceSelectingId(null);
-      }
+      if (!inMenu && !isToggle) setForceSelectingId(null);
     };
     document.addEventListener('pointerdown', handler, true);
     document.addEventListener('click', handler, true);
@@ -261,15 +308,9 @@ export default function Step5() {
     };
   }, [forceSelectingId]);
 
-  // iOS 하단 고정용 스페이서 높이 (bottom tab + footer + gap)
-  const APP_BOTTOM_BAR = 64;      // 전역에서 --app-bottom-bar-height로 재정의 가능
-  const STEP5_FOOTER_H = 56;      // 버튼 영역 추정 높이
-  const FOOTER_GAP     = 8;       // ★ NEW: 아이콘 탭과의 간격
-  const FOOTER_SPACE   = APP_BOTTOM_BAR + STEP5_FOOTER_H + FOOTER_GAP + 12;
-
   return (
-    // ★ NEW: 컬럼 레이아웃 + 100dvh
-    <div className={styles.step} style={{ display:'flex', flexDirection:'column', minHeight:'100dvh' }}>
+    // ★ STEP4와 같은 방식: 페이지 하단 패딩으로 겹침 방지 + footer는 bottom: __safeBottom
+    <div className={styles.step} style={__pageStyle}>
       {/* 컬럼 헤더 */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
@@ -287,7 +328,6 @@ export default function Step5() {
           const scoreValue = scoreDraft[p.id] ?? (p.score != null ? String(p.score) : '');
           return (
             <div key={p.id} className={styles.participantRow}>
-              {/* 그룹, 닉네임, 핸디캡, 점수 */}
               <div className={`${styles.cell} ${styles.group}`}>
                 <input type="text" value={`${p.group}조`} disabled />
               </div>
@@ -297,8 +337,11 @@ export default function Step5() {
               <div className={`${styles.cell} ${styles.handicap}`}>
                 <input type="text" value={p.handicap} disabled />
               </div>
+
+              {/* 점수 입력: text + inputMode(숫자패드) + draft + 롱프레스 '-' */}
               <div className={`${styles.cell} ${styles.score}`}>
                 <input
+                  ref={el => (inputRefs.current[p.id] = el)}
                   type="text"
                   inputMode="decimal"
                   pattern="[0-9.\\-]*"
@@ -306,10 +349,15 @@ export default function Step5() {
                   value={scoreValue}
                   onChange={e => onScoreChange(p.id, e.target.value)}
                   onBlur={() => onScoreBlur(p.id)}
+                  onPointerDown={() => startMinusLongPress(p.id)}
+                  onPointerUp={cancelMinusLongPress}
+                  onPointerLeave={cancelMinusLongPress}
+                  onTouchStart={() => startMinusLongPress(p.id)}
+                  onTouchEnd={cancelMinusLongPress}
                 />
               </div>
 
-              {/* 수동 버튼 */}
+              {/* 수동 */}
               <div className={`${styles.cell} ${styles.manual}`}>
                 <button
                   className={styles.smallBtn}
@@ -320,7 +368,7 @@ export default function Step5() {
                 </button>
               </div>
 
-              {/* 강제 버튼 & 메뉴 */}
+              {/* 강제 + 메뉴 */}
               <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
                 <button
                   className={styles.smallBtn}
@@ -331,10 +379,14 @@ export default function Step5() {
                 </button>
                 {forceSelectingId === p.id && (
                   <div className={styles.forceMenu} data-force-menu-for={p.id}>
-                    {rooms.map(r => {
+                    {Array.from({ length: roomCount }, (_, i) => i + 1).map(r => {
                       const name = roomNames[r - 1]?.trim() || `${r}번 방`;
                       return (
-                        <div key={r} className={styles.forceOption} onClick={() => onForceAssign(p.id, r)}>
+                        <div
+                          key={r}
+                          className={styles.forceOption}
+                          onClick={() => onForceAssign(p.id, r)}
+                        >
                           {name}
                         </div>
                       );
@@ -350,22 +402,19 @@ export default function Step5() {
         })}
       </div>
 
-      {/* ★ NEW: 푸터가 본문을 가리지 않도록 스페이서 */}
-      <div aria-hidden="true" style={{ height: FOOTER_SPACE }} />
-
-      {/* 하단 내비게이션 */}
+      {/* 하단 내비게이션: STEP4와 동일한 여백(좌/우 16px, 세로 12px), 탭 위로 띄움 */}
       <div
         className={styles.stepFooter}
         style={{
           position: 'fixed',
-          // ★ MARGIN FIX: 좌/우 여백(전역 변수 지원)
-          left: 'var(--page-side-gutter, 12px)',
-          right: 'var(--page-side-gutter, 12px)',
-          // ★ MARGIN FIX: 아이콘 탭과의 간격(전역 변수 지원)
-          bottom: 'calc(var(--app-bottom-bar-height, 64px) + env(safe-area-inset-bottom) + var(--footer-gap, 8px))',
+          left: 0,
+          right: 0,
+          bottom: __safeBottom,
+          zIndex: 20,
+          boxSizing: 'border-box',
+          padding: '12px 16px',
           background: '#fff',
           borderTop: '1px solid #e5e5e5',
-          zIndex: 20,
         }}
       >
         <button onClick={goPrev}>← 이전</button>
