@@ -7,40 +7,42 @@ import styles from './Step6.module.css';
 import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
+// [ADD] 라이브 이벤트 문서 구독(컨텍스트가 실시간이 아닐 때 보조)
 import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
 export default function Step6() {
+  // Step 컨텍스트
   const {
-    participants = [],
+    participants = [],     // [{ id, group, nickname, handicap, score, room }, …]
     roomCount,
     roomNames = [],
     goPrev,
     setStep
   } = useContext(StepContext);
 
+  // 이벤트 컨텍스트
   const { eventId, eventData, updateEventImmediate } = useContext(EventContext) || {};
+  // [ADD] 라이브 이벤트 데이터(있으면 컨텍스트보다 우선)
   const { eventData: liveEvent } = useEventLiveQuery(eventId);
   const effectiveEventData = liveEvent || eventData;
 
+  // 표시 옵션 상태
+  // ※ hiddenRooms 는 **1-based(방번호)** Set<number>로 유지 (Step8/Player와 동일)
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const [menuOpen, setMenuOpen]             = useState(false);
 
-  const showScore     = !!visibleMetrics.score;
-  const setShowScore  = (v) => setVisibleMetrics(m => ({ ...m, score: !!v }));
-  const showHalved    = !!visibleMetrics.banddang;
+  const showScore    = !!visibleMetrics.score;
+  const setShowScore = (v) => setVisibleMetrics(m => ({ ...m, score: !!v }));
+  const showHalved   = !!visibleMetrics.banddang;
   const setShowHalved = (v) => setVisibleMetrics(m => ({ ...m, banddang: !!v }));
 
-  // ───────────────────────────────────────────
-  // 하단/스크롤 영역 공통 처리
-  // ───────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // ★ 하단 고정/여백 공통 처리 + 스크롤 컨테이너(실높이 계산) 추가
+  // ─────────────────────────────────────────────────────────────
   const [__bottomGap, __setBottomGap] = useState(64);
-  const footerRef   = useRef(null);
-  const scrollRef   = useRef(null);
-
-  // [NEW] 테이블을 터치해도 상위 스크롤러가 움직이도록 하는 드래그 프록시
-  const dragAllocRef  = useRef(null);
-  const dragResultRef = useRef(null);
+  const footerRef   = useRef(null);   // [NEW] 하단 버튼 실제 높이 측정
+  const scrollRef   = useRef(null);   // [NEW] 스크롤 영역 높이 지정 대상
 
   useEffect(() => {
     const probe = () => {
@@ -58,10 +60,11 @@ export default function Step6() {
     return () => window.removeEventListener('resize', probe);
   }, []);
 
-  const __FOOTER_H    = 56;
+  const __FOOTER_H    = 56;                              // 버튼 바 높이(fallback)
   const __safeBottom  = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
 
-  const __pageStyle = {
+  // [CHANGE] 페이지 컨테이너: 플렉스 컬럼 + 바닥 여백(버튼/탭바)
+  const __pageStyle   = {
     minHeight: '100dvh',
     boxSizing: 'border-box',
     paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
@@ -69,6 +72,7 @@ export default function Step6() {
     flexDirection: 'column'
   };
 
+  // [NEW] 중간 본문 스크롤 래퍼: iOS 전영역 자연 스크롤 + 실높이(px) 적용
   const __scrollAreaBaseStyle = {
     flex: '1 1 auto',
     overflowY: 'auto',
@@ -77,16 +81,26 @@ export default function Step6() {
     overscrollBehavior: 'contain'
   };
 
+  // [NEW] 스크롤 영역 실높이 계산(iOS Safari flex-height 버그 회피)
   const recalcScrollHeight = () => {
     try {
       const viewportH =
         (window.visualViewport && window.visualViewport.height) || window.innerHeight;
       const scrollEl = scrollRef.current;
       if (!scrollEl) return;
-      const topY    = scrollEl.getBoundingClientRect().top;
+
+      // 스크롤영역의 화면상단 위치
+      const topY = scrollEl.getBoundingClientRect().top;
+
+      // 하단 버튼 실제 높이(측정 실패 시 fallback)
       const footerH = (footerRef.current && footerRef.current.offsetHeight) || __FOOTER_H;
+
+      // 하단 탭/세이프에어리어 여백(이미 footer bottom에 반영되지만, 실제 뷰포트 차감에도 필요)
       const bottomGap = __bottomGap;
-      const available = Math.max(120, Math.floor(viewportH - topY - footerH - bottomGap - 6));
+
+      // 여유 margin 조금(6px) 확보
+      const available = Math.max(100, Math.floor(viewportH - topY - footerH - bottomGap - 6));
+
       scrollEl.style.height = `${available}px`;
     } catch {}
   };
@@ -99,58 +113,10 @@ export default function Step6() {
       window.removeEventListener('resize', recalcScrollHeight);
       window.removeEventListener('orientationchange', recalcScrollHeight);
     };
+    // __bottomGap이 변해도 재계산
   }, [__bottomGap]);
 
-  // [NEW] 드래그 프록시: 내부(테이블)에서 터치/휠 → 상위 스크롤러로 전달
-  useEffect(() => {
-    const scroller = scrollRef.current;
-    const attach = (el) => {
-      if (!el || !scroller) return;
-      let active = false;
-      let startY = 0;
-      let startTop = 0;
-
-      const onTouchStart = (e) => {
-        if (!e.touches || !e.touches[0]) return;
-        active   = true;
-        startY   = e.touches[0].clientY;
-        startTop = scroller.scrollTop;
-      };
-      const onTouchMove = (e) => {
-        if (!active || !e.touches || !e.touches[0]) return;
-        const dy = e.touches[0].clientY - startY;
-        scroller.scrollTop = startTop - dy;
-        // iOS에서 상위로 터치 이동이 먹도록 기본 스크롤 방지
-        e.preventDefault();
-      };
-      const onTouchEnd = () => { active = false; };
-
-      // 마우스/트랙패드 휠도 상위로 전달
-      const onWheel = (e) => {
-        scroller.scrollTop += e.deltaY;
-      };
-
-      el.addEventListener('touchstart', onTouchStart, { passive: true });
-      el.addEventListener('touchmove',  onTouchMove,  { passive: false });
-      el.addEventListener('touchend',   onTouchEnd,   { passive: true });
-      el.addEventListener('wheel',      onWheel,      { passive: true });
-
-      return () => {
-        el.removeEventListener('touchstart', onTouchStart);
-        el.removeEventListener('touchmove',  onTouchMove);
-        el.removeEventListener('touchend',   onTouchEnd);
-        el.removeEventListener('wheel',      onWheel);
-      };
-    };
-
-    const cleanA = attach(dragAllocRef.current);
-    const cleanB = attach(dragResultRef.current);
-    return () => {
-      cleanA && cleanA();
-      cleanB && cleanB();
-    };
-  }, []);
-
+  // 로컬/원격 동기화(디바운스 저장) — 저장은 1-based로 처리됨
   usePersistRoomTableSelection({
     eventId,
     hiddenRooms,
@@ -162,14 +128,16 @@ export default function Step6() {
     syncToFirestore: true,
   });
 
+  // 운영자 토글 시 즉시 저장(홈 버튼 없이도 Player 반영)
   const persistPublicViewNow = async (nextHiddenRoomsSet = hiddenRooms, nextVisible = visibleMetrics) => {
     if (!updateEventImmediate) return;
     try {
-      const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a, b) => a - b);
+      const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a, b) => a - b); // 1-based 저장
       await updateEventImmediate({
         publicView: {
           hiddenRooms: hiddenArr,
           visibleMetrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
+          // 구버전 호환 키
           metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang }
         }
       });
@@ -178,6 +146,7 @@ export default function Step6() {
     }
   };
 
+  // 이벤트 문서의 publicView를 **권위 소스**로 안전 복원(과거 0-based도 자동 보정)
   useEffect(() => {
     const pv = effectiveEventData?.publicView;
     if (!pv) return;
@@ -202,6 +171,7 @@ export default function Step6() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveEventData?.publicView, roomCount]);
 
+  // 메뉴 토글 + 바깥 클릭 닫기
   const toggleMenu = (e) => { e.stopPropagation(); setMenuOpen(o => !o); };
   useEffect(() => {
     const close = () => setMenuOpen(false);
@@ -209,7 +179,10 @@ export default function Step6() {
     return () => document.removeEventListener('click', close, true);
   }, [menuOpen]);
 
+  // 헬퍼: 내부 인덱스(0-based) → 숨김 여부(1-based Set)
   const isHiddenIdx = (idx) => hiddenRooms.has(idx + 1);
+
+  // 선택 토글들(즉시 저장 포함) — **1-based** 토글
   const toggleRoom = (idx) => {
     const roomNo = idx + 1;
     const s = new Set(hiddenRooms);
@@ -223,12 +196,15 @@ export default function Step6() {
     persistPublicViewNow(hiddenRooms, next);
   };
 
+  // 캡처용 refs
   const allocRef  = useRef();
   const resultRef = useRef();
 
+  // 다운로드 헬퍼 (JPG / PDF)
   const downloadTable = async (ref, name, type) => {
     const elem = ref.current;
     if (!elem) return;
+
     const origOverflow = elem.style.overflow;
     const origWidth    = elem.style.width;
 
@@ -264,14 +240,17 @@ export default function Step6() {
     }
   };
 
+  // 방 이름
   const headers = Array.from({ length: roomCount }, (_, i) =>
     roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`
   );
 
+  // 참가자 소스: 컨텍스트 비어있으면 **라이브/컨텍스트 이벤트 문서** 폴백
   const sourceParticipants = (participants && participants.length)
     ? participants
     : ((effectiveEventData && Array.isArray(effectiveEventData.participants)) ? effectiveEventData.participants : []);
 
+  // 방별 그룹
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (sourceParticipants || []).forEach(p => {
@@ -282,17 +261,20 @@ export default function Step6() {
     return arr;
   }, [sourceParticipants, roomCount]);
 
+  // 방배정표 rows
   const MAX = 4;
   const allocRows = Array.from({ length: MAX }, (_, ri) =>
     byRoom.map(roomArr => roomArr[ri] || { nickname: '', handicap: '' })
   );
 
+  // 최종결과 계산(반땅만 결과에 영향)
   const resultByRoom = useMemo(() => {
     return byRoom.map(roomArr => {
       const filled = Array.from({ length: MAX }, (_, i) =>
         roomArr[i] || { nickname: '', handicap: 0, score: 0 }
       );
 
+      // 반땅 대상(최고 점수)
       let maxIdx = 0, maxVal = -Infinity;
       filled.forEach((p, i) => {
         const sc = p.score || 0;
@@ -303,8 +285,8 @@ export default function Step6() {
       const detail = filled.map((p, i) => {
         const hd = p.handicap || 0;
         const sc = p.score    || 0;
-        const bd = i === maxIdx ? Math.floor(sc / 2) : sc;
-        const used = showHalved ? bd : sc;
+        const bd = i === maxIdx ? Math.floor(sc / 2) : sc; // 반땅
+        const used = showHalved ? bd : sc;                  // 결과 계산은 반땅만 영향
 
         sumHd += hd;
         sumSc += sc;
@@ -324,6 +306,7 @@ export default function Step6() {
     });
   }, [byRoom, showHalved]);
 
+  // 등수(낮을수록 1등), 동점 시 합계핸디 낮은 쪽 우선
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
@@ -332,16 +315,13 @@ export default function Step6() {
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
 
-  // 드래그 프록시 영역 스타일(시각 변화 없이 이벤트만 받도록)
-  const __dragAreaStyle = { touchAction: 'none' };
-
   return (
     <div className={styles.step} style={__pageStyle}>
-      {/* 스크롤 본문 */}
+      {/* ──────────────── 스크롤 본문 래퍼 시작 ──────────────── */}
       <div ref={scrollRef} style={__scrollAreaBaseStyle}>
         {/* 선택 메뉴 */}
         <div className={styles.selectWrapper}>
-          <button className={styles.selectButton} onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}>선택</button>
+          <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
           {menuOpen && (
             <div className="dropdownMenu" onClick={e => e.stopPropagation()}>
               {headers.map((h, i) => (
@@ -375,160 +355,155 @@ export default function Step6() {
           )}
         </div>
 
-        {/* 방배정표 — 드래그 프록시 래퍼 */}
-        <div ref={dragAllocRef} style={__dragAreaStyle}>
-          <div ref={allocRef} className={styles.tableContainer}>
-            <h4 className={styles.tableTitle}>🏠 방배정표</h4>
-            <table className={`${styles.table} ${styles.fixedRows}`}>
-              <thead>
-                <tr>
-                  {headers.map((h, i) =>
-                    !isHiddenIdx(i) && (
-                      <th key={i} colSpan={2} className={styles.header}>{h}</th>
-                    )
-                  )}
-                </tr>
-                <tr>
-                  {headers.map((_, i) =>
-                    !isHiddenIdx(i) && (
-                      <React.Fragment key={i}>
-                        <th className={styles.header}>닉네임</th>
-                        <th className={styles.header}>G핸디</th>
-                      </React.Fragment>
-                    )
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {allocRows.map((row, ri) => (
-                  <tr key={ri}>
-                    {row.map((c, ci) =>
-                      !isHiddenIdx(ci) && (
-                        <React.Fragment key={ci}>
-                          <td className={styles.cell}>{c.nickname}</td>
-                          <td className={styles.cell} style={{ color: 'blue' }}>{c.handicap}</td>
-                        </React.Fragment>
-                      )
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  {byRoom.map((roomArr, ci) =>
+        {/* 방배정표 */}
+        <div ref={allocRef} className={styles.tableContainer}>
+          <h4 className={styles.tableTitle}>🏠 방배정표</h4>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
+            <thead>
+              <tr>
+                {headers.map((h, i) =>
+                  !isHiddenIdx(i) && (
+                    <th key={i} colSpan={2} className={styles.header}>{h}</th>
+                  )
+                )}
+              </tr>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <th className={styles.header}>닉네임</th>
+                      <th className={styles.header}>G핸디</th>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {allocRows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((c, ci) =>
                     !isHiddenIdx(ci) && (
                       <React.Fragment key={ci}>
-                        <td className={styles.footerLabel}>합계</td>
-                        <td className={styles.footerValue} style={{ color: 'blue' }}>
-                          {roomArr.reduce((sum, p) => sum + (p.handicap || 0), 0)}
-                        </td>
+                        <td className={styles.cell}>{c.nickname}</td>
+                        <td className={styles.cell} style={{ color: 'blue' }}>{c.handicap}</td>
                       </React.Fragment>
                     )
                   )}
                 </tr>
-              </tfoot>
-            </table>
-          </div>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                {byRoom.map((roomArr, ci) =>
+                  !isHiddenIdx(ci) && (
+                    <React.Fragment key={ci}>
+                      <td className={styles.footerLabel}>합계</td>
+                      <td className={styles.footerValue} style={{ color: 'blue' }}>
+                        {roomArr.reduce((sum, p) => sum + (p.handicap || 0), 0)}
+                      </td>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </tfoot>
+          </table>
         </div>
-
         <div className={styles.actionButtons}>
           <button onClick={() => downloadTable(allocRef, 'allocation', 'jpg')}>JPG로 저장</button>
           <button onClick={() => downloadTable(allocRef, 'allocation', 'pdf')}>PDF로 저장</button>
         </div>
 
-        {/* 최종결과표 — 드래그 프록시 래퍼 */}
-        <div ref={dragResultRef} style={__dragAreaStyle}>
-          <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
-            <h4 className={styles.tableTitle}>📊 최종결과표</h4>
-            <table className={`${styles.table} ${styles.fixedRows}`}>
-              <thead>
-                <tr>
-                  {headers.map((h, i) =>
-                    !isHiddenIdx(i) && (
-                      <th
-                        key={i}
-                        colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0) + 1}
-                        className={styles.header}
-                      >
-                        {h}
-                      </th>
-                    )
-                  )}
-                </tr>
-                <tr>
-                  {headers.map((_, i) =>
-                    !isHiddenIdx(i) && (
-                      <React.Fragment key={i}>
-                        <th className={styles.header}>닉네임</th>
-                        <th className={styles.header}>G핸디</th>
-                        {showScore   && <th className={styles.header}>점수</th>}
-                        {showHalved  && <th className={styles.header}>반땅</th>}
-                        <th className={styles.header}>결과</th>
-                      </React.Fragment>
-                    )
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: MAX }).map((_, ri) => (
-                  <tr key={ri}>
-                    {resultByRoom.map((roomObj, ci) =>
-                      !isHiddenIdx(ci) && (
-                        <React.Fragment key={ci}>
-                          <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
-                          <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
-                          {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
-                          {showHalved && <td className={styles.cell} style={{ color: 'blue' }}>
-                            {roomObj.detail[ri].banddang}
-                          </td>}
-                          <td className={styles.cell} style={{ color: 'red' }}>{roomObj.detail[ri].result}</td>
-                        </React.Fragment>
-                      )
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
+        {/* 최종결과표 */}
+        <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
+          <h4 className={styles.tableTitle}>📊 최종결과표</h4>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
+            <thead>
+              <tr>
+                {headers.map((h, i) =>
+                  !isHiddenIdx(i) && (
+                    <th
+                      key={i}
+                      colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0) + 1}
+                      className={styles.header}
+                    >
+                      {h}
+                    </th>
+                  )
+                )}
+              </tr>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <th className={styles.header}>닉네임</th>
+                      <th className={styles.header}>G핸디</th>
+                      {showScore   && <th className={styles.header}>점수</th>}
+                      {showHalved  && <th className={styles.header}>반땅</th>}
+                      <th className={styles.header}>결과</th>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: MAX }).map((_, ri) => (
+                <tr key={ri}>
                   {resultByRoom.map((roomObj, ci) =>
                     !isHiddenIdx(ci) && (
                       <React.Fragment key={ci}>
-                        <td className={styles.footerLabel}>합계</td>
-                        <td className={styles.footerValue}>{roomObj.sumHandicap}</td>
-                        {showScore  && <td className={styles.footerValue}>{roomObj.sumScore}</td>}
-                        {showHalved && <td className={styles.footerBanddang}>{roomObj.sumBanddang}</td>}
-                        <td className={styles.footerResult}>{roomObj.sumResult}</td>
+                        <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
+                        <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
+                        {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
+                        {showHalved && <td className={styles.cell} style={{ color: 'blue' }}>
+                          {roomObj.detail[ri].banddang}
+                        </td>}
+                        <td className={styles.cell} style={{ color: 'red' }}>{roomObj.detail[ri].result}</td>
                       </React.Fragment>
                     )
                   )}
                 </tr>
-                <tr>
-                  {headers.map((_, i) =>
-                    !isHiddenIdx(i) && (
-                      <React.Fragment key={i}>
-                        <td
-                          colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
-                          className={styles.footerBlank}
-                        />
-                        <td className={styles.footerRank} style={{ background: '#fff8d1' }}>
-                          {rankMap[i]}등
-                        </td>
-                      </React.Fragment>
-                    )
-                  )}
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                {resultByRoom.map((roomObj, ci) =>
+                  !isHiddenIdx(ci) && (
+                    <React.Fragment key={ci}>
+                      <td className={styles.footerLabel}>합계</td>
+                      <td className={styles.footerValue}>{roomObj.sumHandicap}</td>
+                      {showScore  && <td className={styles.footerValue}>{roomObj.sumScore}</td>}
+                      {showHalved && <td className={styles.footerBanddang}>{roomObj.sumBanddang}</td>}
+                      <td className={styles.footerResult}>{roomObj.sumResult}</td>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <td
+                        colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
+                        className={styles.footerBlank}
+                      />
+                      <td className={styles.footerRank} style={{ background: '#fff8d1' }}>
+                        {rankMap[i]}등
+                      </td>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </tfoot>
+          </table>
         </div>
-
         <div className={styles.actionButtons}>
           <button onClick={() => downloadTable(resultRef, 'results', 'jpg')}>JPG로 저장</button>
           <button onClick={() => downloadTable(resultRef, 'results', 'pdf')}>PDF로 저장</button>
         </div>
       </div>
+      {/* ──────────────── 스크롤 본문 래퍼 끝 ──────────────── */}
 
-      {/* 하단 버튼 */}
+      {/* 하단 버튼 — STEP1~5와 동일 여백(좌/우 16px, 세로 12px), 탭 위로 고정 */}
       <div
         ref={footerRef}
         className={styles.stepFooter}
@@ -544,7 +519,11 @@ export default function Step6() {
         }}
       >
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={() => { try { localStorage.setItem('homeViewMode', 'stroke'); } catch {} setStep(0); }}>홈</button>
+        <button
+          onClick={() => { try { localStorage.setItem('homeViewMode', 'stroke'); } catch {} setStep(0); }}
+        >
+          홈
+        </button>
       </div>
     </div>
   );
