@@ -1,6 +1,6 @@
 // /src/screens/Step6.jsx
 
-import React, { useState, useRef, useMemo, useContext, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useContext, useEffect, useLayoutEffect } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step6.module.css';
@@ -38,9 +38,12 @@ export default function Step6() {
   const setShowHalved = (v) => setVisibleMetrics(m => ({ ...m, banddang: !!v }));
 
   // ─────────────────────────────────────────────────────────────
-  // ★ 하단 고정/여백을 STEP1~5와 동일화 + 스크롤 컨테이너 추가
+  // ★ 하단 고정/여백 공통 처리 + 스크롤 컨테이너(실높이 계산) 추가
   // ─────────────────────────────────────────────────────────────
   const [__bottomGap, __setBottomGap] = useState(64);
+  const footerRef   = useRef(null);   // [NEW] 하단 버튼 실제 높이 측정
+  const scrollRef   = useRef(null);   // [NEW] 스크롤 영역 높이 지정 대상
+
   useEffect(() => {
     const probe = () => {
       try {
@@ -56,7 +59,8 @@ export default function Step6() {
     window.addEventListener('resize', probe);
     return () => window.removeEventListener('resize', probe);
   }, []);
-  const __FOOTER_H    = 56;                              // 버튼 바 높이(공통 추정)
+
+  const __FOOTER_H    = 56;                              // 버튼 바 높이(fallback)
   const __safeBottom  = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
 
   // [CHANGE] 페이지 컨테이너: 플렉스 컬럼 + 바닥 여백(버튼/탭바)
@@ -68,14 +72,49 @@ export default function Step6() {
     flexDirection: 'column'
   };
 
-  // [NEW] 중간 본문 스크롤 래퍼: iOS에서 전영역 자연 스크롤
-  const __scrollAreaStyle = {
+  // [NEW] 중간 본문 스크롤 래퍼: iOS 전영역 자연 스크롤 + 실높이(px) 적용
+  const __scrollAreaBaseStyle = {
     flex: '1 1 auto',
     overflowY: 'auto',
     WebkitOverflowScrolling: 'touch',
     touchAction: 'pan-y',
     overscrollBehavior: 'contain'
   };
+
+  // [NEW] 스크롤 영역 실높이 계산(iOS Safari flex-height 버그 회피)
+  const recalcScrollHeight = () => {
+    try {
+      const viewportH =
+        (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+      const scrollEl = scrollRef.current;
+      if (!scrollEl) return;
+
+      // 스크롤영역의 화면상단 위치
+      const topY = scrollEl.getBoundingClientRect().top;
+
+      // 하단 버튼 실제 높이(측정 실패 시 fallback)
+      const footerH = (footerRef.current && footerRef.current.offsetHeight) || __FOOTER_H;
+
+      // 하단 탭/세이프에어리어 여백(이미 footer bottom에 반영되지만, 실제 뷰포트 차감에도 필요)
+      const bottomGap = __bottomGap;
+
+      // 여유 margin 조금(6px) 확보
+      const available = Math.max(100, Math.floor(viewportH - topY - footerH - bottomGap - 6));
+
+      scrollEl.style.height = `${available}px`;
+    } catch {}
+  };
+
+  useLayoutEffect(() => {
+    recalcScrollHeight();
+    window.addEventListener('resize', recalcScrollHeight);
+    window.addEventListener('orientationchange', recalcScrollHeight);
+    return () => {
+      window.removeEventListener('resize', recalcScrollHeight);
+      window.removeEventListener('orientationchange', recalcScrollHeight);
+    };
+    // __bottomGap이 변해도 재계산
+  }, [__bottomGap]);
 
   // 로컬/원격 동기화(디바운스 저장) — 저장은 1-based로 처리됨
   usePersistRoomTableSelection({
@@ -136,8 +175,8 @@ export default function Step6() {
   const toggleMenu = (e) => { e.stopPropagation(); setMenuOpen(o => !o); };
   useEffect(() => {
     const close = () => setMenuOpen(false);
-    if (menuOpen) document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    if (menuOpen) document.addEventListener('click', close, true);
+    return () => document.removeEventListener('click', close, true);
   }, [menuOpen]);
 
   // 헬퍼: 내부 인덱스(0-based) → 숨김 여부(1-based Set)
@@ -279,7 +318,7 @@ export default function Step6() {
   return (
     <div className={styles.step} style={__pageStyle}>
       {/* ──────────────── 스크롤 본문 래퍼 시작 ──────────────── */}
-      <div style={__scrollAreaStyle}>
+      <div ref={scrollRef} style={__scrollAreaBaseStyle}>
         {/* 선택 메뉴 */}
         <div className={styles.selectWrapper}>
           <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
@@ -466,6 +505,7 @@ export default function Step6() {
 
       {/* 하단 버튼 — STEP1~5와 동일 여백(좌/우 16px, 세로 12px), 탭 위로 고정 */}
       <div
+        ref={footerRef}
         className={styles.stepFooter}
         style={{
           position: 'fixed',
