@@ -1,4 +1,4 @@
-// src/screens/Step6.jsx
+// /src/screens/Step6.jsx
 
 import React, { useState, useRef, useMemo, useContext, useEffect } from 'react';
 import html2canvas from 'html2canvas';
@@ -36,6 +36,37 @@ export default function Step6() {
   const setShowScore = (v) => setVisibleMetrics(m => ({ ...m, score: !!v }));
   const showHalved   = !!visibleMetrics.banddang;
   const setShowHalved = (v) => setVisibleMetrics(m => ({ ...m, banddang: !!v }));
+
+  // ─────────────────────────────────────────────────────────────
+  // ★ 하단 고정/여백을 STEP1~5와 동일화
+  //   - 아이콘 탭 높이(동적) + 안전영역을 계산하여 footer를 fixed로 바닥에 고정
+  //   - 본문 컨테이너에 padding-bottom을 주어 겹침 방지
+  // ─────────────────────────────────────────────────────────────
+  const [__bottomGap, __setBottomGap] = useState(64);
+  useEffect(() => {
+    const probe = () => {
+      try {
+        const el =
+          document.querySelector('[data-bottom-nav]') ||
+          document.querySelector('#bottomTabBar') ||
+          document.querySelector('.bottomTabBar') ||
+          document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H    = 56;                              // 버튼 바 높이(공통 추정)
+  const __safeBottom  = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle   = {                                // 전체 영역 어디서나 드래그 가능
+    minHeight: '100dvh',
+    boxSizing: 'border-box',
+    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
+    WebkitOverflowScrolling: 'touch',
+    touchAction: 'pan-y'
+  };
 
   // 로컬/원격 동기화(디바운스 저장) — 저장은 1-based로 처리됨
   usePersistRoomTableSelection({
@@ -237,7 +268,7 @@ export default function Step6() {
   }, [resultByRoom, hiddenRooms]);
 
   return (
-    <div className={styles.step}>
+    <div className={styles.step} style={__pageStyle}>{/* ★ 페이지 전체 드래그/여백 적용 */}
       {/* 선택 메뉴 */}
       <div className={styles.selectWrapper}>
         <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
@@ -420,8 +451,20 @@ export default function Step6() {
         <button onClick={() => downloadTable(resultRef, 'results', 'pdf')}>PDF로 저장</button>
       </div>
 
-      {/* 하단 버튼 */}
-      <div className={styles.stepFooter}>
+      {/* 하단 버튼 — STEP1~5와 동일 여백(좌/우 16px, 세로 12px), 탭 위로 고정 */}
+      <div
+        className={styles.stepFooter}
+        style={{
+          position: 'fixed',                          /* ★ */
+          left: 0, right: 0,                          /* ★ */
+          bottom: __safeBottom,                       /* ★ 아이콘 탭 + 안전영역 위 */
+          zIndex: 20,
+          boxSizing: 'border-box',
+          padding: '12px 16px',                       /* ★ STEP1~5 동일 */
+          background: '#fff',
+          borderTop: '1px solid #e5e5e5'
+        }}
+      >
         <button onClick={goPrev}>← 이전</button>
         <button
           onClick={() => { try { localStorage.setItem('homeViewMode', 'stroke'); } catch {} setStep(0); }}
