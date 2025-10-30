@@ -21,11 +21,6 @@ export default function Step5() {
 
   const { eventId, updateEventImmediate } = useContext(EventContext) || {};
 
-  // ─────────────────────────────────────────────────────────────
-  // ① 하단 여백: STEP4와 동일한 계산식 사용(최하단 아이콘탭 높이 + 안전영역)
-  //    - 페이지 컨테이너에 padding-bottom을 주고, footer는 bottom: __safeBottom 고정
-  //    - 좌/우는 내부 padding(16px)으로 동일하게 보이게 함
-  // ─────────────────────────────────────────────────────────────
   const [__bottomGap, __setBottomGap] = useState(64);
   useEffect(() => {
     const probe = () => {
@@ -42,15 +37,14 @@ export default function Step5() {
     window.addEventListener('resize', probe);
     return () => window.removeEventListener('resize', probe);
   }, []);
-  const __FOOTER_H = 56; // 버튼바 높이(프로젝트 공통 추정값)
+  const __FOOTER_H = 56;
   const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
   const __pageStyle = {
     minHeight: '100dvh',
     boxSizing: 'border-box',
-    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`, // 리스트가 footer와 겹치지 않게
+    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
   };
 
-  // ── helper: 변경분을 기존 리스트에 반영해 이벤트 문서로 커밋할 payload 구성 ──
   const buildNextFromChanges = (baseList, changes) => {
     try {
       const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
@@ -69,12 +63,10 @@ export default function Step5() {
   const [loadingId, setLoadingId] = useState(null);
   const [forceSelectingId, setForceSelectingId] = useState(null);
 
-  // ── 모바일 숫자 입력 안정화를 위한 draft 상태 ──
-  const [scoreDraft, setScoreDraft] = useState({}); // { [id]: '입력중 문자열' }
-  const inputRefs = useRef({});       // 점수 input DOM 참조(롱프레스용)
-  const longTimerRef = useRef(null);  // 롱프레스 타이머
+  const [scoreDraft, setScoreDraft] = useState({});
+  const inputRefs = useRef({});
+  const longTimerRef = useRef(null);
 
-  // participants 외부 갱신 시 draft 정리
   useEffect(() => {
     if (!Array.isArray(participants)) return;
     setScoreDraft(prev => {
@@ -93,10 +85,8 @@ export default function Step5() {
     });
   }, [participants]);
 
-  // 방 번호 1~roomCount 배열
   const rooms = Array.from({ length: roomCount }, (_, i) => i + 1);
 
-  // ===== Firestore 동기화(있으면 사용, 없으면 no-op) =====
   const canBulk = typeof updateParticipantsBulk === 'function';
   const canOne  = typeof updateParticipant === 'function';
   const syncChanges = async (changes) => {
@@ -109,7 +99,6 @@ export default function Step5() {
     } catch (e) {
       console.warn('[Step5] syncChanges failed:', e);
     }
-    // 이벤트 문서 participants[]에도 반영(우리가 만든 변경 시점에만 호출)
     try {
       if (typeof updateEventImmediate === 'function' && eventId) {
         const base = participants || [];
@@ -121,7 +110,6 @@ export default function Step5() {
     }
   };
 
-  // ── 점수 입력: draft 유지 + blur/Enter 시 커밋 ──
   const isPartialNumber = (v) => /^-?\d*\.?\d*$/.test(v);
   const onScoreChange = (id, raw) => {
     if (!isPartialNumber(raw)) return;
@@ -140,7 +128,6 @@ export default function Step5() {
     setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
   };
 
-  // ── “-” 롱프레스 입력(복구) ──
   const startMinusLongPress = (id) => {
     try { if (longTimerRef.current) clearTimeout(longTimerRef.current); } catch {}
     longTimerRef.current = setTimeout(() => {
@@ -149,21 +136,19 @@ export default function Step5() {
           const p = (participants || []).find(x => x.id === id);
           return p && p.score != null ? String(p.score) : '';
         })();
-        if (String(cur).startsWith('-')) return d;           // 이미 '-'면 유지
+        if (String(cur).startsWith('-')) return d;
         const nextVal = cur === '' ? '-' : `-${String(cur).replace(/^-/, '')}`;
         const next = { ...d, [id]: nextVal };
-        // 커서/포커스 유지
         const el = inputRefs.current[id];
         if (el) { try { el.focus(); el.setSelectionRange(nextVal.length, nextVal.length); } catch {} }
         return next;
       });
-    }, 600); // STEP4와 맞춘 600ms 롱프레스
+    }, 600);
   };
   const cancelMinusLongPress = () => {
     try { if (longTimerRef.current) clearTimeout(longTimerRef.current); } catch {}
   };
 
-  // ── 수동 배정 ──
   const onManualAssign = (id) => {
     setLoadingId(id);
     setTimeout(async () => {
@@ -200,7 +185,6 @@ export default function Step5() {
     }, 600);
   };
 
-  // ── 강제 배정/취소 ──
   const onForceAssign = async (id, room) => {
     let targetNickname = null;
     let prevRoom = null;
@@ -237,7 +221,6 @@ export default function Step5() {
     await syncChanges(changes);
   };
 
-  // ── 자동 배정 ──
   const onAutoAssign = async () => {
     let nextSnapshot = null;
     setParticipants(ps => {
@@ -274,7 +257,6 @@ export default function Step5() {
     }
   };
 
-  // ── 초기화 ──
   const onReset = async () => {
     setParticipants(ps => ps.map(p => ({ ...p, room: null, score: null, selected: false })));
     const changes = participants.map(p => ({
@@ -289,7 +271,6 @@ export default function Step5() {
     console.log('[Step5] participants:', participants);
   }, [participants]);
 
-  // ★ 강제 메뉴 바깥 클릭 시 닫힘(유지)
   useEffect(() => {
     if (forceSelectingId == null) return;
     const handler = (e) => {
@@ -309,9 +290,7 @@ export default function Step5() {
   }, [forceSelectingId]);
 
   return (
-    // ★ STEP4와 같은 방식: 페이지 하단 패딩으로 겹침 방지 + footer는 bottom: __safeBottom
     <div className={styles.step} style={__pageStyle}>
-      {/* 컬럼 헤더 */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
@@ -321,7 +300,6 @@ export default function Step5() {
         <div className={`${styles.cell} ${styles.force}`}>강제</div>
       </div>
 
-      {/* 참가자 리스트 */}
       <div className={styles.participantTable}>
         {participants.map(p => {
           const isDisabled = loadingId === p.id || p.room != null;
@@ -338,13 +316,13 @@ export default function Step5() {
                 <input type="text" value={p.handicap} disabled />
               </div>
 
-              {/* 점수 입력: text + inputMode(숫자패드) + draft + 롱프레스 '-' */}
               <div className={`${styles.cell} ${styles.score}`}>
                 <input
                   ref={el => (inputRefs.current[p.id] = el)}
                   type="text"
                   inputMode="decimal"
-                  pattern="[0-9.\\-]*"
+                  /* ★ FIX: 최신 브라우저 v-flag 호환 */
+                  pattern="[-0-9.]*"
                   autoComplete="off"
                   value={scoreValue}
                   onChange={e => onScoreChange(p.id, e.target.value)}
@@ -357,7 +335,6 @@ export default function Step5() {
                 />
               </div>
 
-              {/* 수동 */}
               <div className={`${styles.cell} ${styles.manual}`}>
                 <button
                   className={styles.smallBtn}
@@ -368,7 +345,6 @@ export default function Step5() {
                 </button>
               </div>
 
-              {/* 강제 + 메뉴 */}
               <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
                 <button
                   className={styles.smallBtn}
@@ -402,7 +378,6 @@ export default function Step5() {
         })}
       </div>
 
-      {/* 하단 내비게이션: STEP4와 동일한 여백(좌/우 16px, 세로 12px), 탭 위로 띄움 */}
       <div
         className={styles.stepFooter}
         style={{
