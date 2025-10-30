@@ -38,9 +38,7 @@ export default function Step6() {
   const setShowHalved = (v) => setVisibleMetrics(m => ({ ...m, banddang: !!v }));
 
   // ─────────────────────────────────────────────────────────────
-  // ★ 하단 고정/여백을 STEP1~5와 동일화
-  //   - 아이콘 탭 높이(동적) + 안전영역을 계산하여 footer를 fixed로 바닥에 고정
-  //   - 본문 컨테이너에 padding-bottom을 주어 겹침 방지
+  // ★ 하단 고정/여백을 STEP1~5와 동일화 + 스크롤 컨테이너 추가
   // ─────────────────────────────────────────────────────────────
   const [__bottomGap, __setBottomGap] = useState(64);
   useEffect(() => {
@@ -60,12 +58,23 @@ export default function Step6() {
   }, []);
   const __FOOTER_H    = 56;                              // 버튼 바 높이(공통 추정)
   const __safeBottom  = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
-  const __pageStyle   = {                                // 전체 영역 어디서나 드래그 가능
+
+  // [CHANGE] 페이지 컨테이너: 플렉스 컬럼 + 바닥 여백(버튼/탭바)
+  const __pageStyle   = {
     minHeight: '100dvh',
     boxSizing: 'border-box',
     paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
+    display: 'flex',
+    flexDirection: 'column'
+  };
+
+  // [NEW] 중간 본문 스크롤 래퍼: iOS에서 전영역 자연 스크롤
+  const __scrollAreaStyle = {
+    flex: '1 1 auto',
+    overflowY: 'auto',
     WebkitOverflowScrolling: 'touch',
-    touchAction: 'pan-y'
+    touchAction: 'pan-y',
+    overscrollBehavior: 'contain'
   };
 
   // 로컬/원격 동기화(디바운스 저장) — 저장은 1-based로 처리됨
@@ -268,199 +277,203 @@ export default function Step6() {
   }, [resultByRoom, hiddenRooms]);
 
   return (
-    <div className={styles.step} style={__pageStyle}>{/* ★ 페이지 전체 드래그/여백 적용 */}
-      {/* 선택 메뉴 */}
-      <div className={styles.selectWrapper}>
-        <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
-        {menuOpen && (
-          <div className="dropdownMenu" onClick={e => e.stopPropagation()}>
-            {headers.map((h, i) => (
-              <label key={i} className="dropdownItem">
+    <div className={styles.step} style={__pageStyle}>
+      {/* ──────────────── 스크롤 본문 래퍼 시작 ──────────────── */}
+      <div style={__scrollAreaStyle}>
+        {/* 선택 메뉴 */}
+        <div className={styles.selectWrapper}>
+          <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
+          {menuOpen && (
+            <div className="dropdownMenu" onClick={e => e.stopPropagation()}>
+              {headers.map((h, i) => (
+                <label key={i} className="dropdownItem">
+                  <input
+                    type="checkbox"
+                    checked={!isHiddenIdx(i)}
+                    onChange={() => { toggleRoom(i); setMenuOpen(false); }}
+                  />
+                  {h}
+                </label>
+              ))}
+              <hr className="dropdownDivider" />
+              <label className="dropdownItem">
                 <input
                   type="checkbox"
-                  checked={!isHiddenIdx(i)}
-                  onChange={() => { toggleRoom(i); setMenuOpen(false); }}
+                  checked={visibleMetrics.score}
+                  onChange={() => { toggleMetric('score'); setMenuOpen(false); }}
                 />
-                {h}
+                점수
               </label>
-            ))}
-            <hr className="dropdownDivider" />
-            <label className="dropdownItem">
-              <input
-                type="checkbox"
-                checked={visibleMetrics.score}
-                onChange={() => { toggleMetric('score'); setMenuOpen(false); }}
-              />
-              점수
-            </label>
-            <label className="dropdownItem">
-              <input
-                type="checkbox"
-                checked={visibleMetrics.banddang}
-                onChange={() => { toggleMetric('banddang'); setMenuOpen(false); }}
-              />
-              반땅
-            </label>
-          </div>
-        )}
-      </div>
+              <label className="dropdownItem">
+                <input
+                  type="checkbox"
+                  checked={visibleMetrics.banddang}
+                  onChange={() => { toggleMetric('banddang'); setMenuOpen(false); }}
+                />
+                반땅
+              </label>
+            </div>
+          )}
+        </div>
 
-      {/* 방배정표 */}
-      <div ref={allocRef} className={styles.tableContainer}>
-        <h4 className={styles.tableTitle}>🏠 방배정표</h4>
-        <table className={`${styles.table} ${styles.fixedRows}`}>
-          <thead>
-            <tr>
-              {headers.map((h, i) =>
-                !isHiddenIdx(i) && (
-                  <th key={i} colSpan={2} className={styles.header}>{h}</th>
-                )
-              )}
-            </tr>
-            <tr>
-              {headers.map((_, i) =>
-                !isHiddenIdx(i) && (
-                  <React.Fragment key={i}>
-                    <th className={styles.header}>닉네임</th>
-                    <th className={styles.header}>G핸디</th>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {allocRows.map((row, ri) => (
-              <tr key={ri}>
-                {row.map((c, ci) =>
-                  !isHiddenIdx(ci) && (
-                    <React.Fragment key={ci}>
-                      <td className={styles.cell}>{c.nickname}</td>
-                      <td className={styles.cell} style={{ color: 'blue' }}>{c.handicap}</td>
+        {/* 방배정표 */}
+        <div ref={allocRef} className={styles.tableContainer}>
+          <h4 className={styles.tableTitle}>🏠 방배정표</h4>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
+            <thead>
+              <tr>
+                {headers.map((h, i) =>
+                  !isHiddenIdx(i) && (
+                    <th key={i} colSpan={2} className={styles.header}>{h}</th>
+                  )
+                )}
+              </tr>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <th className={styles.header}>닉네임</th>
+                      <th className={styles.header}>G핸디</th>
                     </React.Fragment>
                   )
                 )}
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              {byRoom.map((roomArr, ci) =>
-                !isHiddenIdx(ci) && (
-                  <React.Fragment key={ci}>
-                    <td className={styles.footerLabel}>합계</td>
-                    <td className={styles.footerValue} style={{ color: 'blue' }}>
-                      {roomArr.reduce((sum, p) => sum + (p.handicap || 0), 0)}
-                    </td>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <div className={styles.actionButtons}>
-        <button onClick={() => downloadTable(allocRef, 'allocation', 'jpg')}>JPG로 저장</button>
-        <button onClick={() => downloadTable(allocRef, 'allocation', 'pdf')}>PDF로 저장</button>
-      </div>
+            </thead>
+            <tbody>
+              {allocRows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((c, ci) =>
+                    !isHiddenIdx(ci) && (
+                      <React.Fragment key={ci}>
+                        <td className={styles.cell}>{c.nickname}</td>
+                        <td className={styles.cell} style={{ color: 'blue' }}>{c.handicap}</td>
+                      </React.Fragment>
+                    )
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                {byRoom.map((roomArr, ci) =>
+                  !isHiddenIdx(ci) && (
+                    <React.Fragment key={ci}>
+                      <td className={styles.footerLabel}>합계</td>
+                      <td className={styles.footerValue} style={{ color: 'blue' }}>
+                        {roomArr.reduce((sum, p) => sum + (p.handicap || 0), 0)}
+                      </td>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div className={styles.actionButtons}>
+          <button onClick={() => downloadTable(allocRef, 'allocation', 'jpg')}>JPG로 저장</button>
+          <button onClick={() => downloadTable(allocRef, 'allocation', 'pdf')}>PDF로 저장</button>
+        </div>
 
-      {/* 최종결과표 */}
-      <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
-        <h4 className={styles.tableTitle}>📊 최종결과표</h4>
-        <table className={`${styles.table} ${styles.fixedRows}`}>
-          <thead>
-            <tr>
-              {headers.map((h, i) =>
-                !isHiddenIdx(i) && (
-                  <th
-                    key={i}
-                    colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0) + 1}
-                    className={styles.header}
-                  >
-                    {h}
-                  </th>
-                )
-              )}
-            </tr>
-            <tr>
-              {headers.map((_, i) =>
-                !isHiddenIdx(i) && (
-                  <React.Fragment key={i}>
-                    <th className={styles.header}>닉네임</th>
-                    <th className={styles.header}>G핸디</th>
-                    {showScore   && <th className={styles.header}>점수</th>}
-                    {showHalved  && <th className={styles.header}>반땅</th>}
-                    <th className={styles.header}>결과</th>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: MAX }).map((_, ri) => (
-              <tr key={ri}>
+        {/* 최종결과표 */}
+        <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
+          <h4 className={styles.tableTitle}>📊 최종결과표</h4>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
+            <thead>
+              <tr>
+                {headers.map((h, i) =>
+                  !isHiddenIdx(i) && (
+                    <th
+                      key={i}
+                      colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0) + 1}
+                      className={styles.header}
+                    >
+                      {h}
+                    </th>
+                  )
+                )}
+              </tr>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <th className={styles.header}>닉네임</th>
+                      <th className={styles.header}>G핸디</th>
+                      {showScore   && <th className={styles.header}>점수</th>}
+                      {showHalved  && <th className={styles.header}>반땅</th>}
+                      <th className={styles.header}>결과</th>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: MAX }).map((_, ri) => (
+                <tr key={ri}>
+                  {resultByRoom.map((roomObj, ci) =>
+                    !isHiddenIdx(ci) && (
+                      <React.Fragment key={ci}>
+                        <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
+                        <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
+                        {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
+                        {showHalved && <td className={styles.cell} style={{ color: 'blue' }}>
+                          {roomObj.detail[ri].banddang}
+                        </td>}
+                        <td className={styles.cell} style={{ color: 'red' }}>{roomObj.detail[ri].result}</td>
+                      </React.Fragment>
+                    )
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
                 {resultByRoom.map((roomObj, ci) =>
                   !isHiddenIdx(ci) && (
                     <React.Fragment key={ci}>
-                      <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
-                      <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
-                      {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
-                      {showHalved && <td className={styles.cell} style={{ color: 'blue' }}>
-                        {roomObj.detail[ri].banddang}
-                      </td>}
-                      <td className={styles.cell} style={{ color: 'red' }}>{roomObj.detail[ri].result}</td>
+                      <td className={styles.footerLabel}>합계</td>
+                      <td className={styles.footerValue}>{roomObj.sumHandicap}</td>
+                      {showScore  && <td className={styles.footerValue}>{roomObj.sumScore}</td>}
+                      {showHalved && <td className={styles.footerBanddang}>{roomObj.sumBanddang}</td>}
+                      <td className={styles.footerResult}>{roomObj.sumResult}</td>
                     </React.Fragment>
                   )
                 )}
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              {resultByRoom.map((roomObj, ci) =>
-                !isHiddenIdx(ci) && (
-                  <React.Fragment key={ci}>
-                    <td className={styles.footerLabel}>합계</td>
-                    <td className={styles.footerValue}>{roomObj.sumHandicap}</td>
-                    {showScore  && <td className={styles.footerValue}>{roomObj.sumScore}</td>}
-                    {showHalved && <td className={styles.footerBanddang}>{roomObj.sumBanddang}</td>}
-                    <td className={styles.footerResult}>{roomObj.sumResult}</td>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-            <tr>
-              {headers.map((_, i) =>
-                !isHiddenIdx(i) && (
-                  <React.Fragment key={i}>
-                    <td
-                      colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
-                      className={styles.footerBlank}
-                    />
-                    <td className={styles.footerRank} style={{ background: '#fff8d1' }}>
-                      {rankMap[i]}등
-                    </td>
-                  </React.Fragment>
-                )
-              )}
-            </tr>
-          </tfoot>
-        </table>
+              <tr>
+                {headers.map((_, i) =>
+                  !isHiddenIdx(i) && (
+                    <React.Fragment key={i}>
+                      <td
+                        colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
+                        className={styles.footerBlank}
+                      />
+                      <td className={styles.footerRank} style={{ background: '#fff8d1' }}>
+                        {rankMap[i]}등
+                      </td>
+                    </React.Fragment>
+                  )
+                )}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div className={styles.actionButtons}>
+          <button onClick={() => downloadTable(resultRef, 'results', 'jpg')}>JPG로 저장</button>
+          <button onClick={() => downloadTable(resultRef, 'results', 'pdf')}>PDF로 저장</button>
+        </div>
       </div>
-      <div className={styles.actionButtons}>
-        <button onClick={() => downloadTable(resultRef, 'results', 'jpg')}>JPG로 저장</button>
-        <button onClick={() => downloadTable(resultRef, 'results', 'pdf')}>PDF로 저장</button>
-      </div>
+      {/* ──────────────── 스크롤 본문 래퍼 끝 ──────────────── */}
 
       {/* 하단 버튼 — STEP1~5와 동일 여백(좌/우 16px, 세로 12px), 탭 위로 고정 */}
       <div
         className={styles.stepFooter}
         style={{
-          position: 'fixed',                          /* ★ */
-          left: 0, right: 0,                          /* ★ */
-          bottom: __safeBottom,                       /* ★ 아이콘 탭 + 안전영역 위 */
+          position: 'fixed',
+          left: 0, right: 0,
+          bottom: __safeBottom,
           zIndex: 20,
           boxSizing: 'border-box',
-          padding: '12px 16px',                       /* ★ STEP1~5 동일 */
+          padding: '12px 16px',
           background: '#fff',
           borderTop: '1px solid #e5e5e5'
         }}

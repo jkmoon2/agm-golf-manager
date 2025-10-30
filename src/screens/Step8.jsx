@@ -27,6 +27,34 @@ export default function Step8() {
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
+  // ───────────────────────────────────────────────────────────
+  // [NEW] 하단 고정 버튼을 위한 안전영역/여백 계산 (STEP5/7과 동일 패턴)
+  // ───────────────────────────────────────────────────────────
+  const [__bottomGap, __setBottomGap] = useState(64);
+  useEffect(() => {
+    const probe = () => {
+      try {
+        const el =
+          document.querySelector('[data-bottom-nav]') ||
+          document.querySelector('#bottomTabBar') ||
+          document.querySelector('.bottomTabBar') ||
+          document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H   = 56; // 하단 버튼 영역 높이(대략)
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle  = {
+    minHeight: '100dvh',
+    boxSizing: 'border-box',
+    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`, // 컨텐츠가 버튼 뒤로 숨지 않게
+  };
+  // ───────────────────────────────────────────────────────────
+
   // ── 1) UI 상태 ───────────────────────────────────────────
   // ※ hiddenRooms를 **1-based(방번호)** 세트로 유지합니다.
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
@@ -357,7 +385,7 @@ export default function Step8() {
   }, [teamsByRoom, hiddenRooms]);
 
   return (
-    <div className={styles.step}>
+    <div className={styles.step} style={__pageStyle}>
       {/* ─── “선택” 버튼 + 드롭다운 ─── */}
       <div className={styles.selectWrapper}>
         <button
@@ -399,7 +427,15 @@ export default function Step8() {
       </div>
 
       {/* ─── 중간 컨텐츠(스크롤) ─── */}
-      <div className={styles.contentWrapper}>
+      <div
+        className={styles.contentWrapper}
+        style={{
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-y',
+          overscrollBehavior: 'contain'
+        }}
+      >
 
         {/* ── [Allocation Table] 방배정표 ── */}
         <div ref={allocRef} className={styles.tableContainer}>
@@ -849,8 +885,21 @@ export default function Step8() {
         </div>
       </div>
 
-      {/* ─── 하단 버튼 ─── */}
-      <div className={styles.stepFooter}>
+      {/* ─── 하단 버튼 (고정 + 좌/우/하단 여백) ─── */}
+      <div
+        className={styles.stepFooter}
+        style={{
+          position: 'fixed',
+          left: 0,
+          right: 0,
+          bottom: __safeBottom,          // 아이폰 홈바/탭바 위로 안전하게
+          zIndex: 20,
+          boxSizing: 'border-box',
+          padding: '12px 16px',          // 좌/우 여백 STEP1~7과 동일
+          background: '#fff',
+          borderTop: '1px solid #e5e5e5'
+        }}
+      >
         <button onClick={goPrev}>← 이전</button>
         <button onClick={() => { try{localStorage.setItem('homeViewMode','fourball')}catch{}; setStep(0); }}>홈</button>
       </div>

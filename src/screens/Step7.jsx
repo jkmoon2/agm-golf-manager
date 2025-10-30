@@ -23,7 +23,6 @@ export default function Step7() {
     updateParticipant,
   } = useContext(StepContext);
 
-  // ★ patch: 방 우선순위/이벤트 데이터
   const { eventId, updateEventImmediate, eventData } = useContext(EventContext) || {};
 
   const [loadingId, setLoadingId] = useState(null);
@@ -31,7 +30,35 @@ export default function Step7() {
   const pressTimers = useRef({});
 
   const TIMINGS = { preAlert: 1200, partnerPick: 1400 };
-  const MAX_ROOM_CAPACITY = 4; // 포볼 정원
+  const MAX_ROOM_CAPACITY = 4;
+
+  /* ★ NEW: 하단 고정/여백 계산 — STEP5 동일 */
+  const [__bottomGap, __setBottomGap] = useState(64);
+  useEffect(() => {
+    const probe = () => {
+      try {
+        const el =
+          document.querySelector('[data-bottom-nav]') ||
+          document.querySelector('#bottomTabBar') ||
+          document.querySelector('.bottomTabBar') ||
+          document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H   = 56;
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle  = {
+    minHeight: '100dvh',
+    boxSizing: 'border-box',
+    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
+    WebkitOverflowScrolling: 'touch',
+    touchAction: 'pan-y',
+  };
+  /* ─────────────────────────────────────────────────────────── */
 
   // ─ helpers ─
   const isGroup1 = (p) => Number.isFinite(Number(p?.group))
@@ -41,7 +68,6 @@ export default function Step7() {
   const countInRoom = (list, roomNo) =>
     (list || []).filter(p => Number(p?.room) === Number(roomNo)).length;
 
-  // ★ patch: 최근 비어있지 않았던 participants 캐시(초기화 직후 공백 방지)
   const lastNonEmptyRef = useRef([]);
   useEffect(() => {
     if (Array.isArray(participants) && participants.length > 0) {
@@ -49,13 +75,11 @@ export default function Step7() {
     }
   }, [participants]);
 
-  // ★ patch: 항상 “현재 유효한 목록”을 가져오기
   const getList = () =>
     (Array.isArray(participants) && participants.length > 0)
       ? participants
       : (lastNonEmptyRef.current || []);
 
-  // ★ patch: 운영자 정의 방번호(예: '10번방' → 10) 목록 추출
   const getCustomRoomNumbers = () => {
     const names = Array.isArray(roomNames) ? roomNames : [];
     const nums = names.map(n => {
@@ -63,12 +87,10 @@ export default function Step7() {
       const m = n.match(/(\d+)/);
       return m ? Number(m[1]) : NaN;
     }).filter(v => Number.isFinite(v));
-    // 유효성: 길이가 roomNames와 같고, 중복 없음
     const unique = new Set(nums);
     return (nums.length === names.length && unique.size === nums.length) ? nums : null;
   };
 
-  // ★ patch: "신규 방 우선" 우선순위 목록
   const getRoomPriority = () => {
     const n = Array.isArray(roomNames) ? roomNames.length : 0;
     const fromEvent =
@@ -77,37 +99,24 @@ export default function Step7() {
     if (fromEvent && fromEvent.length) {
       return fromEvent.map(Number).filter(r => r >= 1 && r <= n);
     }
-
-    // 운영자 정의 방번호가 있다면 그 순서를 우선 사용(인덱스 1..N의 순서는 동일하지만 추천/탐색 기준으로 사용)
     const custom = getCustomRoomNumbers();
-    if (custom) {
-      // custom 순서 그대로 인덱스 1..N로 매핑
-      return Array.from({ length: n }, (_, i) => i + 1);
-    }
-
-    // 기본: 큰 번호(최근 생성 가정)부터
-    return Array.from({ length: n }, (_, i) => n - i); // n..1
+    if (custom) return Array.from({ length: n }, (_, i) => i + 1);
+    return Array.from({ length: n }, (_, i) => n - i);
   };
 
-  // ★ patch: 방 입력값을 “운영자 정의 번호 → 해당 인덱스”로 우선 해석
-  //   1) 운영자 정의 번호 목록에서 일치 번호 찾으면 → 해당 방 인덱스(1-base)
-  //   2) 없으면 1..N 인덱스로 해석
   const resolveTargetRoom = (raw) => {
     const num = Number(raw);
     const total = Array.isArray(roomNames) ? roomNames.length : 0;
     if (!Number.isFinite(num) || total === 0) return null;
-
     const custom = getCustomRoomNumbers();
     if (custom) {
       const idx = custom.indexOf(num);
-      if (idx !== -1) return idx + 1; // 이름(파란박스) 기준
+      if (idx !== -1) return idx + 1;
     }
-    // 운영자 정의가 없을 때: 1..N(빨간박스) 기준
     if (num >= 1 && num <= total) return num;
     return null;
   };
 
-  // ★ patch: 선호 방이 가득 찼을 때 "신규 방 우선"으로 대체 방 선택
   const findAvailableRoom = (preferred, list, limit = MAX_ROOM_CAPACITY) => {
     const priority = getRoomPriority();
     const candidates = priority.filter(r => countInRoom(list, r) < limit);
@@ -129,7 +138,6 @@ export default function Step7() {
   const getGroup2InRoom = (list, roomNo) =>
     getRoomMembers(list, roomNo).filter(p => !isGroup1(p));
 
-  // ★ patch: 방 안의 "팀(페어)" 리스트( [ {g1,g2} , ... ] )
   const getTeamsInRoom = (list, roomNo) => {
     const g1s = getGroup1InRoom(list, roomNo);
     return g1s.map(g1 => {
@@ -138,36 +146,88 @@ export default function Step7() {
     }).filter(Boolean);
   };
 
+  /* ★ NEW: STEP5와 동일한 숫자 입력 정책 */
   const isPartialNumber = (s) => /^-?\d*\.?\d*$/.test(s);
+
+  // === 여기부터 실시간 커밋을 위한 보조 유틸(STEP5 동일) ===
+  const buildNextFromChanges = (baseList, changes) => {
+    try {
+      const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
+      (changes || []).forEach(({ id, fields }) => {
+        const k = String(id);
+        const cur = map.get(k) || {};
+        map.set(k, { ...cur, ...(fields || {}) });
+      });
+      return Array.from(map.values());
+    } catch (e) {
+      console.warn('[Step7] buildNextFromChanges error:', e);
+      return baseList || [];
+    }
+  };
+
+  const canBulk = typeof updateParticipantsBulk === 'function';
+  const canOne  = typeof updateParticipant === 'function';
+  const syncChanges = async (changes) => {
+    try {
+      if (canBulk) {
+        await updateParticipantsBulk(changes);
+      } else if (canOne) {
+        for (const ch of changes) await updateParticipant(ch.id, ch.fields);
+      }
+    } catch (e) {
+      console.warn('[Step7] syncChanges failed:', e);
+    }
+    try {
+      if (typeof updateEventImmediate === 'function' && eventId) {
+        const base = participants || [];
+        const next = buildNextFromChanges(base, changes);
+        await updateEventImmediate({ participants: next });
+      }
+    } catch (e) {
+      console.warn('[Step7] updateEventImmediate(participants) failed:', e);
+    }
+  };
+  // ============================================================
 
   const handleScoreInputChange = (id, raw) => {
     if (!isPartialNumber(raw)) return;
     setScoreDraft(d => ({ ...d, [id]: raw }));
-    if (raw === '' || raw === '-' || raw === '.' || raw === '-.') return;
-    const v = Number(raw);
-    if (!Number.isNaN(v)) {
-      if (typeof onScoreChange === 'function') onScoreChange(id, v);
-      else if (typeof setParticipants === 'function')
-        setParticipants(ps => ps.map(p => p.id === id ? { ...p, score: v } : p));
-    }
   };
-  const handleScoreBlur = (id) => {
+
+  const handleScoreBlur = async (id) => {
     const raw = scoreDraft[id];
     if (raw === undefined) return;
-    if (raw === '' || raw === '-' || raw === '.' || raw === '-.')
-      if (typeof onScoreChange === 'function') onScoreChange(id, null);
-      else if (typeof setParticipants === 'function')
-        setParticipants(ps => ps.map(p => p.id === id ? { ...p, score: null } : p));
+    let v = null;
+    if (!(raw === '' || raw === '-' || raw === '.' || raw === '-.')) {
+      const num = Number(raw);
+      v = Number.isNaN(num) ? null : num;
+    }
+
+    // 원본 유지: onScoreChange가 있으면 호출, 없으면 setParticipants
+    if (typeof onScoreChange === 'function') {
+      onScoreChange(id, v);
+    } else if (typeof setParticipants === 'function') {
+      setParticipants(ps => ps.map(p => p.id === id ? { ...p, score: v } : p));
+    }
+
+    // ★ NEW: 즉시 저장(컬렉션 + 이벤트 문서)
+    await syncChanges([{ id, fields: { score: v } }]);
+
     setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
   };
 
-  const startLongPress = (id, current) => {
+  const startLongPress = (id) => {
     try { if (pressTimers.current[id]) clearTimeout(pressTimers.current[id]); } catch {}
     pressTimers.current[id] = setTimeout(() => {
-      const cur = String(current ?? '');
-      const next = cur.startsWith('-') ? cur : (cur ? '-' + cur : '-');
-      handleScoreInputChange(id, next);
-    }, 1000);
+      setScoreDraft(d => {
+        const cur = d[id] ?? (() => {
+          const p = (getList() || []).find(x => x.id === id);
+          return p && p.score != null ? String(p.score) : '';
+        })();
+        if (String(cur).startsWith('-')) return d;
+        return { ...d, [id]: (cur === '' ? '-' : `-${String(cur).replace(/^-/, '')}`) };
+      });
+    }, 600);
   };
   const cancelLongPress = (id) => {
     try { if (pressTimers.current[id]) clearTimeout(pressTimers.current[id]); } catch {}
@@ -179,7 +239,6 @@ export default function Step7() {
     return !!(me && me.room != null && me.partner != null);
   };
 
-  // 저장(이벤트 문서 동시 호환)
   const compatParticipant = (p) => ({
     ...p,
     roomNumber: p.room ?? null,
@@ -197,7 +256,6 @@ export default function Step7() {
     return table;
   };
 
-  // ★ patch: participants 길이가 0이면 커밋 금지(초기화 직후 공백 반영 방지)
   const commitParticipantsNow = async (list) => {
     try {
       if (!Array.isArray(list) || list.length === 0) return;
@@ -235,11 +293,10 @@ export default function Step7() {
     }
   };
 
-  // participants 변경 시 안전 저장(비어있으면 skip)
   const lastCommittedHashRef = useRef('');
   const commitTimerRef = useRef(null);
   useEffect(() => {
-    if (!Array.isArray(participants) || participants.length === 0) return; // ★ patch
+    if (!Array.isArray(participants) || participants.length === 0) return;
     const nextHash = (() => { try { return JSON.stringify(participants); } catch { return String(Date.now()); } })();
     if (nextHash === lastCommittedHashRef.current) return;
     if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
@@ -253,7 +310,6 @@ export default function Step7() {
     }, 250);
   }, [participants]);
 
-  // ★ patch: 페어(2명) 강제 이동 + 가득 찬 방이면 트레이드
   const forceMovePairToRoom = async (id, targetRoom) => {
     const list = [...getList()];
     const pair = getPairForGroup1(id, list);
@@ -262,7 +318,6 @@ export default function Step7() {
     const srcRoom = Number(pair[0]?.room);
     const occ = countInRoom(list, targetRoom);
 
-    // 자리 여유 → 그냥 이동
     if (occ <= MAX_ROOM_CAPACITY - pair.length) {
       const ids = new Set(pair.map(x => String(x.id)));
       const next = list.map(p => ids.has(String(p.id)) ? { ...p, room: targetRoom } : p);
@@ -271,7 +326,6 @@ export default function Step7() {
       return;
     }
 
-    // 가득(4명) → 두 팀 중 선택하여 페어-페어 트레이드
     if (occ >= MAX_ROOM_CAPACITY && pair.length === 2) {
       const teams = getTeamsInRoom(list, targetRoom);
       if (teams.length === 0) { alert('해당 방의 팀 구성을 파악할 수 없습니다.'); return; }
@@ -298,7 +352,6 @@ export default function Step7() {
     alert('선택하신 방은 정원 초과입니다. (정원 4명)');
   };
 
-  // ─ 개인 이동/트레이드 (현 로직 유지, getList 적용) ─
   const moveOrTradeGroup2 = async (idGroup2, targetRoom) => {
     const list = [...getList()];
     const me2 = list.find(p => String(p.id) === String(idGroup2));
@@ -395,7 +448,6 @@ export default function Step7() {
     alert(`트레이드 완료: ${me1.nickname} ↔ ${pick.nickname} ( ${srcRoom} ↔ ${dstRoom} )`);
   };
 
-  // ★ patch: 닉네임 Alt/우클릭/롱프레스 → 개인 이동/교체
   const handleAltOnNickname = async (p, evt) => {
     const alt = !!evt?.altKey;
     if (!alt) return;
@@ -417,7 +469,6 @@ export default function Step7() {
     else await moveOrTradeGroup2(p.id, resolved);
   };
 
-  // ★ patch: 수동 Alt/우클릭/롱프레스 → 페어 이동/트레이드
   const handleManualClick = async (id, evt) => {
     if (evt?.altKey) {
       const list = getList();
@@ -438,17 +489,14 @@ export default function Step7() {
       return;
     }
 
-    // 완료 상태면 일반 클릭은 막고(비활성화), Alt/롱프레스만 허용
     if (isCompleted(id)) return;
 
     setLoadingId(id);
 
-    // 기존 수동 배정 로직
     const res = await onManualAssign(id);
     const { roomNo, roomNumber, nickname, partnerNickname } = res || {};
     const finalRoom = roomNo ?? roomNumber ?? null;
 
-    // 배정 직후 정원 초과 교정(신규 방 우선)
     try {
       const list = getList();
       if (Number.isFinite(Number(finalRoom))) {
@@ -495,7 +543,6 @@ export default function Step7() {
   const handleAutoClick = () => { onAutoAssign(); };
   const handleResetClick = () => { setScoreDraft({}); onReset(); };
 
-  // ★ patch: 모바일 Alt 대체 — 컨텍스트 메뉴(롱프레스/우클릭) 사용
   const manualContext = (pId) => (e) => {
     e.preventDefault();
     handleManualClick(pId, { altKey: true });
@@ -505,10 +552,14 @@ export default function Step7() {
     handleAltOnNickname(p, { altKey: true });
   };
 
-  const renderList = getList(); // ★ patch: 화면은 항상 유효 목록으로
+  useEffect(() => {
+    console.log('[Step7] participants:', participants);
+  }, [participants]);
+
+  const renderList = getList();
 
   return (
-    <div className={styles.step}>
+    <div className={styles.step} style={__pageStyle}>
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
@@ -520,7 +571,7 @@ export default function Step7() {
 
       <div className={styles.participantTable}>
         {renderList.map(p => {
-          const done     = isGroup1(p) && isCompleted(p.id);
+          const done       = isGroup1(p) && isCompleted(p.id);
           const scoreValue = scoreDraft[p.id] ?? (p.score ?? '');
 
           return (
@@ -529,7 +580,6 @@ export default function Step7() {
                 <input type="text" value={`${p.group}조`} disabled />
               </div>
 
-              {/* 닉네임: Alt 클릭 + 우클릭/롱프레스 지원 (readOnly로 이벤트 수신) */}
               <div
                 className={`${styles.cell} ${styles.nickname}`}
                 onClick={(e)=>handleAltOnNickname(p, e)}
@@ -547,15 +597,15 @@ export default function Step7() {
                 <input
                   type="text"
                   inputMode="decimal"
-                  pattern="[0-9.\\-]*"
+                  /* ★ FIX: 최신 브라우저 v-flag 호환 */
+                  pattern="[-0-9.]*"
                   autoComplete="off"
                   value={scoreValue}
                   onChange={e => handleScoreInputChange(p.id, e.target.value)}
                   onBlur={() => handleScoreBlur(p.id)}
-                  onMouseDown={() => startLongPress(p.id, scoreValue)}
-                  onTouchStart={() => startLongPress(p.id, scoreValue)}
-                  onMouseUp={() => cancelLongPress(p.id)}
-                  onMouseLeave={() => cancelLongPress(p.id)}
+                  onPointerDown={() => startLongPress(p.id)}
+                  onPointerUp={() => cancelLongPress(p.id)}
+                  onPointerLeave={() => cancelLongPress(p.id)}
                   onTouchEnd={() => cancelLongPress(p.id)}
                 />
               </div>
@@ -565,11 +615,10 @@ export default function Step7() {
                   <button
                     className={styles.smallBtn}
                     onClick={(e) => {
-                      // 완료면 일반 클릭 무시(비활성화), Alt/롱프레스만 허용
                       if (done && !e.altKey) return;
                       handleManualClick(p.id, e);
                     }}
-                    onContextMenu={manualContext(p.id)} // 모바일 롱프레스
+                    onContextMenu={manualContext(p.id)}
                     aria-disabled={done || (loadingId === p.id)}
                     style={{
                       opacity: (done || loadingId === p.id) ? 0.5 : 1,
@@ -600,7 +649,20 @@ export default function Step7() {
         })}
       </div>
 
-      <div className={styles.stepFooter}>
+      <div
+        className={styles.stepFooter}
+        style={{
+          position: 'fixed',
+          left: 0,
+          right: 0,
+          bottom: __safeBottom,
+          zIndex: 20,
+          boxSizing: 'border-box',
+          padding: '12px 16px',
+          background: '#fff',
+          borderTop: '1px solid #e5e5e5',
+        }}
+      >
         <button onClick={goPrev}>← 이전</button>
         <button onClick={handleAutoClick} className={styles.textOnly}>자동배정</button>
         <button onClick={handleResetClick} className={styles.textOnly}>초기화</button>
