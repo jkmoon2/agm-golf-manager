@@ -308,6 +308,15 @@ export default function PlayerResults() {
 
   const metricsPerRoom = 2 + (visibleMetrics.score ? 1 : 0) + (visibleMetrics.banddang ? 1 : 0);
 
+  /* ★ fix: STEP2와 동일한 정렬·밑줄 제거를 강제하는 공통 스타일 */
+  const navLinkBaseStyle = {               // 기존 스타일은 그대로 유지하면서 최소 보강
+    textDecoration: 'none',                // 밑줄 제거
+    textAlign: 'center',                   // 가운데 정렬
+    display: 'inline-flex',                // 정중앙 배치
+    justifyContent: 'center',
+    alignItems: 'center'
+  };
+
   return (
     <div
       className={styles.page}
@@ -494,12 +503,13 @@ export default function PlayerResults() {
         )}
       </div>
 
-      {/* ★ fix: STEP2와 동일한 하단 버튼 속성으로 통일 (항상 Link 렌더링) */}
+      {/* ★ fix: STEP2와 동일한 하단 버튼 속성 + 정렬/밑줄 제거 통일 */}
       <div className={styles.footerNav}>
         <Link
           to={`/player/home/${eventId}/4`}
           className={`${styles.navBtn} ${styles.navPrev}`}
           onClick={(e)=>{ if (typeof goPrev==='function'){ e.preventDefault(); goPrev(); } }}
+          style={navLinkBaseStyle}        // ★ fix
         >
           ← 이전
         </Link>
@@ -512,7 +522,10 @@ export default function PlayerResults() {
             if (typeof goNext==='function'){ e.preventDefault(); goNext(); }
           }}
           aria-disabled={nextDisabled}
-          style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+          style={ nextDisabled             // ★ fix: 공통 스타일 + 비활성 처리 병합
+            ? { ...navLinkBaseStyle, opacity: 0.5, pointerEvents: 'none' }
+            : navLinkBaseStyle
+          }
         >
           다음 →
         </Link>
