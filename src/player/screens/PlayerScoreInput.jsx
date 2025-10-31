@@ -187,10 +187,12 @@ export default function PlayerScoreInput() {
     return unsub;
   }, [eventId]);
 
-  // ★ Dirty 안정화를 위한 기준 스냅샷과 현재 입력값
+  // ★ 기준 스냅샷 & 현재 입력
   const [baseDraft, setBaseDraft] = useState({});
   const [draft, setDraft] = useState({});
   const bootstrappedRef = useRef(false); // 최초 1회만 draft 초기화
+  // ★ patch: “입력 발생 여부”를 별도로 추적 → 처음엔 비활성, 입력하면 활성
+  const [hasEdited, setHasEdited] = useState(false);
 
   // 기준 스냅샷 생성
   useEffect(() => {
@@ -202,7 +204,7 @@ export default function PlayerScoreInput() {
     });
     setBaseDraft(base);
 
-    // 🔐 최초 1회만 draft를 base로 세팅(이후엔 사용자 입력을 덮지 않음)
+    // 최초 1회만 draft를 base로 세팅(이후엔 사용자 입력을 덮지 않음)
     if (!bootstrappedRef.current) {
       setDraft(base);
       bootstrappedRef.current = true;
@@ -239,7 +241,7 @@ export default function PlayerScoreInput() {
 
       await Promise.all(ops);
 
-      // ★ 저장 후 현재 입력을 기준 스냅샷으로 승격 → Dirty 해제
+      // 저장 후 현재 입력을 기준 스냅샷으로 승격 → Dirty 해제
       setBaseDraft((prev) => {
         const next = { ...prev };
         orderedRoomPlayers.forEach((p) => {
@@ -249,6 +251,8 @@ export default function PlayerScoreInput() {
         return next;
       });
 
+      // ★ patch: 저장 완료 후 입력 플래그 초기화
+      setHasEdited(false);
       alert('저장되었습니다.');
     }catch(e){
       console.error('saveScoresDraft failed', e);
@@ -259,6 +263,8 @@ export default function PlayerScoreInput() {
   const onChangeScore = (pid, val) => {
     const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
+    // ★ patch: 사용자가 실제 편집했음을 표시
+    setHasEdited(true);
   };
 
   const inputRefs = useRef({});
@@ -294,6 +300,8 @@ export default function PlayerScoreInput() {
         });
         return next;
       });
+      // 길게 눌러서 부호 변경도 “편집”으로 본다
+      setHasEdited(true);
     }, LONG_PRESS_MS);
   };
   const moveHold = (pid, e) => {
@@ -322,7 +330,8 @@ export default function PlayerScoreInput() {
     return { sumH, sumS, sumR };
   }, [orderedRoomPlayers, draft]);
 
-  const saveDisabled = !(isReady && isDirty);
+  // ★ patch: 저장 버튼 — 초기 비활성, 입력 발생 시 활성
+  const saveDisabled = !(isReady && (isDirty || hasEdited));
 
   return (
     <div className={styles.page}>

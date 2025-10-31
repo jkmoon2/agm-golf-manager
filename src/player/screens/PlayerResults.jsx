@@ -1,6 +1,7 @@
 // /src/player/screens/PlayerResults.jsx
 
 import React, { useMemo, useRef, useEffect, useContext, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -11,14 +12,13 @@ import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { db } from '../../firebase';
 
+/* ★ 게이트 정규화 */
 function tsToMillis(ts){
   if (!ts) return 0;
   if (typeof ts.toMillis === 'function') return ts.toMillis();
   if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
   return Number(ts) || 0;
 }
-
-/* 게이트 표준화 */
 function normalizeGate(raw){
   const base = (raw && typeof raw === 'object') ? raw : {};
   const out = { ...base };
@@ -107,13 +107,17 @@ function orderRoomFourball(roomArr = []) {
 export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
   const { eventData } = useContext(EventContext) || {};
+  const params = useParams();
+  const routeEventId = params?.eventId || params?.id;
+  const eventId = eventData?.id || eventData?.eventId || routeEventId || '';
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
   const [scoresMap, setScoresMap] = useState({});
 
+  // 게이트 폴백
   useEffect(() => {
-    const id = eventData?.id || eventData?.eventId || null;
+    const id = eventId || null;
     if (!id) return;
     const ref = doc(db, 'events', id);
     const unsub = onSnapshot(ref, (snap) => {
@@ -124,11 +128,11 @@ export default function PlayerResults() {
       }
     });
     return unsub;
-  }, [eventData?.id, eventData?.eventId]);
+  }, [eventId]);
 
-  // /scores 실시간 반영
+  // ★ /scores 실시간 반영
   useEffect(() => {
-    const id = eventData?.id || eventData?.eventId || null;
+    const id = eventId || null;
     if (!id) return;
     const colRef = collection(db, 'events', id, 'scores');
     const unsub = onSnapshot(colRef, (snap) => {
@@ -140,8 +144,9 @@ export default function PlayerResults() {
       setScoresMap(m);
     });
     return unsub;
-  }, [eventData?.id, eventData?.eventId]);
+  }, [eventId]);
 
+  // 게이트 정규화 + nextDisabled
   const nextDisabled = useMemo(() => {
     const modeKey = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
     const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
@@ -170,13 +175,13 @@ export default function PlayerResults() {
     Array.from({ length: roomCount }, (_, i) => (roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`))
   , [roomCount, roomNames]);
 
-  // 방별 참가자 (scoresMap 우선 적용)
+  // 방별 참가자 (★ scoresMap 우선 병합)
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participants || []).forEach(p => {
       if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
         const pid = String(p.id);
-        const merged = (scoresMap.hasOwnProperty(pid))
+        const merged = (Object.prototype.hasOwnProperty.call(scoresMap, pid))
           ? { ...p, score: scoresMap[pid] }
           : p;
         arr[p.room - 1].push(merged);
@@ -302,42 +307,6 @@ export default function PlayerResults() {
   if (!roomCount) return <div className={styles.empty}>표시할 데이터가 없습니다.</div>;
 
   const metricsPerRoom = 2 + (visibleMetrics.score ? 1 : 0) + (visibleMetrics.banddang ? 1 : 0);
-
-  /* ✅ 부드러운 전환: 컨텍스트 우선, 실패 시에만 URL 폴백 */
-  const handlePrev = () => {
-    if (typeof goPrev === 'function') { goPrev(); return; }
-    try {
-      const url = new URL(window.location.href);
-      const parts = url.pathname.split('/').filter(Boolean);
-      const last = parts[parts.length - 1];
-      const n = Number(last);
-      if (Number.isFinite(n) && n > 1) {
-        parts[parts.length - 1] = String(n - 1);
-        const newPath = '/' + parts.join('/');
-        window.history.replaceState(null, '', newPath + url.search + url.hash);
-        return;
-      }
-    } catch (e) {}
-    try { window.history.back(); } catch (e) {}
-  };
-
-  const handleNext = () => {
-    if (nextDisabled) return;
-    if (typeof goNext === 'function') { goNext(); return; }
-    try {
-      const url = new URL(window.location.href);
-      const parts = url.pathname.split('/').filter(Boolean);
-      const last = parts[parts.length - 1];
-      const n = Number(last);
-      if (Number.isFinite(n)) {
-        parts[parts.length - 1] = String(n + 1);
-        const newPath = '/' + parts.join('/');
-        window.history.replaceState(null, '', newPath + url.search + url.hash);
-      } else {
-        window.history.forward();
-      }
-    } catch (e) {}
-  };
 
   return (
     <div
@@ -525,18 +494,35 @@ export default function PlayerResults() {
         )}
       </div>
 
+      {/* ★ 깜빡임 제거: 컨텍스트 우선, 실패 시에도 Link로 안정 이동 */}
       <div className={styles.footerNav}>
-        <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={handlePrev}>← 이전</button>
-        <button
-          className={`${styles.navBtn} ${styles.navNext}`}
-          onClick={handleNext}
-          disabled={nextDisabled}
-          aria-disabled={nextDisabled}
-          data-disabled={nextDisabled ? '1' : '0'}
-          style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
-        >
-          다음 →
-        </button>
+        {typeof goPrev === 'function'
+          ? <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={goPrev}>← 이전</button>
+          : <Link to={`/player/home/${eventId}/4`} className={`${styles.navBtn} ${styles.navPrev}`}>← 이전</Link>
+        }
+
+        {typeof goNext === 'function'
+          ? (
+            <button
+              className={`${styles.navBtn} ${styles.navNext}`}
+              onClick={nextDisabled ? undefined : goNext}
+              disabled={nextDisabled}
+              aria-disabled={nextDisabled}
+              style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+            >
+              다음 →
+            </button>
+          ) : (
+            <Link
+              to={nextDisabled ? '#' : `/player/home/${eventId}/6`}
+              className={`${styles.navBtn} ${styles.navNext}`}
+              aria-disabled={nextDisabled}
+              style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+            >
+              다음 →
+            </Link>
+          )
+        }
       </div>
     </div>
   );
