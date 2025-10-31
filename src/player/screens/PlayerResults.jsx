@@ -175,7 +175,7 @@ export default function PlayerResults() {
     Array.from({ length: roomCount }, (_, i) => (roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`))
   , [roomCount, roomNames]);
 
-  // 방별 참가자 (★ scoresMap 우선 병합)
+  // 방별 참가자 (scoresMap 우선 병합)
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participants || []).forEach(p => {
@@ -494,35 +494,28 @@ export default function PlayerResults() {
         )}
       </div>
 
-      {/* ★ 깜빡임 제거: 컨텍스트 우선, 실패 시에도 Link로 안정 이동 */}
+      {/* ★ fix: STEP2와 동일한 하단 버튼 속성으로 통일 (항상 Link 렌더링) */}
       <div className={styles.footerNav}>
-        {typeof goPrev === 'function'
-          ? <button className={`${styles.navBtn} ${styles.navPrev}`} onClick={goPrev}>← 이전</button>
-          : <Link to={`/player/home/${eventId}/4`} className={`${styles.navBtn} ${styles.navPrev}`}>← 이전</Link>
-        }
+        <Link
+          to={`/player/home/${eventId}/4`}
+          className={`${styles.navBtn} ${styles.navPrev}`}
+          onClick={(e)=>{ if (typeof goPrev==='function'){ e.preventDefault(); goPrev(); } }}
+        >
+          ← 이전
+        </Link>
 
-        {typeof goNext === 'function'
-          ? (
-            <button
-              className={`${styles.navBtn} ${styles.navNext}`}
-              onClick={nextDisabled ? undefined : goNext}
-              disabled={nextDisabled}
-              aria-disabled={nextDisabled}
-              style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
-            >
-              다음 →
-            </button>
-          ) : (
-            <Link
-              to={nextDisabled ? '#' : `/player/home/${eventId}/6`}
-              className={`${styles.navBtn} ${styles.navNext}`}
-              aria-disabled={nextDisabled}
-              style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
-            >
-              다음 →
-            </Link>
-          )
-        }
+        <Link
+          to={nextDisabled ? '#' : `/player/home/${eventId}/6`}
+          className={`${styles.navBtn} ${styles.navNext}`}
+          onClick={(e)=>{ 
+            if (nextDisabled){ e.preventDefault(); return; }
+            if (typeof goNext==='function'){ e.preventDefault(); goNext(); }
+          }}
+          aria-disabled={nextDisabled}
+          style={nextDisabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+        >
+          다음 →
+        </Link>
       </div>
     </div>
   );
