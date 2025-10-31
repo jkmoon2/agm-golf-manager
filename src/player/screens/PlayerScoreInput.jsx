@@ -2,7 +2,7 @@
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, setDoc, onSnapshot, collection } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
@@ -190,6 +190,8 @@ export default function PlayerScoreInput() {
   }, [eventId]);
 
   const [draft, setDraft] = useState({});
+  const [ready, setReady] = useState(false); // ★ 추가: 초기 동기화 완료 플래그
+
   useEffect(() => {
     setDraft((prev) => {
       const next = { ...prev };
@@ -201,7 +203,11 @@ export default function PlayerScoreInput() {
       });
       return next;
     });
-  }, [orderedRoomPlayers, scoresMap]);
+    // ★ 초기 한 번이라도 draft가 채워진 이후에 ready=true
+    if (!ready && orderedRoomPlayers.length > 0) {
+      setReady(true);
+    }
+  }, [orderedRoomPlayers, scoresMap, ready]);
 
   const isDirty = useMemo(() => {
     return orderedRoomPlayers.some(p => {
@@ -230,7 +236,8 @@ export default function PlayerScoreInput() {
         if (raw === undefined || String(raw) === base) return;
 
         const ref = doc(db, 'events', eventId, 'scores', key);
-        ops.push(setDoc(ref, { room: myRoom, score: newScore }, { merge: true }));
+        // ★ updatedAt 추가(서버시각) → 정합성 향상
+        ops.push(setDoc(ref, { room: myRoom, score: newScore, updatedAt: serverTimestamp() }, { merge: true }));
       });
 
       await Promise.all(ops);
@@ -309,6 +316,8 @@ export default function PlayerScoreInput() {
     return { sumH, sumS, sumR };
   }, [orderedRoomPlayers, draft, scoresMap]);
 
+  const saveDisabled = !ready || !isDirty; // ★ 초기 동기화 완료 전/변경없을 때 비활성
+
   return (
     <div className={styles.page}>
       <div className={styles.card}>
@@ -364,7 +373,7 @@ export default function PlayerScoreInput() {
                       <input
                         type="text"
                         inputMode="decimal"
-                        pattern="[0-9.+\-]*"
+                        pattern="[0-9.+\\-]*"
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="off"
@@ -414,9 +423,9 @@ export default function PlayerScoreInput() {
         <button
           className={`${styles.navBtn}`}
           onClick={saveScoresDraft}
-          disabled={!isDirty}
-          aria-disabled={!isDirty}
-          style={!isDirty
+          disabled={saveDisabled}
+          aria-disabled={saveDisabled}
+          style={saveDisabled
             ? { opacity: 0.5, pointerEvents: 'none' }
             : { boxShadow: '0 0 0 2px rgba(59,130,246,.35) inset', fontWeight: 600 }
           }

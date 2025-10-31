@@ -8,11 +8,9 @@ import styles from './PlayerResults.module.css';
 
 import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
-// ★ patch: Firestore 실시간 구독 import는 반드시 최상단
-import { doc, onSnapshot, collection } from 'firebase/firestore'; // ← collection 추가
+import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { db } from '../../firebase';
 
-// ★ patch: Timestamp -> millis
 function tsToMillis(ts){
   if (!ts) return 0;
   if (typeof ts.toMillis === 'function') return ts.toMillis();
@@ -20,7 +18,7 @@ function tsToMillis(ts){
   return Number(ts) || 0;
 }
 
-/* ★ add: 게이트 표준화/모드별 선택(없으면 모두 enabled) */
+/* 게이트 표준화 */
 function normalizeGate(raw){
   const base = (raw && typeof raw === 'object') ? raw : {};
   const out = { ...base };
@@ -38,11 +36,8 @@ function pickGateByMode(playerGate, mode){
 
 const strlen = (s) => Array.from(String(s || '')).length;
 const MAX_PER_ROOM = 4;
-
-/* ★ 팀결과표 닉네임 칸 수동 폭(원하면 '200px' 등으로 바꾸세요. null이면 자동) */
 const TEAM_NICK_WIDTH = null;
 
-/** Admin publicView.hiddenRooms 보정(0/1 기반 자동판별 → index Set) */
 function normalizeHiddenRooms(pv, roomCount, viewKey) {
   let arr = [];
   if (pv && Array.isArray(pv.hiddenRooms)) {
@@ -61,7 +56,6 @@ function normalizeHiddenRooms(pv, roomCount, viewKey) {
   return new Set(filtered);
 }
 
-/** visibleMetrics 읽기(루트 우선 → 모드별 보조) */
 function readVisibleMetrics(pv, viewKey) {
   const vmRoot = pv?.visibleMetrics || pv?.metrics;
   if (vmRoot && (typeof vmRoot.score === 'boolean' || typeof vmRoot.banddang === 'boolean')) {
@@ -114,10 +108,9 @@ export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
   const { eventData } = useContext(EventContext) || {};
 
-  // ★ patch: 실시간 게이트/점수 구독(항상 상단에서 훅 호출)
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
-  const [scoresMap, setScoresMap] = useState({}); // ← ★ add
+  const [scoresMap, setScoresMap] = useState({});
 
   useEffect(() => {
     const id = eventData?.id || eventData?.eventId || null;
@@ -133,7 +126,7 @@ export default function PlayerResults() {
     return unsub;
   }, [eventData?.id, eventData?.eventId]);
 
-  // ★ add: /scores 서브컬렉션 실시간 반영 → 저장 직후 STEP5 표에 즉시 적용
+  // /scores 실시간 반영 → 저장 직후 즉시 표 업데이트
   useEffect(() => {
     const id = eventData?.id || eventData?.eventId || null;
     if (!id) return;
@@ -149,7 +142,6 @@ export default function PlayerResults() {
     return unsub;
   }, [eventData?.id, eventData?.eventId]);
 
-  // ★ change: 게이트 기본값 enabled 폴백 + 모드별 분기
   const nextDisabled = useMemo(() => {
     const modeKey = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
     const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
@@ -165,7 +157,6 @@ export default function PlayerResults() {
   const roomNames    = eventData?.roomNames || [];
   const participants = Array.isArray(eventData?.participants) ? eventData.participants : [];
 
-  // 관리자 선택 복원(오직 Firestore 기준)
   const [hiddenRooms, setHiddenRooms] = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
 
@@ -175,12 +166,11 @@ export default function PlayerResults() {
     setVisibleMetrics(readVisibleMetrics(pv, mode));
   }, [eventData?.publicView, roomCount, mode]);
 
-  /* 헤더 */
   const headers = useMemo(() =>
     Array.from({ length: roomCount }, (_, i) => (roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`))
   , [roomCount, roomNames]);
 
-  /* 방별 참가자 (★ change: scoresMap 우선 적용) */
+  // 방별 참가자 (scoresMap 우선 적용)
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participants || []).forEach(p => {
@@ -195,21 +185,18 @@ export default function PlayerResults() {
     return arr;
   }, [participants, roomCount, scoresMap]);
 
-  /* 최장 닉네임 길이 → CSS 변수로 */
   const maxNickCh = useMemo(() => {
     let m = 0;
     (participants || []).forEach(p => { m = Math.max(m, strlen(p.nickname)); });
     return Math.max(6, m);
   }, [participants]);
 
-  /* 보이는 방 개수 */
   const visibleCols = useMemo(() => {
     let cnt = 0;
     for (let i = 0; i < roomCount; i++) if (!hiddenRooms.has(i)) cnt++;
     return Math.max(1, cnt);
   }, [roomCount, hiddenRooms]);
 
-  /* ── 방 내부 정렬 + 최종결과 계산 ── */
   const resultByRoom = useMemo(() => {
     return byRoom.map(roomArr => {
       const ordered = (mode === 'fourball')
@@ -243,7 +230,6 @@ export default function PlayerResults() {
     });
   }, [byRoom, visibleMetrics.banddang, mode]);
 
-  /* 방별 순위 */
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
@@ -252,7 +238,6 @@ export default function PlayerResults() {
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
 
-  /* 📋 팀결과표(포볼 전용) */
   const teamsByRoom = useMemo(() => {
     if (mode !== 'fourball') return [];
     const list = [];
@@ -318,7 +303,7 @@ export default function PlayerResults() {
 
   const metricsPerRoom = 2 + (visibleMetrics.score ? 1 : 0) + (visibleMetrics.banddang ? 1 : 0);
 
-  /* ★★★ 안전한 네비게이션 폴백(컨텍스트가 없을 때도 동작) */
+  /* 안전한 네비게이션 폴백 보강: /player/home/:eventId/:step */
   const handlePrev = () => {
     if (typeof goPrev === 'function') return goPrev();
     try { window.history.back(); } catch (e) {}
@@ -327,10 +312,14 @@ export default function PlayerResults() {
     if (nextDisabled) return;
     if (typeof goNext === 'function') return goNext();
     try {
-      const { pathname, search, hash } = window.location;
-      const replaced = pathname.replace(/(\/step)(\d+)/i, (m, p, n) => `${p}${Number(n) + 1}`);
-      if (replaced !== pathname) {
-        window.location.assign(replaced + search + hash);
+      const url = new URL(window.location.href);
+      const parts = url.pathname.split('/').filter(Boolean);
+      const last = parts[parts.length - 1];
+      const n = Number(last);
+      if (Number.isFinite(n)) {
+        parts[parts.length - 1] = String(n + 1);
+        const newPath = '/' + parts.join('/');
+        window.location.assign(newPath + url.search + url.hash);
       } else {
         window.history.forward();
       }
@@ -439,7 +428,7 @@ export default function PlayerResults() {
           </div>
         </div>
 
-        {/* 📋 팀결과표(포볼 전용) — 방 셀 병합(rowSpan=4) */}
+        {/* 📋 팀결과표(포볼 전용) */}
         {mode === 'fourball' && (
           <div className={styles.card} style={{ marginTop: 12 }}>
             <div className={styles.cardHeader}><div className={styles.cardTitle}>📋 팀결과표</div></div>
