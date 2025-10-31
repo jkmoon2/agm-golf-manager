@@ -9,7 +9,7 @@ import styles from './PlayerResults.module.css';
 import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection } from 'firebase/firestore'; // ← collection 추가
 import { db } from '../../firebase';
 
 // ★ patch: Timestamp -> millis
@@ -18,6 +18,22 @@ function tsToMillis(ts){
   if (typeof ts.toMillis === 'function') return ts.toMillis();
   if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
   return Number(ts) || 0;
+}
+
+/* ★ add: 게이트 표준화/모드별 선택(없으면 모두 enabled) */
+function normalizeGate(raw){
+  const base = (raw && typeof raw === 'object') ? raw : {};
+  const out = { ...base };
+  const steps = out.steps || {};
+  const fixed = {};
+  for (let i=1;i<=8;i+=1) fixed[i] = steps[i] || 'enabled';
+  out.steps = fixed;
+  return out;
+}
+function pickGateByMode(playerGate, mode){
+  const isFour = (mode === 'fourball' || mode === 'agm');
+  const nested = isFour ? playerGate?.fourball : playerGate?.stroke;
+  return normalizeGate(nested || playerGate || {});
 }
 
 const strlen = (s) => Array.from(String(s || '')).length;
@@ -98,9 +114,11 @@ export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
   const { eventData } = useContext(EventContext) || {};
 
-  // ★ patch: 실시간 게이트 구독(항상 상단에서 훅 호출, 어떤 return보다 앞)
+  // ★ patch: 실시간 게이트/점수 구독(항상 상단에서 훅 호출)
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
+  const [scoresMap, setScoresMap] = useState({}); // ← ★ add
+
   useEffect(() => {
     const id = eventData?.id || eventData?.eventId || null;
     if (!id) return;
@@ -115,12 +133,32 @@ export default function PlayerResults() {
     return unsub;
   }, [eventData?.id, eventData?.eventId]);
 
+  // ★ add: /scores 서브컬렉션 실시간 반영 → 저장 직후 STEP5 표에 즉시 적용
+  useEffect(() => {
+    const id = eventData?.id || eventData?.eventId || null;
+    if (!id) return;
+    const colRef = collection(db, 'events', id, 'scores');
+    const unsub = onSnapshot(colRef, (snap) => {
+      const m = {};
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        m[String(d.id)] = (data.score == null ? null : data.score);
+      });
+      setScoresMap(m);
+    });
+    return unsub;
+  }, [eventData?.id, eventData?.eventId]);
+
+  // ★ change: 게이트 기본값 enabled 폴백 + 모드별 분기
   const nextDisabled = useMemo(() => {
+    const modeKey = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
     const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
     const fbAt  = fallbackAt;
-    const gate  = (ctxAt >= fbAt ? eventData?.playerGate : fallbackGate) || { steps:{} };
+    const ctxGate = pickGateByMode(eventData?.playerGate || {}, modeKey);
+    const fbGate  = pickGateByMode(fallbackGate || {}, modeKey);
+    const gate = (ctxAt >= fbAt ? ctxGate : fbGate);
     return (gate?.steps?.[6] !== 'enabled');
-  }, [eventData?.playerGate, eventData?.gateUpdatedAt, fallbackGate, fallbackAt]);
+  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
 
   const mode         = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
   const roomCount    = eventData?.roomCount || 0;
@@ -142,16 +180,20 @@ export default function PlayerResults() {
     Array.from({ length: roomCount }, (_, i) => (roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`))
   , [roomCount, roomNames]);
 
-  /* 방별 참가자 */
+  /* 방별 참가자 (★ change: scoresMap 우선 적용) */
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participants || []).forEach(p => {
       if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
-        arr[p.room - 1].push(p);
+        const pid = String(p.id);
+        const merged = (scoresMap.hasOwnProperty(pid))
+          ? { ...p, score: scoresMap[pid] }
+          : p;
+        arr[p.room - 1].push(merged);
       }
     });
     return arr;
-  }, [participants, roomCount]);
+  }, [participants, roomCount, scoresMap]);
 
   /* 최장 닉네임 길이 → CSS 변수로 */
   const maxNickCh = useMemo(() => {
