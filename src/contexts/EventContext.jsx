@@ -196,6 +196,16 @@ export function EventProvider({ children }) {
     try {
       const ref = doc(db, 'events', eventId);
       await setDoc(ref, sanitizeUndefinedDeep(updates), { merge: true });
+
+      // ★ FIX(A): 즉시 저장 성공 후 디바운스 큐/타이머를 비워 stale write 차단
+      try {
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+        queuedUpdatesRef.current = null;
+      } catch {}
+
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...updates };
       setEventData(prev => prev ? { ...prev, ...updates } : updates);
     } catch (e) {
@@ -216,7 +226,7 @@ export function EventProvider({ children }) {
     }
   };
 
-  // 페이지 이탈/가려짐 시 강제 플러시
+  // 페이지 이탈/가려짐 시 강제 플러시 (기존 유지)
   useEffect(() => {
     const flush = () => {
       try {
@@ -239,7 +249,7 @@ export function EventProvider({ children }) {
     };
   }, [eventId]);
 
-  // 언마운트 플러시(기존 유지)
+  // 언마운트 플러시(기존 유지 + ★ FIX(B): stale 필드 필터링)
   useEffect(() => {
     return () => {
       try {
@@ -250,7 +260,24 @@ export function EventProvider({ children }) {
         const pending = queuedUpdatesRef.current;
         if (pending && eventId) {
           queuedUpdatesRef.current = null;
-          updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(pending)).catch(() => {});
+
+          // ★ FIX(B): 현재 최신값과 다른 구버전 participants/roomTable은 저장에서 제외
+          let toWrite = { ...pending };
+          try {
+            const current = lastEventDataRef.current || {};
+            if ('participants' in toWrite && !deepEqual(toWrite.participants, current.participants)) {
+              const { participants, ...rest } = toWrite;
+              toWrite = rest;
+            }
+            if ('roomTable' in toWrite && !deepEqual(toWrite.roomTable, current.roomTable)) {
+              const { roomTable, ...rest2 } = toWrite;
+              toWrite = rest2;
+            }
+          } catch {}
+
+          if (Object.keys(toWrite).length > 0) {
+            updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(toWrite)).catch(() => {});
+          }
         }
       } catch (e) {
         console.warn('[EventContext] unmount flush error:', e);
@@ -340,7 +367,7 @@ export function EventProvider({ children }) {
   };
 
   // ───────────────────────────────────────────────
-  // [ADD] 이메일 화이트리스트(preMembers) 자동 클레임
+  // [ADD] 이메일 화이트리스트(preMembers) 자동 클레임 (기존 유지)
   // ───────────────────────────────────────────────
   useEffect(() => {
     const uidRaw   = auth?.currentUser?.uid || null;

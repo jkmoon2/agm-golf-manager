@@ -187,16 +187,16 @@ export default function StepFlow() {
   const agmFlow    = [1,2,3,4,7,8];
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
 
-  const goNext = () => {
-    // ✅ 날짜 포함 저장
-    save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
+  // ★ FIX(C): 저장을 await 후 이동(레이스 제거)
+  const goNext = async () => {
+    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
   };
 
-  const goPrev = () => {
-    save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
+  const goPrev = async () => {
+    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
