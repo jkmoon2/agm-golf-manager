@@ -303,8 +303,9 @@ export default function PlayerResults() {
 
   const metricsPerRoom = 2 + (visibleMetrics.score ? 1 : 0) + (visibleMetrics.banddang ? 1 : 0);
 
-  /* 안전한 ‘이전’ 폴백: /player/home/:eventId/:step → step-1 로 명시 이동 */
+  /* ✅ 부드러운 전환: 컨텍스트 우선, 실패 시에만 URL 폴백 */
   const handlePrev = () => {
+    if (typeof goPrev === 'function') { goPrev(); return; }
     try {
       const url = new URL(window.location.href);
       const parts = url.pathname.split('/').filter(Boolean);
@@ -313,17 +314,16 @@ export default function PlayerResults() {
       if (Number.isFinite(n) && n > 1) {
         parts[parts.length - 1] = String(n - 1);
         const newPath = '/' + parts.join('/');
-        window.location.assign(newPath + url.search + url.hash);
+        window.history.replaceState(null, '', newPath + url.search + url.hash);
         return;
       }
     } catch (e) {}
-    if (typeof goPrev === 'function') return goPrev();
     try { window.history.back(); } catch (e) {}
   };
 
   const handleNext = () => {
     if (nextDisabled) return;
-    if (typeof goNext === 'function') return goNext();
+    if (typeof goNext === 'function') { goNext(); return; }
     try {
       const url = new URL(window.location.href);
       const parts = url.pathname.split('/').filter(Boolean);
@@ -332,7 +332,7 @@ export default function PlayerResults() {
       if (Number.isFinite(n)) {
         parts[parts.length - 1] = String(n + 1);
         const newPath = '/' + parts.join('/');
-        window.location.assign(newPath + url.search + url.hash);
+        window.history.replaceState(null, '', newPath + url.search + url.hash);
       } else {
         window.history.forward();
       }
