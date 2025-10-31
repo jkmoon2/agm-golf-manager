@@ -78,7 +78,7 @@ const toNumberOrNull = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-// 규칙의 writerRoom() 검사 통과를 위해 내 memberships 문서를 보장
+// 규칙 통과(memberships) 보조
 async function ensureMembership(eventId, myRoom) {
   try {
     const uid = auth?.currentUser?.uid || null;
@@ -136,8 +136,6 @@ export default function PlayerScoreInput() {
     if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
   }, [eventId, myRoom]);
 
-  const myKeyCandidates = [participant?.uid, participant?.id, participant?._id].map(v=>String(v ?? '')).filter(Boolean);
-
   const roomLabel =
     myRoom && roomNames[myRoom - 1]?.trim()
       ? roomNames[myRoom - 1].trim()
@@ -189,59 +187,60 @@ export default function PlayerScoreInput() {
     return unsub;
   }, [eventId]);
 
+  // ★ Dirty 안정화를 위한 기준 스냅샷과 현재 입력값
+  const [baseDraft, setBaseDraft] = useState({});
   const [draft, setDraft] = useState({});
-  const [ready, setReady] = useState(false); // ★ 추가: 초기 동기화 완료 플래그
+  const [ready, setReady] = useState(false);
 
+  // 기준 스냅샷 생성 + 초깃값 합성
   useEffect(() => {
-    setDraft((prev) => {
-      const next = { ...prev };
-      orderedRoomPlayers.forEach((p) => {
-        const key = String(p.id);
-        const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
-        const base = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
-        if (next[key] === undefined) next[key] = base;
-      });
-      return next;
+    const base = {};
+    orderedRoomPlayers.forEach((p) => {
+      const key = String(p.id);
+      const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
+      base[key] = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
     });
-    // ★ 초기 한 번이라도 draft가 채워진 이후에 ready=true
-    if (!ready && orderedRoomPlayers.length > 0) {
-      setReady(true);
-    }
+    setBaseDraft(base);
+    setDraft((prev) => ({ ...base, ...prev })); // 기존 입력은 유지, 빈 칸은 base로 채움
+    if (!ready && orderedRoomPlayers.length > 0) setReady(true);
   }, [orderedRoomPlayers, scoresMap, ready]);
 
+  // Dirty: baseDraft vs draft 객체 비교
   const isDirty = useMemo(() => {
-    return orderedRoomPlayers.some(p => {
-      const key  = String(p.id);
-      const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
-      const base = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
-      return draft[key] !== undefined && draft[key] !== base;
-    });
-  }, [orderedRoomPlayers, draft, scoresMap]);
+    const keys = Object.keys(baseDraft);
+    if (!keys.length) return false;
+    return keys.some((k) => (draft[k] ?? '') !== (baseDraft[k] ?? ''));
+  }, [baseDraft, draft]);
 
   const saveScoresDraft = async () => {
     if (!eventId) return;
     try{
       await ensureMembership(eventId, myRoom);
       const ops = [];
-      const roomPids = new Set(orderedRoomPlayers.map(p => String(p.id)));
 
       orderedRoomPlayers.forEach((p) => {
         const key = String(p.id);
-        if (!roomPids.has(key)) return;
         const raw = draft[key];
+        const before = baseDraft[key] ?? '';
+        if (raw === undefined || String(raw) === String(before)) return;
+
         const newScore = toNumberOrNull(raw);
-
-        const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
-        const base = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
-        if (raw === undefined || String(raw) === base) return;
-
         const ref = doc(db, 'events', eventId, 'scores', key);
-        // ★ updatedAt 추가(서버시각) → 정합성 향상
         ops.push(setDoc(ref, { room: myRoom, score: newScore, updatedAt: serverTimestamp() }, { merge: true }));
       });
 
       await Promise.all(ops);
-      setDraft({});
+
+      // ★ 저장이 끝났으면 현재 값을 기준 스냅샷으로 채택 → Dirty 해제
+      setBaseDraft((prev) => {
+        const next = { ...prev };
+        orderedRoomPlayers.forEach((p) => {
+          const key = String(p.id);
+          if (draft[key] !== undefined) next[key] = draft[key] ?? '';
+        });
+        return next;
+      });
+
       alert('저장되었습니다.');
     }catch(e){
       console.error('saveScoresDraft failed', e);
@@ -306,17 +305,16 @@ export default function PlayerScoreInput() {
     let sumH = 0, sumS = 0, sumR = 0;
     orderedRoomPlayers.forEach((p) => {
       const key = String(p.id);
-      const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
-      const s = toNumberOrNull(draft[key] ?? ((baseScore == null) ? '' : baseScore));
+      const s = toNumberOrNull(draft[key]);
       const h = Number(p.handicap || 0);
       sumH += h;
       sumS += (s ?? 0);
       sumR += (s ?? 0) - h;
     });
     return { sumH, sumS, sumR };
-  }, [orderedRoomPlayers, draft, scoresMap]);
+  }, [orderedRoomPlayers, draft]);
 
-  const saveDisabled = !ready || !isDirty; // ★ 초기 동기화 완료 전/변경없을 때 비활성
+  const saveDisabled = !ready || !isDirty;
 
   return (
     <div className={styles.page}>
@@ -353,13 +351,10 @@ export default function PlayerScoreInput() {
                 }
 
                 const key = String(p.id);
-                const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
-                const raw = draft[key] ?? (baseScore == null ? '' : (baseScore === 0 ? '' : String(baseScore)));
+                const raw = draft[key] ?? '';
                 const s = toNumberOrNull(raw);
                 const h = Number(p.handicap || 0);
                 const r = (s ?? 0) - h;
-
-                const inputDisabled = false;
 
                 return (
                   <tr key={p.id}>
@@ -381,7 +376,6 @@ export default function PlayerScoreInput() {
                         className={styles.cellInput}
                         value={raw}
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
-                        onBlur={() => {}}
                         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                         onPointerDown={(e) => startHold(p.id, e)}
                         onPointerUp={() => endHold(p.id)}
@@ -393,9 +387,6 @@ export default function PlayerScoreInput() {
                           if (el) inputRefs.current[key] = el;
                           else delete inputRefs.current[key];
                         }}
-                        disabled={inputDisabled}
-                        aria-disabled={inputDisabled}
-                        style={inputDisabled ? { opacity:.55, background:'#f9fafb' } : undefined}
                       />
                     </td>
                     <td className={`${styles.td} ${styles.resultTd}`}>

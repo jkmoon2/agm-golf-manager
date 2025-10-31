@@ -126,7 +126,7 @@ export default function PlayerResults() {
     return unsub;
   }, [eventData?.id, eventData?.eventId]);
 
-  // /scores 실시간 반영 → 저장 직후 즉시 표 업데이트
+  // /scores 실시간 반영
   useEffect(() => {
     const id = eventData?.id || eventData?.eventId || null;
     if (!id) return;
@@ -303,11 +303,24 @@ export default function PlayerResults() {
 
   const metricsPerRoom = 2 + (visibleMetrics.score ? 1 : 0) + (visibleMetrics.banddang ? 1 : 0);
 
-  /* 안전한 네비게이션 폴백 보강: /player/home/:eventId/:step */
+  /* 안전한 ‘이전’ 폴백: /player/home/:eventId/:step → step-1 로 명시 이동 */
   const handlePrev = () => {
+    try {
+      const url = new URL(window.location.href);
+      const parts = url.pathname.split('/').filter(Boolean);
+      const last = parts[parts.length - 1];
+      const n = Number(last);
+      if (Number.isFinite(n) && n > 1) {
+        parts[parts.length - 1] = String(n - 1);
+        const newPath = '/' + parts.join('/');
+        window.location.assign(newPath + url.search + url.hash);
+        return;
+      }
+    } catch (e) {}
     if (typeof goPrev === 'function') return goPrev();
     try { window.history.back(); } catch (e) {}
   };
+
   const handleNext = () => {
     if (nextDisabled) return;
     if (typeof goNext === 'function') return goNext();
