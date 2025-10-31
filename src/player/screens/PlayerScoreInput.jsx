@@ -190,9 +190,9 @@ export default function PlayerScoreInput() {
   // ★ Dirty 안정화를 위한 기준 스냅샷과 현재 입력값
   const [baseDraft, setBaseDraft] = useState({});
   const [draft, setDraft] = useState({});
-  const [ready, setReady] = useState(false);
+  const bootstrappedRef = useRef(false); // 최초 1회만 draft 초기화
 
-  // 기준 스냅샷 생성 + 초깃값 합성
+  // 기준 스냅샷 생성
   useEffect(() => {
     const base = {};
     orderedRoomPlayers.forEach((p) => {
@@ -201,15 +201,23 @@ export default function PlayerScoreInput() {
       base[key] = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
     });
     setBaseDraft(base);
-    setDraft((prev) => ({ ...base, ...prev })); // 기존 입력은 유지, 빈 칸은 base로 채움
-    if (!ready && orderedRoomPlayers.length > 0) setReady(true);
-  }, [orderedRoomPlayers, scoresMap, ready]);
+
+    // 🔐 최초 1회만 draft를 base로 세팅(이후엔 사용자 입력을 덮지 않음)
+    if (!bootstrappedRef.current) {
+      setDraft(base);
+      bootstrappedRef.current = true;
+    }
+  }, [orderedRoomPlayers, scoresMap]);
 
   // Dirty: baseDraft vs draft 객체 비교
+  const isReady = useMemo(() => Object.keys(baseDraft).length > 0 && orderedRoomPlayers.length > 0, [baseDraft, orderedRoomPlayers.length]);
   const isDirty = useMemo(() => {
     const keys = Object.keys(baseDraft);
     if (!keys.length) return false;
-    return keys.some((k) => (draft[k] ?? '') !== (baseDraft[k] ?? ''));
+    for (const k of keys) {
+      if ((draft[k] ?? '') !== (baseDraft[k] ?? '')) return true;
+    }
+    return false;
   }, [baseDraft, draft]);
 
   const saveScoresDraft = async () => {
@@ -231,7 +239,7 @@ export default function PlayerScoreInput() {
 
       await Promise.all(ops);
 
-      // ★ 저장이 끝났으면 현재 값을 기준 스냅샷으로 채택 → Dirty 해제
+      // ★ 저장 후 현재 입력을 기준 스냅샷으로 승격 → Dirty 해제
       setBaseDraft((prev) => {
         const next = { ...prev };
         orderedRoomPlayers.forEach((p) => {
@@ -314,7 +322,7 @@ export default function PlayerScoreInput() {
     return { sumH, sumS, sumR };
   }, [orderedRoomPlayers, draft]);
 
-  const saveDisabled = !ready || !isDirty;
+  const saveDisabled = !(isReady && isDirty);
 
   return (
     <div className={styles.page}>
