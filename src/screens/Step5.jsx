@@ -277,6 +277,15 @@ export default function Step5() {
         }
       });
       await syncChanges(changes);
+
+      // ★★★ FIX(즉시반영 보강): 전체 스냅샷을 한 번 더 즉시 커밋
+      try {
+        if (typeof updateEventImmediate === 'function' && eventId) {
+          await updateEventImmediate({ participants: nextSnapshot }, false);
+        }
+      } catch (e) {
+        console.warn('[Step5] extra immediate commit failed:', e);
+      }
     }
   };
 
