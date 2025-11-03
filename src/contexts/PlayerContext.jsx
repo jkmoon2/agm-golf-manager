@@ -10,7 +10,8 @@ import {
   serverTimestamp,
   updateDoc,        // ✅ update만 사용 (create 금지)
   getDoc,           // ✅ 이벤트 문서 존재 확인
-  collection        // ★ ADD: scores 구독용
+  collection,       // ★ ADD: scores 구독용
+  getDocs           // ★ ADD: scores 일괄 읽기(저장 전 최신값 머지)
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
@@ -225,18 +226,23 @@ export function PlayerProvider({ children }) {
       const data = snap.exists() ? (snap.data() || {}) : {};
 
       const rawParts = Array.isArray(data.participants) ? data.participants : [];
-      const partArr = rawParts.map((p, i) => ({
-        ...((p && typeof p === 'object') ? p : {}),
-        id:       normId(p?.id ?? i),
-        nickname: normName(p?.nickname),
-        handicap: toInt(p?.handicap, 0),
-        group:    toInt(p?.group, 0),
-        authCode: (p?.authCode ?? '').toString(),
-        room:     p?.room ?? null,
-        partner:  p?.partner != null ? normId(p.partner) : null,
-        score:    toInt(p?.score, 0),
-        selected: !!p?.selected,
-      }));
+      const partArr = rawParts.map((p, i) => {
+        // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
+        const scoreRaw = p?.score;
+        const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
+        return {
+          ...((p && typeof p === 'object') ? p : {}),
+          id:       normId(p?.id ?? i),
+          nickname: normName(p?.nickname),
+          handicap: toInt(p?.handicap, 0),
+          group:    toInt(p?.group, 0),
+          authCode: (p?.authCode ?? '').toString(),
+          room:     p?.room ?? null,
+          partner:  p?.partner != null ? normId(p.partner) : null,
+          score:    scoreVal,
+          selected: !!p?.selected,
+        };
+      });
       setParticipants(partArr);
 
       const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
@@ -330,11 +336,28 @@ export function PlayerProvider({ children }) {
       throw new Error('Event document does not exist');
     }
 
+    // ★★★ FIX: 저장 직전 scores 최신값을 머지하여 덮어쓰기 방지
+    let scoresMap = {};
+    try {
+      const ss = await getDocs(collection(db, 'events', eventId, 'scores'));
+      ss.forEach(d => {
+        const s = d.data() || {};
+        scoresMap[String(d.id)] = {
+          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : null),
+          room : (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : null),
+        };
+      });
+    } catch (e) {
+      if (DEBUG) console.warn('[PlayerContext] getDocs(scores) failed:', e?.message || e);
+    }
+
     const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
       const out = {};
       for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
       if (out.id === undefined) out.id = String(p?.id ?? i);
+
+      // 숫자 정규화
       if (out.group !== undefined) {
         out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
       }
@@ -343,8 +366,12 @@ export function PlayerProvider({ children }) {
         out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
       }
       if (out.score !== undefined) {
-        const n = Number(out.score);
-        out.score = Number.isFinite(n) ? n : (out.score == null ? null : String(out.score));
+        // ★ FIX: 빈값은 null 유지
+        if (out.score === '' || out.score == null) out.score = null;
+        else {
+          const n = Number(out.score);
+          out.score = Number.isFinite(n) ? n : null;
+        }
       }
       if (out.room !== undefined && out.room !== null) {
         const n = Number(out.room);
@@ -359,13 +386,23 @@ export function PlayerProvider({ children }) {
         out.partner = Number.isFinite(n) ? n : String(out.partner);
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
+
+      // ★★★ 여기서 scores 최신값을 합쳐 넣음 (우리 변경이 없는 항목만)
+      const sid = String(out.id);
+      const s   = scoresMap[sid] || {};
+      if ((out.score == null) && (s.score != null)) out.score = s.score;
+      if ((out.room  == null) && (s.room  != null)) out.room  = s.room;
+
+      // roomNumber 동기화(표시용)
+      if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
+
       return out;
     });
 
     try {
       await updateDoc(
         eref,
-        sanitizeForFirestore({ participants: cleaned, updatedAt: serverTimestamp() })
+        sanitizeForFirestore({ participants: cleaned, participantsUpdatedAt: serverTimestamp() })
       );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });

@@ -37,31 +37,31 @@ const toSafeParticipants = (arr) =>
     .map((p) => ({ ...p, id: p?.id ?? p?.pid ?? p?.uid ?? p?._id ?? null }))
     .filter((p) => p.id != null);
 
+// 포볼 A/B/A/B 고정: group===1 + partner 매칭 기반
 function orderByPair(list) {
   const slot = [null, null, null, null];
   const used = new Set();
-  const asNum = (v) => Number(v ?? NaN);
-  const half = Math.floor((list || []).length / 2) || 0;
 
+  // 1조를 기준으로 짝을 찾고, 첫 번째 짝은 slot[0,1], 두 번째 짝은 slot[2,3]
   (list || [])
-    .filter((p) => Number.isFinite(asNum(p?.id)) && asNum(p.id) < half)
+    .filter((p) => Number(p?.group) === 1)
     .forEach((p1) => {
-      const id1 = asNum(p1.id);
-      if (used.has(id1)) return;
+      if (used.has(p1.id)) return;
       const p2 = (list || []).find((x) => String(x?.id) === String(p1?.partner));
-      if (p2) {
+      if (p2 && !used.has(p2.id)) {
         const pos = slot[0] ? 2 : 0;
         slot[pos] = p1;
         slot[pos + 1] = p2;
-        used.add(id1); used.add(asNum(p2.id));
+        used.add(p1.id);
+        used.add(p2.id);
       }
     });
 
+  // 남은 사람은 빈 칸에 순서대로 채우기
   (list || []).forEach((p) => {
-    const id = asNum(p?.id);
-    if (!used.has(id)) {
+    if (!used.has(p.id)) {
       const i = slot.findIndex((s) => s === null);
-      if (i >= 0) { slot[i] = p; used.add(id); }
+      if (i >= 0) { slot[i] = p; used.add(p.id); }
     }
   });
 
@@ -100,7 +100,7 @@ export default function PlayerScoreInput() {
 
   const { eventData } = useContext(EventContext) || {};
   const params = useParams();
-  const routeEventId = params?.eventId || params?.id;
+  const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
   const eventId = ctxEventId || routeEventId;
 
   const [fallbackGate, setFallbackGate] = useState(null);
@@ -203,12 +203,12 @@ export default function PlayerScoreInput() {
     });
     setBaseDraft(base);
 
-    // ★ fix: 재진입/저장 직후(hasEdited=false)에는 저장된 값을 드래프트로 동기화
+    // 저장 직후(hasEdited=false)에는 저장된 값을 드래프트로 동기화
     if (!bootstrappedRef.current || !hasEdited) {
       setDraft(base);
       bootstrappedRef.current = true;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderedRoomPlayers, scoresMap, hasEdited]);
 
   // Dirty 계산
@@ -228,7 +228,7 @@ export default function PlayerScoreInput() {
   const onChangeScore = (pid, val) => {
     const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
     setDraft((d) => ({ ...d, [String(pid)]: clean }));
-    setHasEdited(true); // ★ fix: 실제 편집 표시
+    setHasEdited(true);
   };
 
   const saveScoresDraft = async () => {
@@ -259,7 +259,7 @@ export default function PlayerScoreInput() {
         });
         return next;
       });
-      setHasEdited(false); // ★ fix: 저장 완료 → 편집 플래그 리셋
+      setHasEdited(false);
 
       alert('저장되었습니다.');
     }catch(e){
@@ -301,7 +301,7 @@ export default function PlayerScoreInput() {
         });
         return next;
       });
-      setHasEdited(true); // ★ fix: 길게 눌러 부호 변경도 편집으로 간주
+      setHasEdited(true);
     }, LONG_PRESS_MS);
   };
   const moveHold = (pid, e) => {
@@ -330,7 +330,7 @@ export default function PlayerScoreInput() {
     return { sumH, sumS, sumR };
   }, [orderedRoomPlayers, draft]);
 
-  // ★ fix: 드래프트 미준비 시 항상 비활성(초기 깜빡임 제거)
+  // 드래프트 미준비 시 항상 비활성(초기 깜빡임 제거)
   const hasDraftKeys = Object.keys(draft).length > 0;
   const saveDisabled = !(isReady && hasDraftKeys && (isDirty || hasEdited));
 
@@ -436,7 +436,7 @@ export default function PlayerScoreInput() {
           aria-disabled={saveDisabled}
           style={saveDisabled
             ? { opacity: 0.5, pointerEvents: 'none' }
-            : { boxShadow: '0 0 0 2px rgba(59,130,246,.35) inset', fontWeight: 600 }
+            : { boxShadow: '0 0 0 2px rgba(59,130,246,.35) inset, 0 2px 6px rgba(0,0,0,.05)', fontWeight: 600 }
           }
         >
           저장

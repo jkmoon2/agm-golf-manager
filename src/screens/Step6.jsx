@@ -10,6 +10,10 @@ import { EventContext } from '../contexts/EventContext';
 // [ADD] 라이브 이벤트 문서 구독(컨텍스트가 실시간이 아닐 때 보조)
 import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
+// [ADD] 점수 실시간 반영을 위한 Firestore 구독
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+
 export default function Step6() {
   // Step 컨텍스트
   const {
@@ -25,6 +29,22 @@ export default function Step6() {
   // [ADD] 라이브 이벤트 데이터(있으면 컨텍스트보다 우선)
   const { eventData: liveEvent } = useEventLiveQuery(eventId);
   const effectiveEventData = liveEvent || eventData;
+
+  // [ADD] scores 서브컬렉션 실시간 구독 → { [pid]: score }
+  const [scoresMap, setScoresMap] = useState({});
+  useEffect(() => {
+    if (!eventId) return;
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub = onSnapshot(colRef, (snap) => {
+      const m = {};
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        m[String(d.id)] = (data.score == null ? null : data.score);
+      });
+      setScoresMap(m);
+    });
+    return unsub;
+  }, [eventId]);
 
   // 표시 옵션 상태
   // ※ hiddenRooms 는 **1-based(방번호)** Set<number>로 유지 (Step8/Player와 동일)
@@ -250,16 +270,25 @@ export default function Step6() {
     ? participants
     : ((effectiveEventData && Array.isArray(effectiveEventData.participants)) ? effectiveEventData.participants : []);
 
+  // [ADD] 점수 오버레이 적용(있으면 scoresMap 우선, 없으면 기존 score 유지)
+  const participantsWithScore = useMemo(() => {
+    return (sourceParticipants || []).map((p) => {
+      const key = String(p.id);
+      const s = scoresMap[key];
+      return (s === undefined) ? p : { ...p, score: s };
+    });
+  }, [sourceParticipants, scoresMap]);
+
   // 방별 그룹
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
-    (sourceParticipants || []).forEach(p => {
+    (participantsWithScore || []).forEach(p => {
       if (p.room != null && p.room >= 1 && p.room <= roomCount) {
         arr[p.room - 1].push(p);
       }
     });
     return arr;
-  }, [sourceParticipants, roomCount]);
+  }, [participantsWithScore, roomCount]);
 
   // 방배정표 rows
   const MAX = 4;

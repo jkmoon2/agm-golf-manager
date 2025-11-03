@@ -10,6 +10,10 @@ import { StepContext } from '../flows/StepFlow';
 // [ADD] 라이브 이벤트 문서 구독(컨텍스트가 실시간이 아닐 때 보조)
 import { useEventLiveQuery } from '../live/useEventLiveQuery';
 
+// [ADD] 점수 실시간 반영을 위한 Firestore 구독
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+
 export default function Step8() {
   const {
     participants,
@@ -26,6 +30,22 @@ export default function Step8() {
   const effectiveEventData = liveEvent || eventData;
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
+
+  // [ADD] scores 서브컬렉션 실시간 구독 → { [pid]: score }
+  const [scoresMap, setScoresMap] = useState({});
+  useEffect(() => {
+    if (!eventId) return;
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub = onSnapshot(colRef, (snap) => {
+      const m = {};
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        m[String(d.id)] = (data.score == null ? null : data.score);
+      });
+      setScoresMap(m);
+    });
+    return unsub;
+  }, [eventId]);
 
   // ───────────────────────────────────────────────────────────
   // [NEW] 하단 고정 버튼을 위한 안전영역/여백 계산 (STEP5/7과 동일 패턴)
@@ -214,19 +234,28 @@ export default function Step8() {
     ? effectiveEventData.participants
     : participants;
 
+  // [ADD] 점수 오버레이 적용(있으면 scoresMap 우선)
+  const participantsWithScore = useMemo(() => {
+    return (sourceParticipants || []).map((p) => {
+      const key = String(p.id);
+      const s = scoresMap[key];
+      return (s === undefined) ? p : { ...p, score: s };
+    });
+  }, [sourceParticipants, scoresMap]);
+
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
-    (sourceParticipants || []).forEach(p => {
+    (participantsWithScore || []).forEach(p => {
       if (p.room != null && p.room >= 1 && p.room <= roomCount) {
         arr[p.room - 1].push(p);
       }
     });
     return arr;
-  }, [sourceParticipants, roomCount]);
+  }, [participantsWithScore, roomCount]);
 
   // ── 6) 1조/2조 짝 → slot[0,1], slot[2,3] 고정 ─────────────
   const orderedByRoom = useMemo(() => {
-    return byRoom.map((roomArr, roomIdx) => {
+    return byRoom.map((roomArr) => {
       // 네 칸 slot 초기화
       const slot = [null, null, null, null];
       const used = new Set();
@@ -237,7 +266,7 @@ export default function Step8() {
         .filter(p => Number(p?.group) === 1)
         .forEach(p1 => {
           if (used.has(p1.id)) return;
-          const partner = roomArr.find(x => x.id === p1.partner);
+          const partner = roomArr.find(x => String(x.id) === String(p1.partner));
           if (partner && !used.has(partner.id)) {
             pairs.push([p1, partner]);
             used.add(p1.id);

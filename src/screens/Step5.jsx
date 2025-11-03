@@ -5,6 +5,10 @@ import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import styles from './Step5.module.css';
 
+// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+
 if (process.env.NODE_ENV !== 'production') console.log('[AGM] Step5 render');
 
 export default function Step5() {
@@ -21,6 +25,38 @@ export default function Step5() {
 
   // ★ ADD: upsertScores 가져오기 (있으면 사용, 없어도 무관)
   const { eventId, updateEventImmediate, upsertScores } = useContext(EventContext) || {};
+
+  // ★★★ ADD: scores 구독 → Admin 화면 로컬 participants에 즉시 머지 (Player가 점수 입력 시 즉시 보이도록)
+  useEffect(() => {
+    if (!eventId) return;
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub  = onSnapshot(colRef, snap => {
+      const map = {};
+      snap.forEach(d => {
+        const s = d.data() || {};
+        map[String(d.id)] = {
+          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : undefined),
+          room:  (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : undefined),
+        };
+      });
+      setParticipants(prev => {
+        const next = (prev || []).map(p => {
+          const s = map[String(p.id)];
+          if (!s) return p;
+          let out = p, changed = false;
+          if (Object.prototype.hasOwnProperty.call(s, 'score') && (p.score ?? null) !== (s.score ?? null)) {
+            out = { ...out, score: s.score ?? null }; changed = true;
+          }
+          if (Object.prototype.hasOwnProperty.call(s, 'room') && (p.room ?? null) !== (s.room ?? null)) {
+            out = { ...out, room: s.room ?? null }; changed = true;
+          }
+          return changed ? out : p;
+        });
+        return next;
+      });
+    });
+    return () => unsub();
+  }, [eventId, setParticipants]);
 
   const [__bottomGap, __setBottomGap] = useState(64);
   useEffect(() => {
@@ -124,7 +160,7 @@ export default function Step5() {
       if (typeof updateEventImmediate === 'function' && eventId) {
         const base = participants || [];
         const next = buildNextFromChanges(base, changes);
-        await updateEventImmediate({ participants: next });
+        await updateEventImmediate({ participants: next, participantsUpdatedAt: serverTimestamp() });
       }
     } catch (e) {
       console.warn('[Step5] updateEventImmediate(participants) failed:', e);
@@ -281,7 +317,7 @@ export default function Step5() {
       // ★★★ FIX(즉시반영 보강): 전체 스냅샷을 한 번 더 즉시 커밋
       try {
         if (typeof updateEventImmediate === 'function' && eventId) {
-          await updateEventImmediate({ participants: nextSnapshot }, false);
+          await updateEventImmediate({ participants: nextSnapshot, participantsUpdatedAt: serverTimestamp() }, false);
         }
       } catch (e) {
         console.warn('[Step5] extra immediate commit failed:', e);

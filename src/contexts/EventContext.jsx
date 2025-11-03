@@ -452,7 +452,8 @@ export function EventProvider({ children }) {
       });
 
       if (!deepEqual(baseList, merged)) {
-        updateEventImmediate({ participants: merged }).catch(() => {});
+        // ★ FIX: participantsUpdatedAt 기록(서버 타임스탬프 가드)
+        updateEventImmediate({ participants: merged, participantsUpdatedAt: serverTimestamp() }).catch(() => {});
       }
     });
     return unsub;
