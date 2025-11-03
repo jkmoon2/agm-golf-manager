@@ -5,6 +5,10 @@ import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 
+// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+
 if (process.env.NODE_ENV!=='production') console.log('[AGM] Step7 render');
 
 export default function Step7() {
@@ -25,6 +29,38 @@ export default function Step7() {
 
   // ★ ADD: upsertScores 추가 (Admin→Player 브리지 완성)
   const { eventId, updateEventImmediate, eventData, upsertScores } = useContext(EventContext) || {};
+
+  // ★★★ ADD: scores 구독 → Admin 화면 로컬 participants에 즉시 머지
+  useEffect(() => {
+    if (!eventId) return;
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub  = onSnapshot(colRef, snap => {
+      const map = {};
+      snap.forEach(d => {
+        const s = d.data() || {};
+        map[String(d.id)] = {
+          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : undefined),
+          room:  (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : undefined),
+        };
+      });
+      setParticipants(prev => {
+        const next = (prev || []).map(p => {
+          const s = map[String(p.id)];
+          if (!s) return p;
+          let out = p, changed = false;
+          if (Object.prototype.hasOwnProperty.call(s, 'score') && (p.score ?? null) !== (s.score ?? null)) {
+            out = { ...out, score: s.score ?? null }; changed = true;
+          }
+          if (Object.prototype.hasOwnProperty.call(s, 'room') && (p.room ?? null) !== (s.room ?? null)) {
+            out = { ...out, room: s.room ?? null }; changed = true;
+          }
+          return changed ? out : p;
+        });
+        return next;
+      });
+    });
+    return () => unsub();
+  }, [eventId, setParticipants]);
 
   const [loadingId, setLoadingId] = useState(null);
   const [scoreDraft, setScoreDraft] = useState({});
@@ -182,7 +218,7 @@ export default function Step7() {
       if (typeof updateEventImmediate === 'function' && eventId) {
         const base = participants || [];
         const next = buildNextFromChanges(base, changes);
-        await updateEventImmediate({ participants: next });
+        await updateEventImmediate({ participants: next, participantsUpdatedAt: serverTimestamp() });
       }
     } catch (e) {
       console.warn('[Step7] updateEventImmediate(participants) failed:', e);
@@ -281,7 +317,7 @@ export default function Step7() {
       if (updateEventImmediate && eventId) {
         const compat = (list || []).map(compatParticipant);
         const roomTable = buildRoomTable(compat);
-        await updateEventImmediate(roomTable ? { participants: compat, roomTable } : { participants: compat });
+        await updateEventImmediate(roomTable ? { participants: compat, roomTable, participantsUpdatedAt: serverTimestamp() } : { participants: compat, participantsUpdatedAt: serverTimestamp() });
       } else if (typeof updateParticipantsBulk === 'function') {
         const changes = (list || []).map(p => ({
           id: p.id,
