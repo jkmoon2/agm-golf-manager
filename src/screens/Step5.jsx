@@ -19,7 +19,8 @@ export default function Step5() {
     updateParticipantsBulk,
   } = useContext(StepContext);
 
-  const { eventId, updateEventImmediate } = useContext(EventContext) || {};
+  // ★ ADD: upsertScores 가져오기 (있으면 사용, 없어도 무관)
+  const { eventId, updateEventImmediate, upsertScores } = useContext(EventContext) || {};
 
   const [__bottomGap, __setBottomGap] = useState(64);
   useEffect(() => {
@@ -99,6 +100,26 @@ export default function Step5() {
     } catch (e) {
       console.warn('[Step5] syncChanges failed:', e);
     }
+
+    // ★★★ ADD: Admin → Player 브리지 (scores 업서트: score/room 만 추려서)
+    try {
+      if (typeof upsertScores === 'function' && Array.isArray(changes) && changes.length) {
+        const payload = [];
+        changes.forEach(({ id, fields }) => {
+          if (!fields) return;
+          const item = { id };
+          let push = false;
+          if (Object.prototype.hasOwnProperty.call(fields, 'score')) { item.score = fields.score ?? null; push = true; }
+          if (Object.prototype.hasOwnProperty.call(fields, 'room'))  { item.room  = fields.room  ?? null; push = true; }
+          if (push) payload.push(item);
+        });
+        if (payload.length) await upsertScores(payload);
+      }
+    } catch (e) {
+      console.warn('[Step5] upsertScores from syncChanges failed:', e);
+    }
+
+    // 기존 동작 유지: 이벤트 문서 participants도 병행 저장
     try {
       if (typeof updateEventImmediate === 'function' && eventId) {
         const base = participants || [];
@@ -247,8 +268,10 @@ export default function Step5() {
 
     if (nextSnapshot) {
       const changes = [];
-      nextSnapshot.forEach((p, i) => {
-        const old = participants[i];
+      // ★ FIX: index 기반 → id 기반으로 비교 (안정화)
+      const oldById = new Map((participants || []).map(p => [String(p.id), p]));
+      nextSnapshot.forEach((p) => {
+        const old = oldById.get(String(p.id));
         if (!old || old.room !== p.room) {
           changes.push({ id: p.id, fields: { room: p.room ?? null } });
         }
