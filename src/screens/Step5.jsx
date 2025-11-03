@@ -4,6 +4,7 @@ import React, { useState, useEffect, useContext, useRef } from 'react';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import styles from './Step5.module.css';
+import { serverTimestamp } from 'firebase/firestore';
 
 // ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영
 import { collection, onSnapshot } from 'firebase/firestore';
