@@ -406,6 +406,62 @@ export function EventProvider({ children }) {
     })();
   }, [eventId, auth?.currentUser?.uid, auth?.currentUser?.email]);
 
+  // ───────────────────────────────────────────────
+  // ★★★ [ADD] Admin↔Player 양방향 브리지
+  // 1) Admin → Player : scores 서브컬렉션 업서트
+  // 2) Player → Admin : scores 구독 → participants에 즉시 머지
+  // ───────────────────────────────────────────────
+  const upsertScores = async (payload = []) => {
+    if (!eventId || !Array.isArray(payload) || payload.length === 0) return;
+    try {
+      await Promise.all(
+        payload.map(({ id, score, room }) => {
+          const ref  = doc(db, 'events', eventId, 'scores', String(id));
+          const body = { updatedAt: serverTimestamp() };
+          if (Object.prototype.hasOwnProperty.call({ score }, 'score')) body.score = score ?? null;
+          if (Object.prototype.hasOwnProperty.call({ room },  'room'))  body.room  = room  ?? null;
+          return setDoc(ref, body, { merge: true });
+        })
+      );
+    } catch (e) {
+      console.warn('[EventContext] upsertScores failed:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (!eventId) return;
+    // Player → Admin 브리지: scores 컬렉션을 구독하여 participants에 반영
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub  = onSnapshot(colRef, snap => {
+      const baseList = (lastEventDataRef.current?.participants) || [];
+      if (!Array.isArray(baseList) || baseList.length === 0) return;
+
+      const scoresMap = {};
+      snap.forEach(d => {
+        const s = d.data() || {};
+        scoresMap[String(d.id)] = {
+          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : undefined),
+          room:  (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : undefined)
+        };
+      });
+
+      const merged = baseList.map(p => {
+        const s = scoresMap[String(p.id)];
+        if (!s) return p;
+        let next = p;
+        if (Object.prototype.hasOwnProperty.call(s, 'score')) next = { ...next, score: (s.score ?? null) };
+        if (Object.prototype.hasOwnProperty.call(s, 'room'))  next = { ...next, room:  (s.room  ?? null) };
+        return next;
+      });
+
+      if (!deepEqual(baseList, merged)) {
+        updateEventImmediate({ participants: merged }).catch(() => {});
+      }
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId]);
+
   return (
     <EventContext.Provider value={{
       allEvents,
@@ -471,7 +527,9 @@ export function EventProvider({ children }) {
       updateEventDef,
       removeEventDef,
       setEventInput,
-      updatePlayerGate
+      updatePlayerGate,
+      // ★★★ [ADD]
+      upsertScores
     }}>
       {children}
     </EventContext.Provider>
