@@ -1,6 +1,6 @@
 // /src/contexts/PlayerContext.jsx
 
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useRef } from 'react';
 import {
   doc,
   setDoc,
@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   updateDoc,        // ✅ update만 사용 (create 금지)
   getDoc,           // ✅ 이벤트 문서 존재 확인
+  collection        // ★ ADD: scores 구독용
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
@@ -99,7 +100,6 @@ const validRoomsForStroke = (list, roomCount, me) => {
     const sameGroupExists = list.some(p => toInt(p.room) === r && toInt(p.group) === myGroup && normId(p.id) !== normId(me?.id));
     if (!sameGroupExists && counts[r - 1] < 4) rooms.push(r);
   }
-  // 모두 막혀 있으면 “정원 4미만”만 조건으로 다시 시도
   if (rooms.length === 0) {
     for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < 4) rooms.push(r);
   }
@@ -217,6 +217,7 @@ export function PlayerProvider({ children }) {
     }
   }, [authCode, eventId]);
 
+  // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
@@ -283,6 +284,38 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId, authCode]);
 
+  // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)
+  useEffect(() => {
+    if (!eventId) return;
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub = onSnapshot(colRef, (snap) => {
+      const map = {};
+      snap.forEach(d => {
+        const s = d.data() || {};
+        map[String(d.id)] = {
+          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : undefined),
+          room:  (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : undefined),
+        };
+      });
+      setParticipants(prev => {
+        const next = (prev || []).map(p => {
+          const s = map[String(p.id)];
+          if (!s) return p;
+          let out = p, changed = false;
+          if (Object.prototype.hasOwnProperty.call(s, 'score') && (p.score ?? null) !== (s.score ?? null)) {
+            out = { ...out, score: s.score ?? null }; changed = true;
+          }
+          if (Object.prototype.hasOwnProperty.call(s, 'room') && (p.room ?? null) !== (s.room ?? null)) {
+            out = { ...out, room: s.room ?? null }; changed = true;
+          }
+          return changed ? out : p;
+        });
+        return next;
+      });
+    });
+    return () => unsub();
+  }, [eventId]);
+
   // participants 저장 (화이트리스트 + updateDoc)
   async function writeParticipants(next) {
     if (!eventId) return;
@@ -290,7 +323,6 @@ export function PlayerProvider({ children }) {
 
     const eref = doc(db, 'events', eventId);
 
-    // 이벤트 문서 존재 확인
     const exists = (await getDoc(eref)).exists();
     if (DEBUG) exposeDiag({ eventId, eventExists: exists });
     if (!exists) {
@@ -298,7 +330,6 @@ export function PlayerProvider({ children }) {
       throw new Error('Event document does not exist');
     }
 
-    // ✅ roomNumber도 허용(데이터에 존재할 수 있음)
     const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
       const out = {};
@@ -342,7 +373,39 @@ export function PlayerProvider({ children }) {
     }
   }
 
-  // ─ API ─
+  // ───────── ★★★ ADD: Player측 미러 — participants 변경분을 scores에도 업서트(PLAYER→ADMIN 실시간)
+  const lastMirroredRef = useRef({});
+  useEffect(() => {
+    if (!eventId || !Array.isArray(participants) || !participants.length) return;
+    const nowMap = {};
+    const payload = [];
+    participants.forEach(p => {
+      const id = normId(p.id);
+      const cur = { score: p.score ?? null, room: p.room ?? null };
+      nowMap[id] = cur;
+      const prev = lastMirroredRef.current[id] || {};
+      const changed = (prev.score ?? null) !== cur.score || (prev.room ?? null) !== cur.room;
+      if (changed) payload.push({ id, ...cur });
+    });
+    if (!payload.length) return;
+    (async () => {
+      try {
+        await ensureAuthReady();
+        await Promise.all(payload.map(({ id, score, room }) =>
+          setDoc(doc(db, 'events', eventId, 'scores', String(id)), {
+            score: score ?? null,
+            room:  room  ?? null,
+            updatedAt: serverTimestamp()
+          }, { merge: true })
+        ));
+        lastMirroredRef.current = nowMap;
+      } catch (e) {
+        if (DEBUG) console.warn('[PlayerContext] mirror to scores failed:', e?.message || e);
+      }
+    })();
+  }, [eventId, participants]);
+
+  // ─ API (원본 유지) ─
   async function joinRoom(roomNumber, id) {
     await ensureAuthReady();
     const rid = toInt(roomNumber, 0);
@@ -384,7 +447,6 @@ export function PlayerProvider({ children }) {
     } catch (_) {}
   }
 
-  // ─ 스트로크: “조건 만족 방들 중 균등 랜덤”
   async function assignStrokeForOne(participantId) {
     await ensureAuthReady();
 
@@ -393,7 +455,6 @@ export function PlayerProvider({ children }) {
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
-    // 균등 랜덤
     let candidates = validRoomsForStroke(participants, roomCount, me);
     if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
     const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
@@ -416,7 +477,6 @@ export function PlayerProvider({ children }) {
     return { roomNumber: chosenRoom, roomLabel: makeLabel(roomNames, chosenRoom) };
   }
 
-  // ─ 포볼: “정원 4미만 방들 중 균등 랜덤” + (1조가 파트너 자동 선택)
   async function assignFourballForOneAndPartner(participantId) {
     await ensureAuthReady();
 
@@ -474,11 +534,9 @@ export function PlayerProvider({ children }) {
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');
 
-          // 균등 랜덤
           const rooms = validRoomsForFourball(parts, roomCount);
           const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
-          // 파트너: 2조 중 아직 파트너 없는 사람
           const pool = parts.filter(
             (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
           );
@@ -515,7 +573,6 @@ export function PlayerProvider({ children }) {
       }
     }
 
-    // 비트랜잭션 (동일 정책)
     const rooms = validRoomsForFourball(participants, roomCount);
     const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 

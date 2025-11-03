@@ -380,11 +380,10 @@ export function EventProvider({ children }) {
     (async () => {
       try {
         if (email) {
-          // 1) preMembers에 있으면 → 인증코드 없이 입장(verified: true)
           const preRef  = doc(db, 'events', eid, 'preMembers', email);
           const preSnap = await getDoc(preRef);
           if (preSnap.exists()) {
-            const pre = preSnap.data(); // { name, nickname?, group? ... }
+            const pre = preSnap.data();
             await setDoc(doc(db, 'events', eid, 'memberships', uid), {
               email,
               name: pre?.name ?? (auth?.currentUser?.displayName ?? null),
@@ -395,7 +394,6 @@ export function EventProvider({ children }) {
             return;
           }
         }
-        // 2) preMembers가 없으면: 최소한의 PII만 병합(verified는 넣지 않음)
         await setDoc(doc(db, 'events', eid, 'memberships', uid), {
           email: email || null,
           name : auth?.currentUser?.displayName ?? null
@@ -430,7 +428,6 @@ export function EventProvider({ children }) {
 
   useEffect(() => {
     if (!eventId) return;
-    // Player → Admin 브리지: scores 컬렉션을 구독하여 participants에 반영
     const colRef = collection(db, 'events', eventId, 'scores');
     const unsub  = onSnapshot(colRef, snap => {
       const baseList = (lastEventDataRef.current?.participants) || [];
@@ -459,7 +456,6 @@ export function EventProvider({ children }) {
       }
     });
     return unsub;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   return (
@@ -476,11 +472,9 @@ export function EventProvider({ children }) {
         dateStart = '',
         dateEnd = '',
         allowDuringPeriodOnly = false,
-        // ★ patch: Step0에서 넘겨주는 접근 구간/타임스탬프도 그대로 저장
         accessStartAt = null,
         accessEndAt = null,
         accessUpdatedAt = null,
-        // ★ patch(time): Step0에서 넘겨줄 수 있는 옵션 시간 문자열 저장
         timeStart = null,
         timeEnd   = null
       }) => {
@@ -496,11 +490,9 @@ export function EventProvider({ children }) {
           dateStart,
           dateEnd,
           allowDuringPeriodOnly,
-          // ★ patch: 접근 허용 절대 구간(ms) 및 갱신 시각도 함께 저장
           accessStartAt,
           accessEndAt,
           accessUpdatedAt,
-          // ★ patch(time): 사람이 읽기 좋은 시간 문자열(옵션)
           timeStart: timeStart ?? null,
           timeEnd:   timeEnd   ?? null,
           publicView: {
