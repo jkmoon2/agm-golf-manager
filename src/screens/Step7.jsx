@@ -6,7 +6,7 @@ import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
 
-// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영
+// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영 + 이벤트 문서 구독(서버 지문)
 import { collection, onSnapshot, getDocs, setDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -30,6 +30,16 @@ export default function Step7() {
 
   // ★ ADD: upsertScores 추가 (Admin→Player 브리지 완성)
   const { eventId, updateEventImmediate, eventData, upsertScores } = useContext(EventContext) || {};
+
+  // ───────────────────────────────────────────────────────────
+  // ★ ADD: 중복 커밋/동시 클릭 방지용 writeLock
+  const writeLockRef = useRef(false);
+  const withWriteLock = async (fn) => {
+    if (writeLockRef.current) return;
+    writeLockRef.current = true;
+    try { await fn(); } finally { writeLockRef.current = false; }
+  };
+  // ───────────────────────────────────────────────────────────
 
   // ★★★ ADD: scores 구독 → Admin 화면 로컬 participants에 즉시 머지
   useEffect(() => {
@@ -167,7 +177,7 @@ export default function Step7() {
     if (!a) return [];
     const b = a?.partner ? (list || []).find(p => String(p.id) === String(a.partner)) : null;
     return b ? [a, b] : [a];
-  };
+    };
 
   const getRoomMembers = (list, roomNo) =>
     (list || []).filter(p => Number(p?.room) === Number(roomNo));
@@ -205,7 +215,7 @@ export default function Step7() {
 
   const canBulk = typeof updateParticipantsBulk === 'function';
   const canOne  = typeof updateParticipant === 'function';
-  const syncChanges = async (changes) => {
+  const syncChanges = async (changes) => withWriteLock(async () => {
     try {
       if (canBulk) {
         await updateParticipantsBulk(changes);
@@ -242,7 +252,7 @@ export default function Step7() {
     } catch (e) {
       console.warn('[Step7] upsertScores(syncChanges) failed:', e);
     }
-  };
+  });
   // ============================================================
 
   const handleScoreInputChange = (id, raw) => {
@@ -310,7 +320,7 @@ export default function Step7() {
     return table;
   };
 
-  const commitParticipantsNow = async (list) => {
+  const commitParticipantsNow = async (list) => withWriteLock(async () => {
     try {
       if (!Array.isArray(list) || list.length === 0) return;
 
@@ -366,7 +376,7 @@ export default function Step7() {
     } catch (e) {
       console.warn('[Step7] commitParticipantsNow failed:', e);
     }
-  };
+  });
 
   const lastCommittedHashRef = useRef('');
   const commitTimerRef = useRef(null);
@@ -383,7 +393,7 @@ export default function Step7() {
         console.warn('[Step7] updateEventImmediate failed:', e);
       }
     }, 250);
-  }, [participants]);
+  }, [participants]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 이하 이동/트레이드 로직(원본 유지) …
 
@@ -638,6 +648,7 @@ export default function Step7() {
   /* ───────────────────────────────────────────────────────────
      ★★★ ADD: 포볼도 “업로드 직후” 잔여값을 절대 끌고 오지 않도록
      참가자 시드 지문(fingerprint) 변경 시 한 번만 강제 초기화
+     (세션 비교 + 서버 지문 비교 둘 다)
   ─────────────────────────────────────────────────────────── */
   const seedOf = (list=[]) => {
     try {
@@ -646,6 +657,40 @@ export default function Step7() {
       return JSON.stringify(base);
     } catch { return ''; }
   };
+
+  const clearForNewSeed = async () => {
+    if (!eventId) return;
+    try {
+      // 1) scores 전체 null
+      const colRef = collection(db, 'events', eventId, 'scores');
+      const snap   = await getDocs(colRef);
+      await Promise.all(
+        snap.docs.map(d =>
+          setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })
+        )
+      );
+    } catch (e) {
+      console.warn('[Step7] clear scores on seed change failed:', e?.message || e);
+    }
+    try {
+      // 2) participants도 한 번 클린 커밋(방/점수/파트너 제거)
+      const cleared = (renderList || []).map(p => ({ ...p, room: null, score: null, partner: null }));
+      setParticipants(cleared);
+      if (typeof updateEventImmediate === 'function') {
+        const compat = cleared.map(cp => ({
+          ...cp,
+          roomNumber: cp.room ?? null,
+          teammateId: cp.partner ?? null,
+          teammate:   cp.partner ?? null,
+        }));
+        await updateEventImmediate({ participants: compat, roomTable: {}, participantsUpdatedAt: serverTimestamp() }, false);
+      }
+    } catch (e) {
+      console.warn('[Step7] participants clear on seed change failed:', e?.message || e);
+    }
+  };
+
+  // (A) 세션 지문 비교
   useEffect(() => {
     if (!eventId || !Array.isArray(renderList) || renderList.length === 0) return;
     const seed = seedOf(renderList);
@@ -653,40 +698,29 @@ export default function Step7() {
     const prev = sessionStorage.getItem(key);
 
     if (prev !== seed) {
-      (async () => {
-        try {
-          // 1) scores 전체 null
-          const colRef = collection(db, 'events', eventId, 'scores');
-          const snap   = await getDocs(colRef);
-          await Promise.all(
-            snap.docs.map(d =>
-              setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })
-            )
-          );
-        } catch (e) {
-          console.warn('[Step7] clear scores on seed change failed:', e?.message || e);
-        }
-        try {
-          // 2) participants도 한 번 클린 커밋(방/점수/파트너 제거)
-          const cleared = (renderList || []).map(p => ({ ...p, room: null, score: null, partner: null }));
-          setParticipants(cleared);
-          if (typeof updateEventImmediate === 'function') {
-            const compat = cleared.map(cp => ({
-              ...cp,
-              roomNumber: cp.room ?? null,
-              teammateId: cp.partner ?? null,
-              teammate:   cp.partner ?? null,
-            }));
-            await updateEventImmediate({ participants: compat, roomTable: {}, participantsUpdatedAt: serverTimestamp() }, false);
-          }
-        } catch (e) {
-          console.warn('[Step7] participants clear on seed change failed:', e?.message || e);
-        }
-      })();
+      clearForNewSeed();
       sessionStorage.setItem(key, seed);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, renderList, setParticipants, updateEventImmediate]);
+
+  // ★ ADD (B) 서버 지문 비교 — 멀티기기/새 브라우저에서도 안정화
+  useEffect(() => {
+    if (!eventId) return;
+    const evRef = doc(db, 'events', eventId);
+    const unsub = onSnapshot(evRef, (snap) => {
+      const d = snap.data() || {};
+      const seed = d.participantsSeed || null;
+      if (!seed) return;
+      const key = `seedfp:${eventId}:fourball`;
+      const prev = sessionStorage.getItem(key);
+      if (prev !== seed) {
+        clearForNewSeed();
+        sessionStorage.setItem(key, seed);
+      }
+    });
+    return () => unsub();
+  }, [eventId]); // ─────────────────────────────────────────
   /* ─────────────────────────────────────────────────────────── */
 
   return (

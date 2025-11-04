@@ -1,4 +1,4 @@
-// src/screens/Step4.jsx
+// /src/screens/Step4.jsx
 
 import React, { useContext, useState, useEffect, useRef } from "react";
 import styles from "./Step4.module.css";
@@ -39,6 +39,10 @@ export default function Step4(props) {
 
   const { uploadMethod, participants, setParticipants, roomCount, handleFile, goPrev, goNext } = useContext(StepContext);
   const { eventId } = useContext(EventContext);
+
+  // ★★★ ADD: Step4 업로드 직후 서버 지문 기록에 사용 — 최신 participants 접근용 ref
+  const participantsRef = useRef(participants);
+  useEffect(() => { participantsRef.current = participants; }, [participants]);
 
   // 파일명: 페이지 이동 후에도 유지 (메모리 캐시 → local → session 순)
   const [selectedFileName, setSelectedFileName] = useState(() => {
@@ -136,6 +140,19 @@ export default function Step4(props) {
   // ✅ 관리자일 때만 기본 ON (권한 오류 예방용 최소 수정)
   const [savePII,setSavePII] = useState(() => (getAuth().currentUser?.email === 'a@a.com'));
 
+  // ★★★ ADD: Step5/7과 동일한 지문 생성기 — id/nickname/group 기반
+  const seedOfParticipants = (list = []) => {
+    try {
+      const base = (list || []).map(p => [
+        String(p?.id ?? ''),
+        String(p?.nickname ?? ''),
+        Number(p?.group ?? 0),
+      ]);
+      base.sort((a,b)=> (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      return JSON.stringify(base);
+    } catch { return ''; }
+  };
+
   const handleFileExtended = async (e) => {
     try {
       const f = e?.target?.files?.[0];
@@ -148,8 +165,37 @@ export default function Step4(props) {
         sessionStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
       } catch {}
 
+      // 1) 원래 하던 참가자 파싱/저장
       if (typeof handleFile === 'function') await handleFile(e);
 
+      // 2) ★★★ ADD: 로컬 세션 지문 무효화(둘 다 삭제) → Step5/7에서 1회 강제 초기화 보장
+      try {
+        if (eventId) {
+          sessionStorage.removeItem(`seedfp:${eventId}:stroke`);
+          sessionStorage.removeItem(`seedfp:${eventId}:fourball`);
+        }
+      } catch {}
+
+      // 3) ★★★ ADD: 서버에도 지문 기록(멀티기기 안정화) — participants 반영이 끝난 뒤 약간의 지연 후 반영
+      setTimeout(async () => {
+        try {
+          const seed = seedOfParticipants(participantsRef.current || []);
+          if (eventId && seed) {
+            await updateDoc(
+              doc(db, 'events', eventId),
+              {
+                participantsSeed:   seed,
+                participantsSeedAt: serverTimestamp(),
+                participantsUpdatedAt: serverTimestamp(), // UI 업데이트 트리거
+              }
+            );
+          }
+        } catch (err) {
+          console.warn('[Step4] update participantsSeed failed:', err);
+        }
+      }, 300);
+
+      // (선택기능) preMembers 저장 — 원본 그대로 유지
       const user = getAuth().currentUser;
       const isAdmin = !!user && user.email === 'a@a.com';
       if (!savePII || !eventId || !isAdmin || !f) return;

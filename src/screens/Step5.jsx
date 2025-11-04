@@ -6,7 +6,7 @@ import { EventContext } from '../contexts/EventContext';
 import styles from './Step5.module.css';
 import { serverTimestamp } from 'firebase/firestore';
 
-// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영
+// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영 + 이벤트 문서 구독(서버 지문)
 import { collection, onSnapshot, getDocs, setDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -26,6 +26,16 @@ export default function Step5() {
 
   // ★ ADD: upsertScores 가져오기 (있으면 사용, 없어도 무관)
   const { eventId, updateEventImmediate, upsertScores } = useContext(EventContext) || {};
+
+  // ───────────────────────────────────────────────────────────
+  // ★ ADD: 중복 커밋/동시 클릭 방지용 writeLock
+  const writeLockRef = useRef(false);
+  const withWriteLock = async (fn) => {
+    if (writeLockRef.current) return;
+    writeLockRef.current = true;
+    try { await fn(); } finally { writeLockRef.current = false; }
+  };
+  // ───────────────────────────────────────────────────────────
 
   // ★★★ ADD: scores 구독 → Admin 화면 로컬 participants에 즉시 머지 (Player가 점수 입력 시 즉시 보이도록)
   useEffect(() => {
@@ -127,7 +137,7 @@ export default function Step5() {
 
   const canBulk = typeof updateParticipantsBulk === 'function';
   const canOne  = typeof updateParticipant === 'function';
-  const syncChanges = async (changes) => {
+  const syncChanges = async (changes) => withWriteLock(async () => {
     try {
       if (canBulk) {
         await updateParticipantsBulk(changes);
@@ -166,7 +176,7 @@ export default function Step5() {
     } catch (e) {
       console.warn('[Step5] updateEventImmediate(participants) failed:', e);
     }
-  };
+  });
 
   const isPartialNumber = (v) => /^-?\d*\.?\d*$/.test(v);
   const onScoreChange = (id, raw) => {
@@ -280,6 +290,7 @@ export default function Step5() {
   };
 
   const onAutoAssign = async () => {
+    if (writeLockRef.current) return; // ★ ADD: 연타 방지
     let nextSnapshot = null;
     setParticipants(ps => {
       let updated = [...ps];
@@ -334,11 +345,23 @@ export default function Step5() {
     }));
     setScoreDraft({});
     await syncChanges(changes);
+
+    // ★ ADD: scores 서브컬렉션도 확실히 null로(남아있던 문서까지)
+    try {
+      if (eventId) {
+        const colRef = collection(db, 'events', eventId, 'scores');
+        const snap   = await getDocs(colRef);
+        await Promise.all(snap.docs.map(d => setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })));
+      }
+    } catch (e) {
+      console.warn('[Step5] onReset clear scores failed:', e);
+    }
   };
 
   /* ───────────────────────────────────────────────────────────
      ★★★ ADD: “업로드 직후” 잔여값(이전 대회 scores)을 절대 끌고 오지 않도록
      참가자 시드 지문(fingerprint) 변경 시 한 번만 강제 초기화
+     (세션 비교 + 서버 지문 비교 둘 다)
   ─────────────────────────────────────────────────────────── */
   const seedOf = (list=[]) => {
     try {
@@ -347,43 +370,60 @@ export default function Step5() {
       return JSON.stringify(base);
     } catch { return ''; }
   };
+
+  const clearForNewSeed = async () => {
+    if (!eventId) return;
+    // 1) scores 전체 null
+    try {
+      const colRef = collection(db, 'events', eventId, 'scores');
+      const snap   = await getDocs(colRef);
+      await Promise.all(
+        snap.docs.map(d => setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true }))
+      );
+    } catch (e) {
+      console.warn('[Step5] clear scores on seed change failed:', e?.message || e);
+    }
+    // 2) participants도 한 번 보정(수동 버튼 활성화/점수 리셋)
+    try {
+      const cleared = (participants || []).map(p => ({ ...p, room: null, score: null, selected: false }));
+      setParticipants(cleared);
+      if (typeof updateEventImmediate === 'function') {
+        await updateEventImmediate({ participants: cleared, participantsUpdatedAt: serverTimestamp() }, false);
+      }
+    } catch (e) {
+      console.warn('[Step5] participants clear on seed change failed:', e?.message || e);
+    }
+  };
+
+  // (A) 세션 지문 비교
   useEffect(() => {
     if (!eventId || !Array.isArray(participants) || participants.length === 0) return;
     const seed = seedOf(participants);
     const key  = `seedfp:${eventId}:stroke`;
     const prev = sessionStorage.getItem(key);
-
     if (prev !== seed) {
-      // 새 파일 업로드로 판단 → scores 서브컬렉션 전체를 null로 초기화 + participants도 클린 커밋
-      (async () => {
-        try {
-          // 1) scores 모두 null로
-          const colRef = collection(db, 'events', eventId, 'scores');
-          const snap   = await getDocs(colRef);
-          await Promise.all(
-            snap.docs.map(d =>
-              setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })
-            )
-          );
-        } catch (e) {
-          console.warn('[Step5] clear scores on seed change failed:', e?.message || e);
-        }
-
-        try {
-          // 2) participants도 한 번 보정(수동 버튼 활성화/점수 리셋)
-          const cleared = (participants || []).map(p => ({ ...p, room: null, score: null, selected: false }));
-          setParticipants(cleared);
-          if (typeof updateEventImmediate === 'function') {
-            await updateEventImmediate({ participants: cleared, participantsUpdatedAt: serverTimestamp() }, false);
-          }
-        } catch (e) {
-          console.warn('[Step5] participants clear on seed change failed:', e?.message || e);
-        }
-      })();
-
+      clearForNewSeed();
       sessionStorage.setItem(key, seed);
     }
-  }, [eventId, participants, setParticipants, updateEventImmediate]);
+  }, [eventId, participants]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ★ ADD (B) 서버 지문 비교 — 멀티기기/새 브라우저에서도 안정화
+  useEffect(() => {
+    if (!eventId) return;
+    const evRef = doc(db, 'events', eventId);
+    const unsub = onSnapshot(evRef, (snap) => {
+      const d = snap.data() || {};
+      const seed = d.participantsSeed || null;
+      if (!seed) return;
+      const key = `seedfp:${eventId}:stroke`;
+      const prev = sessionStorage.getItem(key);
+      if (prev !== seed) {
+        clearForNewSeed();
+        sessionStorage.setItem(key, seed);
+      }
+    });
+    return () => unsub();
+  }, [eventId]); // ─────────────────────────────────────────
   /* ─────────────────────────────────────────────────────────── */
 
   useEffect(() => {
