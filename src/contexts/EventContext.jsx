@@ -8,8 +8,8 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
-  serverTimestamp,   // ★ patch
-  getDoc            // ★ ADD: preMembers 조회용
+  serverTimestamp,
+  getDoc
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -21,7 +21,7 @@ import {
   browserLocalPersistence
 } from 'firebase/auth';
 
-/* ★ 추가: Firestore 저장 전 undefined/NaN 정제 */
+/* ★ Firestore 저장 전 undefined/NaN 정제 */
 function sanitizeUndefinedDeep(v){
   if (v === undefined) return null;
   if (typeof v === 'number' && Number.isNaN(v)) return null;
@@ -107,7 +107,7 @@ export function EventProvider({ children }) {
     return { ...d, playerGate: { steps: normSteps, step1 } };
   };
 
-  // 전체 이벤트 구독 (인증 이후 attach)
+  // 전체 이벤트 구독
   useEffect(() => {
     let unsub = null, cancelled = false;
     ensureAuthed().then(() => {
@@ -121,7 +121,7 @@ export function EventProvider({ children }) {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, []);
 
-  // 선택 이벤트 구독 (인증 이후 attach)
+  // 선택 이벤트 구독
   useEffect(() => {
     if (!eventId) { setEventData(null); lastEventDataRef.current = null; return; }
     let unsub = null, cancelled = false;
@@ -197,7 +197,7 @@ export function EventProvider({ children }) {
       const ref = doc(db, 'events', eventId);
       await setDoc(ref, sanitizeUndefinedDeep(updates), { merge: true });
 
-      // ★ FIX(A): 즉시 저장 성공 후 디바운스 큐/타이머를 비워 stale write 차단
+      // ★ 즉시 저장 후 디바운스 큐/타이머 비워 stale write 차단
       try {
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current);
@@ -226,7 +226,7 @@ export function EventProvider({ children }) {
     }
   };
 
-  // 페이지 이탈/가려짐 시 강제 플러시 (기존 유지)
+  // 이탈/가려짐 시 강제 플러시
   useEffect(() => {
     const flush = () => {
       try {
@@ -249,7 +249,7 @@ export function EventProvider({ children }) {
     };
   }, [eventId]);
 
-  // 언마운트 플러시(기존 유지 + ★ FIX(B): stale 필드 필터링)
+  // 언마운트 플러시 + stale 필드 필터링
   useEffect(() => {
     return () => {
       try {
@@ -261,7 +261,7 @@ export function EventProvider({ children }) {
         if (pending && eventId) {
           queuedUpdatesRef.current = null;
 
-          // ★ FIX(B): 현재 최신값과 다른 구버전 participants/roomTable은 저장에서 제외
+          // 현재 최신값과 다른 구버전 participants/roomTable은 저장에서 제외
           let toWrite = { ...pending };
           try {
             const current = lastEventDataRef.current || {};
@@ -351,7 +351,7 @@ export function EventProvider({ children }) {
     await updateEventImmediate({ eventInputs: all }, false);
   };
 
-  // ★ patch: playerGate 저장 시 서버 타임스탬프도 함께 저장(최신판 식별)
+  // ★ playerGate 저장 시 서버 타임스탬프도 함께 저장(최신판 식별)
   const gateStorageKey = (id) => `playerGate:${id || eventId || ''}`;
   const saveGateToLocal = (gate) => { try { localStorage.setItem(gateStorageKey(), JSON.stringify(gate || {})); } catch {} };
 
@@ -363,17 +363,17 @@ export function EventProvider({ children }) {
     };
     if (deepEqual(before, next)) return;
     saveGateToLocal(next);
-    await updateEventImmediate({ playerGate: next, gateUpdatedAt: serverTimestamp() }, false); // ★ patch: timestamp + 강제 저장
+    await updateEventImmediate({ playerGate: next, gateUpdatedAt: serverTimestamp() }, false);
   };
 
   // ───────────────────────────────────────────────
-  // [ADD] 이메일 화이트리스트(preMembers) 자동 클레임 (기존 유지)
+  // 이메일 화이트리스트(preMembers) 자동 클레임
   // ───────────────────────────────────────────────
   useEffect(() => {
     const uidRaw   = auth?.currentUser?.uid || null;
     const emailRaw = auth?.currentUser?.email || null;
     const uid = uidRaw || null;
-    const email = emailRaw ? String(emailRaw).toLowerCase() : null; // 소문자 정규화
+    const email = emailRaw ? String(emailRaw).toLowerCase() : null;
     const eid = eventId || null;
     if (!uid || !eid) return;
 
@@ -405,7 +405,7 @@ export function EventProvider({ children }) {
   }, [eventId, auth?.currentUser?.uid, auth?.currentUser?.email]);
 
   // ───────────────────────────────────────────────
-  // ★★★ [ADD] Admin↔Player 양방향 브리지
+  // ★★★ Admin↔Player 양방향 브리지
   // 1) Admin → Player : scores 서브컬렉션 업서트
   // 2) Player → Admin : scores 구독 → participants에 즉시 머지
   // ───────────────────────────────────────────────
@@ -452,7 +452,6 @@ export function EventProvider({ children }) {
       });
 
       if (!deepEqual(baseList, merged)) {
-        // ★ FIX: participantsUpdatedAt 기록(서버 타임스탬프 가드)
         updateEventImmediate({ participants: merged, participantsUpdatedAt: serverTimestamp() }).catch(() => {});
       }
     });
@@ -521,7 +520,6 @@ export function EventProvider({ children }) {
       removeEventDef,
       setEventInput,
       updatePlayerGate,
-      // ★★★ [ADD]
       upsertScores
     }}>
       {children}

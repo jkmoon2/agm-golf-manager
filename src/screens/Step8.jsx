@@ -1,4 +1,4 @@
-// src/screens/Step8.jsx
+// /src/screens/Step8.jsx
 
 import React, { useState, useRef, useMemo, useContext, useEffect } from 'react';
 import html2canvas from 'html2canvas';
