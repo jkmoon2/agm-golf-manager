@@ -1,4 +1,4 @@
-// /src/screens/Step5.jsx
+// src/screens/Step5.jsx
 
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { StepContext } from '../flows/StepFlow';
@@ -7,7 +7,7 @@ import styles from './Step5.module.css';
 import { serverTimestamp } from 'firebase/firestore';
 
 // ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, getDocs, setDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 if (process.env.NODE_ENV !== 'production') console.log('[AGM] Step5 render');
@@ -335,6 +335,56 @@ export default function Step5() {
     setScoreDraft({});
     await syncChanges(changes);
   };
+
+  /* ───────────────────────────────────────────────────────────
+     ★★★ ADD: “업로드 직후” 잔여값(이전 대회 scores)을 절대 끌고 오지 않도록
+     참가자 시드 지문(fingerprint) 변경 시 한 번만 강제 초기화
+  ─────────────────────────────────────────────────────────── */
+  const seedOf = (list=[]) => {
+    try {
+      const base = (list || []).map(p => [String(p.id ?? ''), String(p.nickname ?? ''), Number(p.group ?? 0)]);
+      base.sort((a,b)=> (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      return JSON.stringify(base);
+    } catch { return ''; }
+  };
+  useEffect(() => {
+    if (!eventId || !Array.isArray(participants) || participants.length === 0) return;
+    const seed = seedOf(participants);
+    const key  = `seedfp:${eventId}:stroke`;
+    const prev = sessionStorage.getItem(key);
+
+    if (prev !== seed) {
+      // 새 파일 업로드로 판단 → scores 서브컬렉션 전체를 null로 초기화 + participants도 클린 커밋
+      (async () => {
+        try {
+          // 1) scores 모두 null로
+          const colRef = collection(db, 'events', eventId, 'scores');
+          const snap   = await getDocs(colRef);
+          await Promise.all(
+            snap.docs.map(d =>
+              setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })
+            )
+          );
+        } catch (e) {
+          console.warn('[Step5] clear scores on seed change failed:', e?.message || e);
+        }
+
+        try {
+          // 2) participants도 한 번 보정(수동 버튼 활성화/점수 리셋)
+          const cleared = (participants || []).map(p => ({ ...p, room: null, score: null, selected: false }));
+          setParticipants(cleared);
+          if (typeof updateEventImmediate === 'function') {
+            await updateEventImmediate({ participants: cleared, participantsUpdatedAt: serverTimestamp() }, false);
+          }
+        } catch (e) {
+          console.warn('[Step5] participants clear on seed change failed:', e?.message || e);
+        }
+      })();
+
+      sessionStorage.setItem(key, seed);
+    }
+  }, [eventId, participants, setParticipants, updateEventImmediate]);
+  /* ─────────────────────────────────────────────────────────── */
 
   useEffect(() => {
     console.log('[Step5] participants:', participants);
