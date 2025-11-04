@@ -1,4 +1,4 @@
-// /src/screens/Step7.jsx
+// src/screens/Step7.jsx
 
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import styles from './Step7.module.css';
@@ -7,7 +7,7 @@ import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
 
 // ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, getDocs, setDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 if (process.env.NODE_ENV!=='production') console.log('[AGM] Step7 render');
@@ -386,7 +386,6 @@ export default function Step7() {
   }, [participants]);
 
   // 이하 이동/트레이드 로직(원본 유지) …
-  // (중략 없이 그대로 유지 — 위/아래 코드 동일)
 
   const forceMovePairToRoom = async (id, targetRoom) => {
     const list = [...getList()];
@@ -635,6 +634,60 @@ export default function Step7() {
   }, [participants]);
 
   const renderList = getList();
+
+  /* ───────────────────────────────────────────────────────────
+     ★★★ ADD: 포볼도 “업로드 직후” 잔여값을 절대 끌고 오지 않도록
+     참가자 시드 지문(fingerprint) 변경 시 한 번만 강제 초기화
+  ─────────────────────────────────────────────────────────── */
+  const seedOf = (list=[]) => {
+    try {
+      const base = (list || []).map(p => [String(p.id ?? ''), String(p.nickname ?? ''), Number(p.group ?? 0)]);
+      base.sort((a,b)=> (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      return JSON.stringify(base);
+    } catch { return ''; }
+  };
+  useEffect(() => {
+    if (!eventId || !Array.isArray(renderList) || renderList.length === 0) return;
+    const seed = seedOf(renderList);
+    const key  = `seedfp:${eventId}:fourball`;
+    const prev = sessionStorage.getItem(key);
+
+    if (prev !== seed) {
+      (async () => {
+        try {
+          // 1) scores 전체 null
+          const colRef = collection(db, 'events', eventId, 'scores');
+          const snap   = await getDocs(colRef);
+          await Promise.all(
+            snap.docs.map(d =>
+              setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })
+            )
+          );
+        } catch (e) {
+          console.warn('[Step7] clear scores on seed change failed:', e?.message || e);
+        }
+        try {
+          // 2) participants도 한 번 클린 커밋(방/점수/파트너 제거)
+          const cleared = (renderList || []).map(p => ({ ...p, room: null, score: null, partner: null }));
+          setParticipants(cleared);
+          if (typeof updateEventImmediate === 'function') {
+            const compat = cleared.map(cp => ({
+              ...cp,
+              roomNumber: cp.room ?? null,
+              teammateId: cp.partner ?? null,
+              teammate:   cp.partner ?? null,
+            }));
+            await updateEventImmediate({ participants: compat, roomTable: {}, participantsUpdatedAt: serverTimestamp() }, false);
+          }
+        } catch (e) {
+          console.warn('[Step7] participants clear on seed change failed:', e?.message || e);
+        }
+      })();
+      sessionStorage.setItem(key, seed);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, renderList, setParticipants, updateEventImmediate]);
+  /* ─────────────────────────────────────────────────────────── */
 
   return (
     <div className={styles.step} style={__pageStyle}>
