@@ -11,8 +11,8 @@ import { db } from '../firebase';
 import * as XLSX from 'xlsx';
 import { getAuth } from 'firebase/auth';
 
-const LAST_SELECTED_FILENAME_KEY = 'agm_step4_filename';
-// ▼ 페이지 간 이동 시에도 유지되도록 메모리 캐시 추가(최소수정)
+const LEGACY_LAST_SELECTED_FILENAME_KEY = 'agm_step4_filename';
+// ▼ 페이지 간 이동 시에도 유지되도록 메모리 캐시(이전 호환)
 let __STEP4_FILE_CACHE = '';
 
 export default function Step4(props) {
@@ -37,35 +37,65 @@ export default function Step4(props) {
   const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
   const __pageStyle  = { minHeight:'100dvh', boxSizing:'border-box', paddingBottom:`calc(${__FOOTER_H}px + ${__safeBottom})` };
 
-  const { uploadMethod, participants, setParticipants, roomCount, handleFile, goPrev, goNext } = useContext(StepContext);
-  const { eventId } = useContext(EventContext);
+  const { uploadMethod, participants, setParticipants, roomCount, handleFile, goPrev, goNext, mode } = useContext(StepContext);
+
+  // ★★★ ADD: EventContext의 업로드 파일명/리셋 유틸 연동 (+ 원샷 applyNewRoster)
+  const {
+    eventId,
+    rememberUploadFilename, // (mode, fileName)
+    getUploadFilename,      // (mode) => string
+    // resetScores,          // ← 기존 분리 호출은 사용하지 않음 (applyNewRoster가 포함 처리)
+    applyNewRoster,         // ★ 핵심: 점수초기화+participants(+seed/updatedAt)+파일명 저장 원샷
+  } = useContext(EventContext);
 
   // ★★★ ADD: Step4 업로드 직후 서버 지문 기록에 사용 — 최신 participants 접근용 ref
   const participantsRef = useRef(participants);
   useEffect(() => { participantsRef.current = participants; }, [participants]);
 
-  // 파일명: 페이지 이동 후에도 유지 (메모리 캐시 → local → session 순)
+  // ── 파일명 저장 키 (이벤트+모드별로 분리 보존) ──────────────────────────────
+  const getFileKey = () => {
+    return `agm_step4_filename:${eventId || 'no-event'}:${mode || 'stroke'}`;
+  };
+
+  // 파일명: 페이지 이동 후에도 유지 (EventContext 우선 → 메모리 캐시 → local → session → 레거시키)
   const [selectedFileName, setSelectedFileName] = useState(() => {
     try {
-      return __STEP4_FILE_CACHE
-          || localStorage.getItem(LAST_SELECTED_FILENAME_KEY)
-          || sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY)
+      const KEY = getFileKey();
+      // ★ ADD: 이벤트 문서에 저장된 모드별 파일명을 1순위로 사용
+      const fromCtx =
+        (typeof getUploadFilename === 'function') ? (getUploadFilename(mode) || '') : '';
+      return fromCtx
+          || __STEP4_FILE_CACHE
+          || localStorage.getItem(KEY)
+          || sessionStorage.getItem(KEY)
+          // 구버전 호환(과거 단일 키에 저장된 값 복구)
+          || localStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY)
+          || sessionStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY)
           || '';
     } catch { return __STEP4_FILE_CACHE || ''; }
   });
+
+  // 라우팅 복귀 시에도 최신 키 기준으로 동기화
   useEffect(() => {
     try {
+      const KEY = getFileKey();
+      // ★ ADD: 문서값을 항상 최우선으로 반영
+      const fromCtx =
+        (typeof getUploadFilename === 'function') ? (getUploadFilename(mode) || '') : '';
       const fromStore =
-        __STEP4_FILE_CACHE
-        || localStorage.getItem(LAST_SELECTED_FILENAME_KEY)
-        || sessionStorage.getItem(LAST_SELECTED_FILENAME_KEY)
+        fromCtx
+        || __STEP4_FILE_CACHE
+        || localStorage.getItem(KEY)
+        || sessionStorage.getItem(KEY)
+        || localStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY)
+        || sessionStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY)
         || '';
       if (fromStore && fromStore !== selectedFileName) {
         setSelectedFileName(fromStore);
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [eventId, mode]);
 
   const [hdInput, setHdInput] = useState({});
   useEffect(() => {
@@ -153,47 +183,38 @@ export default function Step4(props) {
     } catch { return ''; }
   };
 
+  // ★★★ FIX: 업로드 처리 — 원샷 버전 (applyNewRoster 한 번 호출)
   const handleFileExtended = async (e) => {
     try {
       const f = e?.target?.files?.[0];
       const name = f?.name || '';
       setSelectedFileName(name);
-      // ▼ 파일명 영속 저장 + 메모리 캐시
+
+      // ▼ 파일명 뱃지 즉시 반영(로컬) — 원본 유지
       try {
+        const KEY = getFileKey();
         __STEP4_FILE_CACHE = name;
-        localStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
-        sessionStorage.setItem(LAST_SELECTED_FILENAME_KEY, name);
+        localStorage.setItem(KEY, name);
+        sessionStorage.setItem(KEY, name);
+        // 구버전 키도 유지(하위호환)
+        localStorage.setItem(LEGACY_LAST_SELECTED_FILENAME_KEY, name);
+        sessionStorage.setItem(LEGACY_LAST_SELECTED_FILENAME_KEY, name);
       } catch {}
 
-      // 1) 원래 하던 참가자 파싱/저장
-      if (typeof handleFile === 'function') await handleFile(e);
+      // 1) 원래 하던 참가자 파싱/저장(로컬 participants 상태 갱신) — 원본 유지
+      if (typeof handleFile === 'function') {
+        await handleFile(e);
+      }
 
-      // 2) ★★★ ADD: 로컬 세션 지문 무효화(둘 다 삭제) → Step5/7에서 1회 강제 초기화 보장
-      try {
-        if (eventId) {
-          sessionStorage.removeItem(`seedfp:${eventId}:stroke`);
-          sessionStorage.removeItem(`seedfp:${eventId}:fourball`);
-        }
-      } catch {}
-
-      // 3) ★★★ ADD: 서버에도 지문 기록(멀티기기 안정화) — participants 반영이 끝난 뒤 약간의 지연 후 반영
-      setTimeout(async () => {
-        try {
-          const seed = seedOfParticipants(participantsRef.current || []);
-          if (eventId && seed) {
-            await updateDoc(
-              doc(db, 'events', eventId),
-              {
-                participantsSeed:   seed,
-                participantsSeedAt: serverTimestamp(),
-                participantsUpdatedAt: serverTimestamp(), // UI 업데이트 트리거
-              }
-            );
-          }
-        } catch (err) {
-          console.warn('[Step4] update participantsSeed failed:', err);
-        }
-      }, 300);
+      // 2) ★★★ 원샷 반영: 점수 초기화 + participants(+seed/updatedAt) + 모드별 파일명 저장
+      if (typeof applyNewRoster === 'function') {
+        await applyNewRoster({
+          participants: participantsRef.current || [],
+          mode,                 // 'stroke' | 'fourball' (StepContext에서 주입)
+          uploadFileName: name, // 모드별 파일명 영구 저장
+          clearScores: true     // 업로드 직후 scores 서브컬렉션 null 초기화
+        });
+      }
 
       // (선택기능) preMembers 저장 — 원본 그대로 유지
       const user = getAuth().currentUser;
@@ -208,7 +229,7 @@ export default function Step4(props) {
       const batch = writeBatch(db);
       for (let i=1;i<rows.length;i++){
         const r = rows[i]||[];
-        const email = String(r[4]||'').trim().toLowerCase();
+        const email    = String(r[4]||'').trim().toLowerCase();
         const nameCell = String(r[5]||'').trim();
         const nickname = String(r[1]||'').trim();
         const group    = Number(r[0])||null;

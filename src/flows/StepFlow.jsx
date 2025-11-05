@@ -1,4 +1,4 @@
-// src/flows/StepFlow.jsx
+// /src/flows/StepFlow.jsx
 
 import React, { useState, createContext, useEffect, useContext } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -107,7 +107,6 @@ export default function StepFlow() {
     teammate:   p.partner ?? null        // 혹시 teammate 키를 쓰는 코드 대비
   });
   const buildRoomTable = (list=[]) => {
-    // 방 번호 -> 참가자 id 배열(최대 4명) 예시 테이블
     const table = {};
     list.forEach(p => {
       const r = p.room ?? null;
@@ -187,7 +186,7 @@ export default function StepFlow() {
   const agmFlow    = [1,2,3,4,7,8];
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
 
-  // ★ FIX(C): 저장을 await 후 이동(레이스 제거)
+  // ★ FIX: 저장을 await 후 이동(레이스 제거)
   const goNext = async () => {
     await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
@@ -236,7 +235,7 @@ export default function StepFlow() {
       selected: false
     }));
     setParticipants(data);
-    save({ participants: data });
+    await save({ participants: data }); // ← 업로드 직후 즉시 커밋
   };
 
   // Step5: 수동 초기화
@@ -269,6 +268,18 @@ export default function StepFlow() {
   };
 
   // 🔹 추가: 두 사람을 **한 번의 저장으로** 같은 방/상호 파트너로 확정하는 헬퍼
+  const updateParticipantsBulkNow = async (changes) => {
+    let next;
+    const map = new Map(changes.map(c => [String(c.id), c.fields]));
+    setParticipants(prev => (next = prev.map(p => (map.has(String(p.id)) ? { ...p, ...map.get(String(p.id)) } : p))));
+    await save({ participants: next, dateStart, dateEnd });
+  };
+  const updateParticipantNow = async (id, fields) => {
+    let next;
+    setParticipants(prev => (next = prev.map(p => (p.id === id ? { ...p, ...fields } : p))));
+    await save({ participants: next, dateStart, dateEnd });
+  };
+
   const assignPairToRoom = (id1, id2, roomNo) => {
     updateParticipantsBulkNow([
       { id: id1, fields: { room: roomNo, partner: id2 } },
@@ -284,9 +295,7 @@ export default function StepFlow() {
     target = ps.find(p => p.id === id);
     if (!target) return { roomNo: null, nickname: '', partnerNickname: null };
 
-    // [ADD2] 그룹1(리더)만 버튼이 노출되도록 UI가 걸러주지만, 로직도 그룹으로 판정
     if (!isGroup1(target)) {
-      // 그룹2에서는 아무 것도 하지 않음(안전장치)
       return { roomNo: target.room ?? null, nickname: target?.nickname || '', partnerNickname: target?.partner ? (ps.find(p=>p.id===target.partner)?.nickname || null) : null };
     }
 
@@ -309,7 +318,7 @@ export default function StepFlow() {
     partner = pool2.length ? pool2[Math.floor(Math.random() * pool2.length)] : null;
 
     if (partner && roomNo != null) {
-      // [ADD2] 두 사람을 **동시에** 확정 → 저장 한 번
+      // 두 사람을 **동시에** 확정 → 저장 한 번
       assignPairToRoom(id, partner.id, roomNo);
       return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
     }
@@ -377,25 +386,17 @@ export default function StepFlow() {
     await save({ participants: cleanList });
   };
 
-  // Step8: AGM 리셋
+  // Step8: AGM 리셋 (점수도 함께 초기화)
   const handleAgmReset = async () => {
-    // [FIX-SCORE-RESET] 방/파트너뿐 아니라 score도 함께 null로 초기화
     const ps = participants.map(p => ({ ...p, room: null, partner: null, score: null }));
     setParticipants(ps);
     await save({ participants: ps });
   };
 
-  // STEP5 실시간 저장용(기존 유지)
-  const updateParticipantNow = async (id, fields) => {
-    let next;
-    setParticipants(prev => (next = prev.map(p => (p.id === id ? { ...p, ...fields } : p))));
-    await save({ participants: next, dateStart, dateEnd });
-  };
-  const updateParticipantsBulkNow = async (changes) => {
-    let next;
-    const map = new Map(changes.map(c => [String(c.id), c.fields]));
-    setParticipants(prev => (next = prev.map(p => (map.has(String(p.id)) ? { ...p, ...map.get(String(p.id)) } : p))));
-    await save({ participants: next, dateStart, dateEnd });
+  // ★ Step7/Step5에서 공통으로 쓰는 점수 변경 콜백 제공
+  const onScoreChangeNow = async (id, value) => {
+    const v = value === '' ? null : Number(value);
+    await updateParticipantNow(id, { score: v });
   };
 
   const ctxValue = {
@@ -403,6 +404,7 @@ export default function StepFlow() {
     onCancel:        handleAgmCancel,
     onAutoAssign:    handleAgmAutoAssign,
     onReset:         handleAgmReset,
+    onScoreChange:   onScoreChangeNow,         // ★ 추가 제공
     goNext, goPrev, setStep,
     setMode: changeMode,
     setTitle: changeTitle,
