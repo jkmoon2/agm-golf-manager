@@ -9,7 +9,9 @@ import {
   updateDoc,
   deleteDoc,
   serverTimestamp,
-  getDoc
+  getDoc,
+  // ★ ADD: scores 초기화용
+  getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -21,7 +23,7 @@ import {
   browserLocalPersistence
 } from 'firebase/auth';
 
-/* ★ Firestore 저장 전 undefined/NaN 정제 */
+/* ★ Firestore 저장 전 undefined/NaN 정제 (원본 유지) */
 function sanitizeUndefinedDeep(v){
   if (v === undefined) return null;
   if (typeof v === 'number' && Number.isNaN(v)) return null;
@@ -34,10 +36,39 @@ function sanitizeUndefinedDeep(v){
   return v;
 }
 
+// ★ ADD: participants 시드(fingerprint) 생성기 — STEP5/7의 seed 가드와 연동
+function participantsSeedOf(list = []) {
+  try {
+    const base = (list || []).map(p => [
+      String(p?.id ?? ''),
+      String(p?.nickname ?? ''),
+      Number(p?.group ?? 0),
+    ]);
+    base.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return JSON.stringify(base);
+  } catch {
+    return '';
+  }
+}
+
+// ★ ADD: participants 포함 업데이트에 파생필드(Seed/UpdatedAt) 자동 부여
+function enrichParticipantsDerived(updates) {
+  if (!updates || typeof updates !== 'object') return updates;
+  if (!('participants' in updates)) return updates;
+  const out = { ...updates };
+  try {
+    const seed = participantsSeedOf(out.participants || []);
+    out.participantsSeed = seed;
+    // Admin/Player 동기화 가드: 서버 타임스탬프
+    if (!('participantsUpdatedAt' in out)) out.participantsUpdatedAt = serverTimestamp();
+  } catch {}
+  return out;
+}
+
 export const EventContext = createContext({});
 
 // ───────────────────────────────────────────────
-// 인증 게이팅 (기존 유지)
+// 인증 게이팅 (원본 유지)
 // ───────────────────────────────────────────────
 const auth = getAuth();
 try { setPersistence(auth, browserLocalPersistence).catch(() => {}); } catch {}
@@ -107,7 +138,7 @@ export function EventProvider({ children }) {
     return { ...d, playerGate: { steps: normSteps, step1 } };
   };
 
-  // 전체 이벤트 구독
+  // 전체 이벤트 구독 (원본 유지)
   useEffect(() => {
     let unsub = null, cancelled = false;
     ensureAuthed().then(() => {
@@ -121,7 +152,7 @@ export function EventProvider({ children }) {
     return () => { cancelled = true; if (unsub) unsub(); };
   }, []);
 
-  // 선택 이벤트 구독
+  // 선택 이벤트 구독 (원본 유지)
   useEffect(() => {
     if (!eventId) { setEventData(null); lastEventDataRef.current = null; return; }
     let unsub = null, cancelled = false;
@@ -154,15 +185,19 @@ export function EventProvider({ children }) {
   const updateEvent = async (updates, opts = {}) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
     const { debounceMs = 400, ifChanged = true } = opts;
+
+    // ★ ADD: participants 포함 시 파생필드 자동 부여
+    const enriched = enrichParticipantsDerived(updates);
+
     const before = lastEventDataRef.current || {};
     if (ifChanged) {
       let changed = false;
-      for (const k of Object.keys(updates)) {
-        if (!deepEqual(before?.[k], updates[k])) { changed = true; break; }
+      for (const k of Object.keys(enriched)) {
+        if (!deepEqual(before?.[k], enriched[k])) { changed = true; break; }
       }
       if (!changed) return;
     }
-    queuedUpdatesRef.current = { ...(queuedUpdatesRef.current || {}), ...updates };
+    queuedUpdatesRef.current = { ...(queuedUpdatesRef.current || {}), ...enriched };
     clearTimeout(debounceTimerRef.current);
     await new Promise((resolve) => {
       debounceTimerRef.current = setTimeout(async () => {
@@ -185,19 +220,23 @@ export function EventProvider({ children }) {
   // 즉시 업데이트
   const updateEventImmediate = async (updates, ifChanged = true) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
+
+    // ★ ADD: participants 포함 시 파생필드 자동 부여
+    const enriched = enrichParticipantsDerived(updates);
+
     const before = lastEventDataRef.current || {};
     if (ifChanged) {
       let changed = false;
-      for (const k of Object.keys(updates)) {
-        if (!deepEqual(before?.[k], updates[k])) { changed = true; break; }
+      for (const k of Object.keys(enriched)) {
+        if (!deepEqual(before?.[k], enriched[k])) { changed = true; break; }
       }
       if (!changed) return;
     }
     try {
       const ref = doc(db, 'events', eventId);
-      await setDoc(ref, sanitizeUndefinedDeep(updates), { merge: true });
+      await setDoc(ref, sanitizeUndefinedDeep(enriched), { merge: true });
 
-      // ★ 즉시 저장 후 디바운스 큐/타이머 비워 stale write 차단
+      // ★ 즉시 저장 후 디바운스 큐/타이머 비워 stale write 차단 (원본 유지)
       try {
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current);
@@ -206,8 +245,8 @@ export function EventProvider({ children }) {
         queuedUpdatesRef.current = null;
       } catch {}
 
-      lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...updates };
-      setEventData(prev => prev ? { ...prev, ...updates } : updates);
+      lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...enriched };
+      setEventData(prev => prev ? { ...prev, ...enriched } : enriched);
     } catch (e) {
       console.warn('[EventContext] updateEventImmediate failed:', e);
       throw e;
@@ -226,7 +265,7 @@ export function EventProvider({ children }) {
     }
   };
 
-  // 이탈/가려짐 시 강제 플러시
+  // 이탈/가려짐 시 강제 플러시 (원본 유지)
   useEffect(() => {
     const flush = () => {
       try {
@@ -249,7 +288,7 @@ export function EventProvider({ children }) {
     };
   }, [eventId]);
 
-  // 언마운트 플러시 + stale 필드 필터링
+  // 언마운트 플러시 + stale 필드 필터링 (원본 유지)
   useEffect(() => {
     return () => {
       try {
@@ -285,7 +324,7 @@ export function EventProvider({ children }) {
     };
   }, [eventId]);
 
-  // publicView 저장 (로컬 미러 포함)
+  // publicView 저장 (로컬 미러 포함) (원본 유지)
   const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
   const savePublicViewToLocal = (pv) => { try { localStorage.setItem(publicViewStorageKey(), JSON.stringify(pv || {})); } catch {} };
   const loadPublicViewFromLocal = () => {
@@ -319,7 +358,7 @@ export function EventProvider({ children }) {
     try { savePublicViewToLocal(nextRoot); } catch {}
   };
 
-  // 이벤트(미니 이벤트) 정의/입력 (기존 유지)
+  // 이벤트(미니 이벤트) 정의/입력 (원본 유지)
   const addEventDef = async (def) => {
     const base = lastEventDataRef.current || {};
     const list = Array.isArray(base.events) ? [...base.events] : [];
@@ -351,7 +390,7 @@ export function EventProvider({ children }) {
     await updateEventImmediate({ eventInputs: all }, false);
   };
 
-  // ★ playerGate 저장 시 서버 타임스탬프도 함께 저장(최신판 식별)
+  // ★ playerGate 저장 시 서버 타임스탬프도 함께 저장(최신판 식별) (원본 유지)
   const gateStorageKey = (id) => `playerGate:${id || eventId || ''}`;
   const saveGateToLocal = (gate) => { try { localStorage.setItem(gateStorageKey(), JSON.stringify(gate || {})); } catch {} };
 
@@ -367,7 +406,7 @@ export function EventProvider({ children }) {
   };
 
   // ───────────────────────────────────────────────
-  // 이메일 화이트리스트(preMembers) 자동 클레임
+  // 이메일 화이트리스트(preMembers) 자동 클레임 (원본 유지)
   // ───────────────────────────────────────────────
   useEffect(() => {
     const uidRaw   = auth?.currentUser?.uid || null;
@@ -426,6 +465,7 @@ export function EventProvider({ children }) {
     }
   };
 
+  // ★ ADD: scores → participants 실시간 머지 (원본 유지)
   useEffect(() => {
     if (!eventId) return;
     const colRef = collection(db, 'events', eventId, 'scores');
@@ -458,6 +498,71 @@ export function EventProvider({ children }) {
     return unsub;
   }, [eventId]);
 
+  // ───────────────────────────────────────────────
+  // ★ ADD: 모드별 업로드 파일명 유지(이벤트 문서 + 로컬 미러)
+  //  - STEP4에서 호출: rememberUploadFilename(mode, fileName)
+  //  - STEP4/5/7/8에서 조회: getUploadFilename(mode)
+  // ───────────────────────────────────────────────
+  const uploadNameKey = (mode, id = eventId) => `uploadFileName:${id || ''}:${mode || 'stroke'}`;
+  const getUploadFilename = (mode = (lastEventDataRef.current?.mode || 'stroke')) => {
+    const ed = lastEventDataRef.current || {};
+    const fromDoc =
+      mode === 'fourball' ? ed.uploadFileNameFourball :
+      /* else */             ed.uploadFileNameStroke;
+    if (fromDoc) return fromDoc;
+    try {
+      const raw = localStorage.getItem(uploadNameKey(mode));
+      return raw || '';
+    } catch { return ''; }
+  };
+  const rememberUploadFilename = async (mode = (lastEventDataRef.current?.mode || 'stroke'), fileName = '') => {
+    try {
+      localStorage.setItem(uploadNameKey(mode), fileName || '');
+    } catch {}
+    const partial =
+      mode === 'fourball'
+        ? { uploadFileNameFourball: fileName || '' }
+        : { uploadFileNameStroke: fileName || '' };
+    await updateEventImmediate(partial, false);
+  };
+
+  // ───────────────────────────────────────────────
+  // ★ ADD: 참가자 명단 신규 적용(엑셀 업로드 후)
+  //  - scores 서브컬렉션을 null로 비우고
+  //  - participants/participantsSeed/participantsUpdatedAt/업로드파일명까지 한 번에 커밋
+  //  - STEP4에서 이 함수 하나로 처리하면 STEP5/7 플리커 없이 안정
+  // ───────────────────────────────────────────────
+  const resetScores = async () => {
+    if (!eventId) return;
+    try {
+      const snap = await getDocs(collection(db, 'events', eventId, 'scores'));
+      const jobs = snap.docs.map(d =>
+        setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })
+      );
+      if (jobs.length) await Promise.all(jobs);
+    } catch (e) {
+      console.warn('[EventContext] resetScores failed:', e);
+    }
+  };
+
+  const applyNewRoster = async ({
+    participants: roster = [],
+    mode = (lastEventDataRef.current?.mode || 'stroke'),
+    uploadFileName = '',
+    clearScores = true,
+  } = {}) => {
+    try {
+      if (clearScores) await resetScores();
+      // participants + 파생필드(Seed/UpdatedAt) 자동 포함
+      await updateEventImmediate({
+        participants: roster || [],
+      }, false);
+      if (uploadFileName) await rememberUploadFilename(mode, uploadFileName);
+    } catch (e) {
+      console.warn('[EventContext] applyNewRoster failed:', e);
+    }
+  };
+
   return (
     <EventContext.Provider value={{
       allEvents,
@@ -486,6 +591,9 @@ export function EventProvider({ children }) {
           roomCount: 4,
           roomNames: Array(4).fill(''),
           uploadMethod: '',
+          // ★ FIX: 업로드 파일명 모드별 보관 필드 초기화
+          uploadFileNameStroke: '',
+          uploadFileNameFourball: '',
           participants: [],
           dateStart,
           dateEnd,
@@ -520,7 +628,12 @@ export function EventProvider({ children }) {
       removeEventDef,
       setEventInput,
       updatePlayerGate,
-      upsertScores
+      upsertScores,
+      // ★ ADD: 업로드 파일명/명단 적용 유틸 노출
+      getUploadFilename,
+      rememberUploadFilename,
+      applyNewRoster,
+      resetScores,
     }}>
       {children}
     </EventContext.Provider>
