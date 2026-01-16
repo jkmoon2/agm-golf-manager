@@ -106,7 +106,7 @@ function orderRoomFourball(roomArr = []) {
 
 export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
-  const { eventData } = useContext(EventContext) || {};
+  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;
   const eventId = eventData?.id || eventData?.eventId || routeEventId || '';
@@ -114,6 +114,10 @@ export default function PlayerResults() {
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
   const [scoresMap, setScoresMap] = useState({});
+  const [scoresReady, setScoresReady] = useState(false);
+
+  const effectiveScoresMap = (ctxScoresMap && typeof ctxScoresMap === 'object') ? ctxScoresMap : scoresMap;
+  const effectiveScoresReady = (ctxScoresMap && typeof ctxScoresMap === 'object') ? Boolean(ctxScoresReady) : scoresReady;
 
   // 게이트 폴백
   useEffect(() => {
@@ -134,6 +138,8 @@ export default function PlayerResults() {
   useEffect(() => {
     const id = eventId || null;
     if (!id) return;
+    // EventContext가 scoresMap을 제공하면 여기서 추가 구독하지 않음(중복 읽기 방지)
+    if (ctxScoresMap && typeof ctxScoresMap === 'object') return;
     const colRef = collection(db, 'events', id, 'scores');
     const unsub = onSnapshot(colRef, (snap) => {
       const m = {};
@@ -142,9 +148,10 @@ export default function PlayerResults() {
         m[String(d.id)] = (data.score == null ? null : data.score);
       });
       setScoresMap(m);
+      setScoresReady(true);
     });
     return unsub;
-  }, [eventId]);
+  }, [eventId, ctxScoresMap]);
 
   // 게이트 정규화 + nextDisabled
   const nextDisabled = useMemo(() => {
@@ -181,9 +188,9 @@ export default function PlayerResults() {
     (participants || []).forEach(p => {
       if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
         const pid = String(p.id);
-        const merged = (Object.prototype.hasOwnProperty.call(scoresMap, pid))
-          ? { ...p, score: scoresMap[pid] }
-          : p;
+        const merged = (Object.prototype.hasOwnProperty.call(effectiveScoresMap, pid))
+          ? { ...p, score: effectiveScoresMap[pid] }
+          : (effectiveScoresReady ? { ...p, score: null } : p);
         arr[p.room - 1].push(merged);
       }
     });

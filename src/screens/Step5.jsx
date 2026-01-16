@@ -1,16 +1,41 @@
 // src/screens/Step5.jsx
 
-import React, { useState, useEffect, useContext, useRef } from 'react';
-import { StepContext } from '../flows/StepFlow';
-import { EventContext } from '../contexts/EventContext';
-import styles from './Step5.module.css';
-import { serverTimestamp } from 'firebase/firestore';
-
-// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영 + 이벤트 문서 구독(서버 지문)
-import { collection, onSnapshot, getDocs, setDoc, doc } from 'firebase/firestore';
+import React, { useState, useEffect, useContext, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { StepContext } from '../flows/StepFlow';          // ✅ 경로 고정 (에러 방지)
+import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (에러 방지)
+import { serverTimestamp, collection, onSnapshot } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
 import { db } from '../firebase';
+import styles from './Step5.module.css';
 
-if (process.env.NODE_ENV !== 'production') console.log('[AGM] Step5 render');
+// ─────────────────────────────────────────────────────────────────────────────
+// (util) Firestore에 저장 가능한 형태로 정리
+//  - Firestore는 undefined를 허용하지 않음(중첩 포함) → 전부 제거
+//  - 빈 key("")도 허용하지 않음 → 제거
+// ─────────────────────────────────────────────────────────────────────────────
+const sanitizeUndefinedDeep = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => sanitizeUndefinedDeep(v))
+      .filter((v) => v !== undefined);
+  }
+
+  if (typeof value === 'object') {
+    const out = {};
+    Object.keys(value).forEach((k) => {
+      if (!k) return; // 빈 키 방지
+      const v = sanitizeUndefinedDeep(value[k]);
+      if (v === undefined) return;
+      out[k] = v;
+    });
+    return out;
+  }
+
+  return value;
+};
 
 export default function Step5() {
   const {
@@ -20,55 +45,77 @@ export default function Step5() {
     roomNames,
     goPrev,
     goNext,
+
+    // (옵션) StepFlow에 존재하면 사용
     updateParticipant,
     updateParticipantsBulk,
   } = useContext(StepContext);
 
-  // ★ ADD: upsertScores 가져오기 (있으면 사용, 없어도 무관)
-  const { eventId, updateEventImmediate, upsertScores } = useContext(EventContext) || {};
+  // ✅ SSOT 통일: 점수는 /events/{eventId}/scores/{pid} 에만 저장(양방향 실시간)
+  //    - Step5/7/Admin, Player 모두 동일한 scores를 읽고/쓰도록 정리
+  //    - participants 배열에는 score를 영구 저장하지 않음(방배정/명단만 유지)
+  const { eventId, updateEventImmediate, upsertScores, resetScores } = useContext(EventContext) || {};
 
-  // ───────────────────────────────────────────────────────────
-  // ★ ADD: 중복 커밋/동시 클릭 방지용 writeLock
-  const writeLockRef = useRef(false);
-  const withWriteLock = async (fn) => {
-    if (writeLockRef.current) return;
-    writeLockRef.current = true;
-    try { await fn(); } finally { writeLockRef.current = false; }
-  };
-  // ───────────────────────────────────────────────────────────
+  const rooms = useMemo(
+    () => Array.from({ length: Number(roomCount || 0) }, (_, i) => i + 1),
+    [roomCount]
+  );
 
-  // ★★★ ADD: scores 구독 → Admin 화면 로컬 participants에 즉시 머지 (Player가 점수 입력 시 즉시 보이도록)
+  const [loadingId, setLoadingId] = useState(null);
+
+  // ✅ [ADD] participants 동기화 직렬화(마지막 요청이 항상 최종 반영)
+  const syncInFlightRef = useRef(false);
+  const queuedSyncRef = useRef(null);
+  const lastSyncedSigRef = useRef('');
+
+  // ✅ [ADD] onNext에서 항상 최신 participants로 저장하기 위한 스냅샷 ref
+  const latestParticipantsRef = useRef(participants);
+
   useEffect(() => {
-    if (!eventId) return;
-    const colRef = collection(db, 'events', eventId, 'scores');
-    const unsub  = onSnapshot(colRef, snap => {
-      const map = {};
-      snap.forEach(d => {
-        const s = d.data() || {};
-        map[String(d.id)] = {
-          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : undefined),
-          room:  (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : undefined),
-        };
-      });
-      setParticipants(prev => {
-        const next = (prev || []).map(p => {
-          const s = map[String(p.id)];
-          if (!s) return p;
-          let out = p, changed = false;
-          if (Object.prototype.hasOwnProperty.call(s, 'score') && (p.score ?? null) !== (s.score ?? null)) {
-            out = { ...out, score: s.score ?? null }; changed = true;
-          }
-          if (Object.prototype.hasOwnProperty.call(s, 'room') && (p.room ?? null) !== (s.room ?? null)) {
-            out = { ...out, room: s.room ?? null }; changed = true;
-          }
-          return changed ? out : p;
-        });
-        return next;
-      });
-    });
-    return () => unsub();
-  }, [eventId, setParticipants]);
+    latestParticipantsRef.current = participants;
+  }, [participants]);
 
+  // ✅ SSOT: 점수는 scores 서브컬렉션을 실시간 구독하여 표시
+  //   - 운영자(Admin Step5) 입력 ↔ 참가자(Player Step4) 입력 모두 즉시 반영
+  const [scoresMap, setScoresMap] = useState({});
+  useEffect(() => {
+    if (!eventId) {
+      setScoresMap({});
+      return undefined;
+    }
+    try {
+      const colRef = collection(db, 'events', eventId, 'scores');
+      const unsub = onSnapshot(colRef, (snap) => {
+        const next = {};
+        snap.forEach((d) => {
+          const data = d.data() || {};
+          next[d.id] = data;
+        });
+        setScoresMap(next);
+      });
+      return () => unsub();
+    } catch (e) {
+      console.warn('[Step5] scores subscription failed', e);
+      setScoresMap({});
+      return undefined;
+    }
+  }, [eventId]);
+
+  // ✅ (추가) Step5에서는 “중간영역만 스크롤” 되도록 body 스크롤 잠금 (타이틀 고정 문제 해결)
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.overflow;
+    const prevBody = document.body.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.documentElement.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (A) 하단 버튼 위치를 Step4와 동일한 방식으로 맞추기 (bottomTabBar 높이 감지 + safe-area)
+  // ─────────────────────────────────────────────────────────────────────────────
   const [__bottomGap, __setBottomGap] = useState(64);
   useEffect(() => {
     const probe = () => {
@@ -79,234 +126,439 @@ export default function Step5() {
           document.querySelector('.bottomTabBar') ||
           document.querySelector('.BottomTabBar');
         __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
-      } catch {}
+      } catch (e) {}
     };
     probe();
     window.addEventListener('resize', probe);
     return () => window.removeEventListener('resize', probe);
   }, []);
+
   const __FOOTER_H = 56;
   const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
-  const __pageStyle = {
-    minHeight: '100dvh',
+
+  const pageStyle = {
+    height: '100dvh',
+    overflow: 'hidden',
     boxSizing: 'border-box',
+    // footer가 fixed라서, 본문이 footer 밑으로 들어가지 않게 paddingBottom 확보
     paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
+    display: 'flex',
+    flexDirection: 'column',
   };
 
-  const buildNextFromChanges = (baseList, changes) => {
-    try {
-      const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
-      (changes || []).forEach(({ id, fields }) => {
-        const k = String(id);
-        const cur = map.get(k) || {};
-        map.set(k, { ...cur, ...(fields || {}) });
-      });
-      return Array.from(map.values());
-    } catch (e) {
-      console.warn('[Step5] buildNextFromChanges error:', e);
-      return baseList || [];
-    }
-  };
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (B) Firestore에 participants[] 커밋 (A안: onBlur 시점에만 1회 커밋)
+  //  - updateEventImmediate({participants}, false) 로 “스킵” 방지
+  // ─────────────────────────────────────────────────────────────────────────────
+  const syncParticipantsToEvent = useCallback(
+    async (nextList) => {
+      if (!eventId || typeof updateEventImmediate !== 'function') return;
 
-  const [loadingId, setLoadingId] = useState(null);
-  const [forceSelectingId, setForceSelectingId] = useState(null);
+      // ✅ in-flight면 "마지막 요청"만 저장해두고 종료 (마지막이 승리)
+      if (syncInFlightRef.current) {
+        queuedSyncRef.current = nextList || [];
+        return;
+      }
 
-  const [scoreDraft, setScoreDraft] = useState({});
-  const inputRefs = useRef({});
-  const longTimerRef = useRef(null);
+      try {
+        const sanitized = (nextList || []).map((p) => {
+          // ✅ SSOT: 점수는 scores 서브컬렉션만 사용 → participants에는 score/scoreRaw 저장 금지
+          const { scoreRaw, score, ...rest } = p;
+          return sanitizeUndefinedDeep(rest);
+        });
 
-  useEffect(() => {
-    if (!Array.isArray(participants)) return;
-    setScoreDraft(prev => {
-      const next = { ...prev };
-      let changed = false;
-      participants.forEach(p => {
-        const key = p?.id;
-        if (key == null) return;
-        const hasDraft = Object.prototype.hasOwnProperty.call(prev, key);
-        if ((p.score == null || String(p.score).trim() === '') && hasDraft) {
-          delete next[key];
-          changed = true;
+        // 간단 시그니처(중복 동기화 스킵용)
+        let sig = '';
+        try { sig = JSON.stringify(sanitized); } catch { sig = ''; }
+        if (sig && sig === lastSyncedSigRef.current) return;
+
+        syncInFlightRef.current = true;
+
+        // ★ patch: STEP6/STEP8 표에서 방 구성용 roomTable 갱신(점수는 scores 서브컬렉션이 권위 소스)
+        const roomTable = {};
+        for (const p of sanitized) {
+          const r = p?.roomNumber ?? p?.room;       // 어떤 데이터가 와도 안전하게
+          if (!r) continue;
+          const key = String(r);
+
+          if (!roomTable[key]) roomTable[key] = [];
+          roomTable[key].push(p.id);
+        }  
+
+        await updateEventImmediate(
+          {
+            participants: sanitized,
+            roomTable,
+            participantsUpdatedAt: serverTimestamp(),
+            participantsUpdatedAtClient: Date.now(),
+          },
+          false
+        );
+
+        if (sig) lastSyncedSigRef.current = sig;
+      } catch (e) {
+        console.warn('[Step5] syncParticipantsToEvent error:', e);
+      } finally {
+        syncInFlightRef.current = false;
+
+        // ✅ in-flight 동안 들어온 최신 요청이 있으면 1번 더 실행
+        if (queuedSyncRef.current) {
+          const queued = queuedSyncRef.current;
+          queuedSyncRef.current = null;
+          // 재귀 1회(계속 누적되어도 마지막 것만 따라감)
+          syncParticipantsToEvent(queued);
         }
-      });
-      return changed ? next : prev;
-    });
+      }
+    },
+    [eventId, updateEventImmediate]
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (C) 점수 입력: 숫자키패드 유지 + 빈칸 롱프레스하면 '-'만 입력 후 숫자 입력 대기
+  // ─────────────────────────────────────────────────────────────────────────────
+  const participantsRef = useRef(participants);
+  useEffect(() => {
+    participantsRef.current = participants;
   }, [participants]);
 
-  const rooms = Array.from({ length: roomCount }, (_, i) => i + 1);
+  // 점수 입력 커밋 시퀀스 (A안: onBlur에서 마지막 1회만 Firestore/Context에 반영)
+  const scoreCommitSeqRef = useRef(0);
 
-  const canBulk = typeof updateParticipantsBulk === 'function';
-  const canOne  = typeof updateParticipant === 'function';
-  const syncChanges = async (changes) => withWriteLock(async () => {
+  // 각 참가자 점수 input ref (롱프레스 후 포커스 유지)
+  const scoreInputRefs = useRef({});
+
+  // ✅ [ADD] 셀을 눌러도 점수 input에 포커스(모바일에서 "수동" 버튼 오클릭/포커스 이탈 방지)
+  const focusScoreInput = (pid) => {
     try {
-      if (canBulk) {
-        await updateParticipantsBulk(changes);
-      } else if (canOne) {
-        for (const ch of changes) await updateParticipant(ch.id, ch.fields);
-      }
-    } catch (e) {
-      console.warn('[Step5] syncChanges failed:', e);
-    }
-
-    // ★★★ ADD: Admin → Player 브리지 (scores 업서트: score/room 만 추려서)
-    try {
-      if (typeof upsertScores === 'function' && Array.isArray(changes) && changes.length) {
-        const payload = [];
-        changes.forEach(({ id, fields }) => {
-          if (!fields) return;
-          const item = { id };
-          let push = false;
-          if (Object.prototype.hasOwnProperty.call(fields, 'score')) { item.score = fields.score ?? null; push = true; }
-          if (Object.prototype.hasOwnProperty.call(fields, 'room'))  { item.room  = fields.room  ?? null; push = true; }
-          if (push) payload.push(item);
-        });
-        if (payload.length) await upsertScores(payload);
-      }
-    } catch (e) {
-      console.warn('[Step5] upsertScores from syncChanges failed:', e);
-    }
-
-    // 기존 동작 유지: 이벤트 문서 participants도 병행 저장
-    try {
-      if (typeof updateEventImmediate === 'function' && eventId) {
-        const base = participants || [];
-        const next = buildNextFromChanges(base, changes);
-        await updateEventImmediate({ participants: next, participantsUpdatedAt: serverTimestamp() });
-      }
-    } catch (e) {
-      console.warn('[Step5] updateEventImmediate(participants) failed:', e);
-    }
-  });
-
-  const isPartialNumber = (v) => /^-?\d*\.?\d*$/.test(v);
-  const onScoreChange = (id, raw) => {
-    if (!isPartialNumber(raw)) return;
-    setScoreDraft(d => ({ ...d, [id]: raw }));
-  };
-  const onScoreBlur = (id) => {
-    const raw = scoreDraft[id];
-    if (raw === undefined) return;
-    let v = null;
-    if (!(raw === '' || raw === '-' || raw === '.' || raw === '-.')) {
-      const num = Number(raw);
-      v = Number.isNaN(num) ? null : num;
-    }
-    setParticipants(ps => ps.map(p => (p.id === id ? { ...p, score: v } : p)));
-    syncChanges([{ id, fields: { score: v } }]);
-    setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
+      const el = scoreInputRefs.current?.[pid];
+      if (el && typeof el.focus === 'function') el.focus();
+    } catch {}
   };
 
-  const startMinusLongPress = (id) => {
-    try { if (longTimerRef.current) clearTimeout(longTimerRef.current); } catch {}
-    longTimerRef.current = setTimeout(() => {
-      setScoreDraft(d => {
-        const cur = d[id] ?? (() => {
-          const p = (participants || []).find(x => x.id === id);
-          return p && p.score != null ? String(p.score) : '';
-        })();
-        if (String(cur).startsWith('-')) return d;
-        const nextVal = cur === '' ? '-' : `-${String(cur).replace(/^-/, '')}`;
-        const next = { ...d, [id]: nextVal };
-        const el = inputRefs.current[id];
-        if (el) { try { el.focus(); el.setSelectionRange(nextVal.length, nextVal.length); } catch {} }
-        return next;
+  // 롱프레스 타이머
+  const scoreLongPressTimers = useRef({});
+
+  const cancelScoreLongPress = (pid) => {
+    const t = scoreLongPressTimers.current[pid];
+    if (t) clearTimeout(t);
+    delete scoreLongPressTimers.current[pid];
+  };
+
+  const startScoreLongMinus = (pid) => {
+    cancelScoreLongPress(pid);
+
+    scoreLongPressTimers.current[pid] = setTimeout(() => {
+      const cur = (participantsRef.current || []).find((x) => x.id === pid);
+      const curText =
+        cur?.scoreRaw !== undefined
+          ? String(cur.scoreRaw ?? '')
+          : (cur?.score != null ? String(cur.score) : '');
+
+      // 요구사항: "빈칸이면 → 롱프레스하면 '-'만 들어가고 숫자 입력 기다림"
+      let nextText = '-';
+      if (curText && curText.startsWith('-')) {
+        // 이미 -로 시작하면 토글로 제거
+        nextText = curText.slice(1);
+      } else if (curText && !curText.startsWith('-')) {
+        // 값이 있으면 앞에 - 붙이기
+        nextText = `-${curText}`;
+      } else {
+        // 빈칸이면 '-'만
+        nextText = '-';
+      }
+
+      onScoreChange(pid, nextText);
+
+      // 포커스 유지 + 커서 맨 끝
+      setTimeout(() => {
+        const el = scoreInputRefs.current[pid];
+        if (el) {
+          try {
+            el.focus();
+            const len = String(nextText).length;
+            if (el.setSelectionRange) el.setSelectionRange(len, len);
+          } catch (e) {}
+        }
+      }, 0);
+    }, 550);
+  };
+
+  // 입력값 정리(숫자/선행 - 만 허용, 콤마 등 제거)
+  const normalizeScoreText = (raw) => {
+    const s = String(raw ?? '');
+    if (s === '') return '';
+    let cleaned = s.replace(/[^0-9-]/g, '');
+    cleaned = cleaned.replace(/(?!^)-/g, '');
+    return cleaned;
+  };
+
+  // ✅ [A안] onChange는 "로컬 업데이트만" 수행 (Firestore 저장/커밋은 하지 않음)
+  const onScoreChange = (id, rawValue) => {
+    const value = normalizeScoreText(rawValue);
+
+    setParticipants((prev) => {
+      const nextList = prev.map((p) => {
+        if (p.id !== id) return p;
+
+        if (value === '' || value === null) {
+          return { ...p, score: null, scoreRaw: '' };
+        }
+
+        if (value === '-') {
+          return { ...p, score: null, scoreRaw: '-' };
+        }
+
+        const num = Number(value);
+        if (Number.isNaN(num)) {
+          return { ...p, score: null, scoreRaw: value };
+        }
+
+        const clone = { ...p, score: num };
+        if ('scoreRaw' in clone) delete clone.scoreRaw;
+        return clone;
       });
-    }, 600);
-  };
-  const cancelMinusLongPress = () => {
-    try { if (longTimerRef.current) clearTimeout(longTimerRef.current); } catch {}
+
+      latestParticipantsRef.current = nextList;
+      return nextList;
+    });
   };
 
+  // ✅ [A안] onBlur에서만 1회 커밋 (Firestore + (옵션) updateParticipant)
+  const onScoreBlur = (id, rawFromDom) => {
+    setParticipants((prev) => {
+      const nextList = prev.map((p) => {
+        if (p.id !== id) return p;
+
+        const curText =
+          rawFromDom !== undefined
+            ? String(rawFromDom ?? '')
+            : (p?.scoreRaw !== undefined
+              ? String(p.scoreRaw ?? '')
+              : (p?.score != null ? String(p.score) : ''));
+
+        const v = normalizeScoreText(curText);
+
+        // 빈값/단독 '-' 는 저장 불가 → null로 정리
+        if (v === '' || v === '-') {
+          const clone = { ...p, score: null };
+          if ('scoreRaw' in clone) delete clone.scoreRaw;
+          return clone;
+        }
+
+        const num = Number(v);
+        const clone = { ...p, score: Number.isFinite(num) ? num : null };
+        if ('scoreRaw' in clone) delete clone.scoreRaw;
+        return clone;
+      });
+
+      const seq = ++scoreCommitSeqRef.current;
+      Promise.resolve().then(() => {
+        if (seq !== scoreCommitSeqRef.current) return;
+
+        // ✅ SSOT: 점수는 scores 서브컬렉션으로만 저장
+        //    - participants[] 저장은 방배정/명단용으로만 사용
+        const committedScore = nextList.find((x) => x.id === id)?.score ?? null;
+        if (typeof upsertScores === 'function') {
+          upsertScores([{ id, score: committedScore }]).catch((e) => {
+            console.warn('[Step5] upsertScores(onBlur) failed:', e);
+          });
+        }
+      });
+
+      latestParticipantsRef.current = nextList;
+      return nextList;
+    });
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (D) 수동 배정(딜레이 + 스핀)
+  // ─────────────────────────────────────────────────────────────────────────────
   const onManualAssign = (id) => {
+    // 이미 로딩 중이면 무시
+    if (loadingId != null) return;
+
     setLoadingId(id);
-    setTimeout(async () => {
+
+    setTimeout(() => {
       let chosen = null;
       let targetNickname = null;
+      let nextList = null;
 
-      setParticipants(ps => {
-        const target = ps.find(p => p.id === id);
+      setParticipants((ps) => {
+        const target = ps.find((p) => p.id === id);
         if (!target) return ps;
+
+        // 이미 배정돼 있으면 무시
+        if (target.room != null) return ps;
+
         targetNickname = target.nickname;
 
+        // 같은 조에서 이미 배정된 방
         const usedRooms = ps
-          .filter(p => p.group === target.group && p.room != null)
-          .map(p => p.room);
+          .filter((p) => p.group === target.group && p.room != null)
+          .map((p) => p.room);
 
-        const available = rooms.filter(r => !usedRooms.includes(r));
-        chosen = available.length
-          ? available[Math.floor(Math.random() * available.length)]
-          : null;
+        const available = rooms.filter((r) => !usedRooms.includes(r));
+        chosen = available.length ? available[Math.floor(Math.random() * available.length)] : null;
 
-        return ps.map(p => (p.id === id ? { ...p, room: chosen } : p));
+        nextList = ps.map((p) => (p.id === id ? { ...p, room: chosen } : p));
+        return nextList;
       });
 
       setLoadingId(null);
 
       if (chosen != null) {
-        const displayName = roomNames[chosen - 1]?.trim() || `${chosen}번 방`;
+        const displayName = (roomNames?.[chosen - 1] || `${chosen}번 방`).trim();
         alert(`${targetNickname}님은 ${displayName}에 배정되었습니다.`);
-        await syncChanges([{ id, fields: { room: chosen } }]);
       } else {
         alert('남은 방이 없습니다.');
-        await syncChanges([{ id, fields: { room: null } }]);
       }
-    }, 600);
+
+      if (nextList) syncParticipantsToEvent(nextList);
+    }, 900); // ✅ 딜레이 체감(기존 느낌 유지)
   };
 
-  const onForceAssign = async (id, room) => {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (E) 강제 메뉴: 바깥 터치하면 닫힘 + 버튼 아래에 묻히지 않게 Portal로 띄우기
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [forceSelectingId, setForceSelectingId] = useState(null); // ✅ id=0 대비
+  const [forceAnchorRect, setForceAnchorRect] = useState(null);
+  const [forceMenuStyle, setForceMenuStyle] = useState(null);
+  const forceMenuRef = useRef(null);
+
+  const closeForceMenu = useCallback(() => {
+    setForceSelectingId(null);
+    setForceAnchorRect(null);
+    setForceMenuStyle(null);
+  }, []);
+
+  const toggleForceMenu = (e, pid) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (forceSelectingId === pid) {
+      closeForceMenu();
+      return;
+    }
+    setForceSelectingId(pid);
+    setForceAnchorRect({
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    });
+  };
+
+  // 메뉴 위치 계산(아래 공간이 부족하면 위로 띄움)
+  useEffect(() => {
+    // ✅ id=0인 경우도 열려야 하므로 null 체크로 변경
+    if (forceSelectingId == null || !forceAnchorRect) return;
+
+    const place = () => {
+      const vw = window.innerWidth || 360;
+      const vh = window.innerHeight || 640;
+
+      const menuW = 112;
+      const menuH = Math.min(320, rooms.length * 36 + 12);
+
+      const bottomLimit = vh - (__FOOTER_H + __bottomGap + 16);
+
+      let left = forceAnchorRect.right - menuW;
+      left = Math.max(8, Math.min(left, vw - menuW - 8));
+
+      let top = forceAnchorRect.bottom + 6;
+      if (top + menuH > bottomLimit) top = forceAnchorRect.top - menuH - 6;
+      top = Math.max(8, Math.min(top, bottomLimit - menuH));
+
+      setForceMenuStyle({
+        position: 'fixed',
+        left,
+        top,
+        width: menuW,
+        maxHeight: menuH,
+        overflowY: 'auto',
+        zIndex: 1002,
+      });
+    };
+
+    const t = setTimeout(place, 0);
+    window.addEventListener('resize', place);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', place);
+    };
+  }, [forceSelectingId, forceAnchorRect, rooms.length, __bottomGap]); // ✅ bottomGap도 반영
+
+  const onForceAssign = (id, room) => {
     let targetNickname = null;
     let prevRoom = null;
-    const changes = [];
+    let nextList = null;
 
-    setParticipants(ps => {
-      const target = ps.find(p => p.id === id);
+    setParticipants((ps) => {
+      const target = ps.find((p) => p.id === id);
       if (!target) return ps;
+
       targetNickname = target.nickname;
       prevRoom = target.room ?? null;
 
-      let next = ps.map(p => (p.id === id ? { ...p, room } : p));
-      changes.push({ id, fields: { room } });
-
-      if (room != null) {
-        const occupant = ps.find(p => p.group === target.group && p.room === room && p.id !== id);
-        if (occupant) {
-          next = next.map(p => (p.id === occupant.id ? { ...p, room: prevRoom } : p));
-          changes.push({ id: occupant.id, fields: { room: prevRoom } });
-        }
+      // 취소
+      if (room == null) {
+        nextList = ps.map((p) => (p.id === id ? { ...p, room: null } : p));
+        return nextList;
       }
-      return next;
+
+      // 같은 조가 같은 방에 들어가면 안 되므로, 이미 같은 조가 그 방에 있으면 "맞트레이드(스왑)"
+      const conflict = ps.find((p) => p.id !== id && p.group === target.group && p.room === room);
+
+      if (conflict) {
+        nextList = ps.map((p) => {
+          if (p.id === id) return { ...p, room };
+          if (p.id === conflict.id) return { ...p, room: prevRoom };
+          return p;
+        });
+      } else {
+        nextList = ps.map((p) => (p.id === id ? { ...p, room } : p));
+      }
+
+      return nextList;
     });
 
-    setForceSelectingId(null);
+    closeForceMenu();
 
     if (room != null) {
-      const displayName = roomNames[room - 1]?.trim() || `${room}번 방`;
-      alert(`${targetNickname}님은 ${displayName}에 강제 배정되었습니다.`);
+      const displayName = (roomNames?.[room - 1] || `${room}번 방`).trim();
+      alert(`${targetNickname}님은 ${displayName}에 배정되었습니다.`);
     } else {
       alert(`${targetNickname}님의 방 배정이 취소되었습니다.`);
     }
 
-    await syncChanges(changes);
+    if (nextList) syncParticipantsToEvent(nextList);
   };
 
-  const onAutoAssign = async () => {
-    if (writeLockRef.current) return; // ★ ADD: 연타 방지
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (F) 자동 배정 / 초기화
+  // ─────────────────────────────────────────────────────────────────────────────
+  const onAutoAssign = () => {
     let nextSnapshot = null;
-    setParticipants(ps => {
-      let updated = [...ps];
-      const groups = Array.from(new Set(updated.map(p => p.group)));
 
-      groups.forEach(group => {
+    setParticipants((ps) => {
+      let updated = [...ps];
+      const groups = Array.from(new Set(updated.map((p) => p.group)));
+
+      groups.forEach((group) => {
         const assigned = updated
-          .filter(p => p.group === group && p.room != null)
-          .map(p => p.room);
-        const unassigned = updated.filter(p => p.group === group && p.room == null);
-        const slots = rooms.filter(r => !assigned.includes(r));
+          .filter((p) => p.group === group && p.room != null)
+          .map((p) => p.room);
+
+        const unassigned = updated.filter((p) => p.group === group && p.room == null);
+
+        const slots = rooms.filter((r) => !assigned.includes(r));
         const shuffled = [...slots].sort(() => Math.random() - 0.5);
 
         unassigned.forEach((p, idx) => {
           const r = shuffled[idx] ?? null;
-          updated = updated.map(x => (x.id === p.id ? { ...x, room: r } : x));
+          updated = updated.map((x) => (x.id === p.id ? { ...x, room: r } : x));
         });
       });
 
@@ -314,143 +566,61 @@ export default function Step5() {
       return updated;
     });
 
-    if (nextSnapshot) {
-      const changes = [];
-      // ★ FIX: index 기반 → id 기반으로 비교 (안정화)
-      const oldById = new Map((participants || []).map(p => [String(p.id), p]));
-      nextSnapshot.forEach((p) => {
-        const old = oldById.get(String(p.id));
-        if (!old || old.room !== p.room) {
-          changes.push({ id: p.id, fields: { room: p.room ?? null } });
-        }
+    if (nextSnapshot) syncParticipantsToEvent(nextSnapshot);
+  };
+
+  const onReset = () => {
+    let nextSnapshot = null;
+
+    // ✅ [ADD] reset 이전에 예약된 onBlur 커밋(Promise)을 무효화
+    scoreCommitSeqRef.current += 1;
+
+    // ✅ [ADD] 진행중/대기중 동기화도 같이 끊어줘야 점수 되살아남(깜빡임) 방지
+    queuedSyncRef.current = null;
+    syncInFlightRef.current = false;
+
+    // ✅ reset 1번에 “점수+방배정+버튼상태” 모두 초기화
+    setLoadingId(null);
+
+    setParticipants((ps) => {
+      nextSnapshot = ps.map((p) => {
+        const out = { ...p, room: null, score: null };
+        if ('scoreRaw' in out) out.scoreRaw = '';
+        return out;
       });
-      await syncChanges(changes);
-
-      // ★★★ FIX(즉시반영 보강): 전체 스냅샷을 한 번 더 즉시 커밋
-      try {
-        if (typeof updateEventImmediate === 'function' && eventId) {
-          await updateEventImmediate({ participants: nextSnapshot, participantsUpdatedAt: serverTimestamp() }, false);
-        }
-      } catch (e) {
-        console.warn('[Step5] extra immediate commit failed:', e);
-      }
-    }
-  };
-
-  const onReset = async () => {
-    setParticipants(ps => ps.map(p => ({ ...p, room: null, score: null, selected: false })));
-    const changes = participants.map(p => ({
-      id: p.id,
-      fields: { room: null, score: null, selected: false },
-    }));
-    setScoreDraft({});
-    await syncChanges(changes);
-
-    // ★ ADD: scores 서브컬렉션도 확실히 null로(남아있던 문서까지)
-    try {
-      if (eventId) {
-        const colRef = collection(db, 'events', eventId, 'scores');
-        const snap   = await getDocs(colRef);
-        await Promise.all(snap.docs.map(d => setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })));
-      }
-    } catch (e) {
-      console.warn('[Step5] onReset clear scores failed:', e);
-    }
-  };
-
-  /* ───────────────────────────────────────────────────────────
-     ★★★ ADD: “업로드 직후” 잔여값(이전 대회 scores)을 절대 끌고 오지 않도록
-     참가자 시드 지문(fingerprint) 변경 시 한 번만 강제 초기화
-     (세션 비교 + 서버 지문 비교 둘 다)
-  ─────────────────────────────────────────────────────────── */
-  const seedOf = (list=[]) => {
-    try {
-      const base = (list || []).map(p => [String(p.id ?? ''), String(p.nickname ?? ''), Number(p.group ?? 0)]);
-      base.sort((a,b)=> (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-      return JSON.stringify(base);
-    } catch { return ''; }
-  };
-
-  const clearForNewSeed = async () => {
-    if (!eventId) return;
-    // 1) scores 전체 null
-    try {
-      const colRef = collection(db, 'events', eventId, 'scores');
-      const snap   = await getDocs(colRef);
-      await Promise.all(
-        snap.docs.map(d => setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true }))
-      );
-    } catch (e) {
-      console.warn('[Step5] clear scores on seed change failed:', e?.message || e);
-    }
-    // 2) participants도 한 번 보정(수동 버튼 활성화/점수 리셋)
-    try {
-      const cleared = (participants || []).map(p => ({ ...p, room: null, score: null, selected: false }));
-      setParticipants(cleared);
-      if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ participants: cleared, participantsUpdatedAt: serverTimestamp() }, false);
-      }
-    } catch (e) {
-      console.warn('[Step5] participants clear on seed change failed:', e?.message || e);
-    }
-  };
-
-  // (A) 세션 지문 비교
-  useEffect(() => {
-    if (!eventId || !Array.isArray(participants) || participants.length === 0) return;
-    const seed = seedOf(participants);
-    const key  = `seedfp:${eventId}:stroke`;
-    const prev = sessionStorage.getItem(key);
-    if (prev !== seed) {
-      clearForNewSeed();
-      sessionStorage.setItem(key, seed);
-    }
-  }, [eventId, participants]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ★ ADD (B) 서버 지문 비교 — 멀티기기/새 브라우저에서도 안정화
-  useEffect(() => {
-    if (!eventId) return;
-    const evRef = doc(db, 'events', eventId);
-    const unsub = onSnapshot(evRef, (snap) => {
-      const d = snap.data() || {};
-      const seed = d.participantsSeed || null;
-      if (!seed) return;
-      const key = `seedfp:${eventId}:stroke`;
-      const prev = sessionStorage.getItem(key);
-      if (prev !== seed) {
-        clearForNewSeed();
-        sessionStorage.setItem(key, seed);
-      }
+      return nextSnapshot;
     });
-    return () => unsub();
-  }, [eventId]); // ─────────────────────────────────────────
-  /* ─────────────────────────────────────────────────────────── */
 
-  useEffect(() => {
-    console.log('[Step5] participants:', participants);
-  }, [participants]);
+    closeForceMenu();
+    // ✅ SSOT: 점수 초기화는 scores 서브컬렉션에서 수행(1회 reset로 통일)
+    if (typeof resetScores === 'function') {
+      resetScores().catch((e) => console.warn('[Step5] resetScores failed:', e));
+    } else if (typeof upsertScores === 'function' && Array.isArray(nextSnapshot)) {
+      // fallback (컨텍스트에 resetScores가 없을 때)
+      upsertScores(nextSnapshot.map((p) => ({ id: p.id, score: null }))).catch((e) =>
+        console.warn('[Step5] upsertScores(reset fallback) failed:', e)
+      );
+    }
 
-  useEffect(() => {
-    if (forceSelectingId == null) return;
-    const handler = (e) => {
-      const mid = String(forceSelectingId);
-      const t = e.target;
-      if (!t) return;
-      const inMenu  = t.closest && t.closest(`[data-force-menu-for="${mid}"]`);
-      const isToggle = t.closest && t.closest(`[data-force-toggle-for="${mid}"]`);
-      if (!inMenu && !isToggle) setForceSelectingId(null);
-    };
-    document.addEventListener('pointerdown', handler, true);
-    document.addEventListener('click', handler, true);
-    return () => {
-      document.removeEventListener('pointerdown', handler, true);
-      document.removeEventListener('click', handler, true);
-    };
-  }, [forceSelectingId]);
+    if (nextSnapshot) syncParticipantsToEvent(nextSnapshot);
+  };
 
+  const onNext = async () => {
+    try {
+      await syncParticipantsToEvent(latestParticipantsRef.current || participants);
+    } catch (e) {
+      console.warn("[Step5] syncParticipantsToEvent(onNext) failed:", e);
+    }
+    goNext();
+  };      
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
-    <div className={styles.step} style={__pageStyle}>
-      <div className={styles.participantRowHeader}>
+    <div className={styles.step} style={pageStyle}>
+      {/* (1) 컬럼 헤더: 상단 고정 */}
+      <div className={styles.participantRowHeader} style={{ flex: '0 0 auto', zIndex: 2 }}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
         <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
@@ -459,84 +629,131 @@ export default function Step5() {
         <div className={`${styles.cell} ${styles.force}`}>강제</div>
       </div>
 
-      <div className={styles.participantTable}>
-        {participants.map(p => {
-          const isDisabled = loadingId === p.id || p.room != null;
-          const scoreValue = scoreDraft[p.id] ?? (p.score != null ? String(p.score) : '');
-          return (
-            <div key={p.id} className={styles.participantRow}>
-              <div className={`${styles.cell} ${styles.group}`}>
-                <input type="text" value={`${p.group}조`} disabled />
-              </div>
-              <div className={`${styles.cell} ${styles.nickname}`}>
-                <input type="text" value={p.nickname} disabled />
-              </div>
-              <div className={`${styles.cell} ${styles.handicap}`}>
-                <input type="text" value={p.handicap} disabled />
-              </div>
+      {/* (2) 중간 스크롤 영역 */}
+      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+        <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <div className={styles.participantTable}>
+            {participants.map((p) => {
+              const isDisabled = loadingId === p.id || p.room != null;
 
-              <div className={`${styles.cell} ${styles.score}`}>
-                <input
-                  ref={el => (inputRefs.current[p.id] = el)}
-                  type="text"
-                  inputMode="decimal"
-                  /* ★ FIX: 최신 브라우저 v-flag 호환 */
-                  pattern="[-0-9.]*"
-                  autoComplete="off"
-                  value={scoreValue}
-                  onChange={e => onScoreChange(p.id, e.target.value)}
-                  onBlur={() => onScoreBlur(p.id)}
-                  onPointerDown={() => startMinusLongPress(p.id)}
-                  onPointerUp={cancelMinusLongPress}
-                  onPointerLeave={cancelMinusLongPress}
-                  onTouchStart={() => startMinusLongPress(p.id)}
-                  onTouchEnd={cancelMinusLongPress}
-                />
-              </div>
+              const liveScore = scoresMap?.[String(p.id)]?.score;
+              const displayScore =
+                p.scoreRaw !== undefined
+                  ? p.scoreRaw
+                  : liveScore != null
+                    ? liveScore
+                    : p.score != null
+                      ? p.score
+                      : '';
 
-              <div className={`${styles.cell} ${styles.manual}`}>
-                <button
-                  className={styles.smallBtn}
-                  disabled={isDisabled}
-                  onClick={() => onManualAssign(p.id)}
-                >
-                  {loadingId === p.id ? <span className={styles.spinner} /> : '수동'}
-                </button>
-              </div>
-
-              <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
-                <button
-                  className={styles.smallBtn}
-                  data-force-toggle-for={p.id}
-                  onClick={() => setForceSelectingId(forceSelectingId === p.id ? null : p.id)}
-                >
-                  강제
-                </button>
-                {forceSelectingId === p.id && (
-                  <div className={styles.forceMenu} data-force-menu-for={p.id}>
-                    {Array.from({ length: roomCount }, (_, i) => i + 1).map(r => {
-                      const name = roomNames[r - 1]?.trim() || `${r}번 방`;
-                      return (
-                        <div
-                          key={r}
-                          className={styles.forceOption}
-                          onClick={() => onForceAssign(p.id, r)}
-                        >
-                          {name}
-                        </div>
-                      );
-                    })}
-                    <div className={styles.forceOption} onClick={() => onForceAssign(p.id, null)}>
-                      취소
-                    </div>
+              return (
+                <div key={p.id} className={styles.participantRow}>
+                  <div className={`${styles.cell} ${styles.group}`}>
+                    <input type="text" value={`${p.group}조`} disabled />
                   </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                  <div className={`${styles.cell} ${styles.nickname}`}>
+                    <input type="text" value={p.nickname} disabled />
+                  </div>
+                  <div className={`${styles.cell} ${styles.handicap}`}>
+                    <input type="text" value={p.handicap} disabled />
+                  </div>
+
+                  {/* 점수 입력 */}
+                  <div
+                    className={`${styles.cell} ${styles.score}`}
+                    // ✅ 셀 아무 곳이나 눌러도 input 포커스(모바일에서 "수동" 버튼 오클릭 방지)
+                    onClick={() => focusScoreInput(p.id)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      ref={(el) => {
+                        if (el) scoreInputRefs.current[p.id] = el;
+                      }}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="-?[0-9]*"
+                      value={displayScore}
+                      onChange={(e) => onScoreChange(p.id, e.target.value)}
+                      onBlur={(e) => onScoreBlur(p.id, e.target.value)}   // ✅ [A안] 입력 완료 시점에만 1회 저장
+                      onPointerDown={(e) => {
+                        // ✅ iOS/모바일에서 탭 시 포커스가 안정적으로 잡히도록 보강
+                        e.stopPropagation();
+                        try { e.currentTarget.focus(); } catch {}
+                        startScoreLongMinus(p.id);
+                      }}
+                      onPointerUp={() => cancelScoreLongPress(p.id)}
+                      onPointerCancel={() => cancelScoreLongPress(p.id)}
+                      onPointerLeave={() => cancelScoreLongPress(p.id)}
+                      onTouchEnd={() => cancelScoreLongPress(p.id)}
+                    />
+                  </div>
+
+                  {/* 수동 버튼 */}
+                  <div className={`${styles.cell} ${styles.manual}`}>
+                    <button
+                      className={styles.smallBtn}
+                      disabled={isDisabled}
+                      onClick={() => onManualAssign(p.id)}
+                    >
+                      {loadingId === p.id ? <span className={styles.spinner} /> : '수동'}
+                    </button>
+                  </div>
+
+                  {/* 강제 버튼 */}
+                  <div className={`${styles.cell} ${styles.force}`}>
+                    <button className={styles.smallBtn} onClick={(e) => toggleForceMenu(e, p.id)}>
+                      강제
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
+      {/* (3) 강제 메뉴 Portal + 바깥 터치 닫힘 */}
+      {(forceSelectingId != null) && forceAnchorRect
+        ? createPortal(
+            <>
+              <div
+                onClick={closeForceMenu}
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  background: 'transparent',
+                  zIndex: 1001,
+                }}
+              />
+              <div
+                ref={forceMenuRef}
+                className={styles.forceMenu}
+                style={forceMenuStyle || { position: 'fixed', left: 8, top: 8, zIndex: 1002 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {rooms.map((r) => {
+                  const name = (roomNames?.[r - 1] || `${r}번 방`).trim();
+                  return (
+                    <div
+                      key={r}
+                      className={styles.forceOption}
+                      onClick={() => onForceAssign(forceSelectingId, r)}
+                    >
+                      {name}
+                    </div>
+                  );
+                })}
+                <div className={styles.forceOption} onClick={() => onForceAssign(forceSelectingId, null)}>
+                  배정취소
+                </div>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+
+      {/* (4) 하단 내비게이션: Step4와 동일한 방식으로 fixed */}
       <div
         className={styles.stepFooter}
         style={{
@@ -544,17 +761,19 @@ export default function Step5() {
           left: 0,
           right: 0,
           bottom: __safeBottom,
-          zIndex: 20,
+          zIndex: 5,
           boxSizing: 'border-box',
           padding: '12px 16px',
-          background: '#fff',
-          borderTop: '1px solid #e5e5e5',
         }}
       >
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={onAutoAssign} className={styles.textOnly}>자동배정</button>
-        <button onClick={onReset} className={styles.textOnly}>초기화</button>
-        <button onClick={goNext}>다음 →</button>
+        <button onClick={onAutoAssign} className={styles.textOnly}>
+          자동배정
+        </button>
+        <button onClick={onReset} className={styles.textOnly}>
+          초기화
+        </button>
+        <button onClick={onNext}>다음</button>
       </div>
     </div>
   );

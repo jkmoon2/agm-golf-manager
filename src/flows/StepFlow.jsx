@@ -1,8 +1,9 @@
-// /src/flows/StepFlow.jsx
+// src/flows/StepFlow.jsx
 
-import React, { useState, createContext, useEffect, useContext } from 'react';
+import React, { useState, createContext, useEffect, useContext, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { serverTimestamp } from 'firebase/firestore';
 
 import { EventContext } from '../contexts/EventContext';
 import StepPage from '../components/StepPage';
@@ -17,31 +18,77 @@ import Step8    from '../screens/Step8';
 
 export const StepContext = createContext();
 
-// ---------- [추가] 얕은 비교 헬퍼 : 실제 변경이 있을 때만 setState ----------
-const shallowEqualParticipants = (a = [], b = []) => {
-  if (a === b) return true;
-  if (!Array.isArray(a) || !Array.isArray(b)) return false;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const x = a[i], y = b[i];
-    if (!y) return false;
-    if (
-      x.id       !== y.id       ||
-      x.group    !== y.group    ||
-      x.nickname !== y.nickname ||
-      x.handicap !== y.handicap ||
-      x.score    !== y.score    ||
-      x.room     !== y.room     ||
-      x.partner  !== y.partner  ||
-      x.selected !== y.selected
-    ) return false;
+// ✅ Step5 등에서 import 해서 쓰는 훅 (기존 구조 유지)
+export const useStep = () => useContext(StepContext);
+
+/**
+ * ✅ [ADD] deep stable stringify (중첩 객체/배열 포함)
+ * - JSON.stringify(obj, replacerArray) 방식은 nested key가 통째로 누락되는 문제가 있어 사용 금지
+ * - save()의 "동일 payload 저장 스킵" / roomTable 변경 감지에 사용
+ */
+const stableStringify = (input) => {
+  const seen = new WeakSet();
+
+  const norm = (v) => {
+    if (v == null) return v;
+
+    // Firestore Timestamp 유사 객체
+    if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
+      try { return v.toMillis(); } catch { /* ignore */ }
+    }
+
+    if (typeof v !== 'object') return v;
+
+    if (seen.has(v)) return null;
+    seen.add(v);
+
+    if (Array.isArray(v)) return v.map(norm);
+
+    const out = {};
+    Object.keys(v).sort().forEach((k) => {
+      const nv = norm(v[k]);
+      if (nv !== undefined) out[k] = nv;
+    });
+    return out;
+  };
+
+  try {
+    return JSON.stringify(norm(input));
+  } catch (e) {
+    return '';
   }
-  return true;
 };
-// ---------------------------------------------------------------------------
+
+/**
+ * ✅ [ADD] Firestore backoff/Quota 상황에서도 STEP 이동이 무한 대기하지 않도록 타임아웃
+ */
+const withTimeout = async (promise, ms = 2500) => {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`timeout:${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(t);
+  }
+};
+
+// ✅ [ADD] save() 직렬화(순서 보장) - reset/점수 저장 레이스 방지
+const saveChainRef = { current: Promise.resolve() };
 
 export default function StepFlow() {
-  const { eventId, eventData, updateEvent, updateEventImmediate } = useContext(EventContext);
+  const {
+    eventId,
+    eventData,
+    updateEvent,
+    updateEventImmediate,
+    // ✅ 추가: participants → rooms 컬렉션 스냅샷 저장용 브리지
+    persistRoomsFromParticipants,
+    // ✅ [PATCH] Player 즉시 반영용 scores 서브컬렉션
+    upsertScores,
+  } = useContext(EventContext);
+
   const { step }    = useParams();
   const navigate    = useNavigate();
 
@@ -56,10 +103,78 @@ export default function StepFlow() {
   const [roomCount, setRoomCount]       = useState(4);
   const [roomNames, setRoomNames]       = useState(Array(4).fill(''));
   const [uploadMethod, setUploadMethod] = useState('');
-  const [participants, setParticipants] = useState([]);
+
+  // ⭐ patch: participants 상태 + ref 동기화
+  const [participants, setParticipantsInner] = useState([]);
+  const participantsRef = useRef(participants);
+  const lastLocalParticipantsWriteMsRef = useRef(0);
+
+  // ✅ [ADD] 로컬 편집(저장 전) 변경 시점: 서버 스냅샷이 로컬 입력을 덮어쓰는 문제 방지
+  const localDirtyParticipantsMsRef = useRef(0);
+
+  // ✅ [ADD] eventData(서버) participants를 적용하는 중에는 dirty로 기록하지 않기 위한 플래그
+  const applyingRemoteParticipantsRef = useRef(false);
+
+  /**
+   * ✅ [ADD] save() 중복 호출/폭주 방지용 시그니처 ref
+   * - lastSaveSignatureRef: "성공적으로 저장된" 마지막 payload
+   * - inFlightSaveSignatureRef: "저장 진행 중" payload (동일 payload 중복 호출 방지)
+   * - lastRoomsSignatureRef: roomTable(=방배정) 변경 감지용 (score 변경은 rooms 동기화 금지)
+   */
+  const lastSaveSignatureRef = useRef('');
+  const inFlightSaveSignatureRef = useRef('');
+  const lastRoomsSignatureRef = useRef('');
+
+  // ✅ [PATCH] scores 1건/초기화 bulk 반영용 (중복 호출 방지에 활용 가능)
+  const lastScoresSignatureRef = useRef('');
+  const lastScoresSigMapRef = useRef({}); // id별 최근 upsertScores sig
+
+  // ✅ [PATCH] 초기화 중 중복 클릭/중복 저장 방지
+  const resetInFlightRef = useRef(false);
+
+  // ⚠️ 중요: React setState는 비동기라서,
+  // 입력 직후(같은 tick)에 goNext/save가 실행되면 prev가 아직 반영되기 전에
+  // 이전 participants로 저장되어 점수가 '0'으로 덮어쓰이는 현상이 생길 수 있음.
+  // 그래서 ref를 먼저(동기적으로) 갱신하고, 그 값으로 state를 업데이트한다.
+  const setParticipants = (updater) => {
+    const prev = participantsRef.current;
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    participantsRef.current = next;
+
+    // ✅ [ADD] 로컬에서 수정한 시점 기록(단, 서버 스냅샷 적용 중엔 제외)
+    if (!applyingRemoteParticipantsRef.current) {
+      localDirtyParticipantsMsRef.current = Date.now();
+    }
+
+    setParticipantsInner(next);
+  };
+
   // ✅ 날짜 필드 동기화 추가(기존 유지)
   const [dateStart, setDateStart]       = useState('');
   const [dateEnd, setDateEnd]           = useState('');
+
+  // ---------- [추가] 얕은 비교 헬퍼 : 실제 변경이 있을 때만 setState ----------
+  const shallowEqualParticipants = (a = [], b = []) => {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      const x = a[i], y = b[i];
+      if (!y) return false;
+      if (
+        x.id       !== y.id       ||
+        x.group    !== y.group    ||
+        x.nickname !== y.nickname ||
+        x.handicap !== y.handicap ||
+        x.score    !== y.score    ||
+        x.room     !== y.room     ||
+        x.partner  !== y.partner  ||
+        x.selected !== y.selected
+      ) return false;
+    }
+    return true;
+  };
+  // ---------------------------------------------------------------------------
 
   // ---------- [보완] eventData가 변경될 때 "실제로 달라졌을 때만" setState ----------
   useEffect(() => {
@@ -84,11 +199,60 @@ export default function StepFlow() {
     // uploadMethod
     if (uploadMethod !== eventData.uploadMethod) setUploadMethod(eventData.uploadMethod);
 
-    // participants (얕은 비교)
-    const nextParticipants = eventData.participants || [];
-    if (!shallowEqualParticipants(participants, nextParticipants)) {
-      setParticipants(nextParticipants);
-    }
+    // participants (안전 동기화: 빈 서버값이 로컬을 덮어쓰지 않도록 가드)
+    const remoteParticipants = Array.isArray(eventData.participants)
+      ? eventData.participants
+      : [];
+
+    applyingRemoteParticipantsRef.current = true;  
+    setParticipants((prev) => {
+      const prevList   = Array.isArray(prev) ? prev : [];
+      const remoteList = remoteParticipants;
+
+      // 1) 둘 다 비어 있으면 그대로 유지
+      if (prevList.length === 0 && remoteList.length === 0) {
+        return prevList;
+      }
+
+      // 2) 로컬이 비어 있고, 서버에만 데이터가 있으면 → 서버 데이터로 초기화
+      if (prevList.length === 0 && remoteList.length > 0) {
+        return remoteList;
+      }
+
+      // 3) 로컬에는 데이터가 있는데, 서버 값이 빈 배열이면 → 로컬 유지
+      //    (엑셀 업로드 직후 "빈 participants" 스냅샷이 늦게 도착하는 경우 방지)
+      if (prevList.length > 0 && remoteList.length === 0) {
+        return prevList;
+      }
+
+      // 4) 둘 다 비어 있지 않은 경우:
+      //    내용이 같으면 그대로 두고, 다를 때만 서버 값으로 교체
+      if (shallowEqualParticipants(prevList, remoteList)) {
+        return prevList;
+      }
+
+      // 로컬에서 막 저장한 직후(예: Step6에서 publicView만 업데이트되어 스냅샷이 먼저 오는 경우)
+      // 서버 participants가 로컬보다 오래된 것으로 판단되면 로컬을 유지(점수 0 덮어쓰기 방지)
+      const remoteAt = (eventData?.participantsUpdatedAt && typeof eventData.participantsUpdatedAt.toMillis === 'function')
+        ? eventData.participantsUpdatedAt.toMillis()
+        : (typeof eventData?.participantsUpdatedAtClient === 'number' ? eventData.participantsUpdatedAtClient : 0);
+      const localWriteAt = lastLocalParticipantsWriteMsRef.current || 0;
+      const localJustWrote = !!localWriteAt && (Date.now() - localWriteAt < 4000);
+      if (localJustWrote) {
+        if (!remoteAt || remoteAt < localWriteAt) {
+          return prevList;
+        }
+      }
+
+      // ✅ [ADD] 저장 전 로컬 편집이 더 최신이면 서버 participants로 덮어쓰지 않음 (STEP5 입력 보호)
+      const localDirtyAt = localDirtyParticipantsMsRef.current || 0;
+      if (localDirtyAt && remoteAt && remoteAt < localDirtyAt) {
+        return prevList;
+      }  
+
+      return remoteList;
+    });
+    applyingRemoteParticipantsRef.current = false;
 
     // dates
     const nextStart = eventData.dateStart || '';
@@ -100,12 +264,45 @@ export default function StepFlow() {
   // ---------------------------------------------------------------------------
 
   // [COMPAT] Player/STEP8이 읽는 스키마로 동시 저장(dual write)
-  const compatParticipant = (p) => ({
-    ...p,
-    roomNumber: p.room ?? null,          // Player/STEP8 호환
-    teammateId: p.partner ?? null,       // Player/STEP8 호환
-    teammate:   p.partner ?? null        // 혹시 teammate 키를 쓰는 코드 대비
-  });
+  const compatParticipant = (p) => {
+    const copy = { ...p };
+
+    // Remove draft fields
+    // scoreRaw가 남아있으면(blur 없이 다음/이동) 저장 전에 score로 커밋
+    if (Object.prototype.hasOwnProperty.call(copy, "scoreRaw")) {
+      const raw = copy.scoreRaw;
+      const s = raw === null || raw === undefined ? "" : String(raw).trim();
+      if (s !== "") {
+        const n = Number(s);
+        if (Number.isFinite(n)) copy.score = n;
+      }
+      delete copy.scoreRaw;
+    }
+    if (Object.prototype.hasOwnProperty.call(copy, "dirty")) delete copy.dirty;    
+
+    // score는 number 또는 null로 정규화
+    if (typeof copy.score === "string") {
+      const t = copy.score.trim();
+      if (t === "") copy.score = null;
+      else {
+        const n = Number(t);
+        copy.score = Number.isFinite(n) ? n : null;
+      }
+    } else if (copy.score === "" || copy.score === undefined) {
+      copy.score = null;
+    } else if (copy.score != null) {
+      const n = Number(copy.score);
+      copy.score = Number.isFinite(n) ? n : null;
+    }
+
+    return {
+      ...copy,
+      roomNumber: copy.room ?? null,
+      teammateId: copy.partner ?? null,
+      teammate: copy.partner ?? null,
+    };
+  };
+
   const buildRoomTable = (list=[]) => {
     const table = {};
     list.forEach(p => {
@@ -116,6 +313,7 @@ export default function StepFlow() {
     });
     return table;
   };
+
   // [SCORE_SYNC] 방별 점수 배열(집계용 보조 필드, 안 보면 무시됨)
   const buildRoomScores = (list=[]) => {
     const scoreByRoom = {};
@@ -131,15 +329,18 @@ export default function StepFlow() {
 
   // 저장 헬퍼: 함수 값을 제거하고 순수 JSON만 전달
   // ★ patch-start: make save async and await remote write to ensure persistence before route changes
-  const save = async (updates) => {
+  const saveOnce = async (updates) => {
     const clean = {};
+    // ✅ rooms 컬렉션 스냅샷 생성에 사용할 participants (있을 때만)
+    let participantsForRooms = null;
+
     Object.entries(updates).forEach(([key, value]) => {
       if (key === 'participants' && Array.isArray(value)) {
         // [COMPAT] participants를 호환형으로 변환해서 저장
         const compat = value.map(item => {
           const base = {};
           Object.entries(item).forEach(([k, v]) => {
-            if (typeof v !== 'function') base[k] = v;
+            if (typeof v !== 'function' && v !== undefined) base[k] = v;
           });
           return compatParticipant(base);
         });
@@ -148,16 +349,97 @@ export default function StepFlow() {
         clean.roomTable   = buildRoomTable(compat);
         // [SCORE_SYNC] 참고용 방별 점수도 같이 저장(읽지 않으면 무시됨)
         clean.scoreByRoom = buildRoomScores(compat);
-      } else if (typeof value !== 'function') {
+        // ✅ rooms 하위 컬렉션 저장용으로도 기억
+        participantsForRooms = compat;
+      } else if (typeof value !== 'function' && value !== undefined) {
         clean[key] = value;
       }
     });
-    await (updateEventImmediate ? updateEventImmediate(clean) : updateEvent(clean));
+
+    /**
+     * ✅ [ADD] 동일 payload/동일 in-flight payload 저장 스킵 → 쓰기 폭주 방지
+     * (주의) sig는 "성공 저장" 이후에만 lastSaveSignatureRef에 기록됨
+     */
+    const sig = stableStringify(clean);
+    if (sig) {
+      if (sig === lastSaveSignatureRef.current) return;
+      if (sig === inFlightSaveSignatureRef.current) return;
+      inFlightSaveSignatureRef.current = sig;
+    }
+
+    // Firestore events/{eventId}에 먼저 저장
+    const hasParticipants = Object.prototype.hasOwnProperty.call(clean, 'participants');
+    if (hasParticipants) {
+      clean.participantsUpdatedAt = serverTimestamp();
+      clean.participantsUpdatedAtClient = Date.now();
+      lastLocalParticipantsWriteMsRef.current = clean.participantsUpdatedAtClient;
+    }
+
+    // ✅ [ADD] rooms 동기화는 roomTable(=방배정) 변경이 있을 때만 수행
+    const roomSig = participantsForRooms
+      ? stableStringify(clean.roomTable || buildRoomTable(participantsForRooms))
+      : '';
+
+    try {
+      await withTimeout(
+        (updateEventImmediate
+          ? updateEventImmediate(clean, hasParticipants ? false : true)
+          : updateEvent(clean)
+        ),
+        2500
+      );
+
+      // 성공한 경우에만 lastSaveSignatureRef 업데이트
+      if (sig) lastSaveSignatureRef.current = sig;
+    } catch (e) {
+      console.warn('[StepFlow] save(updateEvent*) failed (continue):', e);
+    } finally {
+      if (sig && inFlightSaveSignatureRef.current === sig) {
+        inFlightSaveSignatureRef.current = '';
+      }
+    }
+
+    // ✅ participants가 포함된 경우에만 rooms 컬렉션 스냅샷도 동기화
+    // ✅ 그리고 "방배정(roomTable)"이 실제로 바뀐 경우에만 실행 (score 변경으로 rooms 갈아엎기 금지)
+    if (participantsForRooms && typeof persistRoomsFromParticipants === 'function') {
+      const shouldSyncRooms = !!roomSig && roomSig !== lastRoomsSignatureRef.current;
+
+      if (shouldSyncRooms) {
+        try {
+          await withTimeout(persistRoomsFromParticipants(participantsForRooms), 2500);
+          // 성공한 경우에만 room sig 기록
+          lastRoomsSignatureRef.current = roomSig;
+        } catch (e) {
+          console.warn('[StepFlow] persistRoomsFromParticipants failed (continue):', e);
+        }
+      }
+    }
   };
+
+  // ✅ [ADD] save 직렬화 래퍼: 항상 순서대로 실행되게 해서 "초기화 후 점수 부활/깜빡임" 방지
+  const save = (updates) => {
+    saveChainRef.current = (saveChainRef.current || Promise.resolve())
+      .catch(() => {}) // 앞 save 에러로 체인이 끊기지 않게
+      .then(() => saveOnce(updates));
+    return saveChainRef.current;
+  };
+
   // ★ patch-end
 
+  // ✅ [PATCH] 점수 디바운스 타이머 (캡처 next 문제 해결용)
+  const scoreSaveTimerRef = useRef(null);
+
+  // ✅ [ADD] save() 직렬화(순서 보장) - reset/점수 저장 레이스 방지
+  const saveChainRef = useRef(Promise.resolve());
+
   // 전체 초기화 (현재 mode 유지)
-  const resetAll = () => {
+  const resetAll = async () => {
+    // ✅ [PATCH] 점수 디바운스 타이머가 남아있으면, 나중에 옛 점수를 다시 저장할 수 있음 → 즉시 취소
+    try {
+      if (scoreSaveTimerRef.current) clearTimeout(scoreSaveTimerRef.current);
+    } catch { /* ignore */ }
+    scoreSaveTimerRef.current = null;
+
     const init = {
       mode,
       title:        '',
@@ -176,7 +458,7 @@ export default function StepFlow() {
     setParticipants(init.participants);
     setDateStart(init.dateStart);
     setDateEnd(init.dateEnd);
-    save(init);
+    await save(init);
     navigate('/admin/home/0', { replace: true });
   };
 
@@ -186,22 +468,29 @@ export default function StepFlow() {
   const agmFlow    = [1,2,3,4,7,8];
   const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
 
-  // ★ FIX: 저장을 await 후 이동(레이스 제거)
+  // ★ FIX: 저장을 await 후 이동(레이스 제거) + participantsRef로 항상 최신 값 사용
   const goNext = async () => {
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
+    const latest = participantsRef.current || participants;
+    await save({ mode, title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
   };
 
   const goPrev = async () => {
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants, dateStart, dateEnd });
+    const latest = participantsRef.current || participants;
+    await save({ mode, title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
   };
 
-  const setStep = n => navigate(`/admin/home/${n}`);
+  // ★ FIX: 하단 메뉴/아이콘으로 step 강제 이동할 때도 먼저 저장(점수 0 덮어쓰기 방지)
+  const setStep = async (n) => {
+    const latest = participantsRef.current || participants;
+    await save({ mode, title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
+    navigate(`/admin/home/${n}`);
+  };
 
   // 모드 변경 & 저장
   const changeMode  = newMode => {
@@ -235,7 +524,7 @@ export default function StepFlow() {
       selected: false
     }));
     setParticipants(data);
-    await save({ participants: data }); // ← 업로드 직후 즉시 커밋
+    await save({ participants: data }); // ← 업로드 직후 즉시 커밋(+ rooms 컬렉션도 정리)
   };
 
   // Step5: 수동 초기화
@@ -268,35 +557,53 @@ export default function StepFlow() {
   };
 
   // 🔹 추가: 두 사람을 **한 번의 저장으로** 같은 방/상호 파트너로 확정하는 헬퍼
+
   const updateParticipantsBulkNow = async (changes) => {
-    let next;
-    const map = new Map(changes.map(c => [String(c.id), c.fields]));
-    setParticipants(prev => (next = prev.map(p => (map.has(String(p.id)) ? { ...p, ...map.get(String(p.id)) } : p))));
-    await save({ participants: next, dateStart, dateEnd });
-  };
-  const updateParticipantNow = async (id, fields) => {
-    let next;
-    setParticipants(prev => (next = prev.map(p => (p.id === id ? { ...p, ...fields } : p))));
+    const base = participantsRef.current || [];
+    const map = new Map((changes || []).map((c) => [String(c.id), c.fields || {}]));
+
+    const next = base.map((p) =>
+      map.has(String(p.id)) ? { ...p, ...map.get(String(p.id)) } : p
+    );
+
+    setParticipants(next);
     await save({ participants: next, dateStart, dateEnd });
   };
 
-  const assignPairToRoom = (id1, id2, roomNo) => {
-    updateParticipantsBulkNow([
-      { id: id1, fields: { room: roomNo, partner: id2 } },
-      { id: id2, fields: { room: roomNo, partner: id1 } },
+  // (추가) 두 사람(1조+2조) 배정을 한 번에 커밋하는 헬퍼
+  const assignPairToRoom = async (p1Id, p2Id, roomNo) => {
+    await updateParticipantsBulkNow([
+      { id: p1Id, fields: { room: roomNo, partner: p2Id } },
+      { id: p2Id, fields: { room: roomNo, partner: p1Id } },
     ]);
   };
 
-  // Step7: AGM 수동 할당
+  const updateParticipantNow = async (id, fields) => {
+    const base = participantsRef.current || [];
+    const next = base.map((p) => (p.id === id ? { ...p, ...fields } : p));
+    setParticipants(next);
+    await save({ participants: next, dateStart, dateEnd });
+  };
+
+  // Step7: AGM 수동 할당 (방 + 파트너 랜덤/연동)
   const handleAgmManualAssign = async (id) => {
     let ps = [...participants];
-    let roomNo, target, partner;
+    const target = ps.find((p) => p.id === id);
+    let roomNo = null;
+    let partner = null;
 
-    target = ps.find(p => p.id === id);
-    if (!target) return { roomNo: null, nickname: '', partnerNickname: null };
+    if (!target) {
+      return { roomNo: null, nickname: "", partnerNickname: null };
+    }
 
     if (!isGroup1(target)) {
-      return { roomNo: target.room ?? null, nickname: target?.nickname || '', partnerNickname: target?.partner ? (ps.find(p=>p.id===target.partner)?.nickname || null) : null };
+      return {
+        roomNo: target.room ?? null,
+        nickname: target?.nickname || '',
+        partnerNickname: target?.partner
+          ? (ps.find(p=>p.id===target.partner)?.nickname || null)
+          : null
+      };
     }
 
     roomNo = target.room;
@@ -319,13 +626,21 @@ export default function StepFlow() {
 
     if (partner && roomNo != null) {
       // 두 사람을 **동시에** 확정 → 저장 한 번
-      assignPairToRoom(id, partner.id, roomNo);
-      return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
+      await assignPairToRoom(id, partner.id, roomNo);
+      return {
+        roomNo,
+        nickname: target?.nickname || '',
+        partnerNickname: partner?.nickname || null
+      };
     }
 
     setParticipants(ps);
     await save({ participants: ps });
-    return { roomNo, nickname: target?.nickname || '', partnerNickname: partner?.nickname || null };
+    return {
+      roomNo,
+      nickname: target?.nickname || '',
+      partnerNickname: partner?.nickname || null
+    };
   };
 
   // Step7: AGM 수동 할당 취소
@@ -380,23 +695,95 @@ export default function StepFlow() {
 
     setParticipants(ps);
     const cleanList = ps.map(p => ({
-      id: p.id, group: p.group, nickname: p.nickname, handicap: p.handicap,
-      score: p.score, room: p.room, partner: p.partner, authCode: p.authCode, selected: p.selected
+      id: p.id,
+      group: p.group,
+      nickname: p.nickname,
+      handicap: p.handicap,
+      score: p.score,
+      room: p.room,
+      partner: p.partner,
+      authCode: p.authCode,
+      selected: p.selected
     }));
     await save({ participants: cleanList });
   };
 
-  // Step8: AGM 리셋 (점수도 함께 초기화)
+  // ✅ [PATCH] Step8/Step7/Step5 공통: "초기화" 시 디바운스 저장이 늦게 실행되며 옛 점수를 되살리는 문제 방지
   const handleAgmReset = async () => {
-    const ps = participants.map(p => ({ ...p, room: null, partner: null, score: null }));
+    if (resetInFlightRef.current) return;
+    resetInFlightRef.current = true;
+
+    // 1) 대기 중인 점수 저장 타이머가 있으면 즉시 취소 (핵심)
+    try {
+      if (scoreSaveTimerRef.current) clearTimeout(scoreSaveTimerRef.current);
+    } catch { /* ignore */ }
+    scoreSaveTimerRef.current = null;
+
+    // 2) 최신 participants 기준으로 초기화
+    const base = participantsRef.current || participants || [];
+    const ps = base.map(p => ({ ...p, room: null, partner: null, score: null }));
     setParticipants(ps);
-    await save({ participants: ps });
+
+    try {
+      await save({ participants: ps });
+
+      // 3) (추가 권장) scores 서브컬렉션도 한 번에 null로 반영 → Player/다른 화면 즉시 정합
+      if (typeof upsertScores === 'function') {
+        try {
+          const payload = ps.map(p => ({ id: p.id, score: null, room: null }));
+          const sig = stableStringify(payload);
+          // 너무 잦은 bulk clear 중복 방지(선택)
+          if (!sig || sig !== lastScoresSignatureRef.current) {
+            if (sig) lastScoresSignatureRef.current = sig;
+            await withTimeout(Promise.resolve(upsertScores(payload)), 2500);
+          }
+        } catch (e) {
+          console.warn('[StepFlow] upsertScores(reset bulk) failed (continue):', e);
+        }
+      }
+
+      // reset 이후 id별 score sig도 초기화(선택)
+      lastScoresSigMapRef.current = {};
+    } finally {
+      resetInFlightRef.current = false;
+    }
   };
 
   // ★ Step7/Step5에서 공통으로 쓰는 점수 변경 콜백 제공
-  const onScoreChangeNow = async (id, value) => {
+  const onScoreChangeNow = (id, value) => {
     const v = value === '' ? null : Number(value);
-    await updateParticipantNow(id, { score: v });
+
+    // 로컬 즉시 반영
+    setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, score: v } : p)));
+
+    // ✅ [PATCH] Player 즉시 반영: scores 서브컬렉션 1회만 업데이트(있을 때만)
+    if (typeof upsertScores === 'function') {
+      try {
+        const me = (participantsRef.current || []).find((p) => p.id === id);
+        const room = me?.room ?? null;
+        const sig = `${id}:${v ?? 'null'}:${room ?? 'null'}`;
+
+        const map = lastScoresSigMapRef.current || {};
+        if (map[String(id)] !== sig) {
+          map[String(id)] = sig;
+          lastScoresSigMapRef.current = map;
+          Promise.resolve(upsertScores([{ id, score: v, room }]))
+            .catch((e) => console.warn('[StepFlow] upsertScores failed (continue):', e));
+        }
+      } catch (e) {
+        console.warn('[StepFlow] upsertScores failed (continue):', e);
+      }
+    }
+
+    // ✅ [SSOT 통일] 점수는 /scores 서브컬렉션이 단일 진실(SSOT).
+    //    따라서 점수 입력만으로 events 루트(participants)를 save() 하지 않습니다.
+    //    (배정/수정 등 participants 구조 변경 시에만 save 호출)
+    try {
+      if (scoreSaveTimerRef.current) {
+        clearTimeout(scoreSaveTimerRef.current);
+        scoreSaveTimerRef.current = null;
+      }
+    } catch { /* ignore */ }
   };
 
   const ctxValue = {
@@ -404,7 +791,7 @@ export default function StepFlow() {
     onCancel:        handleAgmCancel,
     onAutoAssign:    handleAgmAutoAssign,
     onReset:         handleAgmReset,
-    onScoreChange:   onScoreChangeNow,         // ★ 추가 제공
+    onScoreChange:   onScoreChangeNow,         // ★ AGM/Stroke 점수 입력용 콜백
     goNext, goPrev, setStep,
     setMode: changeMode,
     setTitle: changeTitle,
@@ -422,7 +809,16 @@ export default function StepFlow() {
     dateEnd,   setDateEnd,
   };
 
-  const pages = { 1:<Step1/>, 2:<Step2/>, 3:<Step3/>, 4:<Step4/>, 5:<Step5/>, 6:<Step6/>, 7:<Step7/>, 8:<Step8/> };
+  const pages = {
+    1:<Step1/>,
+    2:<Step2/>,
+    3:<Step3/>,
+    4:<Step4/>,
+    5:<Step5/>,
+    6:<Step6/>,
+    7:<Step7/>,
+    8:<Step8/>
+  };
   const Current = pages[curr] || <Step1 />;
 
   return (

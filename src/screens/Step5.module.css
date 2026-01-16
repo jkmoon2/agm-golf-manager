@@ -186,15 +186,17 @@
   border-radius: 4px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.15);
   z-index: 10;
-  max-height: 200px;
   overflow-y: auto;
+  width: max-content;   /* ✅ 글자 길이에 맞춰 자동 폭 */
+  min-width: 70px;      /* ✅ 최소 폭 */
+  max-width: 140px;     /* ✅ 너무 넓어지는 것 방지 */
 }
 
 /* 메뉴 항목 */
 .forceOption {
   padding: 6px 12px;
   cursor: pointer;
-  white-space: nowrap;
+  white-space: nowrap;  /* ✅ 줄바꿈 방지 */
 }
 .forceOption:hover {
   background: #f0f0f0;

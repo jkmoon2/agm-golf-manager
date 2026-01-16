@@ -1,6 +1,6 @@
 // /src/contexts/PlayerContext.jsx
 
-import React, { createContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
   setDoc,
@@ -11,7 +11,6 @@ import {
   updateDoc,        // ✅ update만 사용 (create 금지)
   getDoc,           // ✅ 이벤트 문서 존재 확인
   collection,       // ★ ADD: scores 구독용
-  getDocs           // ★ ADD: scores 일괄 읽기(저장 전 최신값 머지)
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
@@ -300,7 +299,6 @@ export function PlayerProvider({ children }) {
         const s = d.data() || {};
         map[String(d.id)] = {
           score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : undefined),
-          room:  (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : undefined),
         };
       });
       setParticipants(prev => {
@@ -310,9 +308,6 @@ export function PlayerProvider({ children }) {
           let out = p, changed = false;
           if (Object.prototype.hasOwnProperty.call(s, 'score') && (p.score ?? null) !== (s.score ?? null)) {
             out = { ...out, score: s.score ?? null }; changed = true;
-          }
-          if (Object.prototype.hasOwnProperty.call(s, 'room') && (p.room ?? null) !== (s.room ?? null)) {
-            out = { ...out, room: s.room ?? null }; changed = true;
           }
           return changed ? out : p;
         });
@@ -334,21 +329,6 @@ export function PlayerProvider({ children }) {
     if (!exists) {
       alert('이벤트 문서가 존재하지 않습니다. 관리자에게 문의해 주세요.');
       throw new Error('Event document does not exist');
-    }
-
-    // ★★★ FIX: 저장 직전 scores 최신값을 머지하여 덮어쓰기 방지
-    let scoresMap = {};
-    try {
-      const ss = await getDocs(collection(db, 'events', eventId, 'scores'));
-      ss.forEach(d => {
-        const s = d.data() || {};
-        scoresMap[String(d.id)] = {
-          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : null),
-          room : (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : null),
-        };
-      });
-    } catch (e) {
-      if (DEBUG) console.warn('[PlayerContext] getDocs(scores) failed:', e?.message || e);
     }
 
     const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','authCode','selected'];
@@ -387,12 +367,6 @@ export function PlayerProvider({ children }) {
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
 
-      // ★★★ 여기서 scores 최신값을 합쳐 넣음 (우리 변경이 없는 항목만)
-      const sid = String(out.id);
-      const s   = scoresMap[sid] || {};
-      if ((out.score == null) && (s.score != null)) out.score = s.score;
-      if ((out.room  == null) && (s.room  != null)) out.room  = s.room;
-
       // roomNumber 동기화(표시용)
       if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
 
@@ -409,38 +383,6 @@ export function PlayerProvider({ children }) {
       throw e;
     }
   }
-
-  // ───────── ★★★ ADD: Player측 미러 — participants 변경분을 scores에도 업서트(PLAYER→ADMIN 실시간)
-  const lastMirroredRef = useRef({});
-  useEffect(() => {
-    if (!eventId || !Array.isArray(participants) || !participants.length) return;
-    const nowMap = {};
-    const payload = [];
-    participants.forEach(p => {
-      const id = normId(p.id);
-      const cur = { score: p.score ?? null, room: p.room ?? null };
-      nowMap[id] = cur;
-      const prev = lastMirroredRef.current[id] || {};
-      const changed = (prev.score ?? null) !== cur.score || (prev.room ?? null) !== cur.room;
-      if (changed) payload.push({ id, ...cur });
-    });
-    if (!payload.length) return;
-    (async () => {
-      try {
-        await ensureAuthReady();
-        await Promise.all(payload.map(({ id, score, room }) =>
-          setDoc(doc(db, 'events', eventId, 'scores', String(id)), {
-            score: score ?? null,
-            room:  room  ?? null,
-            updatedAt: serverTimestamp()
-          }, { merge: true })
-        ));
-        lastMirroredRef.current = nowMap;
-      } catch (e) {
-        if (DEBUG) console.warn('[PlayerContext] mirror to scores failed:', e?.message || e);
-      }
-    })();
-  }, [eventId, participants]);
 
   // ─ API (원본 유지) ─
   async function joinRoom(roomNumber, id) {

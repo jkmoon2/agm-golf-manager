@@ -1,4 +1,4 @@
-// /src/screens/Step6.jsx
+// src/screens/Step6.jsx
 
 import React, { useState, useRef, useMemo, useContext, useEffect, useLayoutEffect } from 'react';
 import html2canvas from 'html2canvas';
@@ -7,8 +7,8 @@ import styles from './Step6.module.css';
 import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
-// [ADD] 라이브 이벤트 문서 구독(컨텍스트가 실시간이 아닐 때 보조)
-import { useEventLiveQuery } from '../live/useEventLiveQuery';
+// [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
+//         Step6에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
 
 // [ADD] 점수 실시간 반영을 위한 Firestore 구독
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -26,9 +26,8 @@ export default function Step6() {
 
   // 이벤트 컨텍스트
   const { eventId, eventData, updateEventImmediate } = useContext(EventContext) || {};
-  // [ADD] 라이브 이벤트 데이터(있으면 컨텍스트보다 우선)
-  const { eventData: liveEvent } = useEventLiveQuery(eventId);
-  const effectiveEventData = liveEvent || eventData;
+  // [PATCH] 중복 리스너 제거: eventData는 EventContext onSnapshot으로 실시간 갱신됨
+  //         (※ 잘못된 재선언 방지)
 
   // [ADD] scores 서브컬렉션 실시간 구독 → { [pid]: score }
   const [scoresMap, setScoresMap] = useState({});
@@ -168,7 +167,7 @@ export default function Step6() {
 
   // 이벤트 문서의 publicView를 **권위 소스**로 안전 복원(과거 0-based도 자동 보정)
   useEffect(() => {
-    const pv = effectiveEventData?.publicView;
+    const pv = eventData?.publicView;
     if (!pv) return;
 
     const nums = (pv.hiddenRooms || []).map(Number).filter(Number.isFinite);
@@ -189,7 +188,7 @@ export default function Step6() {
       setVisibleMetrics(nextVM);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveEventData?.publicView, roomCount]);
+  }, [eventData?.publicView, roomCount]);
 
   // 메뉴 토글 + 바깥 클릭 닫기
   const toggleMenu = (e) => { e.stopPropagation(); setMenuOpen(o => !o); };
@@ -265,10 +264,10 @@ export default function Step6() {
     roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`
   );
 
-  // 참가자 소스: 컨텍스트 비어있으면 **라이브/컨텍스트 이벤트 문서** 폴백
+  // 참가자 소스: StepContext 비어있으면 eventData.participants 폴백
   const sourceParticipants = (participants && participants.length)
     ? participants
-    : ((effectiveEventData && Array.isArray(effectiveEventData.participants)) ? effectiveEventData.participants : []);
+    : ((eventData && Array.isArray(eventData.participants)) ? eventData.participants : []);
 
   // [ADD] 점수 오버레이 적용(있으면 scoresMap 우선, 없으면 기존 score 유지)
   const participantsWithScore = useMemo(() => {
@@ -483,10 +482,14 @@ export default function Step6() {
                         <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
                         <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
                         {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
-                        {showHalved && <td className={styles.cell} style={{ color: 'blue' }}>
-                          {roomObj.detail[ri].banddang}
-                        </td>}
-                        <td className={styles.cell} style={{ color: 'red' }}>{roomObj.detail[ri].result}</td>
+                        {showHalved && (
+                          <td className={styles.cell} style={{ color: 'blue' }}>
+                            {roomObj.detail[ri].banddang}
+                          </td>
+                        )}
+                        <td className={styles.cell} style={{ color: 'red' }}>
+                          {roomObj.detail[ri].result}
+                        </td>
                       </React.Fragment>
                     )
                   )}
@@ -538,7 +541,8 @@ export default function Step6() {
         className={styles.stepFooter}
         style={{
           position: 'fixed',
-          left: 0, right: 0,
+          left: 0,
+          right: 0,
           bottom: __safeBottom,
           zIndex: 20,
           boxSizing: 'border-box',
@@ -549,7 +553,12 @@ export default function Step6() {
       >
         <button onClick={goPrev}>← 이전</button>
         <button
-          onClick={() => { try { localStorage.setItem('homeViewMode', 'stroke'); } catch {} setStep(0); }}
+          onClick={() => {
+            try {
+              localStorage.setItem('homeViewMode', 'stroke');
+            } catch {}
+            setStep(0);
+          }}
         >
           홈
         </button>

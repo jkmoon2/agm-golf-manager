@@ -198,7 +198,9 @@ export default function PlayerScoreInput() {
     const base = {};
     orderedRoomPlayers.forEach((p) => {
       const key = String(p.id);
-      const baseScore = (scoresMap[key] != null ? scoresMap[key] : p.score);
+      // ✅ [PATCH] scoresMap에 key가 존재하면(null 포함) 그 값을 우선(초기화/삭제 반영)
+      const hasScore = Object.prototype.hasOwnProperty.call(scoresMap, key);
+      const baseScore = (hasScore ? scoresMap[key] : p.score);
       base[key] = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
     });
     setBaseDraft(base);

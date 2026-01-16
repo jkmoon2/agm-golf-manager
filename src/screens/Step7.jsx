@@ -4,18 +4,23 @@ import React, { useState, useContext, useRef, useEffect } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
-import { serverTimestamp } from 'firebase/firestore';
-
-// ★ ADD: Admin 화면에서도 scores를 직접 구독하여 즉시 반영 + 이벤트 문서 구독(서버 지문)
-import { collection, onSnapshot, getDocs, setDoc, doc } from 'firebase/firestore';
+import { serverTimestamp, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
-if (process.env.NODE_ENV!=='production') console.log('[AGM] Step7 render');
+const LONG_PRESS_MS = 600;
+const MAX_ROOM_CAPACITY = 4;
+
+// 점수 입력 시 부분 숫자(-, 빈문자 등) 허용하는 헬퍼 (기존 그대로)
+function isPartialNumber(str) {
+  if (str === '') return true;
+  if (str === '-' || str === '.' || str === '-.') return true;
+  return /^-?\d+(\.\d*)?$/.test(str);
+}
 
 export default function Step7() {
   const {
-    participants,
-    roomNames,
+    participants = [],
+    roomNames = [],
     onScoreChange,
     onManualAssign,
     onCancel,
@@ -23,708 +28,658 @@ export default function Step7() {
     onReset,
     goPrev,
     goNext,
+    // ✅ 기존 StepFlow에서 이미 제공 중인 값들 (트레이드용 최소 추가)
     setParticipants,
-    updateParticipantsBulk,
     updateParticipant,
+    updateParticipantsBulk,
   } = useContext(StepContext);
 
-  // ★ ADD: upsertScores 추가 (Admin→Player 브리지 완성)
-  const { eventId, updateEventImmediate, eventData, upsertScores } = useContext(EventContext) || {};
+  const {
+    eventId,
+    updateEventImmediate,
+    upsertScores,
+    persistRoomsFromParticipants,
+  } = useContext(EventContext) || {};
 
-  // ───────────────────────────────────────────────────────────
-  // ★ ADD: 중복 커밋/동시 클릭 방지용 writeLock
-  const writeLockRef = useRef(false);
-  const withWriteLock = async (fn) => {
-    if (writeLockRef.current) return;
-    writeLockRef.current = true;
-    try { await fn(); } finally { writeLockRef.current = false; }
-  };
-  // ───────────────────────────────────────────────────────────
+  // ✅ 자동 브리지(useEffect) ON/OFF 플래그 (기본 OFF)
+  // - StepFlow(save)가 이미 participants를 저장하므로, Step7에서 추가로 events/rooms/scores를 때리면
+  //   스냅샷 루프/쓰기 폭주가 발생할 수 있어 기본 OFF로 둡니다.
+  const AUTO_BRIDGE_USEEFFECT = false;
 
-  // ★★★ ADD: scores 구독 → Admin 화면 로컬 participants에 즉시 머지
+  // 로딩 상태(수동 버튼용)
+  const [loadingId, setLoadingId] = useState(null);
+
+  // 점수 입력용 draft 상태(id → 문자열)
+  const [scoreDraft, setScoreDraft] = useState({});
+
+  // [ADD] scores 서브컬렉션 실시간 구독 → { [pid]: score }
+  //   - SSOT(점수 단일 출처): participants.score에 의존하지 않고 scores/{pid}.score를 화면에 반영
+  const [scoresMap, setScoresMap] = useState({});
   useEffect(() => {
     if (!eventId) return;
     const colRef = collection(db, 'events', eventId, 'scores');
-    const unsub  = onSnapshot(colRef, snap => {
-      const map = {};
-      snap.forEach(d => {
-        const s = d.data() || {};
-        map[String(d.id)] = {
-          score: (Object.prototype.hasOwnProperty.call(s, 'score') ? s.score : undefined),
-          room:  (Object.prototype.hasOwnProperty.call(s, 'room')  ? s.room  : undefined),
-        };
+    const unsub = onSnapshot(colRef, (snap) => {
+      const m = {};
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        m[String(d.id)] = data.score == null ? null : data.score;
       });
-      setParticipants(prev => {
-        const next = (prev || []).map(p => {
-          const s = map[String(p.id)];
-          if (!s) return p;
-          let out = p, changed = false;
-          if (Object.prototype.hasOwnProperty.call(s, 'score') && (p.score ?? null) !== (s.score ?? null)) {
-            out = { ...out, score: s.score ?? null }; changed = true;
-          }
-          if (Object.prototype.hasOwnProperty.call(s, 'room') && (p.room ?? null) !== (s.room ?? null)) {
-            out = { ...out, room: s.room ?? null }; changed = true;
-          }
-          return changed ? out : p;
-        });
-        return next;
-      });
+      setScoresMap(m);
     });
-    return () => unsub();
-  }, [eventId, setParticipants]);
+    return unsub;
+  }, [eventId]);
 
-  const [loadingId, setLoadingId] = useState(null);
-  const [scoreDraft, setScoreDraft] = useState({});
-  const pressTimers = useRef({});
+  const getDisplayScore = (pid, fallbackScore) => {
+    if (Object.prototype.hasOwnProperty.call(scoreDraft || {}, pid)) {
+      const v = scoreDraft?.[pid];
+      return v == null ? '' : String(v);
+    }
+    const ss = scoresMap?.[pid];
+    if (ss !== undefined) return ss == null ? '' : String(ss);
+    return fallbackScore == null ? '' : String(fallbackScore);
+  };
+  const pressTimersRef = useRef({}); // 점수 입력 롱프레스용
 
-  const TIMINGS = { preAlert: 1200, partnerPick: 1400 };
-  const MAX_ROOM_CAPACITY = 4;
+  // ✅ “완료 버튼” 롱프레스용 타이머 & 플래그
+  const manualPressTimersRef = useRef({});
+  const manualLongPressFlagRef = useRef(false);
 
-  /* ★ NEW: 하단 고정/여백 계산 — STEP5 동일 */
-  const [__bottomGap, __setBottomGap] = useState(64);
+  // 하단 탭바/네비 영역 높이 계산 (모바일에서 버튼 가리지 않도록)
+  const [bottomGap, setBottomGap] = useState(64);
   useEffect(() => {
-    const probe = () => {
+    const measure = () => {
       try {
         const el =
           document.querySelector('[data-bottom-nav]') ||
           document.querySelector('#bottomTabBar') ||
           document.querySelector('.bottomTabBar') ||
           document.querySelector('.BottomTabBar');
-        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
-      } catch {}
+        setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {
+        // ignore
+      }
     };
-    probe();
-    window.addEventListener('resize', probe);
-    return () => window.removeEventListener('resize', probe);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
   }, []);
-  const __FOOTER_H   = 56;
-  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
-  const __pageStyle  = {
+
+  const FOOTER_H = 56;
+  const safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${bottomGap}px)`;
+  const pageStyle = {
     minHeight: '100dvh',
     boxSizing: 'border-box',
-    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
+    paddingBottom: `calc(${FOOTER_H}px + ${safeBottom})`,
     WebkitOverflowScrolling: 'touch',
     touchAction: 'pan-y',
   };
-  /* ─────────────────────────────────────────────────────────── */
 
-  // ─ helpers ─
-  const isGroup1 = (p) => Number.isFinite(Number(p?.group))
-    ? (Number(p.group) % 2 === 1)
-    : (p.id % 2 === 1);
+  // 1조/2조 판별 (group 필드 우선, 없으면 id로 fallback)
+  const isGroup1 = (p) =>
+    Number.isFinite(Number(p?.group))
+      ? Number(p.group) % 2 === 1
+      : p.id % 2 === 1;
 
-  const countInRoom = (list, roomNo) =>
-    (list || []).filter(p => Number(p?.room) === Number(roomNo)).length;
-
-  const lastNonEmptyRef = useRef([]);
-  useEffect(() => {
-    if (Array.isArray(participants) && participants.length > 0) {
-      lastNonEmptyRef.current = participants;
-    }
-  }, [participants]);
-
-  const getList = () =>
-    (Array.isArray(participants) && participants.length > 0)
-      ? participants
-      : (lastNonEmptyRef.current || []);
-
-  const getCustomRoomNumbers = () => {
-    const names = Array.isArray(roomNames) ? roomNames : [];
-    const nums = names.map(n => {
-      if (typeof n !== 'string') return NaN;
-      const m = n.match(/(\d+)/);
-      return m ? Number(m[1]) : NaN;
-    }).filter(v => Number.isFinite(v));
-    const unique = new Set(nums);
-    return (nums.length === names.length && unique.size === nums.length) ? nums : null;
-  };
-
-  const getRoomPriority = () => {
-    const n = Array.isArray(roomNames) ? roomNames.length : 0;
-    const fromEvent =
-      eventData && Array.isArray(eventData.roomPriority) ? eventData.roomPriority : null;
-
-    if (fromEvent && fromEvent.length) {
-      return fromEvent.map(Number).filter(r => r >= 1 && r <= n);
-    }
-    const custom = getCustomRoomNumbers();
-    if (custom) return Array.from({ length: n }, (_, i) => i + 1);
-    return Array.from({ length: n }, (_, i) => n - i);
-  };
-
-  const resolveTargetRoom = (raw) => {
-    const num = Number(raw);
-    const total = Array.isArray(roomNames) ? roomNames.length : 0;
-    if (!Number.isFinite(num) || total === 0) return null;
-    const custom = getCustomRoomNumbers();
-    if (custom) {
-      const idx = custom.indexOf(num);
-      if (idx !== -1) return idx + 1;
-    }
-    if (num >= 1 && num <= total) return num;
-    return null;
-  };
-
-  const findAvailableRoom = (preferred, list, limit = MAX_ROOM_CAPACITY) => {
-    const priority = getRoomPriority();
-    const candidates = priority.filter(r => countInRoom(list, r) < limit);
-    if (preferred && candidates.includes(preferred)) return preferred;
-    return candidates[0] || null;
-  };
-
-  const getPairForGroup1 = (id, list) => {
-    const a = (list || []).find(p => String(p.id) === String(id));
-    if (!a) return [];
-    const b = a?.partner ? (list || []).find(p => String(p.id) === String(a.partner)) : null;
-    return b ? [a, b] : [a];
-    };
-
-  const getRoomMembers = (list, roomNo) =>
-    (list || []).filter(p => Number(p?.room) === Number(roomNo));
-  const getGroup1InRoom = (list, roomNo) =>
-    getRoomMembers(list, roomNo).filter(p => isGroup1(p));
-  const getGroup2InRoom = (list, roomNo) =>
-    getRoomMembers(list, roomNo).filter(p => !isGroup1(p));
-
-  const getTeamsInRoom = (list, roomNo) => {
-    const g1s = getGroup1InRoom(list, roomNo);
-    return g1s.map(g1 => {
-      const g2 = (list || []).find(p => String(p.id) === String(g1.partner));
-      return g2 ? { g1, g2 } : null;
-    }).filter(Boolean);
-  };
-
-  /* ★ NEW: STEP5와 동일한 숫자 입력 정책 */
-  const isPartialNumber = (s) => /^-?\d*\.?\d*$/.test(s);
-
-  // === 여기부터 실시간 커밋을 위한 보조 유틸(STEP5 동일) ===
-  const buildNextFromChanges = (baseList, changes) => {
-    try {
-      const map = new Map((baseList || []).map(p => [String(p.id), { ...p }]));
-      (changes || []).forEach(({ id, fields }) => {
-        const k = String(id);
-        const cur = map.get(k) || {};
-        map.set(k, { ...cur, ...(fields || {}) });
-      });
-      return Array.from(map.values());
-    } catch (e) {
-      console.warn('[Step7] buildNextFromChanges error:', e);
-      return baseList || [];
-    }
-  };
-
-  const canBulk = typeof updateParticipantsBulk === 'function';
-  const canOne  = typeof updateParticipant === 'function';
-  const syncChanges = async (changes) => withWriteLock(async () => {
-    try {
-      if (canBulk) {
-        await updateParticipantsBulk(changes);
-      } else if (canOne) {
-        for (const ch of changes) await updateParticipant(ch.id, ch.fields);
-      }
-    } catch (e) {
-      console.warn('[Step7] syncChanges failed:', e);
-    }
-    try {
-      if (typeof updateEventImmediate === 'function' && eventId) {
-        const base = participants || [];
-        const next = buildNextFromChanges(base, changes);
-        await updateEventImmediate({ participants: next, participantsUpdatedAt: serverTimestamp() });
-      }
-    } catch (e) {
-      console.warn('[Step7] updateEventImmediate(participants) failed:', e);
-    }
-
-    // ★★★ ADD: Admin → Player 브리지 (scores 업서트: score/room 반영)
-    try {
-      if (typeof upsertScores === 'function' && Array.isArray(changes) && changes.length) {
-        const payload = [];
-        for (const { id, fields } of changes) {
-          if (!fields) continue;
-          const item = { id };
-          let push = false;
-          if (Object.prototype.hasOwnProperty.call(fields, 'score')) { item.score = fields.score ?? null; push = true; }
-          if (Object.prototype.hasOwnProperty.call(fields, 'room'))  { item.room  = fields.room  ?? null; push = true; }
-          if (push) payload.push(item);
-        }
-        if (payload.length) await upsertScores(payload);
-      }
-    } catch (e) {
-      console.warn('[Step7] upsertScores(syncChanges) failed:', e);
-    }
-  });
-  // ============================================================
-
-  const handleScoreInputChange = (id, raw) => {
-    if (!isPartialNumber(raw)) return;
-    setScoreDraft(d => ({ ...d, [id]: raw }));
-  };
-
-  const handleScoreBlur = async (id) => {
-    const raw = scoreDraft[id];
-    if (raw === undefined) return;
-    let v = null;
-    if (!(raw === '' || raw === '-' || raw === '.' || raw === '-.')) {
-      const num = Number(raw);
-      v = Number.isNaN(num) ? null : num;
-    }
-
-    if (typeof onScoreChange === 'function') {
-      onScoreChange(id, v);
-    } else if (typeof setParticipants === 'function') {
-      setParticipants(ps => ps.map(p => p.id === id ? { ...p, score: v } : p));
-    }
-
-    await syncChanges([{ id, fields: { score: v } }]);
-
-    setScoreDraft(d => { const { [id]:_, ...rest } = d; return rest; });
-  };
-
-  const startLongPress = (id) => {
-    try { if (pressTimers.current[id]) clearTimeout(pressTimers.current[id]); } catch {}
-    pressTimers.current[id] = setTimeout(() => {
-      setScoreDraft(d => {
-        const cur = d[id] ?? (() => {
-          const p = (getList() || []).find(x => x.id === id);
-          return p && p.score != null ? String(p.score) : '';
-        })();
-        if (String(cur).startsWith('-')) return d;
-        return { ...d, [id]: (cur === '' ? '-' : `-${String(cur).replace(/^-/, '')}`) };
-      });
-    }, 600);
-  };
-  const cancelLongPress = (id) => {
-    try { if (pressTimers.current[id]) clearTimeout(pressTimers.current[id]); } catch {}
-    pressTimers.current[id] = null;
-  };
-
-  const isCompleted = id => {
-    const me = getList().find(p => p.id === id);
+  // 완료 여부: 방 + 파트너 둘 다 할당되어 있으면 완료로 간주
+  const isCompleted = (id) => {
+    const me = participants.find((p) => p.id === id);
     return !!(me && me.room != null && me.partner != null);
   };
 
-  const compatParticipant = (p) => ({
-    ...p,
-    roomNumber: p.room ?? null,
-    teammateId: p.partner ?? null,
-    teammate:   p.partner ?? null,
-  });
-  const buildRoomTable = (list=[]) => {
-    const table = {};
-    list.forEach(p => {
-      const r = p.room ?? null;
-      if (r == null) return;
-      if (!table[r]) table[r] = [];
-      table[r].push(p.id);
-    });
-    return table;
+  const findParticipant = (id) =>
+    participants.find((p) => String(p.id) === String(id));
+
+  // ✅ 방/팀 관련 헬퍼들 (트레이드용 최소 추가)
+  const getRoomMembers = (roomNo) =>
+    participants.filter((p) => Number(p?.room) === Number(roomNo));
+
+  const getGroup1InRoom = (roomNo) =>
+    getRoomMembers(roomNo).filter((p) => isGroup1(p));
+
+  const getTeamsInRoom = (roomNo) => {
+    const g1s = getGroup1InRoom(roomNo);
+    return g1s
+      .map((g1) => {
+        const g2 = g1.partner ? findParticipant(g1.partner) : null;
+        return g2 ? { g1, g2 } : null;
+      })
+      .filter(Boolean);
   };
 
-  const commitParticipantsNow = async (list) => withWriteLock(async () => {
-    try {
-      if (!Array.isArray(list) || list.length === 0) return;
+  // ✅ participants 변경을 한 번에 반영하는 공용 함수
+  const applyBulkChanges = async (changes) => {
+    if (!Array.isArray(changes) || !changes.length) return;
 
-      // ★ ADD: 기존과 동일한 participants 저장
-      if (updateEventImmediate && eventId) {
-        const compat = (list || []).map(compatParticipant);
-        const roomTable = buildRoomTable(compat);
-        await updateEventImmediate(roomTable ? { participants: compat, roomTable, participantsUpdatedAt: serverTimestamp() } : { participants: compat, participantsUpdatedAt: serverTimestamp() });
-      } else if (typeof updateParticipantsBulk === 'function') {
-        const changes = (list || []).map(p => ({
-          id: p.id,
-          fields: {
-            room: p.room ?? null,
-            partner: p.partner ?? null,
-            score: p.score ?? null,
-            roomNumber: p.room ?? null,
-            teammateId: p.partner ?? null,
-            teammate:   p.partner ?? null,
-          }
-        }));
-        if (changes.length > 0) await updateParticipantsBulk(changes);
-      } else if (typeof updateParticipant === 'function') {
-        for (const p of (list || [])) {
-          await updateParticipant(p.id, {
-            room: p.room ?? null,
-            partner: p.partner ?? null,
-            score: p.score ?? null,
-            roomNumber: p.room ?? null,
-            teammateId: p.partner ?? null,
-            teammate:   p.partner ?? null,
-          });
-        }
-      }
-
-      // ★★★ ADD: scores 업서트(변경된 사람만)
-      try {
-        if (typeof upsertScores === 'function') {
-          const oldById = new Map((participants || []).map(x => [String(x.id), x]));
-          const payload = [];
-          (list || []).forEach(p => {
-            const old = oldById.get(String(p.id)) || {};
-            const changedScore = (old.score ?? null) !== (p.score ?? null);
-            const changedRoom  = (old.room  ?? null) !== (p.room  ?? null);
-            if (changedScore || changedRoom) {
-              payload.push({ id: p.id, score: p.score ?? null, room: p.room ?? null });
-            }
-          });
-          if (payload.length) await upsertScores(payload);
-        }
-      } catch (e) {
-        console.warn('[Step7] upsertScores(commit) failed:', e);
-      }
-    } catch (e) {
-      console.warn('[Step7] commitParticipantsNow failed:', e);
-    }
-  });
-
-  const lastCommittedHashRef = useRef('');
-  const commitTimerRef = useRef(null);
-  useEffect(() => {
-    if (!Array.isArray(participants) || participants.length === 0) return;
-    const nextHash = (() => { try { return JSON.stringify(participants); } catch { return String(Date.now()); } })();
-    if (nextHash === lastCommittedHashRef.current) return;
-    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
-    commitTimerRef.current = setTimeout(async () => {
-      try {
-        await commitParticipantsNow(participants);
-        lastCommittedHashRef.current = nextHash;
-      } catch (e) {
-        console.warn('[Step7] updateEventImmediate failed:', e);
-      }
-    }, 250);
-  }, [participants]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 이하 이동/트레이드 로직(원본 유지) …
-
-  const forceMovePairToRoom = async (id, targetRoom) => {
-    const list = [...getList()];
-    const pair = getPairForGroup1(id, list);
-    if (pair.length === 0) return;
-
-    const srcRoom = Number(pair[0]?.room);
-    const occ = countInRoom(list, targetRoom);
-
-    if (occ <= MAX_ROOM_CAPACITY - pair.length) {
-      const ids = new Set(pair.map(x => String(x.id)));
-      const next = list.map(p => ids.has(String(p.id)) ? { ...p, room: targetRoom } : p);
-      await commitParticipantsNow(next);
-      alert(`강제 이동 완료: ${pair[0]?.nickname ?? ''}${pair[1] ? ' 팀 포함' : ''} → ${targetRoom}번 방`);
+    // 1순위: StepFlow에서 제공하는 updateParticipantsBulk 사용
+    if (typeof updateParticipantsBulk === 'function') {
+      await updateParticipantsBulk(changes);
       return;
     }
 
-    if (occ >= MAX_ROOM_CAPACITY && pair.length === 2) {
-      const teams = getTeamsInRoom(list, targetRoom);
-      if (teams.length === 0) { alert('해당 방의 팀 구성을 파악할 수 없습니다.'); return; }
-
-      let pick = teams[0];
-      if (teams.length > 1) {
-        const names = teams.map((t,i)=> `${i+1}. ${t.g1.nickname} / ${t.g2.nickname}`).join('\n');
-        const sel = window.prompt(`교체할 팀을 선택하세요:\n${names}`, '1');
-        const idx = Number(sel);
-        if (!Number.isFinite(idx) || idx < 1 || idx > teams.length) return;
-        pick = teams[idx-1];
+    // 2순위: 개별 업데이트
+    if (typeof updateParticipant === 'function') {
+      for (const ch of changes) {
+        await updateParticipant(ch.id, ch.fields);
       }
-
-      const next = list.map(p => {
-        if (p.id === pair[0].id || p.id === pair[1].id) return { ...p, room: targetRoom };
-        if (p.id === pick.g1.id || p.id === pick.g2.id) return { ...p, room: srcRoom };
-        return p;
-      });
-      await commitParticipantsNow(next);
-      alert(`트레이드 완료: (${pair[0].nickname}, ${pair[1].nickname}) ↔ (${pick.g1.nickname}, ${pick.g2.nickname})`);
       return;
     }
 
-    alert('선택하신 방은 정원 초과입니다. (정원 4명)');
+    // 3순위(최후): setParticipants 로컬만 수정 (Firestore 반영은 브리지 useEffect가 처리)
+    if (typeof setParticipants === 'function') {
+      setParticipants((prev) =>
+        prev.map((p) => {
+          const c = changes.find((ch) => String(ch.id) === String(p.id));
+          return c ? { ...p, ...(c.fields || {}) } : p;
+        })
+      );
+    }
   };
 
-  const moveOrTradeGroup2 = async (idGroup2, targetRoom) => {
-    const list = [...getList()];
-    const me2 = list.find(p => String(p.id) === String(idGroup2));
-    if (!me2) return alert('대상을 찾을 수 없습니다.');
-    if (isGroup1(me2)) return alert('해당 동작은 1조만 가능합니다.');
-    const me1 = me2?.partner ? list.find(p => String(p.id) === String(me2.partner)) : null;
-
-    const dstG2s = getGroup2InRoom(list, targetRoom);
-    const dstG1s = getGroup1InRoom(list, targetRoom);
-    const dst1   = dstG1s[0] || null;
-
-    if (dstG2s.length === 0) {
-      if (countInRoom(list, targetRoom) >= MAX_ROOM_CAPACITY) { alert('정원 초과로 이동할 수 없습니다.'); return; }
-      const next = list.map(p => {
-        if (p.id === me2.id) return { ...p, room: targetRoom, partner: dst1?.id ?? null };
-        if (p.id === (dst1?.id ?? -1)) return { ...p, partner: me2.id };
-        if (p.id === (me1?.id ?? -2)) return { ...p, partner: null };
-        return p;
-      });
-      await commitParticipantsNow(next);
-      alert(`${me2.nickname}님을 ${targetRoom}번 방으로 이동했습니다.`);
+  // ✅ 팀(1조+2조) 이동/맞트레이드
+  const moveTeamOrTradePair = async (id, targetRoom) => {
+    const me1 = findParticipant(id);
+    if (!me1) {
+      alert('대상을 찾을 수 없습니다.');
       return;
     }
-
-    let pick = dstG2s[0];
-    if (dstG2s.length > 1) {
-      const names = dstG2s.map((c,i)=> `${i+1}. ${c.nickname}`).join('\n');
-      const sel = window.prompt(`트레이드할 2조를 선택하세요:\n${names}`, '1');
-      const idx = Number(sel);
-      if (!Number.isFinite(idx) || idx < 1 || idx > dstG2s.length) return;
-      pick = dstG2s[idx-1];
-    }
-    const pick1 = pick?.partner ? list.find(p => String(p.id) === String(pick.partner)) : null;
-
-    const srcRoom = Number(me2.room);
-    const dstRoom = Number(targetRoom);
-
-    const next = list.map(p => {
-      if (p.id === me2.id)    return { ...p, room: dstRoom, partner: pick1?.id ?? null };
-      if (p.id === pick.id)   return { ...p, room: srcRoom, partner: me1?.id ?? null };
-      if (p.id === (me1?.id ?? -1))   return { ...p, partner: pick.id };
-      if (p.id === (pick1?.id ?? -2)) return { ...p, partner: me2.id };
-      return p;
-    });
-    await commitParticipantsNow(next);
-    alert(`트레이드 완료: ${me2.nickname} ↔ ${pick.nickname} ( ${srcRoom} ↔ ${dstRoom} )`);
-  };
-
-  const moveOrTradeGroup1 = async (idGroup1, targetRoom) => {
-    const list = [...getList()];
-    const me1 = list.find(p => String(p.id) === String(idGroup1));
-    if (!me1) return alert('대상을 찾을 수 없습니다.');
-    if (!isGroup1(me1)) return alert('해당 동작은 1조만 가능합니다.');
-    const me2 = me1?.partner ? list.find(p => String(p.id) === String(me1.partner)) : null;
-
-    const dstG1s = getGroup1InRoom(list, targetRoom);
-    const dstG2s = getGroup2InRoom(list, targetRoom);
-    const dst2   = dstG2s[0] || null;
-
-    if (dstG1s.length === 0) {
-      if (countInRoom(list, targetRoom) >= MAX_ROOM_CAPACITY) { alert('정원 초과로 이동할 수 없습니다.'); return; }
-      const next = list.map(p => {
-        if (p.id === me1.id) return { ...p, room: targetRoom, partner: dst2?.id ?? null };
-        if (p.id === (dst2?.id ?? -1)) return { ...p, partner: me1.id };
-        if (p.id === (me2?.id ?? -2)) return { ...p, partner: null };
-        return p;
-      });
-      await commitParticipantsNow(next);
-      alert(`${me1.nickname}님을 ${targetRoom}번 방으로 이동했습니다.`);
+    if (!isGroup1(me1)) {
+      alert('팀(1조+2조) 이동은 1조만 가능합니다.');
       return;
     }
-
-    let pick = dstG1s[0];
-    if (dstG1s.length > 1) {
-      const names = dstG1s.map((c,i)=> `${i+1}. ${c.nickname}`).join('\n');
-      const sel = window.prompt(`트레이드할 1조를 선택하세요:\n${names}`, '1');
-      const idx = Number(sel);
-      if (!Number.isFinite(idx) || idx < 1 || idx > dstG1s.length) return;
-      pick = dstG1s[idx-1];
+    const me2 = me1.partner ? findParticipant(me1.partner) : null;
+    if (!me2) {
+      alert('해당 1조에 연결된 2조 팀원이 없습니다.');
+      return;
     }
-    const pick2 = pick?.partner ? list.find(p => String(p.id) === String(pick.partner)) : null;
 
     const srcRoom = Number(me1.room);
     const dstRoom = Number(targetRoom);
 
-    const next = list.map(p => {
-      if (p.id === me1.id)    return { ...p, room: dstRoom, partner: pick2?.id ?? null };
-      if (p.id === pick.id)   return { ...p, room: srcRoom, partner: me2?.id ?? null };
-      if (p.id === (me2?.id ?? -1))   return { ...p, partner: pick.id };
-      if (p.id === (pick2?.id ?? -2)) return { ...p, partner: me1.id };
-      return p;
-    });
-    await commitParticipantsNow(next);
-    alert(`트레이드 완료: ${me1.nickname} ↔ ${pick.nickname} ( ${srcRoom} ↔ ${dstRoom} )`);
-  };
-
-  const handleAltOnNickname = async (p, evt) => {
-    const alt = !!evt?.altKey;
-    if (!alt) return;
-
-    const list = getList();
-    const priority = getRoomPriority();
-    const freeList = priority.filter(r => countInRoom(list, r) < MAX_ROOM_CAPACITY);
-    const recommend = freeList.slice(0, 5).join(', ') || '없음';
-
-    const input = window.prompt(
-      isGroup1(p)
-        ? `1조 개인 이동/트레이드: 방 번호를 입력하세요 (권장: ${recommend})`
-        : `2조 개인 이동/트레이드: 방 번호를 입력하세요 (권장: ${recommend})`,
-      ''
-    );
-    const resolved = resolveTargetRoom(input);
-    if (!resolved) return;
-    if (isGroup1(p)) await moveOrTradeGroup1(p.id, resolved);
-    else await moveOrTradeGroup2(p.id, resolved);
-  };
-
-  const handleManualClick = async (id, evt) => {
-    if (evt?.altKey) {
-      const list = getList();
-      const pair = getPairForGroup1(id, list);
-      const need = pair.length;
-
-      const priority = getRoomPriority();
-      const freeList = priority.filter(r => countInRoom(list, r) <= (MAX_ROOM_CAPACITY - need));
-      const recommend = freeList.slice(0, 5).join(', ') || '없음';
-
-      const input = window.prompt(
-        `강제 이동(페어 ${need}명): 방 번호를 입력하세요 (권장: ${recommend})`,
-        ''
-      );
-      const resolved = resolveTargetRoom(input);
-      if (!resolved) return;
-      await forceMovePairToRoom(id, resolved);
+    if (!Number.isFinite(dstRoom)) {
+      alert('올바른 방 번호가 아닙니다.');
+      return;
+    }
+    if (!Number.isFinite(srcRoom)) {
+      alert('현재 방 정보가 없습니다.');
+      return;
+    }
+    if (srcRoom === dstRoom) {
+      alert('같은 방으로는 이동할 수 없습니다.');
       return;
     }
 
+    const dstMembers = getRoomMembers(dstRoom);
+    const dstCount = dstMembers.length;
+
+    // 0팀/1팀(<= 2명) → 그냥 팀 이동
+    if (dstCount <= MAX_ROOM_CAPACITY - 2) {
+      await applyBulkChanges([
+        { id: me1.id, fields: { room: dstRoom } },
+        { id: me2.id, fields: { room: dstRoom } },
+      ]);
+      alert(
+        `팀 이동 완료:\n${me1.nickname} / ${me2.nickname} → ${dstRoom}번 방`
+      );
+      return;
+    }
+
+    // 정원 4명이 아니면(중간 애매한 상태) 방 구성이 이상하다고 안내
+    if (dstCount !== MAX_ROOM_CAPACITY) {
+      alert('해당 방의 인원 구성이 2팀(4명) 기준이 아닙니다.');
+      return;
+    }
+
+    // 2팀(4명) 꽉 찬 경우 → 팀 vs 팀 맞트레이드
+    const dstTeams = getTeamsInRoom(dstRoom);
+    if (!dstTeams.length) {
+      alert('해당 방의 팀 구성을 찾을 수 없습니다.');
+      return;
+    }
+
+    let pick = dstTeams[0];
+    if (dstTeams.length > 1) {
+      const msg = dstTeams
+        .map(
+          (t, idx) =>
+            `${idx + 1}. ${t.g1.nickname} / ${t.g2.nickname}`
+        )
+        .join('\n');
+      const sel = window.prompt(
+        `맞트레이드할 팀을 선택하세요:\n${msg}`,
+        '1'
+      );
+      const n = Number(sel);
+      if (!Number.isFinite(n) || n < 1 || n > dstTeams.length) return;
+      pick = dstTeams[n - 1];
+    }
+
+    const b1 = pick.g1;
+    const b2 = pick.g2;
+
+    await applyBulkChanges([
+      { id: me1.id, fields: { room: dstRoom } },
+      { id: me2.id, fields: { room: dstRoom } },
+      { id: b1.id, fields: { room: srcRoom } },
+      { id: b2.id, fields: { room: srcRoom } },
+    ]);
+
+    alert(
+      `팀 맞트레이드 완료:\n${me1.nickname} / ${me2.nickname} ↔ ${b1.nickname} / ${b2.nickname}`
+    );
+  };
+
+  // ✅ 팀원(1조만) 맞트레이드 (2조는 각 방에 그대로 있고 파트너만 교체)
+  const tradeGroup1Only = async (id, targetRoom) => {
+    const me1 = findParticipant(id);
+    if (!me1) {
+      alert('대상을 찾을 수 없습니다.');
+      return;
+    }
+    if (!isGroup1(me1)) {
+      alert('팀원(1조) 이동은 1조만 가능합니다.');
+      return;
+    }
+    const me2 = me1.partner ? findParticipant(me1.partner) : null;
+    if (!me2) {
+      alert('해당 1조에 연결된 2조 팀원이 없습니다.');
+      return;
+    }
+
+    const srcRoom = Number(me1.room);
+    const dstRoom = Number(targetRoom);
+
+    if (!Number.isFinite(dstRoom)) {
+      alert('올바른 방 번호가 아닙니다.');
+      return;
+    }
+    if (!Number.isFinite(srcRoom)) {
+      alert('현재 방 정보가 없습니다.');
+      return;
+    }
+    if (srcRoom === dstRoom) {
+      alert('같은 방으로는 이동할 수 없습니다.');
+      return;
+    }
+
+    const dstMembers = getRoomMembers(dstRoom);
+    const dstGroup1s = dstMembers.filter((p) => isGroup1(p));
+
+    if (!dstGroup1s.length) {
+      alert(
+        '선택한 방에 교체할 1조가 없습니다.\n팀원(1조) 이동은 항상 맞트레이드(교체)로만 가능합니다.'
+      );
+      return;
+    }
+
+    let dest1 = dstGroup1s[0];
+    if (dstGroup1s.length > 1) {
+      const msg = dstGroup1s
+        .map((x, idx) => `${idx + 1}. ${x.nickname}`)
+        .join('\n');
+      const sel = window.prompt(
+        `맞트레이드할 1조를 선택하세요:\n${msg}`,
+        '1'
+      );
+      const n = Number(sel);
+      if (!Number.isFinite(n) || n < 1 || n > dstGroup1s.length) return;
+      dest1 = dstGroup1s[n - 1];
+    }
+
+    const dest2 = dest1.partner ? findParticipant(dest1.partner) : null;
+    if (!dest2) {
+      alert('대상 팀의 2조 정보를 찾을 수 없습니다.');
+      return;
+    }
+
+    // 1조만 서로 방을 바꾸고, 2조는 그대로 방에 남아 있으면서 새로운 파트너와 팀 구성
+    const changes = [
+      { id: me1.id, fields: { room: dstRoom, partner: dest2.id } },
+      { id: dest1.id, fields: { room: srcRoom, partner: me2.id } },
+      { id: me2.id, fields: { partner: dest1.id } },
+      { id: dest2.id, fields: { partner: me1.id } },
+    ];
+
+    await applyBulkChanges(changes);
+
+    alert(
+      `팀원(1조) 맞트레이드 완료:\n${me1.nickname} ↔ ${dest1.nickname}`
+    );
+  };
+
+  // ✅ “완료 버튼” 롱프레스 시 동작
+  const handleManualLongPress = async (id) => {
+    const me = findParticipant(id);
+    if (!me || !isGroup1(me) || !isCompleted(id)) {
+      // 아직 완료되지 않은 상태에서는 롱프레스 기능 사용 안 함
+      return;
+    }
+
+    const roomCount = Array.isArray(roomNames) ? roomNames.length : 0;
+    if (roomCount === 0) {
+      alert('방 정보가 없습니다.\n먼저 STEP2에서 방을 생성해 주세요.');
+      return;
+    }
+
+    // 1) 이동 방식 선택
+    const mode = window.prompt(
+      '이동 방식을 선택하세요.\n1. 팀(1조+2조) 이동 / 맞트레이드\n2. 팀원(1조)만 맞트레이드',
+      '1'
+    );
+    if (mode == null) return;
+    const trimmed = String(mode).trim();
+    if (trimmed !== '1' && trimmed !== '2') return;
+
+    // 2) Admin STEP2 에서 만든 방 기준으로 방 번호 선택
+    const roomLines = roomNames
+      .map((name, idx) => {
+        const no = idx + 1;
+        const label =
+          name && String(name).trim()
+            ? String(name).trim()
+            : `${no}번 방`;
+        return `${no}. ${label}`;
+      })
+      .join('\n');
+
+    const input = window.prompt(
+      `이동할 방 번호를 입력하세요.\n(운영자가 STEP2에서 만든 방 순서 기준)\n\n${roomLines}`,
+      ''
+    );
+    if (input == null) return;
+    const roomNo = Number(input);
+    if (
+      !Number.isFinite(roomNo) ||
+      roomNo < 1 ||
+      roomNo > roomCount
+    ) {
+      alert('올바른 방 번호를 입력해 주세요.');
+      return;
+    }
+
+    manualLongPressFlagRef.current = true; // 이 클릭은 롱프레스에서 처리했으니 일반 클릭 막기
+
+    if (trimmed === '1') {
+      await moveTeamOrTradePair(id, roomNo);
+    } else {
+      await tradeGroup1Only(id, roomNo);
+    }
+  };
+
+  // 점수 입력용 롱프레스(기존: 음수 전환)
+  const startLongPress = (id) => {
+    try {
+      const timers = pressTimersRef.current || {};
+      if (timers[id]) clearTimeout(timers[id]);
+      timers[id] = setTimeout(() => {
+        setScoreDraft((draft) => {
+          const current =
+            Object.prototype.hasOwnProperty.call(draft, id)
+              ? (draft[id] == null ? '' : String(draft[id]))
+              : (() => {
+                  const ss = scoresMap?.[id];
+                  if (ss !== undefined) return ss == null ? '' : String(ss);
+                  const p = findParticipant(id);
+                  if (!p || p.score == null) return '';
+                  return String(p.score);
+                })();
+
+          // 이미 음수면 그대로
+          if (String(current).startsWith('-')) return draft;
+
+          const next =
+            current === ''
+              ? '-'
+              : `-${String(current).replace(/^-/, '')}`;
+          return { ...draft, [id]: next };
+        });
+      }, LONG_PRESS_MS);
+      pressTimersRef.current = timers;
+    } catch {
+      // ignore
+    }
+  };
+
+  const cancelLongPress = (id) => {
+    try {
+      const timers = pressTimersRef.current || {};
+      if (timers[id]) clearTimeout(timers[id]);
+      timers[id] = null;
+      pressTimersRef.current = timers;
+    } catch {
+      // ignore
+    }
+  };
+
+  // ✅ 수동 버튼 롱프레스용 (팀/팀원 이동 선택)
+  const startManualLongPress = (id) => {
+    try {
+      const timers = manualPressTimersRef.current || {};
+      if (timers[id]) clearTimeout(timers[id]);
+      timers[id] = setTimeout(() => {
+        handleManualLongPress(id);
+      }, LONG_PRESS_MS);
+      manualPressTimersRef.current = timers;
+    } catch {
+      // ignore
+    }
+  };
+
+  const cancelManualLongPress = (id) => {
+    try {
+      const timers = manualPressTimersRef.current || {};
+      if (timers[id]) clearTimeout(timers[id]);
+      timers[id] = null;
+      manualPressTimersRef.current = timers;
+    } catch {
+      // ignore
+    }
+  };
+
+  // 점수 입력 변경
+  const handleScoreInputChange = (id, raw) => {
+    if (!isPartialNumber(raw)) return;
+    setScoreDraft((draft) => ({ ...draft, [id]: raw }));
+  };
+
+  // 점수 입력 종료(blur 시 실제 숫자 반영)
+  const handleScoreBlur = async (id) => {
+    const raw = scoreDraft[id];
+    if (raw === undefined) return;
+
+    let value = null;
+    if (!(raw === '' || raw === '-' || raw === '.' || raw === '-.')) {
+      const num = Number(raw);
+      value = Number.isNaN(num) ? null : num;
+    }
+
+    // StepContext에 점수 반영 (원본 로직 그대로 사용)
+    if (typeof onScoreChange === 'function') {
+      await onScoreChange(id, value);
+    }
+
+    // draft 제거
+    setScoreDraft((draft) => {
+      const { [id]: _omit, ...rest } = draft;
+      return rest;
+    });
+  };
+
+  // 방 이름 레이블
+  const getRoomLabel = (roomNo) => {
+    if (!roomNo) return '';
+    const idx = Number(roomNo) - 1;
+    if (idx >= 0 && idx < roomNames.length) {
+      const nm = roomNames[idx];
+      if (nm && typeof nm === 'string' && nm.trim()) return nm.trim();
+    }
+    return `${roomNo}번 방`;
+  };
+
+  // 수동 배정 버튼 클릭 (기존 로직 유지)
+  const handleManualClick = async (id) => {
+    if (!onManualAssign) return;
     if (isCompleted(id)) return;
 
+    const me = findParticipant(id);
+    const nickname = me?.nickname || '';
+
     setLoadingId(id);
-
-    const res = await onManualAssign(id);
-    const { roomNo, roomNumber, nickname, partnerNickname } = res || {};
-    const finalRoom = roomNo ?? roomNumber ?? null;
-
     try {
-      const list = getList();
-      if (Number.isFinite(Number(finalRoom))) {
-        const occ = countInRoom(list, finalRoom);
-        if (occ > MAX_ROOM_CAPACITY) {
-          const target = findAvailableRoom(finalRoom, list);
-          if (target && target !== finalRoom) {
-            const pair = getPairForGroup1(id, list);
-            const ids = new Set(pair.map(x => String(x.id)));
-            const next = list.map(p => ids.has(String(p.id)) ? { ...p, room: target } : p);
-            await commitParticipantsNow(next);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[Step7] post-assign capacity fix failed:', e);
-    }
+      // 기존 로직 존중: onManualAssign에서 방/파트너를 모두 결정
+      const res = await onManualAssign(id);
+      const roomNo =
+        res?.roomNo ?? res?.roomNumber ?? findParticipant(id)?.room ?? null;
+      const partnerNickname =
+        res?.partnerNickname ??
+        (() => {
+          const p = findParticipant(id);
+          if (!p?.partner) return null;
+          const teammate = findParticipant(p.partner);
+          return teammate?.nickname ?? null;
+        })();
 
-    setTimeout(async () => {
-      const label = roomNames[(finalRoom ?? 0) - 1]?.trim() || (finalRoom ? `${finalRoom}번 방` : '');
-      if (finalRoom && nickname) {
+      const roomLabel = roomNo ? getRoomLabel(roomNo) : '';
+
+      if (roomNo) {
+        // 1차 알림: 방 배정
+        alert(
+          `${nickname}님은 ${roomLabel}에 배정되었습니다.\n` +
+            `팀원을 선택하려면 확인을 눌러주세요.`
+        );
+
+        // 2차 알림: 팀원 정보
         if (partnerNickname) {
-          alert(`${nickname}님은 ${label}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
           setTimeout(() => {
             alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
-            setLoadingId(null);
-          }, TIMINGS.partnerPick);
-        } else {
-          alert(`${nickname}님은 ${label}에 배정되었습니다.`);
-          setLoadingId(null);
+          }, 700);
         }
       } else {
-        setLoadingId(null);
+        alert(`${nickname}님 수동 배정이 완료되었습니다.`);
       }
-    }, TIMINGS.preAlert);
+    } finally {
+      setLoadingId(null);
+    }
   };
 
+  // ✅ 수동 버튼 클릭 시: 롱프레스에서 이미 처리한 경우는 클릭 무시
+  const handleManualButtonClick = (id) => {
+    if (manualLongPressFlagRef.current) {
+      // 롱프레스에서 이미 처리했으므로 일반 클릭은 소모만 하고 끝
+      manualLongPressFlagRef.current = false;
+      return;
+    }
+    handleManualClick(id);
+  };
+
+  // 취소 버튼 클릭
   const handleCancelClick = (id) => {
-    const me = getList().find(p => p.id === id);
+    if (!onCancel) return;
+    const me = findParticipant(id);
     onCancel(id);
-    if (me) alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
-  };
-
-  const handleAutoClick = () => { onAutoAssign(); };
-  const handleResetClick = () => { setScoreDraft({}); onReset(); };
-
-  const manualContext = (pId) => (e) => {
-    e.preventDefault();
-    handleManualClick(pId, { altKey: true });
-  };
-  const nameContext = (p) => (e) => {
-    e.preventDefault();
-    handleAltOnNickname(p, { altKey: true });
-  };
-
-  useEffect(() => {
-    console.log('[Step7] participants:', participants);
-  }, [participants]);
-
-  const renderList = getList();
-
-  /* ───────────────────────────────────────────────────────────
-     ★★★ ADD: 포볼도 “업로드 직후” 잔여값을 절대 끌고 오지 않도록
-     참가자 시드 지문(fingerprint) 변경 시 한 번만 강제 초기화
-     (세션 비교 + 서버 지문 비교 둘 다)
-  ─────────────────────────────────────────────────────────── */
-  const seedOf = (list=[]) => {
-    try {
-      const base = (list || []).map(p => [String(p.id ?? ''), String(p.nickname ?? ''), Number(p.group ?? 0)]);
-      base.sort((a,b)=> (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-      return JSON.stringify(base);
-    } catch { return ''; }
-  };
-
-  const clearForNewSeed = async () => {
-    if (!eventId) return;
-    try {
-      // 1) scores 전체 null
-      const colRef = collection(db, 'events', eventId, 'scores');
-      const snap   = await getDocs(colRef);
-      await Promise.all(
-        snap.docs.map(d =>
-          setDoc(d.ref, { score: null, room: null, updatedAt: serverTimestamp() }, { merge: true })
-        )
-      );
-    } catch (e) {
-      console.warn('[Step7] clear scores on seed change failed:', e?.message || e);
-    }
-    try {
-      // 2) participants도 한 번 클린 커밋(방/점수/파트너 제거)
-      const cleared = (renderList || []).map(p => ({ ...p, room: null, score: null, partner: null }));
-      setParticipants(cleared);
-      if (typeof updateEventImmediate === 'function') {
-        const compat = cleared.map(cp => ({
-          ...cp,
-          roomNumber: cp.room ?? null,
-          teammateId: cp.partner ?? null,
-          teammate:   cp.partner ?? null,
-        }));
-        await updateEventImmediate({ participants: compat, roomTable: {}, participantsUpdatedAt: serverTimestamp() }, false);
-      }
-    } catch (e) {
-      console.warn('[Step7] participants clear on seed change failed:', e?.message || e);
+    if (me) {
+      alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
     }
   };
 
-  // (A) 세션 지문 비교
-  useEffect(() => {
-    if (!eventId || !Array.isArray(renderList) || renderList.length === 0) return;
-    const seed = seedOf(renderList);
-    const key  = `seedfp:${eventId}:fourball`;
-    const prev = sessionStorage.getItem(key);
+  // 자동 배정
+  const handleAutoClick = () => {
+    if (!onAutoAssign) return;
+    onAutoAssign();
+  };
 
-    if (prev !== seed) {
-      clearForNewSeed();
-      sessionStorage.setItem(key, seed);
+  // 초기화
+  const handleResetClick = () => {
+    if (!onReset) return;
+    setScoreDraft({});
+    onReset();
+  };
+
+  // ─────────────────────────────
+  //  참가자 변경 → Firestore 동기화 브리지
+  //  (Admin STEP7 → EventContext → Player/STEP6/STEP8)
+  // ─────────────────────────────
+  const lastCommittedHashRef = useRef('');
+
+  useEffect(() => {
+    if (!AUTO_BRIDGE_USEEFFECT) return; // ✅ OFF(기본) : StepFlow(save)만 사용
+    if (!eventId || !updateEventImmediate) return;
+    if (!Array.isArray(participants) || participants.length === 0) {
+      lastCommittedHashRef.current = '';
+      return;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId, renderList, setParticipants, updateEventImmediate]);
 
-  // ★ ADD (B) 서버 지문 비교 — 멀티기기/새 브라우저에서도 안정화
-  useEffect(() => {
-    if (!eventId) return;
-    const evRef = doc(db, 'events', eventId);
-    const unsub = onSnapshot(evRef, (snap) => {
-      const d = snap.data() || {};
-      const seed = d.participantsSeed || null;
-      if (!seed) return;
-      const key = `seedfp:${eventId}:fourball`;
-      const prev = sessionStorage.getItem(key);
-      if (prev !== seed) {
-        clearForNewSeed();
-        sessionStorage.setItem(key, seed);
-      }
+    // hash: id, room, partner, score 만을 기준으로 변경 감지
+    let hash;
+    try {
+      const core = participants.map((p) => ({
+        id: p.id,
+        room: p.room ?? null,
+        partner: p.partner ?? null,
+        score: p.score ?? null,
+      }));
+      hash = JSON.stringify(core);
+    } catch {
+      hash = String(Date.now());
+    }
+    if (hash === lastCommittedHashRef.current) return;
+    lastCommittedHashRef.current = hash;
+
+    // Firestore로 내보낼 participants 호환 형태
+    const compat = participants.map((p) => ({
+      ...p,
+      roomNumber: p.room ?? null,
+      teammateId: p.partner ?? null,
+      teammate: p.partner ?? null,
+    }));
+
+    // roomTable 구성 (방 번호 → 참가자 id 배열)
+    const roomTable = {};
+    participants.forEach((p) => {
+      const r = p.room;
+      if (r == null) return;
+      if (!roomTable[r]) roomTable[r] = [];
+      roomTable[r].push(p.id);
     });
-    return () => unsub();
-  }, [eventId]); // ─────────────────────────────────────────
-  /* ─────────────────────────────────────────────────────────── */
 
+    (async () => {
+      try {
+        const docUpdate = {
+          participants: compat,
+          participantsUpdatedAt: serverTimestamp(),
+        };
+        if (Object.keys(roomTable).length > 0) {
+          docUpdate.roomTable = roomTable;
+        }
+
+        // 1) events/{eventId} 참가자/roomTable 갱신
+        await updateEventImmediate(docUpdate);
+
+        // 2) rooms/{roomId} 컬렉션 갱신 (Admin STEP6/STEP8, Player 에서 사용)
+        if (typeof persistRoomsFromParticipants === 'function') {
+          await persistRoomsFromParticipants(participants);
+        }
+
+        // 3) scores 서브컬렉션 갱신 (Admin/Player 점수 실시간 공유)
+        if (typeof upsertScores === 'function') {
+          const payload = participants.map((p) => ({
+            id: p.id,
+            score: p.score ?? null,
+            room: p.room ?? null,
+          }));
+          await upsertScores(payload);
+        }
+      } catch (e) {
+        console.warn('[Step7] sync to Firestore failed:', e);
+      }
+    })();
+  }, [participants, eventId, updateEventImmediate, upsertScores, persistRoomsFromParticipants]);
+
+  // ─────────────────────────────
+  //  렌더링
+  // ─────────────────────────────
   return (
-    <div className={styles.step} style={__pageStyle}>
+    <div className={styles.step} style={pageStyle}>
+      {/* 헤더 */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
         <div className={`${styles.cell} ${styles.nickname}`}>닉네임</div>
@@ -734,40 +689,48 @@ export default function Step7() {
         <div className={`${styles.cell} ${styles.force}`}>취소</div>
       </div>
 
+      {/* 리스트 본문 */}
       <div className={styles.participantTable}>
-        {renderList.map(p => {
-          const done       = isGroup1(p) && isCompleted(p.id);
-          const scoreValue = scoreDraft[p.id] ?? (p.score ?? '');
+        {participants.map((p) => {
+          const group1 = isGroup1(p);
+          const done = group1 && isCompleted(p.id);
+
+          const scoreValue = getDisplayScore(p.id, p.score);
 
           return (
             <div key={p.id} className={styles.participantRow}>
+              {/* 조 */}
               <div className={`${styles.cell} ${styles.group}`}>
-                <input type="text" value={`${p.group}조`} disabled />
+                <input
+                  type="text"
+                  value={group1 ? '1조' : '2조'}
+                  disabled
+                />
               </div>
 
-              <div
-                className={`${styles.cell} ${styles.nickname}`}
-                onClick={(e)=>handleAltOnNickname(p, e)}
-                onContextMenu={nameContext(p)}
-                title="Alt/롱프레스: 개인 이동/트레이드 (1조↔1조, 2조↔2조)"
-              >
-                <input type="text" value={p.nickname} readOnly />
+              {/* 닉네임 */}
+              <div className={`${styles.cell} ${styles.nickname}`}>
+                <input type="text" value={p.nickname} disabled />
               </div>
 
+              {/* G핸디 */}
               <div className={`${styles.cell} ${styles.handicap}`}>
                 <input type="text" value={p.handicap} disabled />
               </div>
 
+              {/* 점수 입력 */}
               <div className={`${styles.cell} ${styles.score}`}>
                 <input
                   type="text"
                   inputMode="decimal"
-                  /* ★ FIX: 최신 브라우저 v-flag 호환 */
-                  pattern="[-0-9.]*"
                   autoComplete="off"
                   value={scoreValue}
-                  onChange={e => handleScoreInputChange(p.id, e.target.value)}
+                  onChange={(e) =>
+                    handleScoreInputChange(p.id, e.target.value)
+                  }
                   onBlur={() => handleScoreBlur(p.id)}
+            onTouchStart={() => startLongPress(p.id)}
+            onTouchCancel={cancelLongPress}
                   onPointerDown={() => startLongPress(p.id)}
                   onPointerUp={() => cancelLongPress(p.id)}
                   onPointerLeave={() => cancelLongPress(p.id)}
@@ -775,34 +738,46 @@ export default function Step7() {
                 />
               </div>
 
+              {/* 수동 배정 (1조만 표시) */}
               <div className={`${styles.cell} ${styles.manual}`}>
-                {isGroup1(p) ? (
+                {group1 ? (
                   <button
                     className={styles.smallBtn}
-                    onClick={(e) => {
-                      if (done && !e.altKey) return;
-                      handleManualClick(p.id, e);
-                    }}
-                    onContextMenu={manualContext(p.id)}
-                    aria-disabled={done || (loadingId === p.id)}
+                    onClick={() => handleManualButtonClick(p.id)}
+                    onPointerDown={() => startManualLongPress(p.id)}
+                    onPointerUp={() => cancelManualLongPress(p.id)}
+                    onPointerLeave={() => cancelManualLongPress(p.id)}
+                    onTouchEnd={() => cancelManualLongPress(p.id)}
+                    disabled={loadingId === p.id} // ✅ 완료 상태여도 롱프레스는 가능해야 하므로 done으로 disable 하지 않음
                     style={{
-                      opacity: (done || loadingId === p.id) ? 0.5 : 1,
-                      cursor: (done && !loadingId) ? 'not-allowed' : 'pointer'
+                      opacity:
+                        done || loadingId === p.id ? 0.5 : 1,
+                      cursor:
+                        loadingId === p.id
+                          ? 'not-allowed'
+                          : 'pointer',
                     }}
-                    title="Alt/롱프레스: 페어(2명) 강제 이동/트레이드"
                   >
-                    {loadingId === p.id
-                      ? <span className={styles.spinner}/>
-                      : done ? '완료' : '수동'}
+                    {loadingId === p.id ? (
+                      <span className={styles.spinner} />
+                    ) : done ? (
+                      '완료'
+                    ) : (
+                      '수동'
+                    )}
                   </button>
                 ) : (
                   <div style={{ width: 28, height: 28 }} />
                 )}
               </div>
 
+              {/* 취소 (1조만 표시) */}
               <div className={`${styles.cell} ${styles.force}`}>
-                {isGroup1(p) ? (
-                  <button className={styles.smallBtn} onClick={() => handleCancelClick(p.id)}>
+                {group1 ? (
+                  <button
+                    className={styles.smallBtn}
+                    onClick={() => handleCancelClick(p.id)}
+                  >
                     취소
                   </button>
                 ) : (
@@ -814,13 +789,14 @@ export default function Step7() {
         })}
       </div>
 
+      {/* 하단 네비게이션(고정) */}
       <div
         className={styles.stepFooter}
         style={{
           position: 'fixed',
           left: 0,
           right: 0,
-          bottom: __safeBottom,
+          bottom: safeBottom,
           zIndex: 20,
           boxSizing: 'border-box',
           padding: '12px 16px',
@@ -829,8 +805,12 @@ export default function Step7() {
         }}
       >
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={handleAutoClick} className={styles.textOnly}>자동배정</button>
-        <button onClick={handleResetClick} className={styles.textOnly}>초기화</button>
+        <button onClick={handleAutoClick} className={styles.textOnly}>
+          자동배정
+        </button>
+        <button onClick={handleResetClick} className={styles.textOnly}>
+          초기화
+        </button>
         <button onClick={goNext}>다음 →</button>
       </div>
     </div>
