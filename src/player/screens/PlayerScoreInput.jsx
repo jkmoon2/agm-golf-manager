@@ -38,174 +38,186 @@ const toSafeParticipants = (arr) =>
     .filter((p) => p.id != null);
 
 // 포볼 A/B/A/B 고정: group===1 + partner 매칭 기반
-function isFourballMode(mode){ return mode === 'fourball' || mode === 'agm'; }
-function resolveFourballPairOrder(allParticipants, myRoom){
-  // room 내 pair 구성 (1조 + partner(2조))
-  const ps = toSafeParticipants(allParticipants);
-  const roomPlayers = ps.filter((p) => String(p.room ?? '') === String(myRoom ?? ''));
-
-  // group 1 기준으로 partnerId / partnerUid / partnerPid 등 다양한 키 대응
-  const group1 = roomPlayers.filter((p) => String(p.group) === '1' || p.group === 1);
-  const group2 = roomPlayers.filter((p) => String(p.group) === '2' || p.group === 2);
-
-  const g2ById = new Map(group2.map((p) => [String(p.id), p]));
-  const g2ByUid = new Map(group2.map((p) => [String(p.uid ?? p.id), p]));
-  const g2ByPid = new Map(group2.map((p) => [String(p.pid ?? p.id), p]));
-  const takeG2 = (ref) => g2ById.get(String(ref)) || g2ByUid.get(String(ref)) || g2ByPid.get(String(ref));
-
+function orderByPair(list) {
+  const slot = [null, null, null, null];
   const used = new Set();
-  const pairs = [];
 
-  group1.forEach((p) => {
-    const pid = p.partnerId ?? p.partnerUid ?? p.partnerPid ?? p.partner ?? p.partnerRef;
-    const mate = pid != null ? takeG2(pid) : null;
-    if (mate && !used.has(String(mate.id))) {
-      used.add(String(mate.id));
-      pairs.push([p, mate]);
-    } else {
-      pairs.push([p, null]);
-    }
-  });
-
-  // 남은 2조
-  const remain2 = group2.filter((p) => !used.has(String(p.id)));
-
-  // 방에 4명인 경우: A/B/A/B 고정
-  // pairs를 2개 단위로 묶어서 [A1,B1,A2,B2] 형태로 반환
-  const out = [];
-  const pairList = pairs.slice();
-  while (pairList.length) {
-    const [a1, b1] = pairList.shift();
-    const [a2, b2] = pairList.shift() || [null, null];
-
-    if (a1) out.push(a1);
-    if (b1) out.push(b1);
-    else if (remain2.length) out.push(remain2.shift());
-
-    if (a2) out.push(a2);
-    if (b2) out.push(b2);
-    else if (remain2.length) out.push(remain2.shift());
-  }
-
-  // 혹시 4명보다 많거나 적어도 안전하게
-  // roomPlayers 중 빠진 사람을 뒤에 붙임
-  const seen = new Set(out.map((p) => String(p.id)));
-  roomPlayers.forEach((p) => {
-    if (!seen.has(String(p.id))) out.push(p);
-  });
-
-  return out;
-}
-
-function toNumberOrNull(val){
-  const s = String(val ?? '').trim();
-  if (s === '' || s === '-' || s === '+' || s === '.' || s === '+.' || s === '-.') return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
-
-export default function PlayerScoreInput(){
-  const { eventId } = useParams();
-  const { participants: ctxParticipants, myRoom, participantId, isAuthed, mode } = useContext(PlayerContext);
-  const { eventData, ensureMembership } = useContext(EventContext);
-
-  const [scores, setScores] = useState({});
-  const [draft, setDraft] = useState({});
-  const [baseDraft, setBaseDraft] = useState({});
-  const [hasEdited, setHasEdited] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-
-  // gate 체크(기존 흐름 유지)
-  const gate = useMemo(() => pickGateByMode(eventData?.playerGate, mode), [eventData?.playerGate, mode]);
-  const step4State = gate?.steps?.[4] || 'enabled';
-  const isLocked = (step4State === 'locked' || step4State === 'disabled');
-
-  // roomLabel
-  const roomLabel = useMemo(() => {
-    if (!myRoom) return '';
-    const r = String(myRoom);
-    return `${r}번 방`;
-  }, [myRoom]);
-
-  const allParticipants = useMemo(() => {
-    // ctxParticipants 우선, 없으면 eventData.participants fallback
-    const a = asArray(ctxParticipants);
-    if (a.length) return a;
-    return asArray(eventData?.participants);
-  }, [ctxParticipants, eventData?.participants]);
-
-  const orderedRoomPlayers = useMemo(() => {
-    if (!myRoom) return [];
-    const ps = toSafeParticipants(allParticipants);
-
-    if (isFourballMode(mode)) {
-      return resolveFourballPairOrder(ps, myRoom);
-    }
-
-    // 스트로크: 원래 정렬(조/slot/이름 등) 최대 유지
-    const roomPlayers = ps.filter((p) => String(p.room ?? '') === String(myRoom ?? ''));
-    // slot 있으면 slot 기준, 아니면 group->nickname
-    return roomPlayers.slice().sort((a,b) => {
-      const sa = Number(a.slot ?? 9999);
-      const sb = Number(b.slot ?? 9999);
-      if (sa !== sb) return sa - sb;
-      const ga = Number(a.group ?? 9999);
-      const gb = Number(b.group ?? 9999);
-      if (ga !== gb) return ga - gb;
-      return String(a.nickname ?? '').localeCompare(String(b.nickname ?? ''), 'ko');
+  // 1조를 기준으로 짝을 찾고, 첫 번째 짝은 slot[0,1], 두 번째 짝은 slot[2,3]
+  (list || [])
+    .filter((p) => Number(p?.group) === 1)
+    .forEach((p1) => {
+      if (used.has(p1.id)) return;
+      const p2 = (list || []).find((x) => String(x?.id) === String(p1?.partner));
+      if (p2 && !used.has(p2.id)) {
+        const pos = slot[0] ? 2 : 0;
+        slot[pos] = p1;
+        slot[pos + 1] = p2;
+        used.add(p1.id);
+        used.add(p2.id);
+      }
     });
-  }, [allParticipants, myRoom, mode]);
 
-  const paddedRows = useMemo(() => {
-    const arr = orderedRoomPlayers.slice();
-    while (arr.length < 4) arr.push({ __empty: true, id: `empty-${arr.length}` });
-    return arr;
+  // 남은 사람은 빈 칸에 순서대로 채우기
+  (list || []).forEach((p) => {
+    if (!used.has(p.id)) {
+      const i = slot.findIndex((s) => s === null);
+      if (i >= 0) { slot[i] = p; used.add(p.id); }
+    }
+  });
+
+  for (let i = 0; i < 4; i += 1) {
+    if (!slot[i]) slot[i] = { id: `empty-${i}`, nickname: '', handicap: '', score: null, __empty: true };
+  }
+  return slot.slice(0, 4);
+}
+
+const toNumberOrNull = (v) => {
+  if (v === '' || v == null) return null;
+  if (v === '-' || v === '+') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+// 규칙 통과(memberships) 보조
+async function ensureMembership(eventId, myRoom) {
+  try {
+    const uid = auth?.currentUser?.uid || null;
+    if (!uid || !eventId || !myRoom) return;
+    const ref = doc(db, 'events', eventId, 'memberships', uid);
+    await setDoc(ref, { room: myRoom }, { merge: true });
+  } catch (e) {
+    console.warn('ensureMembership failed', e);
+  }
+}
+
+export default function PlayerScoreInput() {
+  const {
+    eventId: ctxEventId,
+    participants = [],
+    participant,
+    roomNames = [],
+  } = useContext(PlayerContext);
+
+  const { eventData } = useContext(EventContext) || {};
+  const params = useParams();
+  const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
+  const eventId = ctxEventId || routeEventId;
+
+  const [fallbackGate, setFallbackGate] = useState(null);
+  const [fallbackAt, setFallbackAt] = useState(0);
+
+  useEffect(() => {
+    if (!eventId) return;
+    const ref = doc(db, 'events', eventId);
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.data();
+      if (d?.playerGate) {
+        setFallbackGate(d.playerGate);
+        setFallbackAt(tsToMillis(d?.gateUpdatedAt));
+      }
+    });
+    return unsub;
+  }, [eventId]);
+
+  const latestGate = useMemo(() => {
+    const mode = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
+    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const fbG   = pickGateByMode(fallbackGate || {}, mode);
+    const fbAt  = fallbackAt;
+    return (ctxAt >= fbAt) ? ctxG : fbG;
+  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
+
+  const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
+
+  const myRoom = participant?.room ?? null;
+
+  useEffect(() => {
+    if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
+  }, [eventId, myRoom]);
+
+  const roomLabel =
+    myRoom && roomNames[myRoom - 1]?.trim()
+      ? roomNames[myRoom - 1].trim()
+      : myRoom
+      ? `${myRoom}번방`
+      : '';
+
+  const roomPlayers = useMemo(
+    () => (myRoom ? toSafeParticipants(participants).filter((p) => (p?.room ?? null) === myRoom) : []),
+    [participants, myRoom]
+  );
+  const orderedRoomPlayers = useMemo(() => orderByPair(roomPlayers), [roomPlayers]);
+
+  useEffect(() => {
+    try {
+      const a = orderedRoomPlayers;
+      if (Array.isArray(a)) {
+        const safe = a.filter((p) => !!p && typeof p === 'object' && p.id != null);
+        Object.defineProperty(a, 'forEach', {
+          configurable: true,
+          writable: true,
+          value: function (cb, thisArg) { return safe.forEach(cb, thisArg); }
+        });
+      }
+    } catch {}
   }, [orderedRoomPlayers]);
 
-  // step4(점수) 저장/표시: scores 컬렉션 사용
-  useEffect(() => {
-    if (!eventId || !myRoom || !isAuthed) return;
+  const paddedRows = useMemo(() => {
+    const rows = [...orderedRoomPlayers];
+    while (rows.length < 4) {
+      rows.push({ id: `empty-${rows.length}`, nickname: '', handicap: '', score: null, __empty: true });
+    }
+    return rows;
+  }, [orderedRoomPlayers]);
 
+  // 실시간 점수 맵 { [pid]: score }
+  const [scoresMap, setScoresMap] = useState({});
+  useEffect(() => {
+    if (!eventId) return;
     const colRef = collection(db, 'events', eventId, 'scores');
     const unsub = onSnapshot(colRef, (snap) => {
-      const next = {};
+      const m = {};
       snap.forEach((d) => {
         const data = d.data() || {};
-        // 내 방만
-        if (String(data.room ?? '') !== String(myRoom ?? '')) return;
-        next[String(d.id)] = data;
+        m[String(d.id)] = data.score == null ? null : data.score;
       });
-      setScores(next);
-    }, (e) => {
-      console.error('scores onSnapshot failed', e);
+      setScoresMap(m);
     });
+    return unsub;
+  }, [eventId]);
 
-    return () => unsub();
-  }, [eventId, myRoom, isAuthed]);
+  // ★ 기준 스냅샷 & 현재 입력
+  const [baseDraft, setBaseDraft] = useState({});
+  const [draft, setDraft] = useState({});
+  const bootstrappedRef = useRef(false); // 최초 1회 플래그
+  const [hasEdited, setHasEdited] = useState(false); // ★ 입력 발생 여부
 
-  // 초기 draft 세팅(점수 스냅샷)
+  // 기준 스냅샷 생성
   useEffect(() => {
-    if (!myRoom) return;
-    const next = {};
+    const base = {};
     orderedRoomPlayers.forEach((p) => {
       const key = String(p.id);
-      const s = scores[key]?.score;
-      next[key] = (s === null || s === undefined) ? '' : String(s);
+      // ✅ [PATCH] scoresMap에 key가 존재하면(null 포함) 그 값을 우선(초기화/삭제 반영)
+      const hasScore = Object.prototype.hasOwnProperty.call(scoresMap, key);
+      const baseScore = (hasScore ? scoresMap[key] : p.score);
+      base[key] = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
     });
-    setDraft(next);
-    setBaseDraft(next);
-    setHasEdited(false);
-    setIsReady(true);
+    setBaseDraft(base);
+
+    // 저장 직후(hasEdited=false)에는 저장된 값을 드래프트로 동기화
+    if (!bootstrappedRef.current || !hasEdited) {
+      setDraft(base);
+      bootstrappedRef.current = true;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myRoom, orderedRoomPlayers.map((p)=>String(p.id)).join('|'), Object.keys(scores).join('|')]);
+  }, [orderedRoomPlayers, scoresMap, hasEdited]);
 
-  const nextDisabled = useMemo(() => {
-    // 잠금이면 다음(혹은 저장) 제어는 기존 정책 유지
-    if (!isReady) return true;
-    if (isLocked) return false;
-    return false;
-  }, [isReady, isLocked]);
-
+  // Dirty 계산
+  const isReady = useMemo(
+    () => Object.keys(baseDraft).length > 0 && orderedRoomPlayers.length > 0,
+    [baseDraft, orderedRoomPlayers.length]
+  );
   const isDirty = useMemo(() => {
     const keys = Object.keys(baseDraft);
     if (!keys.length) return false;
@@ -262,51 +274,33 @@ export default function PlayerScoreInput(){
   const holdMapRef = useRef({});
   const LONG_PRESS_MS = 1000;
   const MOVE_CANCEL_PX = 10;
-  // ✅ Android(특히 크롬) 터치 시 미세 떨림/스크롤로 move가 쉽게 발생해
-  // 기존 10px 기준이면 롱프레스 타이머가 자주 취소되는 케이스가 있어 여유 폭을 둠
-  const TOUCH_MOVE_CANCEL_PX = 18;
 
-  const getPoint = (e) => {
-    // Pointer/Mouse
-    if (e && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
-      return { x: e.clientX, y: e.clientY, pointerType: e.pointerType };
-    }
-    // Touch
-    const t = e?.touches?.[0] || e?.changedTouches?.[0] || null;
-    if (t) {
-      return { x: t.clientX ?? 0, y: t.clientY ?? 0, pointerType: 'touch' };
-    }
-    return { x: 0, y: 0, pointerType: e?.pointerType };
+  // ✅ [PATCH] Android(특히 Chrome)에서 input의 long-press가 PointerEvent로 안정적으로 전달되지 않는 케이스가 있어
+  // touch/mouse 이벤트에서도 동일 로직이 동작하도록 좌표 추출을 통합
+  const getPointFromEvt = (e) => {
+    const ne = e?.nativeEvent || e;
+    if (!ne) return { x: 0, y: 0 };
+    const t = (ne.touches && ne.touches[0]) || (ne.changedTouches && ne.changedTouches[0]);
+    if (t) return { x: t.clientX ?? 0, y: t.clientY ?? 0 };
+    if (typeof ne.clientX === 'number' || typeof ne.clientY === 'number') return { x: ne.clientX ?? 0, y: ne.clientY ?? 0 };
+    return { x: 0, y: 0 };
   };
 
   const ensureMap = (pid) => {
     const key = String(pid);
-    if (!holdMapRef.current[key]) holdMapRef.current[key] = { timer: null, x: 0, y: 0, fired: false, lastStartAt: 0, pointerType: null };
+    if (!holdMapRef.current[key]) holdMapRef.current[key] = { timer: null, x: 0, y: 0, fired: false };
     return holdMapRef.current[key];
   };
   const startHold = (pid, e) => {
     const m = ensureMap(pid);
-    // ✅ [PATCH] Android에서 input long-press 중 cancel이 나도 '-'가 안정적으로 입력되도록
-    // 시작 시 입력칸을 확실히 focus(브라우저 제스처/선택 상태 안정화)
-    const __el = inputRefs.current[String(pid)];
-    try {
-      if (__el && document.activeElement !== __el) __el.focus({ preventScroll: true });
-    } catch {
-      try { if (__el && document.activeElement !== __el) __el.focus(); } catch {}
-    }
-    // 일부 브라우저(특히 Android)에서 pointer/touch 이벤트가 거의 동시에 발생하는 경우가 있어 중복 시작을 방지
-    const now = Date.now();
-    if (m.lastStartAt && now - m.lastStartAt < 50) return;
-    m.lastStartAt = now;
     m.fired = false;
-    const pt = getPoint(e);
-    m.pointerType = pt.pointerType || null;
+    // ✅ [PATCH] Pointer/Touch/Mouse 모두 동일 좌표 기준
+    const pt = getPointFromEvt(e);
     m.x = pt.x;
     m.y = pt.y;
     if (m.timer) clearTimeout(m.timer);
     m.timer = setTimeout(() => {
       m.fired = true;
-      m.timer = null; // ✅ [PATCH] fired 이후 move/cancel에서 타이머가 잘못 취소되지 않게
       setDraft((d) => {
         const key = String(pid);
         const cur = String(d[key] ?? '');
@@ -328,25 +322,15 @@ export default function PlayerScoreInput(){
   const moveHold = (pid, e) => {
     const m = ensureMap(pid);
     if (!m.timer) return;
-    const pt = getPoint(e);
+    // ✅ [PATCH] Pointer/Touch/Mouse 모두 동일 좌표 기준
+    const pt = getPointFromEvt(e);
     const dx = Math.abs((pt.x ?? 0) - (m.x ?? 0));
     const dy = Math.abs((pt.y ?? 0) - (m.y ?? 0));
-    const cancelPx = (m.pointerType === 'touch' || pt.pointerType === 'touch') ? TOUCH_MOVE_CANCEL_PX : MOVE_CANCEL_PX;
-    if (dx > cancelPx || dy > cancelPx) { clearTimeout(m.timer); m.timer = null; }
+    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) { clearTimeout(m.timer); m.timer = null; }
   };
   const endHold = (pid) => {
     const m = ensureMap(pid);
     if (m.timer) { clearTimeout(m.timer); m.timer = null; }
-  };
-
-  const cancelHold = (pid, e) => {
-    const m = ensureMap(pid);
-    const pt = getPoint(e);
-    const isTouch = (m.pointerType === 'touch' || pt.pointerType === 'touch');
-    // ✅ [PATCH] Android Chrome은 long-press 중 touchcancel/pointercancel이 종종 발생함
-    // 그때 endHold로 타이머를 지워버리면 '-'가 안 뜨므로, 터치 cancel은(미발생 시) 무시
-    if (isTouch && !m.fired) return;
-    endHold(pid);
   };
   const preventContextMenu = (e) => { e.preventDefault(); };
 
@@ -428,23 +412,19 @@ export default function PlayerScoreInput(){
                         value={raw}
                         onChange={(e) => onChangeScore(p.id, e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                        // ✅ Android 일부 기기에서 input에 PointerEvent가 안정적으로 안 들어오거나
-                        // 롱프레스 도중 pointercancel이 발생하는 케이스가 있어 touch/mouse 백업도 함께 둠
                         onPointerDown={(e) => startHold(p.id, e)}
                         onPointerUp={() => endHold(p.id)}
-                        onPointerCancel={(e) => cancelHold(p.id, e)}
+                        onPointerCancel={() => endHold(p.id)}
                         onPointerLeave={() => endHold(p.id)}
                         onPointerMove={(e) => moveHold(p.id, e)}
+
+                        // ✅ [PATCH] Android 일부 기기에서 PointerEvent 대신 TouchEvent만 안정적으로 들어오는 케이스 대응
                         onTouchStart={(e) => startHold(p.id, e)}
                         onTouchEnd={() => endHold(p.id)}
-                        onTouchCancel={(e) => cancelHold(p.id, e)}
+                        onTouchCancel={() => endHold(p.id)}
                         onTouchMove={(e) => moveHold(p.id, e)}
-                        onMouseDown={(e) => startHold(p.id, e)}
-                        onMouseUp={() => endHold(p.id)}
-                        onMouseLeave={() => endHold(p.id)}
-                        onMouseMove={(e) => moveHold(p.id, e)}
+
                         onContextMenu={preventContextMenu}
-                        style={{ touchAction: 'manipulation' }}
                         ref={(el) => {
                           if (el) inputRefs.current[key] = el;
                           else delete inputRefs.current[key];
