@@ -10,7 +10,29 @@ import { serverTimestamp } from 'firebase/firestore';
 export default function Step0() {
   const { createEvent, loadEvent, deleteEvent, allEvents, updateEventById } = useContext(EventContext);
   const [viewMode, setViewMode]     = useState('stroke');
-  
+  // (hotfix) locally hide deleted events to prevent reappearing in list
+  const HIDDEN_KEY = 'agmHiddenEventIds.v1';
+  const [hiddenEventIds, setHiddenEventIds] = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(HIDDEN_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const hideEventLocally = (id) => {
+    if (!id) return;
+    setHiddenEventIds((prev) => {
+      if (prev && prev.includes(id)) return prev;
+      const next = [...(prev || []), id];
+      try { if (typeof window !== 'undefined') localStorage.setItem(HIDDEN_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
   // normalize historic mode values (agm -> fourball)
   const normMode = (m) => (m === 'agm' ? 'fourball' : (m || 'stroke'));
   // default to STROKE on first mount (ignore previous local storage to fix inconsistent state)
@@ -53,8 +75,13 @@ export default function Step0() {
     document.addEventListener('click', onDocClick);
     return () => document.removeEventListener('click', onDocClick);
   }, []);
-
-  const filtered = useMemo(() => (allEvents || []).filter(e => normMode(e.mode) === viewMode), [allEvents, viewMode]);
+  const filtered = useMemo(() => {
+    const hidden = new Set(hiddenEventIds || []);
+    return (allEvents || [])
+      .filter((e) => normMode(e.mode) === viewMode)
+      .filter((e) => !hidden.has(e.id))
+      .filter((e) => !e.deleted && !e.isDeleted);
+  }, [allEvents, viewMode, hiddenEventIds]);
   const fmt = (s) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) ? s.replaceAll('-', '.') : '미정';
   const isClosed = (dateEnd) => {
     // ★ patch: 정규식 오타 수정 (\d2 -> \d{2})
@@ -141,9 +168,21 @@ export default function Step0() {
     alert(`링크가 복사되었습니다:\n${url}`);
   };
   const handleDelete = async (id) => {
+    if (!id) return;
     if (!window.confirm('정말 삭제하시겠습니까?')) return;
-    await deleteEvent(id);
+
+    // optimistic hide: even if delete fails (offline/permission), keep it hidden locally
+    hideEventLocally(id);
+
+    try {
+      await deleteEvent(id);
+    } catch (e) {
+      console.error(e);
+      alert('삭제 중 오류가 발생했습니다\n네트워크/권한 상태를 확인해주세요\n(목록에서는 임시로 숨김 처리되었습니다.)');
+    }
+
     if (selectedId === id) setSelectedId(null);
+    setOpenMenuId(null);
   };
 
   const openEditModal = (evt) => {

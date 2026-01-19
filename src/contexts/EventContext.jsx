@@ -226,10 +226,19 @@ export function EventProvider({ children }) {
       if (cancelled) return;
       const docRef = doc(db, 'events', eventId);
       unsub = onSnapshot(docRef, { includeMetadataChanges: true }, (snap) => {
-        if (snap.metadata.hasPendingWrites) return;
         const data = snap.data();
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
+
+        // ✅ includeMetadataChanges: true 환경에서 pendingWrites 스냅샷을 무조건 무시하면
+        //   (Player가 방배정/점수 입력 직후) Admin STEP7/STEP8 최초 진입 시
+        //   방배정 반영이 늦고, 홈으로 나갔다가 재진입해야 반영되는 현상이 발생할 수 있음.
+        //   → '데이터가 실제로 동일한 경우'에만 스킵하고, 내용이 바뀌면 즉시 반영.
+        try {
+          const prev = lastEventDataRef.current;
+          if (prev && deepEqual(prev, withGate)) return;
+        } catch {}
+
         setEventData(withGate);
         lastEventDataRef.current = withGate;
       });
