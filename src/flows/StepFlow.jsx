@@ -345,6 +345,14 @@ export default function StepFlow() {
           return compatParticipant(base);
         });
         clean[key] = compat;
+        // ✅ 모드별 participants 분리 저장 지원(스트로크/포볼)
+        // - EventContext에서도 동일 미러를 수행하지만, StepFlow에서도 같이 기록해 두면
+        //   기존 이벤트(필드 미존재)도 최초 저장 시 분리 필드가 생성되어 더 안정적임.
+        try {
+          const mForMirror = (updates && updates.mode) || mode || 'stroke';
+          if (mForMirror === 'fourball') clean.participantsFourball = compat;
+          else clean.participantsStroke = compat;
+        } catch {}
         // [COMPAT] 참고용 roomTable도 같이 저장(읽지 않으면 무시됨)
         clean.roomTable   = buildRoomTable(compat);
         // [SCORE_SYNC] 참고용 방별 점수도 같이 저장(읽지 않으면 무시됨)

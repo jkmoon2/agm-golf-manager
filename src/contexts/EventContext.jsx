@@ -71,6 +71,24 @@ function enrichParticipantsDerived(updates) {
   return out;
 }
 
+// ✅ 모드별 참가자 리스트(스트로크/포볼) 완전 분리 저장 지원
+// - 문서 필드: participantsStroke / participantsFourball
+// - 기존 호환: participants는 "현재 모드"의 미러로 계속 유지
+function participantsFieldByMode(mode = 'stroke') {
+  return mode === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
+
+function ensureModeSplitParticipants(updates, currentMode) {
+  try {
+    if (!updates || typeof updates !== 'object') return updates;
+    if (!('participants' in updates)) return updates;
+    const mode = updates.mode || currentMode || 'stroke';
+    const field = participantsFieldByMode(mode);
+    if (!(field in updates)) updates[field] = updates.participants || [];
+  } catch {}
+  return updates;
+}
+
 export const EventContext = createContext({});
 
 // ✅ Step5 등에서 import 해서 쓰는 훅 (기존 구조 유지)
@@ -230,6 +248,20 @@ export function EventProvider({ children }) {
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
 
+        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball을 SSOT로 사용
+        // - 모드 분리 필드 중 하나라도 존재하면 '분리 저장 모드'로 간주하고,
+        //   현재 mode에 해당하는 participants 필드만 eventData.participants로 매핑한다.
+        try {
+          const splitEnabled =
+            Object.prototype.hasOwnProperty.call(withGate, 'participantsStroke') ||
+            Object.prototype.hasOwnProperty.call(withGate, 'participantsFourball');
+          if (splitEnabled) {
+            const m = withGate?.mode || 'stroke';
+            const f = participantsFieldByMode(m);
+            withGate.participants = Array.isArray(withGate?.[f]) ? withGate[f] : [];
+          }
+        } catch {}
+
         // ✅ includeMetadataChanges: true 환경에서 pendingWrites 스냅샷을 무조건 무시하면
         //   (Player가 방배정/점수 입력 직후) Admin STEP7/STEP8 최초 진입 시
         //   방배정 반영이 늦고, 홈으로 나갔다가 재진입해야 반영되는 현상이 발생할 수 있음.
@@ -262,6 +294,8 @@ export function EventProvider({ children }) {
     const { debounceMs = 400, ifChanged = true } = opts;
 
     const enriched = enrichParticipantsDerived(updates);
+    // ✅ participants 저장 시, 모드별 필드(participantsStroke/participantsFourball)에도 같이 저장
+    ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
 
     const before = lastEventDataRef.current || {};
     if (ifChanged) {
@@ -300,6 +334,8 @@ export function EventProvider({ children }) {
     await ensureAuthed();
 
     const enriched = enrichParticipantsDerived(updates);
+    // ✅ participants 저장 시, 모드별 필드(participantsStroke/participantsFourball)에도 같이 저장
+    ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
 
     const before = lastEventDataRef.current || {};
     if (ifChanged) {
@@ -731,7 +767,14 @@ export function EventProvider({ children }) {
   } = {}) => {
     try {
       if (clearScores) await resetScores();
-      await updateEventImmediate({ participants: roster || [] }, false);
+      // ✅ 업로드 명단은 모드별 리스트로 완전 분리 저장
+      await updateEventImmediate(
+        {
+          participants: roster || [],
+          ...(mode === 'fourball' ? { participantsFourball: roster || [] } : { participantsStroke: roster || [] }),
+        },
+        false,
+      );
       if (uploadFileName) await rememberUploadFilename(mode, uploadFileName);
     } catch (e) {
       console.warn('[EventContext] applyNewRoster failed:', e);
@@ -814,6 +857,9 @@ export function EventProvider({ children }) {
             uploadFileNameStroke: '',
             uploadFileNameFourball: '',
             participants: [],
+            // ✅ 모드별 명단 분리 저장용(스트로크/포볼)
+            participantsStroke: [],
+            participantsFourball: [],
             dateStart,
             dateEnd,
             allowDuringPeriodOnly,

@@ -89,6 +89,9 @@ export default function Step4() {
 
   // 최신 participants 참조용 ref (업로드 직후 서버 반영에 사용)
   const participantsRef = useRef(participants);
+
+  // 파일 선택 input ref(파일명 표시를 input에 의존하지 않기 위해 사용)
+  const fileInputRef = useRef(null);
   useEffect(() => {
     participantsRef.current = participants;
   }, [participants]);
@@ -103,14 +106,18 @@ export default function Step4() {
       const KEY = getFileKey();
       const fromDoc =
         typeof getUploadFilename === "function" ? getUploadFilename(mode) || "" : "";
-      const fromStore =
+      const fromKey =
         __STEP4_FILE_CACHE ||
         localStorage.getItem(KEY) ||
         sessionStorage.getItem(KEY) ||
+        "";
+      const legacy =
         localStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY) ||
         sessionStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY) ||
         "";
-      return fromStore || fromDoc || "";
+
+      // ✅ 모드/이벤트 분리 우선: 문서 → 모드키(local/session) → 레거시
+      return fromDoc || fromKey || legacy || "";
     } catch {
       return "";
     }
@@ -122,15 +129,26 @@ export default function Step4() {
       const KEY = getFileKey();
       const fromDoc =
         typeof getUploadFilename === "function" ? getUploadFilename(mode) || "" : "";
-      const fromStore =
+      const fromKey =
         __STEP4_FILE_CACHE ||
         localStorage.getItem(KEY) ||
         sessionStorage.getItem(KEY) ||
+        "";
+      const legacy =
         localStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY) ||
         sessionStorage.getItem(LEGACY_LAST_SELECTED_FILENAME_KEY) ||
         "";
-      const next = fromStore || fromDoc || "";
-      if (next && next !== selectedFileName) setSelectedFileName(next);
+
+      // ★ patch: KEY가 비어있고 legacy만 있을 때, 모드/이벤트 키로 승격 저장(모드 분리 유지)
+      if (!fromKey && legacy) {
+        try {
+          localStorage.setItem(KEY, legacy);
+          sessionStorage.setItem(KEY, legacy);
+        } catch {}
+      }
+
+      const next = fromDoc || fromKey || legacy || "";
+      if (next !== selectedFileName) setSelectedFileName(next);
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, mode]);
@@ -454,6 +472,49 @@ export default function Step4() {
         } catch {}
       }
 
+      
+
+      // ★ patch: 업로드 roster를 Step4에서 직접 파싱하여 즉시 반영
+      //   - STEP4에서 G핸디를 수정해도, 같은 파일을 다시 업로드하면 "업로드 파일 기준"으로 복귀
+      //   - handleFile 이후 participantsRef.current가 이전 값일 수 있어, applyNewRoster에 잘못 전달되는 문제 방지
+      let rosterFromFile = null;
+      try {
+        const abRoster = await f.arrayBuffer();
+        const wbRoster = XLSX.read(abRoster, { type: "array" });
+        const sheetRoster = wbRoster.Sheets[wbRoster.SheetNames[0]];
+        const rowsRoster = XLSX.utils
+          .sheet_to_json(sheetRoster, { header: 1 })
+          .slice(1);
+
+        rosterFromFile = rowsRoster.map((row, idx) => ({
+          id: idx,
+          group: Number(row?.[0]) || 1,
+          nickname: String(row?.[1] || "").trim(),
+          handicap: Number(row?.[2]) || 0,
+          authCode: String(row?.[3] || "").trim(),
+          score: null,
+          room: null,
+          partner: null,
+          selected: false,
+        }));
+
+        // 즉시 반영(화면/다른 STEP 동기화)
+        participantsRef.current = rosterFromFile;
+        setParticipants(rosterFromFile);
+        setHdInput(() => {
+          const next = {};
+          rosterFromFile.forEach((p) => {
+            next[String(p.id)] =
+              p.handicap === null || p.handicap === undefined
+                ? ""
+                : String(p.handicap);
+          });
+          return next;
+        });
+      } catch (e) {
+        rosterFromFile = null;
+      }
+
       // 3) 기존 파서(상태 반영은 기존 handleFile에 위임)
       if (typeof handleFile === "function") {
         // React SyntheticEvent 풀링 문제를 피하기 위해 순수 객체로 다시 감싸서 전달
@@ -461,14 +522,24 @@ export default function Step4() {
       }
 
       // 4) 점수 초기화 + participants + 파일명까지 서버에 원샷 반영
+      // ★ patch: handleFile(setState) 직후 participantsRef가 이전 값일 수 있는 레이스 컨디션 방지
+      //          → 업로드 파일을 Step4에서 직접 파싱한 roster를 우선 사용
       if (typeof applyNewRoster === "function") {
         await applyNewRoster({
-          participants: participantsRef.current || [],
+          participants: rosterFromFile || participantsRef.current || [],
           mode,
           uploadFileName: name,
           clearScores: true,
         });
+      } else {
+        // applyNewRoster가 없더라도 최소한 이벤트 문서 participants는 즉시 갱신
+        await syncEventDocParticipants(rosterFromFile || participantsRef.current || []);
       }
+
+      // ★ patch: 같은 파일 재선택 가능하도록 file input value 초기화
+      try {
+        if (e?.target) e.target.value = "";
+      } catch {}
 
       // 5) (선택) preMembers 저장 — 관리자만
       const user = getAuth().currentUser;
@@ -531,6 +602,12 @@ export default function Step4() {
         });
         await batch.commit();
       }
+
+      // ★ patch: 같은 파일을 연속 선택해도 onChange가 다시 발생하도록 input 값을 비움
+      try {
+        if (e?.target) e.target.value = "";
+      } catch {}
+
     } catch (err) {
       console.warn("[Step4] handleFileExtended error", err);
       alert(`엑셀 업로드 중 preMembers 반영에 실패했습니다.\n(${err?.code || "error"})`);
@@ -589,8 +666,36 @@ export default function Step4() {
               className={styles.leftCol}
               style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}
             >
-              {/* 파일 입력: 기본 라벨은 복원 불가 → 옆 배지로 저장된 파일명 표시 */}
-              <input type="file" accept=".xlsx,.xls" onChange={handleFileExtended} />
+              {/* 파일 입력: input 라벨은 업로드 후 value 초기화로 "선택된 파일 없음"이 되므로 숨기고, 저장된 파일명을 배지로 표시 */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleFileExtended}
+                style={{ display: "none" }}
+              />
+              <button
+                type="button"
+                className={styles.filePickBtn}
+                onClick={() => {
+                  try {
+                    fileInputRef.current && fileInputRef.current.click();
+                  } catch (e) {}
+                }}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(0,0,0,0.18)",
+                  background: "#fff",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  lineHeight: "14px",
+                  whiteSpace: "nowrap",
+                }}
+                title="엑셀 파일 선택"
+              >
+                파일 선택
+              </button>
               <span
                 className={styles.filenameBadge}
                 title={selectedFileName || "선택한 파일 없음"}
