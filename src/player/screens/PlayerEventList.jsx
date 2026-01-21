@@ -14,6 +14,12 @@ export default function PlayerEventList() {
   const [cache, setCache] = useState([]);
   const events = useMemo(() => (allEvents?.length ? allEvents : cache), [allEvents, cache]);
 
+  // ✅ 숨김 처리: 참가자 화면에서 숨긴 대회(isHidden) 제외
+  const visibleEvents = useMemo(
+    () => (Array.isArray(events) ? events.filter(ev => !ev?.isHidden) : []),
+    [events]
+  );
+
   useEffect(() => {
     (async () => {
       if (allEvents && allEvents.length) return;
@@ -172,9 +178,9 @@ export default function PlayerEventList() {
 
   return (
     <div className={styles.container}>
-      {!events.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
+      {!visibleEvents.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
       <ul className={styles.list}>
-        {events.map(ev => {
+        {visibleEvents.map(ev => {
           const dateStart = ev.dateStart ?? ev.startDate ?? '';
           const dateEnd   = ev.dateEnd   ?? ev.endDate   ?? '';
           const count = Array.isArray(ev.participants) ? ev.participants.length : 0;

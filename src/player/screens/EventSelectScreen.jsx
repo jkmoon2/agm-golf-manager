@@ -15,6 +15,12 @@ export default function EventSelectScreen() {
   const [cache, setCache] = useState([]);
   const events = useMemo(() => (allEvents?.length ? allEvents : cache), [allEvents, cache]);
 
+  // ✅ 숨김 처리: 참가자 화면에서 숨긴 대회(isHidden) 제외
+  const visibleEvents = useMemo(
+    () => (Array.isArray(events) ? events.filter(ev => !ev?.isHidden) : []),
+    [events]
+  );
+
   useEffect(() => {
     (async () => {
       if (allEvents && allEvents.length) return;
@@ -99,9 +105,9 @@ export default function EventSelectScreen() {
 
   return (
     <div className={styles.container}>
-      {!events.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
+      {!visibleEvents.length && <div className={styles.empty}>등록된 대회가 없습니다.</div>}
       <ul className={styles.list}>
-        {events.map(ev => (
+        {visibleEvents.map(ev => (
           <li key={ev.id} className={styles.card} onClick={() => goNext(ev)}>
             <div className={styles.titleRow}>
               <h3 className={styles.title} title={ev.title}>{ev.title || ev.id}</h3>

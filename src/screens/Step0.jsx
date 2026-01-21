@@ -146,6 +146,8 @@ export default function Step0() {
       dateStart: newDateStart || '',
       dateEnd:   newDateEnd   || '',
       allowDuringPeriodOnly: duringOnly,
+      // ▼ 숨기기 기능(참가자 페이지에서 숨김) — 기본값 false
+      isHidden: false,
       // ▼ 추가 필드(완전 추가만, 기존 코드 영향 없음)
       accessStartAt: accessStartAt ?? null,
       accessEndAt:   accessEndAt   ?? null,
@@ -167,7 +169,28 @@ export default function Step0() {
     navigator.clipboard.writeText(url);
     alert(`링크가 복사되었습니다:\n${url}`);
   };
-  const handleDelete = async (id) => {
+  
+  // ▼ 숨기기 토글: 숨기면 참가자 페이지(공개 목록)에서 보이지 않도록 처리
+  const handleToggleHidden = async (evt) => {
+    try {
+      if (!evt?.id) return;
+      const nextHidden = !evt?.isHidden;
+      const msg = nextHidden
+        ? '이 대회를 숨기면 참가자 페이지에서 보이지 않습니다.\n숨기겠습니까?'
+        : '숨김을 해제하면 참가자 페이지에서 다시 보입니다.\n해제하겠습니까?';
+      if (!window.confirm(msg)) return;
+
+      await updateEventById(evt.id, {
+        isHidden: nextHidden,
+        hiddenUpdatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error('[Step0] toggle hidden failed', e);
+      alert('숨기기 설정 중 오류가 발생했습니다. 콘솔을 확인해 주세요.');
+    }
+  };
+
+const handleDelete = async (id) => {
     if (!id) return;
     if (!window.confirm('정말 삭제하시겠습니까?')) return;
 
@@ -298,6 +321,9 @@ export default function Step0() {
                       </button>
                       <button className={styles.moreItem} role="menuitem" onClick={() => { openEditModal(evt); setOpenMenuId(null); }}>
                         ✎ 편집
+                      </button>
+                      <button className={styles.moreItem} role="menuitem" onClick={() => { handleToggleHidden(evt); setOpenMenuId(null); }}>
+                        {evt?.isHidden ? '👁️ 숨김 해제' : '🙈 숨기기'}
                       </button>
                       <button className={styles.moreItemDanger} role="menuitem" onClick={() => { handleDelete(evt.id); setOpenMenuId(null); }}>
                         🗑️ 삭제
