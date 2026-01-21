@@ -459,8 +459,21 @@ export default function Step5() {
       const vw = window.innerWidth || 360;
       const vh = window.innerHeight || 640;
 
-      const menuW = 112;
-      const menuH = Math.min(320, rooms.length * 36 + 12);
+// ✅ [PATCH] '강제' 메뉴 폭을 글자(방 이름) 길이에 맞게 자동 조정
+//  - 기존 고정폭(112px) 대신, 현재 roomNames/rooms 기반으로 적정 폭 계산
+const labels = [];
+try {
+  (rooms || []).forEach((r) => labels.push(((roomNames?.[r - 1] || `${r}번 방`).trim()) || `${r}번 방`));
+} catch (e) {}
+labels.push('배정취소');
+
+const maxLen = labels.reduce((m, t) => Math.max(m, String(t || '').length), 0);
+const estW = Math.round(maxLen * 8.5 + 28); // 대략(폰트 13~14px 기준): 글자폭*len + padding
+const minW = 84;
+const maxW = Math.min(280, (vw || 360) - 16);
+const menuW = Math.max(minW, Math.min(estW, maxW));
+
+const menuH = Math.min(320, rooms.length * 36 + 12);
 
       const bottomLimit = vh - (__FOOTER_H + __bottomGap + 16);
 
@@ -488,7 +501,7 @@ export default function Step5() {
       clearTimeout(t);
       window.removeEventListener('resize', place);
     };
-  }, [forceSelectingId, forceAnchorRect, rooms.length, __bottomGap]); // ✅ bottomGap도 반영
+  }, [forceSelectingId, forceAnchorRect, rooms.length, __bottomGap, roomNames]); // ✅ bottomGap도 반영
 
   const onForceAssign = (id, room) => {
     let targetNickname = null;
