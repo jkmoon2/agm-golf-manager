@@ -220,8 +220,20 @@ export function PlayerProvider({ children }) {
   // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
-    const ref = doc(db, 'events', eventId);
-    const unsub = onSnapshot(ref, (snap) => {
+
+    let unsub = () => {};
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // ✅ PATCH: 인증(anonymous) 준비가 끝난 뒤에만 listener를 붙여 permission-denied 루프 방지
+        await ensureAuthReady();
+        if (cancelled) return;
+
+        const ref = doc(db, 'events', eventId);
+        unsub = onSnapshot(
+          ref,
+          (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
 
       const rawParts = Array.isArray(data.participants) ? data.participants : [];
@@ -285,15 +297,40 @@ export function PlayerProvider({ children }) {
       } else {
         setParticipant(null);
       }
-    });
-    return () => unsub();
+              },
+          (err) => {
+            console.warn('[PlayerContext] events/{eventId} onSnapshot error:', err);
+          }
+        );
+      } catch (e) {
+        console.warn('[PlayerContext] ensureAuthReady failed before event subscribe:', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try { unsub(); } catch (_) {}
+    };
   }, [eventId, authCode]);
 
+
   // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)
-  useEffect(() => {
+    useEffect(() => {
     if (!eventId) return;
-    const colRef = collection(db, 'events', eventId, 'scores');
-    const unsub = onSnapshot(colRef, (snap) => {
+
+    let unsub = () => {};
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // ✅ PATCH: scores 리스너도 auth 준비 이후에만 붙여 permission-denied 루프 방지
+        await ensureAuthReady();
+        if (cancelled) return;
+
+        const colRef = collection(db, 'events', eventId, 'scores');
+        unsub = onSnapshot(
+          colRef,
+          (snap) => {
       const map = {};
       snap.forEach(d => {
         const s = d.data() || {};
@@ -313,8 +350,20 @@ export function PlayerProvider({ children }) {
         });
         return next;
       });
-    });
-    return () => unsub();
+              },
+          (err) => {
+            console.warn('[PlayerContext] scores onSnapshot error:', err);
+          }
+        );
+      } catch (e) {
+        console.warn('[PlayerContext] ensureAuthReady failed before scores subscribe:', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try { unsub(); } catch (_) {}
+    };
   }, [eventId]);
 
   // participants 저장 (화이트리스트 + updateDoc)
