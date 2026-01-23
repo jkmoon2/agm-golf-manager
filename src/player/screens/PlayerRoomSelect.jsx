@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PlayerContext } from '../../context/PlayerContext';
+import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
 
