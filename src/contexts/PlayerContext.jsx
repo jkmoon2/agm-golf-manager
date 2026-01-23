@@ -1,4 +1,4 @@
-// /src/contexts/PlayerContext.jsx
+// /src/context/PlayerContext.jsx
 
 import React, { createContext, useState, useEffect } from 'react';
 import {
@@ -182,11 +182,17 @@ export function PlayerProvider({ children }) {
   const { pathname } = useLocation();
 
   useEffect(() => {
-    if (!eventId && typeof pathname === 'string') {
-      const m = pathname.match(/\/player\/home\/([^/]+)/);
-      if (m && m[1]) {
-        setEventId(m[1]);
-        try { localStorage.setItem('eventId', m[1]); } catch {}
+    // ✅ URL의 eventId가 localStorage에 남아있는 예전 eventId를 덮어쓰도록(가장 흔한 원인)
+    //   - /player/home/:eventId
+    //   - /player/room/:eventId
+    //   - /player/table/:eventId
+    //   - /player/select/:eventId
+    if (typeof pathname === 'string') {
+      const m = pathname.match(/\/player\/(home|room|table|select)\/([^/]+)/);
+      const urlEventId = m?.[2];
+      if (urlEventId && urlEventId !== eventId) {
+        setEventId(urlEventId);
+        try { localStorage.setItem('eventId', urlEventId); } catch {}
       }
     }
   }, [pathname, eventId]);
@@ -220,20 +226,8 @@ export function PlayerProvider({ children }) {
   // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
-
-    let unsub = () => {};
-    let cancelled = false;
-
-    (async () => {
-      try {
-        // ✅ PATCH: 인증(anonymous) 준비가 끝난 뒤에만 listener를 붙여 permission-denied 루프 방지
-        await ensureAuthReady();
-        if (cancelled) return;
-
-        const ref = doc(db, 'events', eventId);
-        unsub = onSnapshot(
-          ref,
-          (snap) => {
+    const ref = doc(db, 'events', eventId);
+    const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
 
       const rawParts = Array.isArray(data.participants) ? data.participants : [];
@@ -297,40 +291,15 @@ export function PlayerProvider({ children }) {
       } else {
         setParticipant(null);
       }
-              },
-          (err) => {
-            console.warn('[PlayerContext] events/{eventId} onSnapshot error:', err);
-          }
-        );
-      } catch (e) {
-        console.warn('[PlayerContext] ensureAuthReady failed before event subscribe:', e);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      try { unsub(); } catch (_) {}
-    };
+    });
+    return () => unsub();
   }, [eventId, authCode]);
 
-
   // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)
-    useEffect(() => {
+  useEffect(() => {
     if (!eventId) return;
-
-    let unsub = () => {};
-    let cancelled = false;
-
-    (async () => {
-      try {
-        // ✅ PATCH: scores 리스너도 auth 준비 이후에만 붙여 permission-denied 루프 방지
-        await ensureAuthReady();
-        if (cancelled) return;
-
-        const colRef = collection(db, 'events', eventId, 'scores');
-        unsub = onSnapshot(
-          colRef,
-          (snap) => {
+    const colRef = collection(db, 'events', eventId, 'scores');
+    const unsub = onSnapshot(colRef, (snap) => {
       const map = {};
       snap.forEach(d => {
         const s = d.data() || {};
@@ -350,20 +319,8 @@ export function PlayerProvider({ children }) {
         });
         return next;
       });
-              },
-          (err) => {
-            console.warn('[PlayerContext] scores onSnapshot error:', err);
-          }
-        );
-      } catch (e) {
-        console.warn('[PlayerContext] ensureAuthReady failed before scores subscribe:', e);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      try { unsub(); } catch (_) {}
-    };
+    });
+    return () => unsub();
   }, [eventId]);
 
   // participants 저장 (화이트리스트 + updateDoc)

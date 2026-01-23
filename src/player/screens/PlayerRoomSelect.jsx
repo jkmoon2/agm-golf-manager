@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PlayerContext } from '../../contexts/PlayerContext';
+import { PlayerContext } from '../../context/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
 
@@ -105,9 +105,19 @@ function FourballLikeSelect() {
 
 function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
-  const { eventId: playerEventId, isEventClosed } = useContext(PlayerContext);
+  const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
+
+  // ✅ URL의 eventId가 PlayerContext의 eventId보다 우선 (이전 대회 localStorage 잔상/오배정 방지)
+  useEffect(() => {
+    if (!urlEventId) return;
+    if (urlEventId === playerEventId) return;
+    try {
+      setEventId?.(urlEventId);
+      localStorage.setItem('eventId', urlEventId);
+    } catch (_) {}
+  }, [urlEventId, playerEventId, setEventId]);
 
   useEffect(() => {
     const eid = urlEventId || playerEventId;
