@@ -1,5 +1,4 @@
-// /src/context/PlayerContext.jsx
-
+// /src/contexts/PlayerContext.jsx
 import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
@@ -58,6 +57,12 @@ const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
+
+
+// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
+function participantsFieldByMode(md = 'stroke') {
+  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
     ? roomNames[num - 1].trim()
@@ -229,8 +234,17 @@ export function PlayerProvider({ children }) {
     const ref = doc(db, 'events', eventId);
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
+      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
+      setMode(md);
 
-      const rawParts = Array.isArray(data.participants) ? data.participants : [];
+      // ✅ 모드별 참가자 리스트(스트로크/포볼) 분리 저장 지원
+      // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
+      // - (호환) 없으면 기존 participants를 사용
+      const f = participantsFieldByMode(md);
+      const rawParts =
+        (Array.isArray(data?.[f]) && data[f].length)
+          ? data[f]
+          : (Array.isArray(data.participants) ? data.participants : []);
       const partArr = rawParts.map((p, i) => {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
@@ -249,9 +263,6 @@ export function PlayerProvider({ children }) {
         };
       });
       setParticipants(partArr);
-
-      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
-      setMode(md);
 
       const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
       const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
@@ -382,7 +393,7 @@ export function PlayerProvider({ children }) {
     try {
       await updateDoc(
         eref,
-        sanitizeForFirestore({ participants: cleaned, participantsUpdatedAt: serverTimestamp() })
+        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
       );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });

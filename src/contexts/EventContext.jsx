@@ -248,27 +248,27 @@ export function EventProvider({ children }) {
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
 
-	        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball 지원
-	        // - 기존 호환: participants(미러)가 존재/값이 있으면 participants를 우선 사용
-	        // - participants가 비어있거나 없으면, 현재 mode의 participantsStroke/Fourball로 폴백
-	        try {
-	          const splitEnabled =
-	            Object.prototype.hasOwnProperty.call(withGate, 'participantsStroke') ||
-	            Object.prototype.hasOwnProperty.call(withGate, 'participantsFourball');
-	          if (splitEnabled) {
-	            const m = withGate?.mode || 'stroke';
-	            const f = participantsFieldByMode(m);
-	            const fromSplit = Array.isArray(withGate?.[f]) ? withGate[f] : [];
-	            const fromLegacy = Array.isArray(withGate?.participants) ? withGate.participants : null;
-
-	            // ⚠️ PlayerContext(방배정/점수 입력)는 participants(미러)만 업데이트하는 경우가 있어,
-	            //     split 필드가 비어있으면 화면에서 방배정이 "사라진 것처럼" 보일 수 있음.
-	            //     → participants가 비어있을 때만 split 값을 사용하여 호환 유지.
-	            if (!Array.isArray(fromLegacy) || fromLegacy.length === 0) {
-	              withGate.participants = fromSplit;
-	            }
-	          }
-	        } catch {}
+        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball을 SSOT로 사용
+        // - 모드 분리 필드 중 하나라도 존재하면 '분리 저장 모드'로 간주하고,
+        //   현재 mode에 해당하는 participants 필드만 eventData.participants로 매핑한다.
+        try {
+          const splitEnabled =
+            Object.prototype.hasOwnProperty.call(withGate, 'participantsStroke') ||
+            Object.prototype.hasOwnProperty.call(withGate, 'participantsFourball');
+          if (splitEnabled) {
+            const m = withGate?.mode || 'stroke';
+            const f = participantsFieldByMode(m);
+            // (호환) 분리 필드가 비어있으면 기존 participants(미러)를 유지
+            const splitList = Array.isArray(withGate?.[f]) ? withGate[f] : null;
+            if (splitList && splitList.length) {
+              withGate.participants = splitList;
+            } else if (Array.isArray(withGate?.participants)) {
+              // keep existing mirror
+            } else {
+              withGate.participants = [];
+            }
+          }
+        } catch {}
 
         // ✅ includeMetadataChanges: true 환경에서 pendingWrites 스냅샷을 무조건 무시하면
         //   (Player가 방배정/점수 입력 직후) Admin STEP7/STEP8 최초 진입 시
