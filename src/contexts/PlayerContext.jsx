@@ -518,7 +518,15 @@ export function PlayerProvider({ children }) {
           const eref = doc(db, 'events', eventId);
           const snap = await tx.get(eref);
           const data = snap.exists() ? (snap.data() || {}) : {};
-          const parts = (data.participants || []).map((p, i) => ({
+          // ★ FIX: 모드별 분리 저장(participantsFourball / participantsStroke) 기준으로 읽고/쓰기
+          // - participantsFourball 값이 존재하는 이벤트에서는 participants만 갱신하면
+          //   onSnapshot이 participantsFourball을 다시 덮어써서 "배정이 풀리는" 현상이 발생합니다.
+          const fieldParts = participantsFieldByMode(mode);
+          const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
+            ? data[fieldParts]
+            : (data.participants || []);
+
+          const parts = (baseParts || []).map((p, i) => ({
             ...((p && typeof p === 'object') ? p : {}),
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
@@ -544,7 +552,16 @@ export function PlayerProvider({ children }) {
             return p;
           });
 
-          tx.set(eref, sanitizeForFirestore({ participants: next, updatedAt: serverTimestamp() }), { merge: true });
+          tx.set(
+            eref,
+            sanitizeForFirestore({
+              participants: next,
+              [fieldParts]: next,
+              participantsUpdatedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            }),
+            { merge: true }
+          );
 
           const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
           if (mateId) tx.set(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }) }, { merge: true });

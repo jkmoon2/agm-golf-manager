@@ -248,25 +248,23 @@ export function EventProvider({ children }) {
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
 
-        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball을 SSOT로 사용
-        // - 모드 분리 필드 중 하나라도 존재하면 '분리 저장 모드'로 간주하고,
-        //   현재 mode에 해당하는 participants 필드만 eventData.participants로 매핑한다.
+        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball 지원
+        // - split 필드가 '빈 배열'로만 존재하는 경우(생성 템플릿 잔상)는 기존 participants(mirror) 우선
+        // - split 필드에 실제 데이터가 존재하면 해당 모드 필드를 participants로 매핑
         try {
-          const splitEnabled =
-            Object.prototype.hasOwnProperty.call(withGate, 'participantsStroke') ||
-            Object.prototype.hasOwnProperty.call(withGate, 'participantsFourball');
+          const mirrorArr = Array.isArray(withGate?.participants) ? withGate.participants : [];
+          const strokeArr = Array.isArray(withGate?.participantsStroke) ? withGate.participantsStroke : [];
+          const fourArr   = Array.isArray(withGate?.participantsFourball) ? withGate.participantsFourball : [];
+          const splitEnabled = (strokeArr.length > 0) || (fourArr.length > 0);
+
           if (splitEnabled) {
             const m = withGate?.mode || 'stroke';
             const f = participantsFieldByMode(m);
-            // (호환) 분리 필드가 비어있으면 기존 participants(미러)를 유지
-            const splitList = Array.isArray(withGate?.[f]) ? withGate[f] : null;
-            if (splitList && splitList.length) {
-              withGate.participants = splitList;
-            } else if (Array.isArray(withGate?.participants)) {
-              // keep existing mirror
-            } else {
-              withGate.participants = [];
-            }
+            const splitArr = withGate?.[f];
+
+            if (Array.isArray(splitArr) && splitArr.length > 0) withGate.participants = splitArr;
+            else if (mirrorArr.length > 0) withGate.participants = mirrorArr;
+            else withGate.participants = Array.isArray(splitArr) ? splitArr : [];
           }
         } catch {}
 

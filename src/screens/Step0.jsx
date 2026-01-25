@@ -190,22 +190,25 @@ export default function Step0() {
     }
   };
 
-const handleDelete = async (id) => {
+  const handleDelete = async (id) => {
     if (!id) return;
-    if (!window.confirm('정말 삭제하시겠습니까?')) return;
+    if (!window.confirm('정말 삭제하시겠습니까? (복구 불가)')) return;
 
-    // optimistic hide: even if delete fails (offline/permission), keep it hidden locally
-    hideEventLocally(id);
-
+    // ✅ 기존: delete 실패해도 로컬에서 숨겨져 "삭제된 것처럼" 보이는 문제
+    // ✅ 개선: 실제 delete 성공 후에만 목록에서 사라지도록 처리 (실패 시 경고)
     try {
       await deleteEvent(id);
+      if (selectedId === id) setSelectedId(null);
+      setOpenMenuId(null);
     } catch (e) {
-      console.error(e);
-      alert('삭제 중 오류가 발생했습니다\n네트워크/권한 상태를 확인해주세요\n(목록에서는 임시로 숨김 처리되었습니다.)');
+      console.error('[Step0] deleteEvent failed:', e);
+      const msg = String(e?.message || e || '');
+      if (msg.toLowerCase().includes('permission')) {
+        alert('삭제 실패: 관리자 권한이 없습니다. (a@a.com) 로그인 상태를 확인해 주세요.');
+      } else {
+        alert('삭제 실패: 네트워크/권한 문제로 삭제되지 않았습니다. 콘솔 로그를 확인해 주세요.');
+      }
     }
-
-    if (selectedId === id) setSelectedId(null);
-    setOpenMenuId(null);
   };
 
   const openEditModal = (evt) => {
