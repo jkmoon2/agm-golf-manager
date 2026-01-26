@@ -91,7 +91,12 @@ export default function PlayerEventList() {
           return v && v.toUpperCase() === code.toUpperCase();
         });
 
-      let participant = findInArray(snap.data().participants);
+      // ✅ 모드 분리 저장(participantsStroke/participantsFourball)까지 모두 탐색
+      const ed = snap.data() || {};
+      let participant =
+        findInArray(ed.participants) ||
+        findInArray(ed.participantsStroke) ||
+        findInArray(ed.participantsFourball);
       if (!participant) {
         const qs = await getDocs(collection(db, 'events', eventId, 'participants'));
         qs.forEach(d => {
