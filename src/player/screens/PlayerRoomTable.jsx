@@ -154,7 +154,7 @@ export default function PlayerRoomTable() {
   }, [paramId, ctxId]);
 
   const latestGate = useMemo(() => {
-    const mode = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const mode = ((eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke');
     const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
     const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
     const fbG  = pickGateByMode(fallbackGate || {}, mode);
@@ -204,7 +204,7 @@ export default function PlayerRoomTable() {
   // Admin의 선택(숨김 방) 복원 – 루트/모드별/0·1기반 혼용 모두 흡수
   const hiddenRooms = useMemo(() => {
     const pvRaw = eventData?.publicView || {};
-    const mode = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
+    const mode = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
     return normalizeHiddenRooms(pvRaw, roomNames.length, mode);
   }, [eventData?.publicView, eventData?.mode, roomNames.length]);
 

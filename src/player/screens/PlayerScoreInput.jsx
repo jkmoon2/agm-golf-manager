@@ -120,7 +120,7 @@ export default function PlayerScoreInput() {
   }, [eventId]);
 
   const latestGate = useMemo(() => {
-    const mode = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const mode = ((eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke');
     const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
     const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
     const fbG   = pickGateByMode(fallbackGate || {}, mode);

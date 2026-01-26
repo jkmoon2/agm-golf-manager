@@ -75,7 +75,7 @@ function enrichParticipantsDerived(updates) {
 // - 문서 필드: participantsStroke / participantsFourball
 // - 기존 호환: participants는 "현재 모드"의 미러로 계속 유지
 function participantsFieldByMode(mode = 'stroke') {
-  return mode === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+  return (mode === 'fourball' || mode === 'agm') ? 'participantsFourball' : 'participantsStroke';
 }
 
 function ensureModeSplitParticipants(updates, currentMode) {
@@ -248,23 +248,17 @@ export function EventProvider({ children }) {
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
 
-        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball 지원
-        // - split 필드가 '빈 배열'로만 존재하는 경우(생성 템플릿 잔상)는 기존 participants(mirror) 우선
-        // - split 필드에 실제 데이터가 존재하면 해당 모드 필드를 participants로 매핑
+        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball을 SSOT로 사용
+        // - 모드 분리 필드 중 하나라도 존재하면 '분리 저장 모드'로 간주하고,
+        //   현재 mode에 해당하는 participants 필드만 eventData.participants로 매핑한다.
         try {
-          const mirrorArr = Array.isArray(withGate?.participants) ? withGate.participants : [];
-          const strokeArr = Array.isArray(withGate?.participantsStroke) ? withGate.participantsStroke : [];
-          const fourArr   = Array.isArray(withGate?.participantsFourball) ? withGate.participantsFourball : [];
-          const splitEnabled = (strokeArr.length > 0) || (fourArr.length > 0);
-
+          const splitEnabled =
+            Object.prototype.hasOwnProperty.call(withGate, 'participantsStroke') ||
+            Object.prototype.hasOwnProperty.call(withGate, 'participantsFourball');
           if (splitEnabled) {
             const m = withGate?.mode || 'stroke';
             const f = participantsFieldByMode(m);
-            const splitArr = withGate?.[f];
-
-            if (Array.isArray(splitArr) && splitArr.length > 0) withGate.participants = splitArr;
-            else if (mirrorArr.length > 0) withGate.participants = mirrorArr;
-            else withGate.participants = Array.isArray(splitArr) ? splitArr : [];
+            withGate.participants = Array.isArray(withGate?.[f]) ? withGate[f] : [];
           }
         } catch {}
 
@@ -725,7 +719,7 @@ export function EventProvider({ children }) {
   const uploadNameKey = (mode, id = eventId) => `uploadFileName:${id || ''}:${mode || 'stroke'}`;
   const getUploadFilename = (mode = lastEventDataRef.current?.mode || 'stroke') => {
     const ed = lastEventDataRef.current || {};
-    const fromDoc = mode === 'fourball' ? ed.uploadFileNameFourball : ed.uploadFileNameStroke;
+    const fromDoc = (mode === 'fourball' || mode === 'agm') ? ed.uploadFileNameFourball : ed.uploadFileNameStroke;
     if (fromDoc) return fromDoc;
     try {
       const raw = localStorage.getItem(uploadNameKey(mode));
@@ -740,7 +734,7 @@ export function EventProvider({ children }) {
       localStorage.setItem(uploadNameKey(mode), fileName || '');
     } catch {}
     const partial =
-      mode === 'fourball' ? { uploadFileNameFourball: fileName || '' } : { uploadFileNameStroke: fileName || '' };
+      (mode === 'fourball' || mode === 'agm') ? { uploadFileNameFourball: fileName || '' } : { uploadFileNameStroke: fileName || '' };
     await updateEventImmediate(partial, false);
   };
 
@@ -777,7 +771,7 @@ export function EventProvider({ children }) {
       await updateEventImmediate(
         {
           participants: roster || [],
-          ...(mode === 'fourball' ? { participantsFourball: roster || [] } : { participantsStroke: roster || [] }),
+          ...((mode === 'fourball' || mode === 'agm') ? { participantsFourball: roster || [] } : { participantsStroke: roster || [] }),
         },
         false,
       );
