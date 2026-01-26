@@ -57,6 +57,38 @@ export default function Step6() {
   const setShowHalved = (v) => setVisibleMetrics(m => ({ ...m, banddang: !!v }));
 
   // ─────────────────────────────────────────────────────────────
+  // ✅ [WIDTH TUNING] STEP6 표(방배정표/최종결과표) 컬럼 폭 조정
+  // - 아래 숫자(px)만 바꾸면 바로 폭이 바뀝니다. (CSS는 그대로 유지)
+  // - 닉네임/G핸디/점수/반땅/결과 컬럼별로 각각 조정 가능
+  // ─────────────────────────────────────────────────────────────
+  const __COL_W = {
+    // [EDIT HERE] 방배정표(닉네임/G핸디)
+    alloc: {
+      nick: 110,
+      ghandi: 50,
+    },
+    // [EDIT HERE] 최종결과표(닉네임/G핸디/점수/반땅/결과)
+    result: {
+      nick: 110,
+      ghandi: 50,
+      score: 50,
+      banddang: 50,
+      result: 50,
+    },
+  };
+  const __W = (n) => ({ width: `${n}px`, minWidth: `${n}px`, maxWidth: `${n}px` });
+  const __COL = {
+    allocNick: __W(__COL_W.alloc.nick),
+    allocGhandi: __W(__COL_W.alloc.ghandi),
+    resultNick: __W(__COL_W.result.nick),
+    resultGhandi: __W(__COL_W.result.ghandi),
+    resultScore: __W(__COL_W.result.score),
+    resultBanddang: __W(__COL_W.result.banddang),
+    resultResult: __W(__COL_W.result.result),
+  };
+
+
+  // ─────────────────────────────────────────────────────────────
   // ★ 하단 고정/여백 공통 처리 + 스크롤 컨테이너(실높이 계산) 추가
   // ─────────────────────────────────────────────────────────────
   const [__bottomGap, __setBottomGap] = useState(64);
@@ -399,8 +431,8 @@ export default function Step6() {
                 {headers.map((_, i) =>
                   !isHiddenIdx(i) && (
                     <React.Fragment key={i}>
-                      <th className={styles.header}>닉네임</th>
-                      <th className={styles.header}>G핸디</th>
+                      <th className={styles.header} style={__COL.allocNick}>닉네임</th>
+                      <th className={styles.header} style={__COL.allocGhandi}>G핸디</th>
                     </React.Fragment>
                   )
                 )}
@@ -412,8 +444,8 @@ export default function Step6() {
                   {row.map((c, ci) =>
                     !isHiddenIdx(ci) && (
                       <React.Fragment key={ci}>
-                        <td className={styles.cell}>{c.nickname}</td>
-                        <td className={styles.cell} style={{ color: 'blue' }}>{c.handicap}</td>
+                        <td className={styles.cell} style={__COL.allocNick}>{c.nickname}</td>
+                        <td className={styles.cell} style={{ ...__COL.allocGhandi, color: 'blue' }}>{c.handicap}</td>
                       </React.Fragment>
                     )
                   )}
@@ -425,8 +457,8 @@ export default function Step6() {
                 {byRoom.map((roomArr, ci) =>
                   !isHiddenIdx(ci) && (
                     <React.Fragment key={ci}>
-                      <td className={styles.footerLabel}>합계</td>
-                      <td className={styles.footerValue} style={{ color: 'blue' }}>
+                      <td className={styles.footerLabel} style={__COL.allocNick}>합계</td>
+                      <td className={styles.footerValue} style={{ ...__COL.allocGhandi, color: 'blue' }}>
                         {roomArr.reduce((sum, p) => sum + (p.handicap || 0), 0)}
                       </td>
                     </React.Fragment>
@@ -463,11 +495,11 @@ export default function Step6() {
                 {headers.map((_, i) =>
                   !isHiddenIdx(i) && (
                     <React.Fragment key={i}>
-                      <th className={styles.header}>닉네임</th>
-                      <th className={styles.header}>G핸디</th>
-                      {showScore   && <th className={styles.header}>점수</th>}
-                      {showHalved  && <th className={styles.header}>반땅</th>}
-                      <th className={styles.header}>결과</th>
+                      <th className={styles.header} style={__COL.resultNick}>닉네임</th>
+                      <th className={styles.header} style={__COL.resultGhandi}>G핸디</th>
+                      {showScore   && <th className={styles.header} style={__COL.resultScore}>점수</th>}
+                      {showHalved  && <th className={styles.header} style={__COL.resultBanddang}>반땅</th>}
+                      <th className={styles.header} style={__COL.resultResult}>결과</th>
                     </React.Fragment>
                   )
                 )}
@@ -479,15 +511,15 @@ export default function Step6() {
                   {resultByRoom.map((roomObj, ci) =>
                     !isHiddenIdx(ci) && (
                       <React.Fragment key={ci}>
-                        <td className={styles.cell}>{roomObj.detail[ri].nickname}</td>
-                        <td className={styles.cell}>{roomObj.detail[ri].handicap}</td>
-                        {showScore  && <td className={styles.cell}>{roomObj.detail[ri].score}</td>}
+                        <td className={styles.cell} style={__COL.resultNick}>{roomObj.detail[ri].nickname}</td>
+                        <td className={styles.cell} style={__COL.resultGhandi}>{roomObj.detail[ri].handicap}</td>
+                        {showScore  && <td className={styles.cell} style={__COL.resultScore}>{roomObj.detail[ri].score}</td>}
                         {showHalved && (
-                          <td className={styles.cell} style={{ color: 'blue' }}>
+                          <td className={styles.cell} style={{ ...__COL.resultBanddang, color: 'blue' }}>
                             {roomObj.detail[ri].banddang}
                           </td>
                         )}
-                        <td className={styles.cell} style={{ color: 'red' }}>
+                        <td className={styles.cell} style={{ ...__COL.resultResult, color: 'red' }}>
                           {roomObj.detail[ri].result}
                         </td>
                       </React.Fragment>
@@ -501,11 +533,11 @@ export default function Step6() {
                 {resultByRoom.map((roomObj, ci) =>
                   !isHiddenIdx(ci) && (
                     <React.Fragment key={ci}>
-                      <td className={styles.footerLabel}>합계</td>
-                      <td className={styles.footerValue}>{roomObj.sumHandicap}</td>
-                      {showScore  && <td className={styles.footerValue}>{roomObj.sumScore}</td>}
-                      {showHalved && <td className={styles.footerBanddang}>{roomObj.sumBanddang}</td>}
-                      <td className={styles.footerResult}>{roomObj.sumResult}</td>
+                      <td className={styles.footerLabel} style={__COL.resultNick}>합계</td>
+                      <td className={styles.footerValue} style={__COL.resultGhandi}>{roomObj.sumHandicap}</td>
+                      {showScore  && <td className={styles.footerValue} style={__COL.resultScore}>{roomObj.sumScore}</td>}
+                      {showHalved && <td className={styles.footerBanddang} style={__COL.resultBanddang}>{roomObj.sumBanddang}</td>}
+                      <td className={styles.footerResult} style={__COL.resultResult}>{roomObj.sumResult}</td>
                     </React.Fragment>
                   )
                 )}
@@ -518,7 +550,7 @@ export default function Step6() {
                         colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
                         className={styles.footerBlank}
                       />
-                      <td className={styles.footerRank} style={{ background: '#fff8d1' }}>
+                      <td className={styles.footerRank} style={{ ...__COL.resultResult, background: '#fff8d1' }}>
                         {rankMap[i]}등
                       </td>
                     </React.Fragment>
