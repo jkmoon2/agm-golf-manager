@@ -168,7 +168,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     if (!participantsLoaded) return false;
     return participants.some((p) => String(p.id) === String(participant.id));
   }, [participantsLoaded, participants, participant?.id]);
-  const isSyncing = participantsLoaded && !isMeReady;
+  // ✅ iOS/PWA에서 sessionStorage가 초기화되면 participant가 비어 있을 수 있음
+  //   - participant가 없으면 '동기화'가 아니라 '재로그인'이 필요하므로 분리 표시
+  const isSyncing = participantsLoaded && !!participant?.id && !isMeReady;
+  const needReLogin = participantsLoaded && !participant?.id;
 
   useEffect(() => {
     if (participant?.room != null && flowStep === 'idle') {
@@ -452,6 +455,21 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       {!isEventClosed && !isAssigning && isSyncing && (
         <div className={styles.notice} translate="no" contentEditable={false} style={guard}>
           내 정보 동기화 중입니다…
+        </div>
+      )}
+
+      {!isEventClosed && !isAssigning && needReLogin && (
+        <div className={styles.notice} translate="no" contentEditable={false} style={guard}>
+          로그인 정보가 사라졌습니다. 아래 버튼을 눌러 다시 인증해주세요.
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className={`${styles.btn} ${styles.btnBlue}`}
+              onClick={() => navigate('/player/login-or-code', { replace: true })}
+            >
+              다시 로그인
+            </button>
+          </div>
         </div>
       )}
 
