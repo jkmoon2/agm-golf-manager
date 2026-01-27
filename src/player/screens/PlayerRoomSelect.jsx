@@ -147,8 +147,19 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const teamConfirmVisible =
     !(gate?.step1?.teamConfirmHidden === true) && !!(gate?.step1?.teamConfirmVisible ?? true);
 
-  const done = !!participant?.room;
-  const assignedRoom = participant?.room ?? null;
+  // iOS/Safari(PWA 포함)에서 실시간 스냅샷 반영이 늦거나,
+  // 운영자 세션에서 참가자 탭을 동시에 사용할 때 UI가 바로 갱신되지 않는 케이스 대비
+  const [optimisticRoom, setOptimisticRoom] = useState(null);
+
+  useEffect(() => {
+    const r = Number(participant?.room);
+    if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
+  }, [participant?.room]);
+
+  const done = Number.isFinite(Number(participant?.room)) || Number.isFinite(Number(optimisticRoom));
+  const assignedRoom = Number.isFinite(Number(participant?.room))
+    ? Number(participant?.room)
+    : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
 
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
@@ -168,10 +179,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     if (!participantsLoaded) return false;
     return participants.some((p) => String(p.id) === String(participant.id));
   }, [participantsLoaded, participants, participant?.id]);
-  // ✅ iOS/PWA에서 sessionStorage가 초기화되면 participant가 비어 있을 수 있음
-  //   - participant가 없으면 '동기화'가 아니라 '재로그인'이 필요하므로 분리 표시
-  const isSyncing = participantsLoaded && !!participant?.id && !isMeReady;
-  const needReLogin = participantsLoaded && !participant?.id;
+  const isSyncing = participantsLoaded && !isMeReady;
 
   useEffect(() => {
     if (participant?.room != null && flowStep === 'idle') {
@@ -356,6 +364,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
         return;
       }
 
+      // snapshot 반영 지연 대비: 방배정 결과를 UI에 즉시 반영하여 중복 클릭 방지
+      const rn = Number(roomNumber);
+      if (Number.isFinite(rn) && rn >= 1) setOptimisticRoom(rn);
+
       if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
 
       await ensureMembership(eid, Number(roomNumber));
@@ -455,21 +467,6 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       {!isEventClosed && !isAssigning && isSyncing && (
         <div className={styles.notice} translate="no" contentEditable={false} style={guard}>
           내 정보 동기화 중입니다…
-        </div>
-      )}
-
-      {!isEventClosed && !isAssigning && needReLogin && (
-        <div className={styles.notice} translate="no" contentEditable={false} style={guard}>
-          로그인 정보가 사라졌습니다. 아래 버튼을 눌러 다시 인증해주세요.
-          <div style={{ marginTop: 10 }}>
-            <button
-              type="button"
-              className={`${styles.btn} ${styles.btnBlue}`}
-              onClick={() => navigate('/player/login-or-code', { replace: true })}
-            >
-              다시 로그인
-            </button>
-          </div>
         </div>
       )}
 

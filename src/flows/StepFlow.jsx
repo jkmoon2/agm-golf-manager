@@ -349,7 +349,7 @@ export default function StepFlow() {
         // - EventContext에서도 동일 미러를 수행하지만, StepFlow에서도 같이 기록해 두면
         //   기존 이벤트(필드 미존재)도 최초 저장 시 분리 필드가 생성되어 더 안정적임.
         try {
-          const mForMirror = (updates && updates.mode) || mode || 'stroke';
+          const mForMirror = (updates && updates.mode) || (eventData && eventData.mode) || mode || 'stroke';
           if (mForMirror === 'fourball' || mForMirror === 'agm') clean.participantsFourball = compat;
           else clean.participantsStroke = compat;
         } catch {}
@@ -474,20 +474,39 @@ export default function StepFlow() {
   const curr       = Number(step) || 1;
   const strokeFlow = [1,2,3,4,5,6];
   const agmFlow    = [1,2,3,4,7,8];
-  const flow       = mode === 'stroke' ? strokeFlow : agmFlow;
+  // ✅ mode 값이 'agm'으로 들어오거나(구버전) eventData 로딩 전 기본값('stroke')이 잠깐 잡히는 경우가 있어
+  //    화면/저장 로직에서 일관되게 'stroke' | 'fourball'로 정규화해서 사용
+  const normMode = (m) => {
+    if (!m) return 'stroke';
+    if (m === 'agm') return 'fourball';
+    return m;
+  };
+
+  const effectiveMode = normMode((eventData && eventData.mode) || mode);
+  const flow       = effectiveMode === 'stroke' ? strokeFlow : agmFlow;
 
   // ★ FIX: 저장을 await 후 이동(레이스 제거) + participantsRef로 항상 최신 값 사용
   const goNext = async () => {
+    // ✅ eventData 로딩 전에 저장/이동하면 mode 기본값('stroke')이 Firestore에 덮어써지며
+    //    포볼 대회가 스트로크 탭으로 "이동"되는 현상이 발생할 수 있음
+    if (eventId && !eventData) {
+      alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
     const latest = participantsRef.current || participants;
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
+    await save({ title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
   };
 
   const goPrev = async () => {
+    if (eventId && !eventData) {
+      alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
     const latest = participantsRef.current || participants;
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
+    await save({ title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
@@ -495,8 +514,12 @@ export default function StepFlow() {
 
   // ★ FIX: 하단 메뉴/아이콘으로 step 강제 이동할 때도 먼저 저장(점수 0 덮어쓰기 방지)
   const setStep = async (n) => {
+    if (eventId && !eventData) {
+      alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
     const latest = participantsRef.current || participants;
-    await save({ mode, title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
+    await save({ title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
     navigate(`/admin/home/${n}`);
   };
 

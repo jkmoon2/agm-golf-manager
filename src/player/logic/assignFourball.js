@@ -1,6 +1,7 @@
 // src/player/logic/assignFourball.js
 
-import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { arrayUnion, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { sanitizeForFirestore } from '../../utils/sanitizeForFirestore';
 
 // 포볼: 1조가 실행, 미배정 2조 중에서 랜덤으로 팀원 선택 + 방(여유 2자리) 랜덤
 export function pickRoomAndPartnerForFourball({
@@ -13,7 +14,7 @@ export function pickRoomAndPartnerForFourball({
   }
 
   // 아직 방/파트너 미배정인 2조 후보
-  const freeG2 = participants.filter((p) =>
+  const freeG2 = participants.filter(p =>
     Number(p.group) === 2 && !p.room && p.id !== me.id
   );
   if (freeG2.length === 0) {
@@ -50,8 +51,8 @@ export function pickRoomAndPartnerForFourball({
   }
 
   if (strategy === 'balanced') {
-    const min = Math.min(...candidates.map((c) => c.cnt));
-    candidates = candidates.filter((c) => c.cnt === min);
+    const min = Math.min(...candidates.map(c => c.cnt));
+    candidates = candidates.filter(c => c.cnt === min);
   }
 
   const roomNumber = candidates[Math.floor(Math.random() * candidates.length)].r;
@@ -60,59 +61,133 @@ export function pickRoomAndPartnerForFourball({
   return { roomNumber, partner };
 }
 
-function normalizeMode(m) {
-  return (m === 'fourball' || m === 'agm') ? 'fourball' : 'stroke';
-}
-function participantsFieldByMode(m) {
-  return normalizeMode(m) === 'fourball' ? 'participantsFourball' : 'participantsStroke';
-}
+/*
+  Firestore 트랜잭션 버전(모듈러 SDK)
+  - 기존 샘플(compat: db.collection / db.runTransaction) 때문에
+    `t.collection is not a function` 에러가 발생했고,
+    fallback tx(수동 tx)로 내려가면서 participantsFourball 분리 저장 이벤트에서
+    "배정이 풀리는" 문제가 생겼습니다.
 
-// (선택) Firestore 트랜잭션 버전
-// - 이 프로젝트는 참가자 데이터를 events/{eventId} 문서의 participants 배열에 저장함
-// - 따라서 트랜잭션도 "event 문서"를 대상으로 동시 확정해야 함
+  ✅ 현재 프로젝트 표준
+  - 이벤트 루트 문서에 participants + participantsFourball(모드별 필드) 동시 저장
+  - 트랜잭션 내부에서 최신 스냅샷 기준으로 방/파트너를 확정
+  - fourballRooms/{roomNumber} 도 같이 갱신(운영 화면과 동기화)
+
+  호출부(PlayerContext)에서 사용하는 형태:
+    transactionalAssignFourball({ db, eventId, participants, roomCount, selfId })
+*/
+
+const normId = (v) => String(v ?? '').trim();
+const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
+const toInt = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
 export async function transactionalAssignFourball({
   db,
   eventId,
+  participants, // (옵션) caller가 가진 로컬 participants. 트랜잭션에서는 서버 스냅샷을 우선.
+  roomCount,
+  selfId,
+
+  // (레거시) 예전 샘플 형태: me/partner/roomNumber
   me,
   partner,
   roomNumber,
 }) {
-  const eref = doc(db, 'events', String(eventId));
+  if (!db) throw new Error('missing_db');
+  if (!eventId) throw new Error('missing_eventId');
 
-  await runTransaction(db, async (tx) => {
+  const eref = doc(db, 'events', eventId);
+
+  return await runTransaction(db, async (tx) => {
     const snap = await tx.get(eref);
-    const data = snap.exists() ? (snap.data() || {}) : {};
+    if (!snap.exists()) throw new Error('event_not_found');
+    const data = snap.data() || {};
 
-    const md = normalizeMode(data.mode);
-    const pField = participantsFieldByMode(md);
-    const splitEnabled = !!(data.participantsStroke || data.participantsFourball);
+    const fieldParts = 'participantsFourball';
+    const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
+      ? data[fieldParts]
+      : (Array.isArray(data?.participants) && data.participants?.length)
+        ? data.participants
+        : (Array.isArray(participants) ? participants : []);
 
-    const partsSrc = splitEnabled ? (data[pField] ?? data.participants ?? []) : (data.participants ?? []);
-    const parts = (Array.isArray(partsSrc) ? partsSrc : []).map((p) => ({ ...p }));
+    const parts = (baseParts || []).map((p, i) => ({
+      ...((p && typeof p === 'object') ? p : {}),
+      id: normId(p?.id ?? i),
+      nickname: normName(p?.nickname),
+      group: toInt(p?.group, 0),
+      room: p?.room ?? null,
+      partner: p?.partner != null ? normId(p?.partner) : null,
+    }));
 
-    const meIdx = parts.findIndex((p) => String(p.id) === String(me.id));
-    const ptIdx = parts.findIndex((p) => String(p.id) === String(partner.id));
-    if (meIdx < 0 || ptIdx < 0) throw new Error('participant_not_found');
+    const rc = toInt(roomCount, toInt(data?.roomCount, 4));
+    if (!rc || rc < 1) throw new Error('invalid_roomCount');
 
-    // 이미 배정되었는지 최종 확인
-    if (parts[meIdx].room || parts[ptIdx].room) throw new Error('already_assigned');
+    // 1) 레거시 인자(me/partner/roomNumber)가 들어오면 그대로 확정
+    let chosenRoom = toInt(roomNumber, 0);
+    let mateId = normId(partner?.id);
+    let pid = normId(selfId ?? me?.id);
+    if (!pid) throw new Error('missing_selfId');
 
-    // 방 여유(2자리) 최종 확인
-    const peopleInRoom = parts.filter((p) => Number(p.room) === Number(roomNumber));
-    if (peopleInRoom.length > 2) throw new Error('room_full');
+    const self = parts.find((p) => normId(p.id) === pid);
+    if (!self) throw new Error('Participant not found');
+    if (toInt(self.group) !== 1) throw new Error('group_2_cannot_initiate');
+    if (self.room) throw new Error('already_assigned');
 
-    // 동시 확정
-    parts[meIdx].room = roomNumber;
-    parts[ptIdx].room = roomNumber;
-    parts[meIdx].partner = String(partner.id);
-    parts[ptIdx].partner = String(me.id);
+    // 2) 신형 호출(selfId/roomCount)일 때는 최신 스냅샷 기준으로 랜덤 선택
+    if (!chosenRoom) {
+      // 방별 인원 수
+      const counts = Array.from({ length: rc }, () => 0);
+      for (const p of parts) {
+        const r = toInt(p.room, 0);
+        if (r >= 1 && r <= rc) counts[r - 1] += 1;
+      }
+      // 여유 2자리 이상(roomCapacity=4 기준) 방 후보
+      let roomCandidates = [];
+      for (let r = 1; r <= rc; r++) {
+        if (counts[r - 1] <= 2) roomCandidates.push(r);
+      }
+      if (roomCandidates.length === 0) {
+        const min = Math.min(...counts);
+        for (let r = 1; r <= rc; r++) {
+          if (counts[r - 1] === min) roomCandidates.push(r);
+        }
+      }
+      chosenRoom = roomCandidates[Math.floor(Math.random() * roomCandidates.length)];
+    }
 
-    const payload = {
-      participants: parts,
-      [pField]: parts,
-      participantsUpdatedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-    tx.set(eref, payload, { merge: true });
+    if (!mateId) {
+      const pool = parts.filter(
+        (p) => toInt(p.group) === 2 && !p.room && !p.partner && normId(p.id) !== pid
+      );
+      if (!pool.length) throw new Error('no_free_group2');
+      mateId = normId(pool[Math.floor(Math.random() * pool.length)].id);
+    }
+
+    const next = parts.map((p) => {
+      if (normId(p.id) === pid) return { ...p, room: chosenRoom, partner: mateId || null };
+      if (mateId && normId(p.id) === mateId) return { ...p, room: chosenRoom, partner: pid };
+      return p;
+    });
+
+    tx.set(
+      eref,
+      sanitizeForFirestore({
+        participants: next,
+        [fieldParts]: next,
+        participantsUpdatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+      { merge: true }
+    );
+
+    // 운영/표 출력용: fourballRooms 누적
+    const fbref = doc(db, 'events', eventId, 'fourballRooms', String(chosenRoom));
+    if (mateId) {
+      tx.set(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }), updatedAt: serverTimestamp() }, { merge: true });
+    } else {
+      tx.set(fbref, { singles: arrayUnion(pid), updatedAt: serverTimestamp() }, { merge: true });
+    }
+
+    return { roomNumber: chosenRoom, partnerId: mateId || null, nextParticipants: next };
   });
 }

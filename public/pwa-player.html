@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AGM 참가자 모드</title>
+  </head>
+  <body>
+    <script>
+      try {
+        localStorage.setItem('agm.lastRoute', '/player/login-or-code');
+        localStorage.setItem('agm.lastMode', 'player');
+      } catch (e) {}
+      location.replace('/player/login-or-code');
+    </script>
+  </body>
+</html>

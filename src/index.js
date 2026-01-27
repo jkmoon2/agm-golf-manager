@@ -5,7 +5,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import AppRouter from './AppRouter';
-import { EventProvider } from './contexts/EventContext';
 import './index.css';
 
 // 위에서 만든 serviceWorker.js 불러오기
@@ -14,9 +13,8 @@ import * as serviceWorker from './serviceWorker';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <EventProvider>
-      <AppRouter />
-    </EventProvider>
+    {/* ✅ EventProvider는 AppRouter 내부(<BrowserRouter> 안)에서 1회만 감싸도록 유지 */}
+    <AppRouter />
   </React.StrictMode>
 );
 

@@ -2,6 +2,7 @@
 // (원본 최대 유지 + 필요한 최소 보강: 익명 인증 보장, participants 파생필드, scores 브리지/초기화, 업로드 파일명 유지)
 
 import React, { createContext, useState, useEffect, useRef, useContext } from 'react';
+import { useLocation } from 'react-router-dom';
 
 import {
   collection,
@@ -75,7 +76,7 @@ function enrichParticipantsDerived(updates) {
 // - 문서 필드: participantsStroke / participantsFourball
 // - 기존 호환: participants는 "현재 모드"의 미러로 계속 유지
 function participantsFieldByMode(mode = 'stroke') {
-  return (mode === 'fourball' || mode === 'agm') ? 'participantsFourball' : 'participantsStroke';
+  return mode === 'fourball' ? 'participantsFourball' : 'participantsStroke';
 }
 
 function ensureModeSplitParticipants(updates, currentMode) {
@@ -125,6 +126,9 @@ const ensureAuthed = (() => {
 })();
 
 export function EventProvider({ children }) {
+  const location = useLocation();
+  const isPlayerRoute = !!location?.pathname?.startsWith('/player');
+
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
@@ -248,17 +252,23 @@ export function EventProvider({ children }) {
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
 
-        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball을 SSOT로 사용
-        // - 모드 분리 필드 중 하나라도 존재하면 '분리 저장 모드'로 간주하고,
-        //   현재 mode에 해당하는 participants 필드만 eventData.participants로 매핑한다.
+        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball 지원
+        // - split 필드가 '빈 배열'로만 존재하는 경우(생성 템플릿 잔상)는 기존 participants(mirror) 우선
+        // - split 필드에 실제 데이터가 존재하면 해당 모드 필드를 participants로 매핑
         try {
-          const splitEnabled =
-            Object.prototype.hasOwnProperty.call(withGate, 'participantsStroke') ||
-            Object.prototype.hasOwnProperty.call(withGate, 'participantsFourball');
+          const mirrorArr = Array.isArray(withGate?.participants) ? withGate.participants : [];
+          const strokeArr = Array.isArray(withGate?.participantsStroke) ? withGate.participantsStroke : [];
+          const fourArr   = Array.isArray(withGate?.participantsFourball) ? withGate.participantsFourball : [];
+          const splitEnabled = (strokeArr.length > 0) || (fourArr.length > 0);
+
           if (splitEnabled) {
             const m = withGate?.mode || 'stroke';
             const f = participantsFieldByMode(m);
-            withGate.participants = Array.isArray(withGate?.[f]) ? withGate[f] : [];
+            const splitArr = withGate?.[f];
+
+            if (Array.isArray(splitArr) && splitArr.length > 0) withGate.participants = splitArr;
+            else if (mirrorArr.length > 0) withGate.participants = mirrorArr;
+            else withGate.participants = Array.isArray(splitArr) ? splitArr : [];
           }
         } catch {}
 
@@ -385,8 +395,15 @@ export function EventProvider({ children }) {
 
   // 탭 이탈/가려짐 시 강제 플러시
   useEffect(() => {
+    // ✅ 운영자 로그인 상태에서 참가자 화면(/player/*)도 동시에 사용할 수 있도록,
+    //    참가자 라우트에서는 Admin 쪽 디바운스 큐 플러시를 막아
+    //    (iOS/Safari에서 pagehide/visibilitychange가 자주 발생할 때)
+    //    stale 데이터가 덮어쓰는 현상을 방지합니다.
+    if (isPlayerRoute) return;
+
     const flush = () => {
       try {
+        if (isPlayerRoute) return;
         if (!eventId) return;
         const pending = queuedUpdatesRef.current;
         if (pending) {
@@ -406,7 +423,7 @@ export function EventProvider({ children }) {
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', flush);
     };
-  }, [eventId]);
+  }, [eventId, isPlayerRoute]);
 
   // 언마운트 플러시 + stale 필드 필터링
   useEffect(() => {
@@ -719,7 +736,7 @@ export function EventProvider({ children }) {
   const uploadNameKey = (mode, id = eventId) => `uploadFileName:${id || ''}:${mode || 'stroke'}`;
   const getUploadFilename = (mode = lastEventDataRef.current?.mode || 'stroke') => {
     const ed = lastEventDataRef.current || {};
-    const fromDoc = (mode === 'fourball' || mode === 'agm') ? ed.uploadFileNameFourball : ed.uploadFileNameStroke;
+    const fromDoc = mode === 'fourball' ? ed.uploadFileNameFourball : ed.uploadFileNameStroke;
     if (fromDoc) return fromDoc;
     try {
       const raw = localStorage.getItem(uploadNameKey(mode));
@@ -734,7 +751,7 @@ export function EventProvider({ children }) {
       localStorage.setItem(uploadNameKey(mode), fileName || '');
     } catch {}
     const partial =
-      (mode === 'fourball' || mode === 'agm') ? { uploadFileNameFourball: fileName || '' } : { uploadFileNameStroke: fileName || '' };
+      mode === 'fourball' ? { uploadFileNameFourball: fileName || '' } : { uploadFileNameStroke: fileName || '' };
     await updateEventImmediate(partial, false);
   };
 
@@ -771,7 +788,7 @@ export function EventProvider({ children }) {
       await updateEventImmediate(
         {
           participants: roster || [],
-          ...((mode === 'fourball' || mode === 'agm') ? { participantsFourball: roster || [] } : { participantsStroke: roster || [] }),
+          ...(mode === 'fourball' ? { participantsFourball: roster || [] } : { participantsStroke: roster || [] }),
         },
         false,
       );

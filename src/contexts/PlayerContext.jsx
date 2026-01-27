@@ -1,5 +1,4 @@
-// /src/context/PlayerContext.jsx
-
+// /src/contexts/PlayerContext.jsx
 import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
@@ -39,28 +38,6 @@ function exposeDiag(part) {
 }
 // ──────────────────────────────────────────────────────────────
 
-// ✅ 모드 정규화
-// - 데이터에 'agm' 등 값이 섞여 있어도 포볼로 취급
-function normalizeMode(mode) {
-  const m = String(mode || '').toLowerCase();
-  if (m.includes('four') || m.includes('agm')) return 'fourball';
-  return 'stroke';
-}
-
-// ✅ 이벤트 문서에서 참가자 배열을 모드 기준으로 안전하게 선택
-function pickParticipantsByMode(data) {
-  const mode = normalizeMode(data?.mode);
-  const stroke = Array.isArray(data?.participantsStroke) ? data.participantsStroke : null;
-  const fourball = Array.isArray(data?.participantsFourball) ? data.participantsFourball : null;
-
-  // 모드별 필드가 존재하면 그쪽을 우선 사용
-  if (mode === 'fourball' && fourball) return fourball;
-  if (mode === 'stroke' && stroke) return stroke;
-
-  // 호환: 기존 participants 필드
-  return Array.isArray(data?.participants) ? data.participants : [];
-}
-
 const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
 
@@ -80,6 +57,12 @@ const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
+
+
+// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
+function participantsFieldByMode(md = 'stroke') {
+  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
     ? roomNames[num - 1].trim()
@@ -251,9 +234,17 @@ export function PlayerProvider({ children }) {
     const ref = doc(db, 'events', eventId);
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
+      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
+      setMode(md);
 
-      // ✅ 모드 분리 저장(participantsStroke/participantsFourball) 우선 반영
-      const rawParts = pickParticipantsByMode(data);
+      // ✅ 모드별 참가자 리스트(스트로크/포볼) 분리 저장 지원
+      // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
+      // - (호환) 없으면 기존 participants를 사용
+      const f = participantsFieldByMode(md);
+      const rawParts =
+        (Array.isArray(data?.[f]) && data[f].length)
+          ? data[f]
+          : (Array.isArray(data.participants) ? data.participants : []);
       const partArr = rawParts.map((p, i) => {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
@@ -272,9 +263,6 @@ export function PlayerProvider({ children }) {
         };
       });
       setParticipants(partArr);
-
-      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
-      setMode(md);
 
       const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
       const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
@@ -403,16 +391,9 @@ export function PlayerProvider({ children }) {
     });
 
     try {
-      const modeNorm = normalizeMode(mode);
-      const modeField = modeNorm === 'fourball' ? 'participantsFourball' : 'participantsStroke';
       await updateDoc(
         eref,
-        sanitizeForFirestore({
-          // legacy(기존) + 모드별(신규) 동시 갱신
-          participants: cleaned,
-          [modeField]: cleaned,
-          participantsUpdatedAt: serverTimestamp(),
-        })
+        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
       );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });
@@ -537,8 +518,15 @@ export function PlayerProvider({ children }) {
           const eref = doc(db, 'events', eventId);
           const snap = await tx.get(eref);
           const data = snap.exists() ? (snap.data() || {}) : {};
-          // ✅ 모드 분리 저장(participantsStroke/participantsFourball) 우선 반영
-          const parts = pickParticipantsByMode(data).map((p, i) => ({
+          // ★ FIX: 모드별 분리 저장(participantsFourball / participantsStroke) 기준으로 읽고/쓰기
+          // - participantsFourball 값이 존재하는 이벤트에서는 participants만 갱신하면
+          //   onSnapshot이 participantsFourball을 다시 덮어써서 "배정이 풀리는" 현상이 발생합니다.
+          const fieldParts = participantsFieldByMode(mode);
+          const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
+            ? data[fieldParts]
+            : (data.participants || []);
+
+          const parts = (baseParts || []).map((p, i) => ({
             ...((p && typeof p === 'object') ? p : {}),
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
@@ -564,13 +552,12 @@ export function PlayerProvider({ children }) {
             return p;
           });
 
-          const modeNorm = normalizeMode(data.mode);
-          const modeField = modeNorm === 'fourball' ? 'participantsFourball' : 'participantsStroke';
           tx.set(
             eref,
             sanitizeForFirestore({
               participants: next,
-              [modeField]: next,
+              [fieldParts]: next,
+              participantsUpdatedAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             }),
             { merge: true }

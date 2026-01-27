@@ -1,7 +1,7 @@
 // /src/AppRouter.jsx
 
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PlayerProvider }        from './contexts/PlayerContext';
 import { EventProvider }         from './contexts/EventContext';
@@ -33,11 +33,74 @@ function RedirectPlayerHomeNoLogin() {
   return <Navigate to={`/player/home/${eventId || ''}`} replace />;
 }
 
+// ─────────────────────────────────────────────────────────────
+// PWA(아이폰 홈화면 추가)에서 시작 경로가 항상 '/'로 고정되는 문제 대응
+// - 마지막으로 사용했던 경로를 저장해두고, PWA로 실행 시 '/' 또는 '/login'이면 그 경로로 자동 이동
+// - 참가자 전용 아이콘을 만들고 싶으면 Safari에서 '/pwa-player.html' 접속 후 홈화면에 추가하면 됨.
+// ─────────────────────────────────────────────────────────────
+function isStandalonePWA() {
+  try {
+    return (
+      (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      // iOS Safari
+      (typeof window !== 'undefined' && window.navigator && window.navigator.standalone === true)
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
+function PwaRouteRememberer() {
+  const location = useLocation();
+
+  useEffect(() => {
+    try {
+      const full = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+      localStorage.setItem('agm.lastRoute', full);
+      if (location.pathname.startsWith('/player')) {
+        localStorage.setItem('agm.lastMode', 'player');
+      } else if (location.pathname.startsWith('/admin') || location.pathname.startsWith('/login')) {
+        localStorage.setItem('agm.lastMode', 'admin');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [location.pathname, location.search, location.hash]);
+
+  return null;
+}
+
+function PwaStartRedirect() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isStandalonePWA()) return;
+    // PWA는 start_url 때문에 '/' 또는 '/login'으로 뜨는 경우가 많음 → lastRoute로 되돌림
+    if (location.pathname !== '/' && location.pathname !== '/login') return;
+
+    let last = null;
+    try {
+      last = localStorage.getItem('agm.lastRoute');
+    } catch (e) {
+      last = null;
+    }
+
+    if (last && last !== location.pathname) {
+      navigate(last, { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  return null;
+}
+
 export default function AppRouter() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <EventProvider>
+          <PwaRouteRememberer />
+          <PwaStartRedirect />
           <Routes>
             <Route path="/" element={<Navigate to="/login?role=admin" replace />} />
             <Route path="/login" element={<LoginScreen />} />
