@@ -17,6 +17,16 @@ const TIMINGS = {
   spinDuringPartnerPick: 1800,
 };
 
+// ✅ room 값 판정 유틸
+// - Number(null) === 0 이라서 Number.isFinite(Number(null))가 true가 되는 문제 방지
+// - room은 1 이상의 유효한 방 번호일 때만 roomNumber로 인정
+function toRoomNumber(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (n < 1) return null;
+  return n;
+}
+
 async function ensureAuthReady() {
   try {
     if (!auth?.currentUser) {
@@ -38,7 +48,8 @@ async function ensureMembership(eventId, myRoom) {
     if (!uid || !eventId) return;
 
     const payload = { joinedAt: serverTimestamp() };
-    if (Number.isFinite(Number(myRoom))) payload.room = Number(myRoom);
+    const rn = toRoomNumber(myRoom);
+    if (rn != null) payload.room = rn;
 
     try {
       const code =
@@ -105,7 +116,7 @@ function FourballLikeSelect() {
 
 function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
-  const { eventId: playerEventId, setEventId, isEventClosed, playerHydrated } = useContext(PlayerContext);
+  const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
@@ -152,24 +163,20 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
   useEffect(() => {
-    if (!playerHydrated) return;
     const r = Number(participant?.room);
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [participant?.room, playerHydrated]);
+  }, [participant?.room]);
 
-  const done = (!!playerHydrated && Number.isFinite(Number(participant?.room))) || Number.isFinite(Number(optimisticRoom));
-  const assignedRoom = Number.isFinite(Number(participant?.room))
-    ? Number(participant?.room)
-    : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
+  const participantRoom = toRoomNumber(participant?.room);
+  const optimisticRoomNum = toRoomNumber(optimisticRoom);
+  const done = participantRoom != null || optimisticRoomNum != null;
+  const assignedRoom = participantRoom != null ? participantRoom : (optimisticRoomNum != null ? optimisticRoomNum : null);
 
   useEffect(() => {
-    if (!playerHydrated) return;
     const eid = playerEventId || ctxEventId || urlEventId;
-    const r = Number(assignedRoom);
-    if (eid && Number.isFinite(r) && r >= 1) {
-      ensureMembership(eid, r);
-    }
-  }, [assignedRoom, playerEventId, ctxEventId, urlEventId, playerHydrated]);
+    const r = toRoomNumber(assignedRoom);
+    if (eid && r != null) ensureMembership(eid, r);
+  }, [assignedRoom, playerEventId, ctxEventId, urlEventId]);
 
   const [showTeam, setShowTeam] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
@@ -284,9 +291,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   useEffect(() => {
-    if (Number.isFinite(Number(participant?.room))) {
-      saveMyRoom(Number(participant.room));
-    }
+    const r = toRoomNumber(participant?.room);
+    if (r != null) saveMyRoom(r);
   }, [participant?.room]);
 
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
@@ -319,8 +325,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       await sleep(500);
       setIsAssigning(false);
       if (participant?.room != null) {
-        const roomLabel = getLabel(participant.room);
-        saveMyRoom(Number(participant.room));
+        const r = toRoomNumber(participant.room);
+        const roomLabel = getLabel(r != null ? r : participant.room);
+        if (r != null) saveMyRoom(r);
         setShowTeam(false);
         setFlowStep('show');
         alert(`${participant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
@@ -367,12 +374,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       }
 
       // snapshot 반영 지연 대비: 방배정 결과를 UI에 즉시 반영하여 중복 클릭 방지
-      const rn = Number(roomNumber);
-      if (Number.isFinite(rn) && rn >= 1) setOptimisticRoom(rn);
-
-      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
-
-      await ensureMembership(eid, Number(roomNumber));
+      const rn = toRoomNumber(roomNumber);
+      if (rn != null) setOptimisticRoom(rn);
+      if (rn != null) saveMyRoom(rn);
+      await ensureMembership(eid, rn);
 
       setFlowStep('afterAssign');
 
