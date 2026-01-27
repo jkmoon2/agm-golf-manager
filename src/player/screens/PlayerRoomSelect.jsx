@@ -105,7 +105,7 @@ function FourballLikeSelect() {
 
 function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
-  const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
+  const { eventId: playerEventId, setEventId, isEventClosed, playerHydrated } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
@@ -152,22 +152,24 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
   useEffect(() => {
+    if (!playerHydrated) return;
     const r = Number(participant?.room);
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [participant?.room]);
+  }, [participant?.room, playerHydrated]);
 
-  const done = Number.isFinite(Number(participant?.room)) || Number.isFinite(Number(optimisticRoom));
+  const done = (!!playerHydrated && Number.isFinite(Number(participant?.room))) || Number.isFinite(Number(optimisticRoom));
   const assignedRoom = Number.isFinite(Number(participant?.room))
     ? Number(participant?.room)
     : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
 
   useEffect(() => {
+    if (!playerHydrated) return;
     const eid = playerEventId || ctxEventId || urlEventId;
     const r = Number(assignedRoom);
     if (eid && Number.isFinite(r) && r >= 1) {
       ensureMembership(eid, r);
     }
-  }, [assignedRoom, playerEventId, ctxEventId, urlEventId]);
+  }, [assignedRoom, playerEventId, ctxEventId, urlEventId, playerHydrated]);
 
   const [showTeam, setShowTeam] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);

@@ -1,5 +1,5 @@
 // /src/contexts/PlayerContext.jsx
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useRef } from 'react';
 import {
   doc,
   setDoc,
@@ -183,6 +183,9 @@ export function PlayerProvider({ children }) {
   const [participant, setParticipant]     = useState(null);
   const [allowTeamView, setAllowTeamView] = useState(false);
   const [authCode, setAuthCode]           = useState('');
+  const [playerHydrated, setPlayerHydrated] = useState(false); // ✅ 서버 스냅샷 1회 이상 로드됨(캐시 제외)
+  const playerHydratedRef = useRef(false);
+
 
   const { pathname } = useLocation();
 
@@ -212,6 +215,12 @@ export function PlayerProvider({ children }) {
 
   useEffect(() => {
     try { if (eventId) localStorage.setItem('eventId', eventId); } catch {}
+  }, [eventId]);
+
+  useEffect(() => {
+    // ✅ eventId 변경 시 hydration 리셋(캐시로 STEP1이 잠기는 문제 방지)
+    playerHydratedRef.current = false;
+    setPlayerHydrated(false);
   }, [eventId]);
 
   useEffect(() => {
@@ -302,6 +311,14 @@ export function PlayerProvider({ children }) {
       } else {
         setParticipant(null);
       }
+
+      // ✅ 서버 스냅샷 1회 이상 로드 완료 플래그(캐시 제외)
+      // - iOS PWA/Safari에서 캐시 스냅샷(예전 room 값) 먼저 반영되는 케이스 방지
+      if (!playerHydratedRef.current && snap?.metadata?.fromCache === false) {
+        playerHydratedRef.current = true;
+        setPlayerHydrated(true);
+      }
+
     });
     return () => unsub();
   }, [eventId, authCode]);
@@ -333,6 +350,44 @@ export function PlayerProvider({ children }) {
     });
     return () => unsub();
   }, [eventId]);
+
+  // ✅ participants 변경 시 내 participant를 항상 participants 기준으로 재계산(덮어쓰기)
+  // - 캐시/이전 room 값 때문에 STEP1이 '배정 완료'로 잠기는 현상 방지
+  // - scores 서브컬렉션 구독으로 participants가 부분 갱신될 때 participant도 같이 동기화
+  useEffect(() => {
+    if (!eventId) {
+      setParticipant(null);
+      return;
+    }
+
+    const norm = (v) => String(v ?? '').trim();
+
+    let found = null;
+    if (authCode && norm(authCode)) {
+      found = (participants || []).find((p) => norm(p?.authCode) === norm(authCode)) || null;
+    } else {
+      const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+      if (authedThisEvent) {
+        let idCached = '';
+        let nickCache = '';
+        try {
+          idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
+          nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
+        } catch {}
+        if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+        if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+
+        if (idCached) found = (participants || []).find((p) => normId(p.id) === idCached) || null;
+        if (!found && nickCache) found = (participants || []).find((p) => normName(p.nickname) === nickCache) || null;
+      }
+    }
+
+    setParticipant((prev) => {
+      if (!found) return null;
+      // ✅ participants(=서버 스냅샷 기반) 값이 항상 우선
+      return { ...found };
+    });
+  }, [participants, authCode, eventId]);
 
   // participants 저장 (화이트리스트 + updateDoc)
   async function writeParticipants(next) {
@@ -623,6 +678,7 @@ export function PlayerProvider({ children }) {
         eventId, setEventId,
         mode, roomCount, roomNames, rooms,
         participants, participant,
+        playerHydrated,
         setParticipant,
         authCode, setAuthCode,
         allowTeamView, setAllowTeamView,
