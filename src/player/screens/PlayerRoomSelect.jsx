@@ -38,7 +38,7 @@ async function ensureMembership(eventId, myRoom) {
     if (!uid || !eventId) return;
 
     const payload = { joinedAt: serverTimestamp() };
-    if (Number.isFinite(Number(myRoom))) payload.room = Number(myRoom);
+    if (Number.isFinite(Number(myRoom)) && Number(myRoom) >= 1) payload.room = Number(myRoom);
 
     try {
       const code =
@@ -289,7 +289,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   useEffect(() => {
-    if (Number.isFinite(Number(participant?.room))) {
+    if (hasServerRoom) {
       saveMyRoom(Number(participant.room));
     }
   }, [participant?.room]);
@@ -375,7 +375,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       const rn = Number(roomNumber);
       if (Number.isFinite(rn) && rn >= 1) setOptimisticRoom(rn);
 
-      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
+      if (Number.isFinite(Number(roomNumber)) && Number(roomNumber) >= 1) saveMyRoom(Number(roomNumber));
 
       await ensureMembership(eid, Number(roomNumber));
 

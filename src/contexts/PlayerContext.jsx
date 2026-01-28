@@ -244,8 +244,6 @@ export function PlayerProvider({ children }) {
 
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.data() || {};
-      setEventData(data);
-
       // 모드 판별
       const md = ((((data.mode || '').toLowerCase().includes('four')) || ((data.gameMode || '').toLowerCase().includes('four')) || ((data.type || '').toLowerCase().includes('four')))
         ? 'fourball'
@@ -307,7 +305,8 @@ export function PlayerProvider({ children }) {
           markEventAuthed(eventId, me.authCode, me);
         } catch { }
       } else {
-        setParticipant(null);
+        // NOTE: keep previous participant to avoid Safari/admin-embed flicker
+        // setParticipant(null);
       }
     });
 
