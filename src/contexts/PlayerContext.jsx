@@ -1,5 +1,5 @@
 // /src/contexts/PlayerContext.jsx
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useRef } from 'react';
 import {
   doc,
   setDoc,
@@ -184,6 +184,14 @@ export function PlayerProvider({ children }) {
   const [allowTeamView, setAllowTeamView] = useState(false);
   const [authCode, setAuthCode]           = useState('');
 
+  const modeRef = useRef('stroke');
+  const activeParticipantsFieldRef = useRef(participantsFieldByMode('stroke'));
+
+  useEffect(() => {
+    modeRef.current = mode;
+    activeParticipantsFieldRef.current = participantsFieldByMode(mode);
+  }, [mode]);
+
   const { pathname } = useLocation();
 
   useEffect(() => {
@@ -207,7 +215,7 @@ export function PlayerProvider({ children }) {
     if (!eventId) return;
     try {
       const code = sessionStorage.getItem(`authcode_${eventId}`) || '';
-      setAuthCode(code);
+      setAuthCode(String(code || '').trim());
     } catch {}
   }, [eventId]);
 
@@ -225,92 +233,86 @@ export function PlayerProvider({ children }) {
           sessionStorage.removeItem(`nickname_${eventId}`);
         }
       } catch {}
-      setParticipant(null);
     }
   }, [authCode, eventId]);
 
   // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
+
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
-    const unsub = onSnapshot(ref, (snap) => {
-      const data = snap.exists() ? (snap.data() || {}) : {};
-      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
-      setMode(md);
 
-      // ✅ Admin 화면과 동일하게 기본은 events/{eventId}.participants 를 기준으로 읽는다.
-      // - participantsStroke/participantsFourball 은 과거/실험용으로 남아 있을 수 있으며,
-      //   Admin(방배정) 수정이 participants 에만 반영되는 경우가 있어서 Player 쪽에서 우선순위를 낮춘다.
-      // - (호환) participants 가 비어있고 모드별 필드만 존재하는 구버전 이벤트는 fallback 한다.
-      const f = participantsFieldByMode(md);
-      const rawParts =
-        (Array.isArray(data.participants) && data.participants.length)
-          ? data.participants
-          : ((Array.isArray(data?.[f]) && data[f].length)
-              ? data[f]
-              : (Array.isArray(data.participants) ? data.participants : []));
-      const partArr = rawParts.map((p, i) => {
-        // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
-        const scoreRaw = p?.score;
-        const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
+    const unsub = onSnapshot(ref, (snap) => {
+      const data = snap.data() || {};
+      setEventData(data);
+
+      // 모드 판별
+      const md = ((((data.mode || '').toLowerCase().includes('four')) || ((data.gameMode || '').toLowerCase().includes('four')) || ((data.type || '').toLowerCase().includes('four')))
+        ? 'fourball'
+        : 'stroke');
+      setMode(md);
+      modeRef.current = md;
+      activeParticipantsFieldRef.current = participantsFieldByMode(md);
+
+      setRoomCount(Number(data.roomCount) || 4);
+      setRoomNames(Array.isArray(data.roomNames) ? data.roomNames : []);
+      setRooms(Array.isArray(data.rooms) ? data.rooms : []);
+      setAllowTeamView(Boolean(data.allowTeamView));
+
+      // 모드 전용 participants가 존재하면 그걸 우선 사용 (배정/파트너 정보가 "풀려" 보이는 현상 방지)
+      const fieldParts = participantsFieldByMode(md);
+      const rawParts = (Array.isArray(data[fieldParts]) && data[fieldParts].length)
+        ? data[fieldParts]
+        : (data.participants || []);
+
+      const partArr = (Array.isArray(rawParts) ? rawParts : []).map((p, idx) => {
+        const id = normId(p?.id ?? p?.pid ?? idx);
         return {
-          ...((p && typeof p === 'object') ? p : {}),
-          id:       normId(p?.id ?? i),
-          nickname: normName(p?.nickname),
-          handicap: toInt(p?.handicap, 0),
-          group:    toInt(p?.group, 0),
-          authCode: (p?.authCode ?? '').toString(),
-          // roomNumber(구버전) 호환
-          room:     (p?.room ?? p?.roomNumber) ?? null,
-          partner:  p?.partner != null ? normId(p.partner) : null,
-          score:    scoreVal,
-          selected: !!p?.selected,
+          id,
+          nickname: (p?.nickname ?? p?.name ?? '').toString(),
+          group: Number(p?.group ?? p?.jo ?? p?.team ?? 0) || 0,
+          gHandicap: Number(p?.gHandicap ?? p?.gh ?? p?.g핸디 ?? 0) || 0,
+          room: (p?.room ?? p?.roomNumber ?? null),
+          roomNumber: (p?.roomNumber ?? p?.room ?? null),
+          partner: (p?.partner != null ? normId(p.partner) : (p?.partnerId != null ? normId(p.partnerId) : null)),
+          authCode: String(p?.authCode ?? '').trim(),
+          score: Number(p?.score ?? 0) || 0,
+          scoreDelta: Number(p?.scoreDelta ?? p?.delta ?? 0) || 0,
         };
       });
+
       setParticipants(partArr);
 
-      const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
-      const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
-      setRoomCount(rc);
-      setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
-      setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
-
+      // 나 찾기 (authCode 우선)
+      const ac = String(authCode || '').trim();
       let me = null;
-      if (authCode && authCode.trim()) {
-        me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
+      if (ac) {
+        me = partArr.find((p) => String(p.authCode || '').trim() === ac) || null;
       } else {
-        const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
-        if (authedThisEvent) {
-          let idCached  = '';
-          let nickCache = '';
-          try {
-            idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
-            nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
-          } catch {}
-          if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
-          if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
-          if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
-          if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
-        }
+        // authCode가 없더라도, 이전 인증/선택 정보가 있으면 복구
+        try {
+          const wasAuthed = sessionStorage.getItem(`auth_${eventId}`) === '1';
+          if (wasAuthed) {
+            const myId = sessionStorage.getItem(`myId_${eventId}`) || localStorage.getItem('myId') || '';
+            const myNick = sessionStorage.getItem(`myNick_${eventId}`) || localStorage.getItem('nickname') || '';
+            me = partArr.find((p) => (myId && p.id === myId) || (myNick && p.nickname === myNick)) || null;
+          }
+        } catch { }
       }
 
       if (me) {
-        setParticipant(me);
-        localStorage.setItem('myId', normId(me.id));
-        localStorage.setItem('nickname', normName(me.nickname));
+        setParticipant({ ...me });
         try {
-          sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
-          sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
-        } catch {}
-        if (me.authCode) setAuthCode(me.authCode);
-        markEventAuthed(eventId, me.authCode, me);
+          if (me.authCode) setAuthCode(String(me.authCode || '').trim());
+          markEventAuthed(eventId, me.authCode, me);
+        } catch { }
       } else {
         setParticipant(null);
       }
     });
+
     return () => unsub();
   }, [eventId, authCode]);
-
   // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)
   useEffect(() => {
     if (!eventId) return;
@@ -345,6 +347,7 @@ export function PlayerProvider({ children }) {
     await ensureAuthReady();
 
     const eref = doc(db, 'events', eventId);
+    const fieldParts = activeParticipantsFieldRef.current || participantsFieldByMode(modeRef.current || mode);
 
     const exists = (await getDoc(eref)).exists();
     if (DEBUG) exposeDiag({ eventId, eventExists: exists });
@@ -353,7 +356,7 @@ export function PlayerProvider({ children }) {
       throw new Error('Event document does not exist');
     }
 
-    const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','authCode','selected'];
+    const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','partnerId','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
       const out = {};
       for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
@@ -388,9 +391,13 @@ export function PlayerProvider({ children }) {
         out.partner = Number.isFinite(n) ? n : String(out.partner);
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
-
       // roomNumber 동기화(표시용)
+      if (out.room == null && out.roomNumber != null) out.room = out.roomNumber;
       if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
+
+      // partnerId 동기화(표시용/호환)
+      if (out.partner == null && out.partnerId != null) out.partner = out.partnerId;
+      if (out.partnerId == null && out.partner != null) out.partnerId = out.partner;
 
       return out;
     });
@@ -398,7 +405,7 @@ export function PlayerProvider({ children }) {
     try {
       await updateDoc(
         eref,
-        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
+        sanitizeForFirestore({ participants: cleaned, [fieldParts]: cleaned, participantsUpdatedAt: serverTimestamp() })
       );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });
@@ -526,7 +533,7 @@ export function PlayerProvider({ children }) {
           // ★ FIX: 모드별 분리 저장(participantsFourball / participantsStroke) 기준으로 읽고/쓰기
           // - participantsFourball 값이 존재하는 이벤트에서는 participants만 갱신하면
           //   onSnapshot이 participantsFourball을 다시 덮어써서 "배정이 풀리는" 현상이 발생합니다.
-          const fieldParts = participantsFieldByMode(mode);
+          const fieldParts = activeParticipantsFieldRef.current || participantsFieldByMode(modeRef.current || mode);
           const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
             ? data[fieldParts]
             : (data.participants || []);
