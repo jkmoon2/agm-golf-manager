@@ -38,8 +38,7 @@ async function ensureMembership(eventId, myRoom) {
     if (!uid || !eventId) return;
 
     const payload = { joinedAt: serverTimestamp() };
-    const n = Number(myRoom);
-    if (Number.isFinite(n) && n >= 1) payload.room = n;
+    if (Number.isFinite(Number(myRoom))) payload.room = Number(myRoom);
 
     try {
       const code =
@@ -106,7 +105,7 @@ function FourballLikeSelect() {
 
 function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
-  const { eventId: playerEventId, setEventId, isEventClosed, authCode, membershipRoom } = useContext(PlayerContext);
+  const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
@@ -152,84 +151,49 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   // 운영자 세션에서 참가자 탭을 동시에 사용할 때 UI가 바로 갱신되지 않는 케이스 대비
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
-  useEffect(() => {
-    const r = Number(participant?.room);
-    if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [participant?.room]);
-
-  const toRoom = (v) => {
-    const n = Number(v);
-    return Number.isFinite(n) && n >= 1 ? n : null;
-  };
-
-  const resolvedEventId = playerEventId || ctxEventId || urlEventId;
-
-  const participantsLoaded = Array.isArray(participants) && participants.length > 0;
-
-  const normalizedAuthCode = useMemo(() => {
-    const code =
-      authCode ||
-      (resolvedEventId
-        ? sessionStorage.getItem(`authcode_${resolvedEventId}`) ||
-          localStorage.getItem(`authcode_${resolvedEventId}`)
-        : '') ||
-      '';
-    return String(code || '').trim().toUpperCase();
-  }, [authCode, resolvedEventId]);
-
-  const meFromList = useMemo(() => {
-    if (!participantsLoaded) return null;
-    if (normalizedAuthCode) {
-      const found = participants.find(
-        (p) => String(p?.authCode || '').trim().toUpperCase() === normalizedAuthCode
-      );
-      if (found) return found;
-    }
-    if (participant?.id != null) {
-      const found = participants.find((p) => String(p.id) === String(me.id));
-      if (found) return found;
-    }
-    if (participant?.nickname) {
-      const meNick = String(participant.nickname || '').normalize('NFC').trim();
-      const found = participants.find(
-        (p) => String(p?.nickname || '').normalize('NFC').trim() === meNick
-      );
-      if (found) return found;
-    }
-    return null;
-  }, [participantsLoaded, participants, participant?.id, participant?.nickname, normalizedAuthCode]);
-
-  const me = meFromList || participant || null;
-
-  const assignedRoom =
-    toRoom(me?.room) ?? toRoom(optimisticRoom) ?? toRoom(membershipRoom);
-  const done = assignedRoom != null;
-
-  useEffect(() => {
-    const eid = resolvedEventId;
-    const r = toRoom(assignedRoom);
-    if (eid && r != null) {
-      ensureMembership(eid, r);
-    }
-  }, [assignedRoom, resolvedEventId]);
-
   const [showTeam, setShowTeam] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [flowStep, setFlowStep] = useState('idle');
 
+  useEffect(() => {
+    const r = Number(participant?.room);
+    if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
+    // 서버(room)가 비어있는데 optimisticRoom만 남아있으면(가장 흔한 버그) 자동으로 제거
+    if (!(Number.isFinite(r) && r >= 1) && !isAssigning) setOptimisticRoom(null);
+  }, [participant?.room, isAssigning]);
+
+  const hasServerRoom = Number.isFinite(Number(participant?.room)) && Number(participant?.room) >= 1;
+  const hasServerPartner = variant === 'fourball' ? !!participant?.partner : true;
+  const serverDone = hasServerRoom && hasServerPartner;
+  const hasOptimistic = Number.isFinite(Number(optimisticRoom)) && Number(optimisticRoom) >= 1;
+
+  // 완료 상태는 "서버 확인" 기준으로만 표시(로컬 optimistic 값으로 완료 표시되면 Admin과 불일치 발생)
+  const done = serverDone;
+  const assignedRoom = hasServerRoom
+    ? Number(participant?.room)
+    : ((!serverDone && isAssigning && hasOptimistic) ? Number(optimisticRoom) : null);
+
+  useEffect(() => {
+    const eid = playerEventId || ctxEventId || urlEventId;
+    const r = Number(participant?.room);
+    // membership은 서버 반영된 room 기준으로만 생성
+    if (eid && Number.isFinite(r) && r >= 1) ensureMembership(eid, r);
+  }, [participant?.room, playerEventId, ctxEventId, urlEventId]);
+
+  const participantsLoaded = Array.isArray(participants) && participants.length > 0;
   const isMeReady = useMemo(() => {
-    if (!me?.id) return false;
+    if (!participant?.id) return false;
     if (!participantsLoaded) return false;
-    return participants.some((p) => String(p.id) === String(me.id));
-  }, [participantsLoaded, participants, me?.id]);
+    return participants.some((p) => String(p.id) === String(participant.id));
+  }, [participantsLoaded, participants, participant?.id]);
   const isSyncing = participantsLoaded && !isMeReady;
 
   useEffect(() => {
-    if (assignedRoom != null && flowStep === 'idle') {
+    if (participant?.room != null && flowStep === 'idle') {
       setShowTeam(false);
       setFlowStep('show');
     }
-  }, [assignedRoom, flowStep]);
+  }, [participant?.room, flowStep]);
 
   const getLabel = (num) =>
     Array.isArray(roomNames) && roomNames[num - 1]?.trim()
@@ -237,17 +201,17 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       : `${num}번방`;
 
   const compactMembers = useMemo(() => {
-    if (!done || assignedRoom == null || !me) return [];
+    if (!done || assignedRoom == null || !participant) return [];
     if (variant === 'fourball') {
-      const mine = participants.find((p) => String(p.id) === String(me.id)) || me;
+      const mine = participants.find((p) => String(p.id) === String(participant.id));
       const mate = participants.find((p) => String(mine?.partner || '') === String(p.id));
       const pair = [mine, mate].filter(Boolean);
       pair.sort((a, b) => (Number(a?.group || 99) - Number(b?.group || 99)));
       return pair;
     }
-    const mine = participants.find((p) => String(p.id) === String(me.id)) || me;
-    return [mine].filter(Boolean);
-  }, [done, assignedRoom, participants, me, variant]);
+    const me = participants.find((p) => String(p.id) === String(participant.id));
+    return [me].filter(Boolean);
+  }, [done, assignedRoom, participants, participant, variant]);
 
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
@@ -298,12 +262,12 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const roomCount = useMemo(() => (Array.isArray(roomNames) ? roomNames.length : 0), [roomNames]);
   const isValidStrokeRoom = (roomNo) => {
     if (variant !== 'stroke' || !roomNo) return true;
-    const myGroup = Number(me?.group) || 0;
+    const myGroup = Number(participant?.group) || 0;
     const sameGroupExists = participants.some(
       (p) =>
         Number(p.room) === Number(roomNo) &&
         Number(p.group) === myGroup &&
-        String(p.id) !== String(me?.id)
+        String(p.id) !== String(participant?.id)
     );
     const currentCount = participants.filter((p) => Number(p.room) === Number(roomNo)).length;
     const isFull = currentCount >= 4;
@@ -325,10 +289,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   useEffect(() => {
-    if (assignedRoom != null) {
-      saveMyRoom(Number(assignedRoom));
+    if (Number.isFinite(Number(participant?.room))) {
+      saveMyRoom(Number(participant.room));
     }
-  }, [assignedRoom]);
+  }, [participant?.room]);
 
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
     try {
@@ -340,7 +304,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   const handleAssign = async () => {
-    if (!me?.id) return;
+    if (!participant?.id) return;
     if (done || isAssigning) return;
 
     if (!isMeReady) {
@@ -355,16 +319,16 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       return;
     }
 
-    if (variant === 'fourball' && Number(me?.group) === 2) {
+    if (variant === 'fourball' && Number(participant?.group) === 2) {
       setIsAssigning(true);
       await sleep(500);
       setIsAssigning(false);
-      if (assignedRoom != null) {
-        const roomLabel = getLabel(Number(assignedRoom));
-        saveMyRoom(Number(assignedRoom));
+      if (participant?.room != null) {
+        const roomLabel = getLabel(participant.room);
+        saveMyRoom(Number(participant.room));
         setShowTeam(false);
         setFlowStep('show');
-        alert(`${me?.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
+        alert(`${participant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
       } else {
         alert('아직 방배정이 진행되지 않았습니다.\n1조 참가자가 방/팀원을 선택하면 확인 가능합니다.');
       }
@@ -385,7 +349,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       let partnerNickname = null;
 
       while (attempt < 3) {
-        const res = await onAssign(me.id);
+        const res = await onAssign(participant.id);
         roomNumber = res?.roomNumber ?? null;
         partnerNickname = res?.partnerNickname ?? null;
 
@@ -411,9 +375,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       const rn = Number(roomNumber);
       if (Number.isFinite(rn) && rn >= 1) setOptimisticRoom(rn);
 
-      if (Number.isFinite(rn) && rn >= 1) saveMyRoom(rn);
+      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
 
-      await ensureMembership(eid, rn);
+      await ensureMembership(eid, Number(roomNumber));
 
       setFlowStep('afterAssign');
 
@@ -422,15 +386,15 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
       const roomLabel = getLabel(roomNumber);
       if (variant === 'fourball') {
-        alert(`${me.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
+        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
         if (partnerNickname) {
           setIsAssigning(true);
           await sleep(TIMINGS.spinDuringPartnerPick);
           setIsAssigning(false);
-          alert(`${me.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+          alert(`${participant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
         }
       } else {
-        alert(`${me.nickname}님은 ${roomLabel}에 배정되었습니다.`);
+        alert(`${participant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
       }
 
       setShowTeam(false);
@@ -455,7 +419,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const sumHd = (list) => list.reduce((s, p) => s + (Number(p?.handicap) || 0), 0);
 
   const assignBtnLabel =
-    (variant === 'fourball' && Number(me?.group) === 2) ? '방확인'
+    (variant === 'fourball' && Number(participant?.group) === 2) ? '방확인'
       : isEventClosed ? '종료됨'
       : !isMeReady ? '동기화 중…'
       : isAssigning ? '배정 중…'
@@ -493,10 +457,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       contentEditable={false}
       suppressContentEditableWarning
     >
-      {me?.nickname && (
+      {participant?.nickname && (
         <p className={styles.greeting}>
           <span className={styles.nickname} translate="no" contentEditable={false} style={guard}>
-            {me?.nickname}
+            {participant.nickname}
           </span>
           <span translate="no" contentEditable={false} style={guard}>님, 안녕하세요!</span>
         </p>

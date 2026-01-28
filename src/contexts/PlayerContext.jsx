@@ -1,5 +1,5 @@
 // /src/contexts/PlayerContext.jsx
-import React, { createContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
   setDoc,
@@ -7,15 +7,15 @@ import {
   onSnapshot,
   runTransaction,
   serverTimestamp,
-  updateDoc,        // â updateë§ ì¬ì© (create ê¸ì§)
-  getDoc,           // â ì´ë²¤í¸ ë¬¸ì ì¡´ì¬ íì¸
-  collection,       // â ADD: scores êµ¬ëì©
+  updateDoc,        // ✅ update만 사용 (create 금지)
+  getDoc,           // ✅ 이벤트 문서 존재 확인
+  collection,       // ★ ADD: scores 구독용
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useLocation } from 'react-router-dom';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 
-// (ì í) ë¨ì ìë import â ì¬ì©íì§ ììë ë¹ë ê°ë¥í ìíë¼ë©´ ê·¸ëë¡ ëìë ë©ëë¤.
+// (선택) 남아 있던 import — 사용하지 않아도 빌드 가능한 상태라면 그대로 두셔도 됩니다.
 // import { pickRoomForStroke } from '../player/logic/assignStroke';
 import {
   pickRoomAndPartnerForFourball,
@@ -24,8 +24,8 @@ import {
 
 export const PlayerContext = createContext(null);
 
-// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-// â ì½ì ì§ë¨ ëêµ¬ (ì¼ë ë²: ì½ììì localStorage.setItem('AGM_DEBUG','1'); í ìë¡ê³ ì¹¨)
+// ──────────────────────────────────────────────────────────────
+// ✅ 콘솔 진단 도구 (켜는 법: 콘솔에서 localStorage.setItem('AGM_DEBUG','1'); 후 새로고침)
 const DEBUG = (() => {
   try { return (localStorage.getItem('AGM_DEBUG') === '1'); } catch { return false; }
 })();
@@ -36,7 +36,7 @@ function exposeDiag(part) {
     if (DEBUG) console.log('[AGM][diag]', window.__AGM_DIAG);
   } catch {}
 }
-// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ──────────────────────────────────────────────────────────────
 
 const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
@@ -52,15 +52,14 @@ const FOURBALL_USE_TRANSACTION = (() => {
   }
 })();
 
-// â helpers â
+// ─ helpers ─
 const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
-const normCode = (v) => String(v ?? '').trim().toUpperCase();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 
 
-// â ëª¨ëë³ participants íë ì í(ì¤í¸ë¡í¬/í¬ë³¼ ë¶ë¦¬ ì ì¥)
+// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
 function participantsFieldByMode(md = 'stroke') {
   return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
 }
@@ -68,7 +67,7 @@ const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
     ? roomNames[num - 1].trim()
     : '';
-  return n || `${num}ë²ë°©`;
+  return n || `${num}번방`;
 };
 
 const cryptoRand = () =>
@@ -87,7 +86,7 @@ const shuffle = (arr) => {
 
 const pickUniform = (roomCount) => 1 + Math.floor(cryptoRand() * roomCount);
 
-// íì¬ participants ê¸°ì¤ì¼ë¡ ë°©ë³ ì¸ìì (1-indexed room)
+// 현재 participants 기준으로 방별 인원수 (1-indexed room)
 const countInRoom = (list, roomCount) => {
   const counts = Array.from({ length: roomCount }, () => 0);
   list.forEach(p => {
@@ -97,7 +96,7 @@ const countInRoom = (list, roomCount) => {
   return counts;
 };
 
-// ì¤í¸ë¡í¬ì©: âê°ì ì¡° ì¤ë³µ ê¸ì§ + ì ì 4ë¯¸ë§âì ë§ì¡±íë ë°© ëª©ë¡
+// 스트로크용: “같은 조 중복 금지 + 정원 4미만”을 만족하는 방 목록
 const validRoomsForStroke = (list, roomCount, me) => {
   const myGroup = toInt(me?.group, 0);
   const counts = countInRoom(list, roomCount);
@@ -112,7 +111,7 @@ const validRoomsForStroke = (list, roomCount, me) => {
   return rooms;
 };
 
-// í¬ë³¼ì©: âì ì 4ë¯¸ë§âì ë§ì¡±íë ë°© ëª©ë¡
+// 포볼용: “정원 4미만”을 만족하는 방 목록
 const validRoomsForFourball = (list, roomCount) => {
   const counts = countInRoom(list, roomCount);
   const rooms = [];
@@ -139,7 +138,7 @@ function sanitizeForFirestore(v) {
   return v;
 }
 
-// ì¸ì ì¸ì¦ íëê·¸
+// 세션 인증 플래그
 function markEventAuthed(id, code, meObj) {
   if (!id) return;
   try {
@@ -153,7 +152,7 @@ function markEventAuthed(id, code, meObj) {
   } catch {}
 }
 
-// â ëª¨ë  ì°ê¸° ì ì ì¸ì¦ ë³´ì¥ + ì½ì ì ê²ì© ë¸ì¶
+// ✅ 모든 쓰기 전에 인증 보장 + 콘솔 점검용 노출
 async function ensureAuthReady() {
   const auth = getAuth();
   if (!auth.currentUser) {
@@ -184,24 +183,18 @@ export function PlayerProvider({ children }) {
   const [participant, setParticipant]     = useState(null);
   const [allowTeamView, setAllowTeamView] = useState(false);
   const [authCode, setAuthCode]           = useState('');
-  const [membershipRoom, setMembershipRoom] = useState(null);
-  const authCodeRef = useRef('');
-
-  // authCodeê° ë°ëì´ë ì´ë²¤í¸ ì¤ëì· useEffectê° ì¬êµ¬ëëì§ ìëë¡ refë¡ ë³´ê´
-  useEffect(() => {
-    authCodeRef.current = authCode || '';
-  }, [authCode]);
 
   const { pathname } = useLocation();
 
   useEffect(() => {
-    // â URLì eventIdê° localStorageì ë¨ììë ìì  eventIdë¥¼ ë®ì´ì°ëë¡(ê°ì¥ íí ìì¸)
+    // ✅ URL의 eventId가 localStorage에 남아있는 예전 eventId를 덮어쓰도록(가장 흔한 원인)
     //   - /player/home/:eventId
     //   - /player/room/:eventId
     //   - /player/table/:eventId
     //   - /player/select/:eventId
     if (typeof pathname === 'string') {
-      const m = pathname.match(/\/player\/(home|room|table|select)\/([^/]+)/);
+      // player 라우트가 점수/결과 등으로 확장되면서 eventId 추출 범위를 넓힘
+      const m = pathname.match(/\/player\/(home|room|table|select|score|result|step1|step2|step4|step5)\/([^/]+)/);
       const urlEventId = m?.[2];
       if (urlEventId && urlEventId !== eventId) {
         setEventId(urlEventId);
@@ -232,10 +225,11 @@ export function PlayerProvider({ children }) {
           sessionStorage.removeItem(`nickname_${eventId}`);
         }
       } catch {}
+      setParticipant(null);
     }
   }, [authCode, eventId]);
 
-  // âââââââââ events/{eventId} êµ¬ë: participants ìë³¸ ë¡ë (ê¸°ì¡´ ì ì§)
+  // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
@@ -244,16 +238,19 @@ export function PlayerProvider({ children }) {
       const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
       setMode(md);
 
-      // â ëª¨ëë³ ì°¸ê°ì ë¦¬ì¤í¸(ì¤í¸ë¡í¬/í¬ë³¼) ë¶ë¦¬ ì ì¥ ì§ì
-      // - íì¬ ëª¨ëì í´ë¹íë participantsStroke/participantsFourballì ì°ì  ì¬ì©
-      // - (í¸í) ìì¼ë©´ ê¸°ì¡´ participantsë¥¼ ì¬ì©
+      // ✅ Admin 화면과 동일하게 기본은 events/{eventId}.participants 를 기준으로 읽는다.
+      // - participantsStroke/participantsFourball 은 과거/실험용으로 남아 있을 수 있으며,
+      //   Admin(방배정) 수정이 participants 에만 반영되는 경우가 있어서 Player 쪽에서 우선순위를 낮춘다.
+      // - (호환) participants 가 비어있고 모드별 필드만 존재하는 구버전 이벤트는 fallback 한다.
       const f = participantsFieldByMode(md);
       const rawParts =
-        (Array.isArray(data?.[f]) && data[f].length)
-          ? data[f]
-          : (Array.isArray(data.participants) ? data.participants : []);
+        (Array.isArray(data.participants) && data.participants.length)
+          ? data.participants
+          : ((Array.isArray(data?.[f]) && data[f].length)
+              ? data[f]
+              : (Array.isArray(data.participants) ? data.participants : []));
       const partArr = rawParts.map((p, i) => {
-        // â FIX: ì ì ê¸°ë³¸ê° 0 â null ë³´ì (ì´ê¸°í ì¤í´ ë°©ì§)
+        // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
         const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
         return {
@@ -263,7 +260,8 @@ export function PlayerProvider({ children }) {
           handicap: toInt(p?.handicap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
-          room:     p?.room ?? null,
+          // roomNumber(구버전) 호환
+          room:     (p?.room ?? p?.roomNumber) ?? null,
           partner:  p?.partner != null ? normId(p.partner) : null,
           score:    scoreVal,
           selected: !!p?.selected,
@@ -277,13 +275,9 @@ export function PlayerProvider({ children }) {
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
-      // ✅ authCode 최신값은 ref 기준(이 effect는 authCode에 의존하지 않음)
-      const currentAuthCode = (authCodeRef?.current ?? authCode ?? "");
-
       let me = null;
-      if (currentAuthCode && String(currentAuthCode).trim()) {
-        const key = normCode(currentAuthCode);
-        me = partArr.find((p) => normCode(p.authCode) === key) || null;
+      if (authCode && authCode.trim()) {
+        me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
         const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
         if (authedThisEvent) {
@@ -300,17 +294,8 @@ export function PlayerProvider({ children }) {
         }
       }
 
-      // keep participant stable (prevents iOS flicker)
-      setParticipant((prev) => {
-        if (me) return me;
-        if (prev?.id != null) {
-          const still = partArr.find((p) => normId(p?.id) === normId(prev.id));
-          if (still) return still;
-        }
-        return null;
-      });
-
       if (me) {
+        setParticipant(me);
         localStorage.setItem('myId', normId(me.id));
         localStorage.setItem('nickname', normName(me.nickname));
         try {
@@ -319,45 +304,14 @@ export function PlayerProvider({ children }) {
         } catch {}
         if (me.authCode) setAuthCode(me.authCode);
         markEventAuthed(eventId, me.authCode, me);
+      } else {
+        setParticipant(null);
       }
     });
     return () => unsub();
-  }, [eventId]);
-  // âââââââââ âââ ADD: memberships ë¬¸ì êµ¬ë â room fallback (iOS/ê´ë¦¬ì-ì°¸ê°ìí­ ìì í)
-  useEffect(() => {
-    if (!eventId) return;
-    let unsub = null;
-    let alive = true;
+  }, [eventId, authCode]);
 
-    (async () => {
-      try {
-        await ensureAuthReady();
-        if (!alive) return;
-        const auth = getAuth();
-        const uid = auth.currentUser?.uid;
-        if (!uid) return;
-
-        const mref = doc(db, 'events', eventId, 'memberships', uid);
-        unsub = onSnapshot(mref, (snap) => {
-          const data = snap.exists() ? (snap.data() || {}) : {};
-          const roomVal = (data.room ?? data.roomNumber ?? null);
-          setMembershipRoom(roomVal ?? null);
-        });
-      } catch (e) {
-        // ignore
-      }
-    })();
-
-    return () => {
-      alive = false;
-      try {
-        if (unsub) unsub();
-      } catch {}
-    };
-  }, [eventId]);
-
-
-  // âââââââââ âââ ADD: scores ìë¸ì»¬ë ì êµ¬ë â participantsì ì¦ì í©ì¹ê¸°(ADMINâPLAYER ì¤ìê°)
+  // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)
   useEffect(() => {
     if (!eventId) return;
     const colRef = collection(db, 'events', eventId, 'scores');
@@ -385,7 +339,7 @@ export function PlayerProvider({ children }) {
     return () => unsub();
   }, [eventId]);
 
-  // participants ì ì¥ (íì´í¸ë¦¬ì¤í¸ + updateDoc)
+  // participants 저장 (화이트리스트 + updateDoc)
   async function writeParticipants(next) {
     if (!eventId) return;
     await ensureAuthReady();
@@ -395,7 +349,7 @@ export function PlayerProvider({ children }) {
     const exists = (await getDoc(eref)).exists();
     if (DEBUG) exposeDiag({ eventId, eventExists: exists });
     if (!exists) {
-      alert('ì´ë²¤í¸ ë¬¸ìê° ì¡´ì¬íì§ ììµëë¤. ê´ë¦¬ììê² ë¬¸ìí´ ì£¼ì¸ì.');
+      alert('이벤트 문서가 존재하지 않습니다. 관리자에게 문의해 주세요.');
       throw new Error('Event document does not exist');
     }
 
@@ -405,7 +359,7 @@ export function PlayerProvider({ children }) {
       for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
       if (out.id === undefined) out.id = String(p?.id ?? i);
 
-      // ì«ì ì ê·í
+      // 숫자 정규화
       if (out.group !== undefined) {
         out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
       }
@@ -414,7 +368,7 @@ export function PlayerProvider({ children }) {
         out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
       }
       if (out.score !== undefined) {
-        // â FIX: ë¹ê°ì null ì ì§
+        // ★ FIX: 빈값은 null 유지
         if (out.score === '' || out.score == null) out.score = null;
         else {
           const n = Number(out.score);
@@ -435,7 +389,7 @@ export function PlayerProvider({ children }) {
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
 
-      // roomNumber ëê¸°í(íìì©)
+      // roomNumber 동기화(표시용)
       if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
 
       return out;
@@ -452,7 +406,7 @@ export function PlayerProvider({ children }) {
     }
   }
 
-  // â API (ìë³¸ ì ì§) â
+  // ─ API (원본 유지) ─
   async function joinRoom(roomNumber, id) {
     await ensureAuthReady();
     const rid = toInt(roomNumber, 0);
@@ -569,9 +523,9 @@ export function PlayerProvider({ children }) {
           const eref = doc(db, 'events', eventId);
           const snap = await tx.get(eref);
           const data = snap.exists() ? (snap.data() || {}) : {};
-          // â FIX: ëª¨ëë³ ë¶ë¦¬ ì ì¥(participantsFourball / participantsStroke) ê¸°ì¤ì¼ë¡ ì½ê³ /ì°ê¸°
-          // - participantsFourball ê°ì´ ì¡´ì¬íë ì´ë²¤í¸ììë participantsë§ ê°±ì íë©´
-          //   onSnapshotì´ participantsFourballì ë¤ì ë®ì´ì¨ì "ë°°ì ì´ íë¦¬ë" íìì´ ë°ìí©ëë¤.
+          // ★ FIX: 모드별 분리 저장(participantsFourball / participantsStroke) 기준으로 읽고/쓰기
+          // - participantsFourball 값이 존재하는 이벤트에서는 participants만 갱신하면
+          //   onSnapshot이 participantsFourball을 다시 덮어써서 "배정이 풀리는" 현상이 발생합니다.
           const fieldParts = participantsFieldByMode(mode);
           const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
             ? data[fieldParts]
@@ -582,7 +536,8 @@ export function PlayerProvider({ children }) {
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
-            room: p?.room ?? null,
+          // roomNumber(구버전) 호환
+          room: (p?.room ?? p?.roomNumber) ?? null,
             partner: p?.partner != null ? normId(p?.partner) : null,
           }));
 
@@ -674,7 +629,6 @@ export function PlayerProvider({ children }) {
         eventId, setEventId,
         mode, roomCount, roomNames, rooms,
         participants, participant,
-        membershipRoom,
         setParticipant,
         authCode, setAuthCode,
         allowTeamView, setAllowTeamView,

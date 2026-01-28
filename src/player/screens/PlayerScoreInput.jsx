@@ -78,12 +78,6 @@ const toNumberOrNull = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const toRoom = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 1 ? n : null;
-};
-const normCode = (v) => String(v ?? '').trim().toUpperCase();
-
 // 규칙 통과(memberships) 보조
 async function ensureMembership(eventId, myRoom) {
   try {
@@ -101,8 +95,6 @@ export default function PlayerScoreInput() {
     eventId: ctxEventId,
     participants = [],
     participant,
-    authCode,
-    membershipRoom,
     roomNames = [],
   } = useContext(PlayerContext);
 
@@ -138,36 +130,7 @@ export default function PlayerScoreInput() {
 
   const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
-  const normalizedAuthCode = useMemo(() => {
-    const code =
-      authCode ||
-      (eventId
-        ? sessionStorage.getItem(`authcode_${eventId}`) ||
-          localStorage.getItem(`authcode_${eventId}`)
-        : '') ||
-      '';
-    return normCode(code);
-  }, [authCode, eventId]);
-
-  const meFromList = useMemo(() => {
-    const list = toSafeParticipants(participants);
-    if (normalizedAuthCode) {
-      const found = list.find((p) => normCode(p?.authCode) === normalizedAuthCode);
-      if (found) return found;
-    }
-    if (participant?.id != null) {
-      const found = list.find((p) => String(p.id) === String(participant.id));
-      if (found) return found;
-    }
-    if (participant?.nickname) {
-      const meNick = String(participant.nickname || '').normalize('NFC').trim();
-      const found = list.find((p) => String(p?.nickname || '').normalize('NFC').trim() === meNick);
-      if (found) return found;
-    }
-    return null;
-  }, [participants, participant?.id, participant?.nickname, normalizedAuthCode]);
-
-  const myRoom = toRoom(meFromList?.room) ?? toRoom(participant?.room) ?? toRoom(membershipRoom);
+  const myRoom = participant?.room ?? null;
 
   useEffect(() => {
     if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
@@ -181,7 +144,7 @@ export default function PlayerScoreInput() {
       : '';
 
   const roomPlayers = useMemo(
-    () => (myRoom ? toSafeParticipants(participants).filter((p) => toRoom(p?.room) === myRoom) : []),
+    () => (myRoom ? toSafeParticipants(participants).filter((p) => (p?.room ?? null) === myRoom) : []),
     [participants, myRoom]
   );
   const orderedRoomPlayers = useMemo(() => orderByPair(roomPlayers), [roomPlayers]);
