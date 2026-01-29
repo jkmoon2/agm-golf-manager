@@ -59,10 +59,17 @@ const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 
 
-// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
-function participantsFieldByMode(md = 'stroke') {
-  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+
+function coerceRoomNumber(room) {
+  if (room == null) return null;
+  const n = Number(room);
+  if (Number.isFinite(n)) return n;
+  const mm = String(room).match(/\d+/);
+  return mm ? Number(mm[0]) : null;
 }
+
+// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
+function participantsFieldByMode() { return "participants"; }
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
     ? roomNames[num - 1].trim()
@@ -253,7 +260,7 @@ export function PlayerProvider({ children }) {
           ...((p && typeof p === 'object') ? p : {}),
           id:       normId(p?.id ?? i),
           nickname: normName(p?.nickname),
-          handicap: toInt(p?.handicap ?? p?.gHandi ?? p?.gHandicap ?? p?.gHandy ?? p?.gHandiCap, 0),
+          handicap: toInt(p?.handicap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
           room:     p?.room ?? null,
@@ -393,7 +400,7 @@ export function PlayerProvider({ children }) {
     try {
       await updateDoc(
         eref,
-        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
+        sanitizeForFirestore({ participants: cleaned, participantsUpdatedAt: serverTimestamp() })
       );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });
@@ -451,6 +458,13 @@ export function PlayerProvider({ children }) {
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
+
+    // 중복 배정 방지(스트로크): 이미 room 이 있으면 그대로 반환
+    const alreadyRoomS = coerceRoomNumber(me?.room);
+    if (alreadyRoomS != null) {
+      return { roomNumber: alreadyRoomS, roomLabel: makeLabel(roomNames, alreadyRoomS) };
+    }
+
     let candidates = validRoomsForStroke(participants, roomCount, me);
     if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
     const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
@@ -480,6 +494,14 @@ export function PlayerProvider({ children }) {
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
+
+
+    // 중복 배정 방지(포볼): 이미 room/partner 가 있으면 그대로 반환
+    const alreadyRoomF = coerceRoomNumber(me?.room);
+    if (alreadyRoomF != null) {
+      const partnerObj = me?.partner ? participants.find((pp) => normId(pp?.id) === normId(me?.partner)) : null;
+      return { roomNumber: alreadyRoomF, roomLabel: makeLabel(roomNames, alreadyRoomF), partnerId: me?.partner || null, partnerNickname: partnerObj?.nickname || '' };
+    }
 
     if (toInt(me.group) !== 1) {
       const partnerNickname =
