@@ -59,17 +59,10 @@ const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 
 
-
-function coerceRoomNumber(room) {
-  if (room == null) return null;
-  const n = Number(room);
-  if (Number.isFinite(n)) return n;
-  const mm = String(room).match(/\d+/);
-  return mm ? Number(mm[0]) : null;
-}
-
 // ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
-function participantsFieldByMode() { return "participants"; }
+function participantsFieldByMode(md = 'stroke') {
+  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
     ? roomNames[num - 1].trim()
@@ -191,26 +184,39 @@ export function PlayerProvider({ children }) {
   const [allowTeamView, setAllowTeamView] = useState(false);
   const [authCode, setAuthCode]           = useState('');
 
-  const { pathname } = useLocation();
-
+  const { pathname, search } = useLocation();
   useEffect(() => {
     // ✅ URL의 eventId가 localStorage에 남아있는 예전 eventId를 덮어쓰도록(가장 흔한 원인)
     //   - /player/home/:eventId
     //   - /player/room/:eventId
     //   - /player/table/:eventId
     //   - /player/select/:eventId
-    if (typeof pathname === 'string') {
-      const m = pathname.match(/\/player\/(home|room|table|select)\/([^/]+)/);
-      const urlEventId = m?.[2];
+    //   - /player/score/:eventId
+    //   - /player/result/:eventId
+    //   - ...또는 ?eventId=xxx (Admin에서 참가자탭으로 들어올 때 자주 사용)
+    try {
+      let urlEventId = '';
+      if (typeof pathname === 'string') {
+        const m = pathname.match(/\/player\/(home|room|table|select|score|result)\/([^/]+)/);
+        urlEventId = m?.[2] || '';
+      }
+      if (!urlEventId && typeof search === 'string' && search) {
+        const params = new URLSearchParams(search);
+        urlEventId = params.get('eventId') || params.get('eid') || params.get('id') || '';
+      }
       if (urlEventId && urlEventId !== eventId) {
         setEventId(urlEventId);
         try { localStorage.setItem('eventId', urlEventId); } catch {}
       }
-    }
-  }, [pathname, eventId]);
+    } catch {}
+  }, [pathname, search, eventId]);
 
   useEffect(() => {
     if (!eventId) return;
+
+    // ✅ eventId가 바뀔 때 이전 이벤트의 상태(배정/핸디 등)가 잠깐 남아 UI를 오염시키는 것을 방지
+    setParticipants([]);
+    setParticipant(null);
     try {
       const code = sessionStorage.getItem(`authcode_${eventId}`) || '';
       setAuthCode(code);
@@ -238,6 +244,12 @@ export function PlayerProvider({ children }) {
   // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
+    // ✅ eventId가 바뀔 때 이전 이벤트의 상태(배정/핸디 등)가 잠깐 남아 UI를 오염시키는 것을 방지
+    //   (특히 Admin에서 참가자탭 전환 시 '배정완료'로 오인되는 현상 방지)
+    setParticipants([]);
+    setParticipant(null);
+    setRooms([]);
+
     const ref = doc(db, 'events', eventId);
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
@@ -245,13 +257,14 @@ export function PlayerProvider({ children }) {
       setMode(md);
 
       // ✅ 모드별 참가자 리스트(스트로크/포볼) 분리 저장 지원
-      // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
-      // - (호환) 없으면 기존 participants를 사용
+      // - participants를 우선 사용 (관리자/운영에서 가장 일관되게 갱신되는 필드)
+      // - (호환) participants가 비어있으면 participantsStroke/participantsFourball 사용
       const f = participantsFieldByMode(md);
-      const rawParts =
-        (Array.isArray(data?.[f]) && data[f].length)
-          ? data[f]
-          : (Array.isArray(data.participants) ? data.participants : []);
+      // - participants는 운영(관리자)쪽에서 가장 일관되게 갱신되는 필드이므로 우선 사용
+      // - (호환) participants가 비어있으면 모드별 participantsStroke/participantsFourball 사용
+      const baseParts = (Array.isArray(data.participants) ? data.participants : []);
+      const modeParts = (Array.isArray(data?.[f]) ? data[f] : []);
+      const rawParts = (baseParts.length ? baseParts : modeParts);
       const partArr = rawParts.map((p, i) => {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
@@ -260,7 +273,8 @@ export function PlayerProvider({ children }) {
           ...((p && typeof p === 'object') ? p : {}),
           id:       normId(p?.id ?? i),
           nickname: normName(p?.nickname),
-          handicap: toInt(p?.handicap, 0),
+          // (호환) handicap 필드명이 다르게 저장된 경우를 대비
+          handicap: toInt((p?.handicap ?? p?.gHandi ?? p?.gHandicap ?? p?.g_handicap ?? p?.g_handi ?? p?.gHand), 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
           room:     p?.room ?? null,
@@ -316,6 +330,10 @@ export function PlayerProvider({ children }) {
   // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)
   useEffect(() => {
     if (!eventId) return;
+
+    // ✅ eventId가 바뀔 때 이전 이벤트의 상태(배정/핸디 등)가 잠깐 남아 UI를 오염시키는 것을 방지
+    setParticipants([]);
+    setParticipant(null);
     const colRef = collection(db, 'events', eventId, 'scores');
     const unsub = onSnapshot(colRef, (snap) => {
       const map = {};
@@ -400,7 +418,7 @@ export function PlayerProvider({ children }) {
     try {
       await updateDoc(
         eref,
-        sanitizeForFirestore({ participants: cleaned, participantsUpdatedAt: serverTimestamp() })
+        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
       );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });
@@ -458,13 +476,6 @@ export function PlayerProvider({ children }) {
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
-
-    // 중복 배정 방지(스트로크): 이미 room 이 있으면 그대로 반환
-    const alreadyRoomS = coerceRoomNumber(me?.room);
-    if (alreadyRoomS != null) {
-      return { roomNumber: alreadyRoomS, roomLabel: makeLabel(roomNames, alreadyRoomS) };
-    }
-
     let candidates = validRoomsForStroke(participants, roomCount, me);
     if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
     const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
@@ -494,14 +505,6 @@ export function PlayerProvider({ children }) {
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
-
-
-    // 중복 배정 방지(포볼): 이미 room/partner 가 있으면 그대로 반환
-    const alreadyRoomF = coerceRoomNumber(me?.room);
-    if (alreadyRoomF != null) {
-      const partnerObj = me?.partner ? participants.find((pp) => normId(pp?.id) === normId(me?.partner)) : null;
-      return { roomNumber: alreadyRoomF, roomLabel: makeLabel(roomNames, alreadyRoomF), partnerId: me?.partner || null, partnerNickname: partnerObj?.nickname || '' };
-    }
 
     if (toInt(me.group) !== 1) {
       const partnerNickname =
@@ -556,6 +559,7 @@ export function PlayerProvider({ children }) {
             room: p?.room ?? null,
             partner: p?.partner != null ? normId(p?.partner) : null,
           }));
+
 
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');
