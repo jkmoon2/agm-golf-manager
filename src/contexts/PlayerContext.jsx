@@ -57,22 +57,6 @@ const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
-// ✅ 과거/혼재된 필드명까지 흡수해서 "handicap"(표준)로 정규화
-// - 기존 데이터: gHandi / gHandicap / gHandy 등이 남아 있을 수 있음
-const getHandicap = (p, d = 0) => {
-  if (!p || typeof p !== 'object') return d;
-  const v =
-    p.handicap ??
-    p.gHandi ??
-    p.gHandicap ??
-    p.gHandy ??
-    p.ghandi ??
-    p.g_handicap ??
-    p.gHandiCap ??
-    d;
-  return toInt(v, d);
-};
-
 
 
 // ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
@@ -269,7 +253,7 @@ export function PlayerProvider({ children }) {
           ...((p && typeof p === 'object') ? p : {}),
           id:       normId(p?.id ?? i),
           nickname: normName(p?.nickname),
-          handicap: getHandicap(p, 0),
+          handicap: toInt(p?.handicap ?? p?.gHandi ?? p?.gHandicap ?? p?.gHandy ?? p?.gHandiCap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
           room:     p?.room ?? null,
@@ -357,44 +341,18 @@ export function PlayerProvider({ children }) {
 
     const eref = doc(db, 'events', eventId);
 
-    // 현재 문서를 한번 읽어서(이미 읽음 비용) 필드 보존용으로 사용
-    const esnap = await getDoc(eref);
-    const exists = esnap.exists();
+    const exists = (await getDoc(eref)).exists();
     if (DEBUG) exposeDiag({ eventId, eventExists: exists });
     if (!exists) {
       alert('이벤트 문서가 존재하지 않습니다. 관리자에게 문의해 주세요.');
       throw new Error('Event document does not exist');
     }
 
-    const curData = esnap.data() || {};
-    const curField = participantsFieldByMode(mode);
-    const curArr = (Array.isArray(curData?.[curField]) && curData[curField].length)
-      ? curData[curField]
-      : (Array.isArray(curData?.participants) ? curData.participants : []);
-    const curMap = new Map(curArr.map((p) => [String(p?.id), p]));
-
     const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
-      const pid = String(p?.id ?? i);
-      const cur = curMap.get(pid) || null;
       const out = {};
-      for (const k of ALLOWED) {
-        if (p?.[k] !== undefined) out[k] = p[k] ?? null;
-        else if (cur && cur[k] !== undefined) out[k] = cur[k] ?? null; // ✅ 기존값 보존
-      }
-      // id는 숫자로 유지
-      if (out.id === undefined) out.id = toInt(p?.id ?? i, i);
-      else out.id = toInt(out.id, toInt(p?.id ?? i, i));
-
-      // ✅ handicap은 표준(handicap)로 강제 보존/정규화 (과거 gHandi 데이터도 흡수)
-      if (out.handicap === undefined) {
-        const hv = getHandicap(p, undefined);
-        if (hv !== undefined) out.handicap = hv;
-        else if (cur) {
-          const chv = getHandicap(cur, undefined);
-          if (chv !== undefined) out.handicap = chv;
-        }
-      }
+      for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
+      if (out.id === undefined) out.id = String(p?.id ?? i);
 
       // 숫자 정규화
       if (out.group !== undefined) {

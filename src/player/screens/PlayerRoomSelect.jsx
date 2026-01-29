@@ -156,10 +156,14 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
   }, [participant?.room]);
 
-  const done = Number.isFinite(Number(participant?.room)) || Number.isFinite(Number(optimisticRoom));
-  const assignedRoom = Number.isFinite(Number(participant?.room))
-    ? Number(participant?.room)
-    : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
+  // NOTE: Number(null) === 0, so Number.isFinite(Number(participant?.room)) was making
+  // 'done' true even when the participant was NOT assigned yet. We must require room >= 1.
+  const roomNum = Number(participant?.room);
+  const optNum = Number(optimisticRoom);
+  const done = (Number.isFinite(roomNum) && roomNum >= 1) || (Number.isFinite(optNum) && optNum >= 1);
+  const assignedRoom = (Number.isFinite(roomNum) && roomNum >= 1)
+    ? roomNum
+    : ((Number.isFinite(optNum) && optNum >= 1) ? optNum : null);
 
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
@@ -182,7 +186,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const isSyncing = participantsLoaded && !isMeReady;
 
   useEffect(() => {
-    if (participant?.room != null && flowStep === 'idle') {
+    const r = Number(participant?.room);
+    if (Number.isFinite(r) && r >= 1 && flowStep === 'idle') {
       setShowTeam(false);
       setFlowStep('show');
     }
