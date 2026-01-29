@@ -1,5 +1,5 @@
 // /src/contexts/PlayerContext.jsx
-import React, { createContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
   setDoc,
@@ -56,6 +56,22 @@ const FOURBALL_USE_TRANSACTION = (() => {
 const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
+// ✅ 과거/혼재된 필드명까지 흡수해서 "handicap"(표준)로 정규화
+// - 기존 데이터: gHandi / gHandicap / gHandy 등이 남아 있을 수 있음
+const getHandicap = (p, d = 0) => {
+  if (!p || typeof p !== 'object') return d;
+  const v =
+    p.handicap ??
+    p.gHandi ??
+    p.gHandicap ??
+    p.gHandy ??
+    p.ghandi ??
+    p.g_handicap ??
+    p.gHandiCap ??
+    d;
+  return toInt(v, d);
+};
 
 
 
@@ -184,14 +200,6 @@ export function PlayerProvider({ children }) {
   const [allowTeamView, setAllowTeamView] = useState(false);
   const [authCode, setAuthCode]           = useState('');
 
-  const modeRef = useRef('stroke');
-  const activeParticipantsFieldRef = useRef(participantsFieldByMode('stroke'));
-
-  useEffect(() => {
-    modeRef.current = mode;
-    activeParticipantsFieldRef.current = participantsFieldByMode(mode);
-  }, [mode]);
-
   const { pathname } = useLocation();
 
   useEffect(() => {
@@ -201,8 +209,7 @@ export function PlayerProvider({ children }) {
     //   - /player/table/:eventId
     //   - /player/select/:eventId
     if (typeof pathname === 'string') {
-      // player 라우트가 점수/결과 등으로 확장되면서 eventId 추출 범위를 넓힘
-      const m = pathname.match(/\/player\/(home|room|table|select|score|result|step1|step2|step4|step5)\/([^/]+)/);
+      const m = pathname.match(/\/player\/(home|room|table|select)\/([^/]+)/);
       const urlEventId = m?.[2];
       if (urlEventId && urlEventId !== eventId) {
         setEventId(urlEventId);
@@ -215,7 +222,7 @@ export function PlayerProvider({ children }) {
     if (!eventId) return;
     try {
       const code = sessionStorage.getItem(`authcode_${eventId}`) || '';
-      setAuthCode(String(code || '').trim());
+      setAuthCode(code);
     } catch {}
   }, [eventId]);
 
@@ -233,85 +240,88 @@ export function PlayerProvider({ children }) {
           sessionStorage.removeItem(`nickname_${eventId}`);
         }
       } catch {}
+      setParticipant(null);
     }
   }, [authCode, eventId]);
 
   // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
-
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
-
     const unsub = onSnapshot(ref, (snap) => {
-      const data = snap.data() || {};
-      // 모드 판별
-      const md = ((((data.mode || '').toLowerCase().includes('four')) || ((data.gameMode || '').toLowerCase().includes('four')) || ((data.type || '').toLowerCase().includes('four')))
-        ? 'fourball'
-        : 'stroke');
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
       setMode(md);
-      modeRef.current = md;
-      activeParticipantsFieldRef.current = participantsFieldByMode(md);
 
-      setRoomCount(Number(data.roomCount) || 4);
-      setRoomNames(Array.isArray(data.roomNames) ? data.roomNames : []);
-      setRooms(Array.isArray(data.rooms) ? data.rooms : []);
-      setAllowTeamView(Boolean(data.allowTeamView));
-
-      // 모드 전용 participants가 존재하면 그걸 우선 사용 (배정/파트너 정보가 "풀려" 보이는 현상 방지)
-      const fieldParts = participantsFieldByMode(md);
-      const rawParts = (Array.isArray(data[fieldParts]) && data[fieldParts].length)
-        ? data[fieldParts]
-        : (data.participants || []);
-
-      const partArr = (Array.isArray(rawParts) ? rawParts : []).map((p, idx) => {
-        const id = normId(p?.id ?? p?.pid ?? idx);
+      // ✅ 모드별 참가자 리스트(스트로크/포볼) 분리 저장 지원
+      // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
+      // - (호환) 없으면 기존 participants를 사용
+      const f = participantsFieldByMode(md);
+      const rawParts =
+        (Array.isArray(data?.[f]) && data[f].length)
+          ? data[f]
+          : (Array.isArray(data.participants) ? data.participants : []);
+      const partArr = rawParts.map((p, i) => {
+        // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
+        const scoreRaw = p?.score;
+        const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
         return {
-          id,
-          nickname: (p?.nickname ?? p?.name ?? '').toString(),
-          group: Number(p?.group ?? p?.jo ?? p?.team ?? 0) || 0,
-          gHandicap: Number(p?.gHandicap ?? p?.gh ?? p?.g핸디 ?? 0) || 0,
-          room: (p?.room ?? p?.roomNumber ?? null),
-          roomNumber: (p?.roomNumber ?? p?.room ?? null),
-          partner: (p?.partner != null ? normId(p.partner) : (p?.partnerId != null ? normId(p.partnerId) : null)),
-          authCode: String(p?.authCode ?? '').trim(),
-          score: Number(p?.score ?? 0) || 0,
-          scoreDelta: Number(p?.scoreDelta ?? p?.delta ?? 0) || 0,
+          ...((p && typeof p === 'object') ? p : {}),
+          id:       normId(p?.id ?? i),
+          nickname: normName(p?.nickname),
+          handicap: getHandicap(p, 0),
+          group:    toInt(p?.group, 0),
+          authCode: (p?.authCode ?? '').toString(),
+          room:     p?.room ?? null,
+          partner:  p?.partner != null ? normId(p.partner) : null,
+          score:    scoreVal,
+          selected: !!p?.selected,
         };
       });
-
       setParticipants(partArr);
 
-      // 나 찾기 (authCode 우선)
-      const ac = String(authCode || '').trim();
+      const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
+      const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
+      setRoomCount(rc);
+      setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
+      setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
+
       let me = null;
-      if (ac) {
-        me = partArr.find((p) => String(p.authCode || '').trim() === ac) || null;
+      if (authCode && authCode.trim()) {
+        me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
-        // authCode가 없더라도, 이전 인증/선택 정보가 있으면 복구
-        try {
-          const wasAuthed = sessionStorage.getItem(`auth_${eventId}`) === '1';
-          if (wasAuthed) {
-            const myId = sessionStorage.getItem(`myId_${eventId}`) || localStorage.getItem('myId') || '';
-            const myNick = sessionStorage.getItem(`myNick_${eventId}`) || localStorage.getItem('nickname') || '';
-            me = partArr.find((p) => (myId && p.id === myId) || (myNick && p.nickname === myNick)) || null;
-          }
-        } catch { }
+        const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+        if (authedThisEvent) {
+          let idCached  = '';
+          let nickCache = '';
+          try {
+            idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
+            nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
+          } catch {}
+          if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+          if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+          if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
+          if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
+        }
       }
 
       if (me) {
-        setParticipant({ ...me });
+        setParticipant(me);
+        localStorage.setItem('myId', normId(me.id));
+        localStorage.setItem('nickname', normName(me.nickname));
         try {
-          if (me.authCode) setAuthCode(String(me.authCode || '').trim());
-          markEventAuthed(eventId, me.authCode, me);
-        } catch { }
+          sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
+          sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
+        } catch {}
+        if (me.authCode) setAuthCode(me.authCode);
+        markEventAuthed(eventId, me.authCode, me);
       } else {
-        // NOTE: keep previous participant to avoid Safari/admin-embed flicker
-        // setParticipant(null);
+        setParticipant(null);
       }
     });
-
     return () => unsub();
   }, [eventId, authCode]);
+
   // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)
   useEffect(() => {
     if (!eventId) return;
@@ -346,20 +356,45 @@ export function PlayerProvider({ children }) {
     await ensureAuthReady();
 
     const eref = doc(db, 'events', eventId);
-    const fieldParts = activeParticipantsFieldRef.current || participantsFieldByMode(modeRef.current || mode);
 
-    const exists = (await getDoc(eref)).exists();
+    // 현재 문서를 한번 읽어서(이미 읽음 비용) 필드 보존용으로 사용
+    const esnap = await getDoc(eref);
+    const exists = esnap.exists();
     if (DEBUG) exposeDiag({ eventId, eventExists: exists });
     if (!exists) {
       alert('이벤트 문서가 존재하지 않습니다. 관리자에게 문의해 주세요.');
       throw new Error('Event document does not exist');
     }
 
-    const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','partnerId','authCode','selected'];
+    const curData = esnap.data() || {};
+    const curField = participantsFieldByMode(mode);
+    const curArr = (Array.isArray(curData?.[curField]) && curData[curField].length)
+      ? curData[curField]
+      : (Array.isArray(curData?.participants) ? curData.participants : []);
+    const curMap = new Map(curArr.map((p) => [String(p?.id), p]));
+
+    const ALLOWED = ['id','group','nickname','handicap','score','room','roomNumber','partner','authCode','selected'];
     const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
+      const pid = String(p?.id ?? i);
+      const cur = curMap.get(pid) || null;
       const out = {};
-      for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
-      if (out.id === undefined) out.id = String(p?.id ?? i);
+      for (const k of ALLOWED) {
+        if (p?.[k] !== undefined) out[k] = p[k] ?? null;
+        else if (cur && cur[k] !== undefined) out[k] = cur[k] ?? null; // ✅ 기존값 보존
+      }
+      // id는 숫자로 유지
+      if (out.id === undefined) out.id = toInt(p?.id ?? i, i);
+      else out.id = toInt(out.id, toInt(p?.id ?? i, i));
+
+      // ✅ handicap은 표준(handicap)로 강제 보존/정규화 (과거 gHandi 데이터도 흡수)
+      if (out.handicap === undefined) {
+        const hv = getHandicap(p, undefined);
+        if (hv !== undefined) out.handicap = hv;
+        else if (cur) {
+          const chv = getHandicap(cur, undefined);
+          if (chv !== undefined) out.handicap = chv;
+        }
+      }
 
       // 숫자 정규화
       if (out.group !== undefined) {
@@ -390,13 +425,9 @@ export function PlayerProvider({ children }) {
         out.partner = Number.isFinite(n) ? n : String(out.partner);
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
-      // roomNumber 동기화(표시용)
-      if (out.room == null && out.roomNumber != null) out.room = out.roomNumber;
-      if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
 
-      // partnerId 동기화(표시용/호환)
-      if (out.partner == null && out.partnerId != null) out.partner = out.partnerId;
-      if (out.partnerId == null && out.partner != null) out.partnerId = out.partner;
+      // roomNumber 동기화(표시용)
+      if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
 
       return out;
     });
@@ -404,7 +435,7 @@ export function PlayerProvider({ children }) {
     try {
       await updateDoc(
         eref,
-        sanitizeForFirestore({ participants: cleaned, [fieldParts]: cleaned, participantsUpdatedAt: serverTimestamp() })
+        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
       );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });
@@ -532,7 +563,7 @@ export function PlayerProvider({ children }) {
           // ★ FIX: 모드별 분리 저장(participantsFourball / participantsStroke) 기준으로 읽고/쓰기
           // - participantsFourball 값이 존재하는 이벤트에서는 participants만 갱신하면
           //   onSnapshot이 participantsFourball을 다시 덮어써서 "배정이 풀리는" 현상이 발생합니다.
-          const fieldParts = activeParticipantsFieldRef.current || participantsFieldByMode(modeRef.current || mode);
+          const fieldParts = participantsFieldByMode(mode);
           const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
             ? data[fieldParts]
             : (data.participants || []);
@@ -542,8 +573,7 @@ export function PlayerProvider({ children }) {
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
-          // roomNumber(구버전) 호환
-          room: (p?.room ?? p?.roomNumber) ?? null,
+            room: p?.room ?? null,
             partner: p?.partner != null ? normId(p?.partner) : null,
           }));
 

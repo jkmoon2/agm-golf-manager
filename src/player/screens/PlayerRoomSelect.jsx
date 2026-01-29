@@ -38,7 +38,7 @@ async function ensureMembership(eventId, myRoom) {
     if (!uid || !eventId) return;
 
     const payload = { joinedAt: serverTimestamp() };
-    if (Number.isFinite(Number(myRoom)) && Number(myRoom) >= 1) payload.room = Number(myRoom);
+    if (Number.isFinite(Number(myRoom))) payload.room = Number(myRoom);
 
     try {
       const code =
@@ -151,34 +151,27 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   // 운영자 세션에서 참가자 탭을 동시에 사용할 때 UI가 바로 갱신되지 않는 케이스 대비
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
-  const [showTeam, setShowTeam] = useState(false);
-  const [isAssigning, setIsAssigning] = useState(false);
-  const [flowStep, setFlowStep] = useState('idle');
-
   useEffect(() => {
     const r = Number(participant?.room);
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-    // 서버(room)가 비어있는데 optimisticRoom만 남아있으면(가장 흔한 버그) 자동으로 제거
-    if (!(Number.isFinite(r) && r >= 1) && !isAssigning) setOptimisticRoom(null);
-  }, [participant?.room, isAssigning]);
+  }, [participant?.room]);
 
-  const hasServerRoom = Number.isFinite(Number(participant?.room)) && Number(participant?.room) >= 1;
-  const hasServerPartner = variant === 'fourball' ? !!participant?.partner : true;
-  const serverDone = hasServerRoom && hasServerPartner;
-  const hasOptimistic = Number.isFinite(Number(optimisticRoom)) && Number(optimisticRoom) >= 1;
-
-  // 완료 상태는 "서버 확인" 기준으로만 표시(로컬 optimistic 값으로 완료 표시되면 Admin과 불일치 발생)
-  const done = serverDone;
-  const assignedRoom = hasServerRoom
+  const done = Number.isFinite(Number(participant?.room)) || Number.isFinite(Number(optimisticRoom));
+  const assignedRoom = Number.isFinite(Number(participant?.room))
     ? Number(participant?.room)
-    : ((!serverDone && isAssigning && hasOptimistic) ? Number(optimisticRoom) : null);
+    : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
 
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
-    const r = Number(participant?.room);
-    // membership은 서버 반영된 room 기준으로만 생성
-    if (eid && Number.isFinite(r) && r >= 1) ensureMembership(eid, r);
-  }, [participant?.room, playerEventId, ctxEventId, urlEventId]);
+    const r = Number(assignedRoom);
+    if (eid && Number.isFinite(r) && r >= 1) {
+      ensureMembership(eid, r);
+    }
+  }, [assignedRoom, playerEventId, ctxEventId, urlEventId]);
+
+  const [showTeam, setShowTeam] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [flowStep, setFlowStep] = useState('idle');
 
   const participantsLoaded = Array.isArray(participants) && participants.length > 0;
   const isMeReady = useMemo(() => {
@@ -289,7 +282,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   useEffect(() => {
-    if (hasServerRoom) {
+    if (Number.isFinite(Number(participant?.room))) {
       saveMyRoom(Number(participant.room));
     }
   }, [participant?.room]);
@@ -375,7 +368,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       const rn = Number(roomNumber);
       if (Number.isFinite(rn) && rn >= 1) setOptimisticRoom(rn);
 
-      if (Number.isFinite(Number(roomNumber)) && Number(roomNumber) >= 1) saveMyRoom(Number(roomNumber));
+      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
 
       await ensureMembership(eid, Number(roomNumber));
 
