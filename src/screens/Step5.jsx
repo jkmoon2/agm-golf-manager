@@ -71,6 +71,24 @@ export default function Step5() {
   // ✅ [ADD] onNext에서 항상 최신 participants로 저장하기 위한 스냅샷 ref
   const latestParticipantsRef = useRef(participants);
 
+  // room / roomNumber 통합 처리 (스트로크/포볼 공통)
+  const getRoomValue = (p) => {
+    const raw = p?.roomNumber ?? p?.room;
+    if (raw === '' || raw === undefined || raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const withRoomValue = (p, room) => {
+    if (room === '' || room === undefined || room == null) {
+      return { ...p, room: null, roomNumber: null };
+    }
+    const n = Number(room);
+    const v = Number.isFinite(n) ? n : null;
+    return { ...p, room: v, roomNumber: v };
+  };
+
+
   useEffect(() => {
     latestParticipantsRef.current = participants;
   }, [participants]);
@@ -389,19 +407,19 @@ export default function Step5() {
         if (!target) return ps;
 
         // 이미 배정돼 있으면 무시
-        if (target.room != null) return ps;
+        if (getRoomValue(target) != null) return ps;
 
         targetNickname = target.nickname;
 
         // 같은 조에서 이미 배정된 방
         const usedRooms = ps
-          .filter((p) => p.group === target.group && p.room != null)
-          .map((p) => p.room);
+          .filter((p) => p.group === target.group && getRoomValue(p) != null)
+          .map((p) => getRoomValue(p));
 
         const available = rooms.filter((r) => !usedRooms.includes(r));
         chosen = available.length ? available[Math.floor(Math.random() * available.length)] : null;
 
-        nextList = ps.map((p) => (p.id === id ? { ...p, room: chosen } : p));
+        nextList = ps.map((p) => (p.id === id ? withRoomValue(p, chosen) : p));
         return nextList;
       });
 
@@ -513,25 +531,25 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
       if (!target) return ps;
 
       targetNickname = target.nickname;
-      prevRoom = target.room ?? null;
+      prevRoom = getRoomValue(target);
 
       // 취소
       if (room == null) {
-        nextList = ps.map((p) => (p.id === id ? { ...p, room: null } : p));
+        nextList = ps.map((p) => (p.id === id ? { ...p, room: null, roomNumber: null } : p));
         return nextList;
       }
 
       // 같은 조가 같은 방에 들어가면 안 되므로, 이미 같은 조가 그 방에 있으면 "맞트레이드(스왑)"
-      const conflict = ps.find((p) => p.id !== id && p.group === target.group && p.room === room);
+      const conflict = ps.find((p) => p.id !== id && p.group === target.group && getRoomValue(p) === room);
 
       if (conflict) {
         nextList = ps.map((p) => {
-          if (p.id === id) return { ...p, room };
-          if (p.id === conflict.id) return { ...p, room: prevRoom };
+          if (p.id === id) return { ...p, room, roomNumber: room };
+          if (p.id === conflict.id) return { ...p, room: prevRoom, roomNumber: prevRoom };
           return p;
         });
       } else {
-        nextList = ps.map((p) => (p.id === id ? { ...p, room } : p));
+        nextList = ps.map((p) => (p.id === id ? { ...p, room, roomNumber: room } : p));
       }
 
       return nextList;
@@ -561,17 +579,17 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
 
       groups.forEach((group) => {
         const assigned = updated
-          .filter((p) => p.group === group && p.room != null)
-          .map((p) => p.room);
+          .filter((p) => p.group === group && getRoomValue(p) != null)
+          .map((p) => getRoomValue(p));
 
-        const unassigned = updated.filter((p) => p.group === group && p.room == null);
+        const unassigned = updated.filter((p) => p.group === group && getRoomValue(p) == null);
 
         const slots = rooms.filter((r) => !assigned.includes(r));
         const shuffled = [...slots].sort(() => Math.random() - 0.5);
 
         unassigned.forEach((p, idx) => {
           const r = shuffled[idx] ?? null;
-          updated = updated.map((x) => (x.id === p.id ? { ...x, room: r } : x));
+          updated = updated.map((x) => (x.id === p.id ? withRoomValue(x, r) : x));
         });
       });
 
@@ -597,7 +615,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
 
     setParticipants((ps) => {
       nextSnapshot = ps.map((p) => {
-        const out = { ...p, room: null, score: null };
+        const out = { ...p, room: null, roomNumber: null, score: null };
         if ('scoreRaw' in out) out.scoreRaw = '';
         return out;
       });
@@ -647,7 +665,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
         <div style={{ height: '100%', minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
           <div className={styles.participantTable}>
             {participants.map((p) => {
-              const isDisabled = loadingId === p.id || p.room != null;
+              const isDisabled = loadingId === p.id || getRoomValue(p) != null;
 
               const liveScore = scoresMap?.[String(p.id)]?.score;
               const displayScore =

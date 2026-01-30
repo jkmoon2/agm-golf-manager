@@ -604,8 +604,8 @@ export default function StepFlow() {
   // (추가) 두 사람(1조+2조) 배정을 한 번에 커밋하는 헬퍼
   const assignPairToRoom = async (p1Id, p2Id, roomNo) => {
     await updateParticipantsBulkNow([
-      { id: p1Id, fields: { room: roomNo, partner: p2Id } },
-      { id: p2Id, fields: { room: roomNo, partner: p1Id } },
+      { id: p1Id, fields: { room: roomNo, roomNumber: roomNo, partner: p2Id } },
+      { id: p2Id, fields: { room: roomNo, roomNumber: roomNo, partner: p1Id } },
     ]);
   };
 
@@ -629,7 +629,7 @@ export default function StepFlow() {
 
     if (!isGroup1(target)) {
       return {
-        roomNo: target.room ?? null,
+        roomNo: (target.room ?? target.roomNumber ?? null),
         nickname: target?.nickname || '',
         partnerNickname: target?.partner
           ? (ps.find(p=>p.id===target.partner)?.nickname || null)
@@ -637,22 +637,23 @@ export default function StepFlow() {
       };
     }
 
-    roomNo = target.room;
+    roomNo = (target.room ?? target.roomNumber ?? null);
     if (roomNo == null) {
       // 같은 그룹1이 한 방에 최대 2명
       const countByRoom = ps
-        .filter(p => isGroup1(p) && p.room != null)
-        .reduce((acc, p) => { acc[p.room] = (acc[p.room]||0) + 1; return acc; }, {});
+        .filter(p => isGroup1(p) && (p.room != null || p.roomNumber != null))
+        .reduce((acc, p) => { const rn = (p.room ?? p.roomNumber);
+          acc[rn] = (acc[rn]||0) + 1; return acc; }, {});
       const candidates = Array.from({ length: roomCount }, (_, i) => i+1)
         .filter(r => (countByRoom[r] || 0) < 2);
       roomNo = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null;
     }
 
     // 우선 대상의 방만 확정(파트너는 아직)
-    ps = ps.map(p => p.id === id ? { ...p, room: roomNo } : p);
+    ps = ps.map(p => p.id === id ? { ...p, room: roomNo, roomNumber: roomNo } : p);
 
     // 파트너는 그룹2 중 미배정자에서 선택
-    const pool2 = ps.filter(p => isGroup2(p) && p.room == null);
+    const pool2 = ps.filter(p => isGroup2(p) && p.room == null && p.roomNumber == null);
     partner = pool2.length ? pool2[Math.floor(Math.random() * pool2.length)] : null;
 
     if (partner && roomNo != null) {
@@ -681,11 +682,11 @@ export default function StepFlow() {
     if (target?.partner != null) {
       const pid = target.partner;
       ps = ps.map(p => (p.id === id || p.id === pid)
-        ? { ...p, room: null, partner: null }
+        ? { ...p, room: null, roomNumber: null, partner: null }
         : p
       );
     } else {
-      ps = ps.map(p => p.id === id ? { ...p, room: null, partner: null } : p);
+      ps = ps.map(p => p.id === id ? { ...p, room: null, roomNumber: null, partner: null } : p);
     }
     setParticipants(ps);
     await save({ participants: ps });
@@ -705,7 +706,7 @@ export default function StepFlow() {
       const freeG1 = ps.filter(p => isGroup1(p) && p.room == null);
       for (let i = 0; i < need && freeG1.length; i += 1) {
         const pick = freeG1.splice(Math.floor(Math.random() * freeG1.length), 1)[0];
-        ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, partner: null } : p);
+        ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, roomNumber: roomNo, partner: null } : p);
       }
     });
 
@@ -718,7 +719,7 @@ export default function StepFlow() {
         const pick = freeG2[Math.floor(Math.random() * freeG2.length)];
         ps = ps.map(p => {
           if (p.id === p1.id)   return { ...p, partner: pick.id };
-          if (p.id === pick.id) return { ...p, room: roomNo, partner: p1.id };
+          if (p.id === pick.id) return { ...p, room: roomNo, roomNumber: roomNo, partner: p1.id };
           return p;
         });
       });
@@ -752,7 +753,7 @@ export default function StepFlow() {
 
     // 2) 최신 participants 기준으로 초기화
     const base = participantsRef.current || participants || [];
-    const ps = base.map(p => ({ ...p, room: null, partner: null, score: null }));
+    const ps = base.map(p => ({ ...p, room: null, roomNumber: null, partner: null, score: null }));
     setParticipants(ps);
 
     try {
@@ -761,7 +762,7 @@ export default function StepFlow() {
       // 3) (추가 권장) scores 서브컬렉션도 한 번에 null로 반영 → Player/다른 화면 즉시 정합
       if (typeof upsertScores === 'function') {
         try {
-          const payload = ps.map(p => ({ id: p.id, score: null, room: null }));
+          const payload = ps.map(p => ({ id: p.id, score: null, room: null, roomNumber: null }));
           const sig = stableStringify(payload);
           // 너무 잦은 bulk clear 중복 방지(선택)
           if (!sig || sig !== lastScoresSignatureRef.current) {

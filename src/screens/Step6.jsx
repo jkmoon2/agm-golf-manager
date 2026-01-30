@@ -314,8 +314,11 @@ export default function Step6() {
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participantsWithScore || []).forEach(p => {
-      if (p.room != null && p.room >= 1 && p.room <= roomCount) {
-        arr[p.room - 1].push(p);
+      const rRaw = (p?.roomNumber ?? p?.room);
+      if (rRaw == null || rRaw === '') return;
+      const r = Number(rRaw);
+      if (Number.isFinite(r) && r >= 1 && r <= roomCount) {
+        arr[r - 1].push(p);
       }
     });
     return arr;
