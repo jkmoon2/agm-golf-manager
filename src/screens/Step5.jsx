@@ -331,8 +331,7 @@ export default function Step5() {
           return { ...p, score: null, scoreRaw: value };
         }
 
-        const clone = { ...p, score: num };
-        if ('scoreRaw' in clone) delete clone.scoreRaw;
+        const clone = { ...p, score: num, scoreRaw: value }; // ✅ [PATCH] 편집 중에는 scoreRaw 유지 (liveScore 덮어쓰기 방지)
         return clone;
       });
 
@@ -671,10 +670,10 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
               const displayScore =
                 p.scoreRaw !== undefined
                   ? p.scoreRaw
-                  : liveScore != null
-                    ? liveScore
-                    : p.score != null
-                      ? p.score
+                  : p.score != null
+                    ? p.score
+                    : liveScore != null
+                      ? liveScore
                       : '';
 
               return (
