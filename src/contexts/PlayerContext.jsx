@@ -57,6 +57,10 @@ const FOURBALL_USE_TRANSACTION = (() => {
 const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+const toRoom   = (v) => {
+  const n = Number(v);
+  return (Number.isFinite(n) && n >= 1) ? n : null;
+};
 
 
 
@@ -250,6 +254,7 @@ export function PlayerProvider({ children }) {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
         const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
+        const roomVal = toRoom(p?.room ?? p?.roomNumber ?? null);
         return {
           ...((p && typeof p === 'object') ? p : {}),
           id:       normId(p?.id ?? i),
@@ -257,7 +262,8 @@ export function PlayerProvider({ children }) {
           handicap: toInt(p?.handicap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
-          room:     p?.room ?? null,
+          room:     roomVal,
+          roomNumber: roomVal,
           partner:  p?.partner != null ? normId(p.partner) : null,
           score:    scoreVal,
           selected: !!p?.selected,
@@ -385,8 +391,12 @@ export function PlayerProvider({ children }) {
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
 
-      // roomNumber 동기화(표시용)
-      if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
+      // room/roomNumber 동기화(표시용)
+      const _roomBase = (out.room != null ? out.room : out.roomNumber);
+      const _roomNum  = Number(_roomBase);
+      const _roomNorm = (Number.isFinite(_roomNum) && _roomNum >= 1) ? _roomNum : null;
+      out.room = _roomNorm;
+      out.roomNumber = _roomNorm;
 
       return out;
     });
@@ -527,14 +537,18 @@ export function PlayerProvider({ children }) {
             ? data[fieldParts]
             : (data.participants || []);
 
-          const parts = (baseParts || []).map((p, i) => ({
-            ...((p && typeof p === 'object') ? p : {}),
-            id: normId(p?.id ?? i),
-            nickname: normName(p?.nickname),
-            group: toInt(p?.group, 0),
-            room: p?.room ?? null,
-            partner: p?.partner != null ? normId(p?.partner) : null,
-          }));
+	          const parts = (baseParts || []).map((p, i) => {
+	            const roomVal = toRoom(p?.room ?? p?.roomNumber ?? null);
+	            return ({
+	              ...((p && typeof p === 'object') ? p : {}),
+	              id: normId(p?.id ?? i),
+	              nickname: normName(p?.nickname),
+	              group: toInt(p?.group, 0),
+	              room: roomVal,
+	              roomNumber: roomVal,
+	              partner: p?.partner != null ? normId(p?.partner) : null,
+	            });
+	          });
 
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');

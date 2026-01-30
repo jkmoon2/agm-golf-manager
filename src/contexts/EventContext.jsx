@@ -100,13 +100,20 @@ function ensureModeSplitParticipants(updates, currentMode) {
     // ✅ room/roomNumber 동기화(스트로크/포볼/참가자/운영자 화면 모두 동일 기준)
     updates.participants = normalizeParticipantsRoomFields(updates.participants || []);
 
-    const mode = updates.mode || currentMode || 'stroke';
-    const field = participantsFieldByMode(mode);
-    // mode 전용 필드도 항상 정규화
-    if (!(field in updates)) {
-      updates[field] = updates.participants || [];
+    const strokeField = 'participantsStroke';
+    const fourballField = 'participantsFourball';
+
+    // mode 전용 필드도 항상 정규화(구형 코드/화면 호환 위해 양쪽 모두 동기화)
+    if (!(strokeField in updates)) {
+      updates[strokeField] = updates.participants || [];
     } else {
-      updates[field] = normalizeParticipantsRoomFields(updates[field] || []);
+      updates[strokeField] = normalizeParticipantsRoomFields(updates[strokeField] || []);
+    }
+
+    if (!(fourballField in updates)) {
+      updates[fourballField] = updates.participants || [];
+    } else {
+      updates[fourballField] = normalizeParticipantsRoomFields(updates[fourballField] || []);
     }
   } catch {}
   return updates;

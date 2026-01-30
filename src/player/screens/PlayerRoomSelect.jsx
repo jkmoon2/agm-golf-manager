@@ -152,14 +152,17 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
   useEffect(() => {
-    const r = Number(participant?.room);
+    const r = Number(participant?.room ?? participant?.roomNumber);
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [participant?.room]);
+  }, [participant?.room, participant?.roomNumber]);
 
-  const done = Number.isFinite(Number(participant?.room)) || Number.isFinite(Number(optimisticRoom));
-  const assignedRoom = Number.isFinite(Number(participant?.room))
-    ? Number(participant?.room)
-    : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
+  // ✅ null/undefined가 Number()로 0이 되어 '배정완료'로 오판되는 케이스 방지
+  const r0 = Number(participant?.room ?? participant?.roomNumber);
+  const r1 = Number(optimisticRoom);
+  const done = (Number.isFinite(r0) && r0 >= 1) || (Number.isFinite(r1) && r1 >= 1);
+  const assignedRoom = (Number.isFinite(r0) && r0 >= 1)
+    ? r0
+    : ((Number.isFinite(r1) && r1 >= 1) ? r1 : null);
 
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
