@@ -79,13 +79,35 @@ function participantsFieldByMode(mode = 'stroke') {
   return mode === 'fourball' ? 'participantsFourball' : 'participantsStroke';
 }
 
+// room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
+function normalizeParticipantsRoomFields(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((p) => {
+    if (!p || typeof p !== 'object') return p;
+    const room = p.room;
+    const roomNumber = p.roomNumber;
+    if (room == null && roomNumber != null) return { ...p, room: roomNumber };
+    if (room != null && roomNumber == null) return { ...p, roomNumber: room };
+    return p;
+  });
+}
+
 function ensureModeSplitParticipants(updates, currentMode) {
   try {
     if (!updates || typeof updates !== 'object') return updates;
     if (!('participants' in updates)) return updates;
+
+    // ✅ room/roomNumber 동기화(스트로크/포볼/참가자/운영자 화면 모두 동일 기준)
+    updates.participants = normalizeParticipantsRoomFields(updates.participants || []);
+
     const mode = updates.mode || currentMode || 'stroke';
     const field = participantsFieldByMode(mode);
-    if (!(field in updates)) updates[field] = updates.participants || [];
+    // mode 전용 필드도 항상 정규화
+    if (!(field in updates)) {
+      updates[field] = updates.participants || [];
+    } else {
+      updates[field] = normalizeParticipantsRoomFields(updates[field] || []);
+    }
   } catch {}
   return updates;
 }
