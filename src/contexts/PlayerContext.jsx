@@ -143,26 +143,12 @@ function sanitizeForFirestore(v) {
 function markEventAuthed(id, code, meObj) {
   if (!id) return;
   try {
-    // ✅ iOS/PWA에서 sessionStorage가 간헐적으로 초기화되는 케이스가 있어
-    //    sessionStorage + localStorage 둘 다 기록합니다.
     sessionStorage.setItem(`auth_${id}`, 'true');
-    try { localStorage.setItem(`auth_${id}`, 'true'); } catch {}
-
-    if (code != null) {
-      sessionStorage.setItem(`authcode_${id}`, String(code));
-      try { localStorage.setItem(`authcode_${id}`, String(code)); } catch {}
-    }
-
+    if (code != null) sessionStorage.setItem(`authcode_${id}`, String(code));
     if (meObj) {
       sessionStorage.setItem(`participant_${id}`, JSON.stringify(meObj));
       sessionStorage.setItem(`myId_${id}`, normId(meObj.id || ''));
       sessionStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
-
-      try {
-        localStorage.setItem(`participant_${id}`, JSON.stringify(meObj));
-        localStorage.setItem(`myId_${id}`, normId(meObj.id || ''));
-        localStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
-      } catch {}
     }
   } catch {}
 }
@@ -201,15 +187,6 @@ export function PlayerProvider({ children }) {
 
   const { pathname } = useLocation();
 
-
-  // ✅ Firestore 읽기 규칙이 request.auth != null 인 환경에서,
-  //    초기 렌더링 타이밍에 onSnapshot이 auth보다 먼저 실행되면
-  //    참가자 명단이 비어 보이거나(=인증코드 없음) 간헐적으로 막히는 케이스가 생깁니다.
-  //    앱 진입 즉시 익명로그인을 선행합니다.
-  useEffect(() => {
-    ensureAuthReady().catch(() => {});
-  }, []);
-
   useEffect(() => {
     // ✅ URL의 eventId가 localStorage에 남아있는 예전 eventId를 덮어쓰도록(가장 흔한 원인)
     //   - /player/home/:eventId
@@ -229,20 +206,36 @@ export function PlayerProvider({ children }) {
   useEffect(() => {
     if (!eventId) return;
     try {
-      // ✅ 이미 입력된 authCode가 있으면(이벤트 선택 직후) storage 값으로 덮어쓰지 않음
-      //    - iOS에서 이벤트 선택/라우팅 타이밍에 따라 authCode가 빈값으로 덮여
-      //      '인증코드가 없다' 경고가 뜨는 케이스가 있었습니다.
-      if (authCode && authCode.trim()) return;
+      // ✅ (중요) 참가자 인증코드가 "첫번째 로그인 값으로 고정"되는 문제 방지
+      // - Edge 새창/새탭 테스트 시 localStorage 는 공유되지만, sessionStorage/pending_code 흐름은 탭 단위
+      // - LoginOrCode/PlayerRoomSelect 에서 pending_code 로 넘어오는 경우, 이를 최우선으로 적용
+      const pending = sessionStorage.getItem('pending_code') || '';
+      const stored = sessionStorage.getItem(`authcode_${eventId}`) || '';
 
-      const code =
-        (sessionStorage.getItem(`authcode_${eventId}`) ||
-         localStorage.getItem(`authcode_${eventId}`) ||
-         localStorage.getItem(`authCode_${eventId}`) ||
-         localStorage.getItem('authCode') ||
-         '')
-        .toString();
+      if (pending && String(pending).trim()) {
+        const next = String(pending).trim();
 
-      if (code) setAuthCode(code);
+        // 기존 세션 플래그/캐시가 남아있으면 "첫번째 로그인"이 계속 재사용될 수 있음
+        if (!stored || stored !== next) {
+          try {
+            sessionStorage.removeItem(`auth_${eventId}`);
+            sessionStorage.removeItem(`myId_${eventId}`);
+            sessionStorage.removeItem(`nickname_${eventId}`);
+          } catch {}
+          try {
+            localStorage.removeItem(`myId_${eventId}`);
+            localStorage.removeItem(`nickname_${eventId}`);
+          } catch {}
+          setParticipant(null);
+        }
+
+        sessionStorage.setItem(`authcode_${eventId}`, next);
+        setAuthCode(next);
+        // (선택) 한번 소비한 pending_code 는 제거해서 다른 이벤트로 새는 것 방지
+        sessionStorage.removeItem('pending_code');
+      } else {
+        setAuthCode(stored);
+      }
     } catch {}
   }, [eventId]);
 
@@ -258,127 +251,88 @@ export function PlayerProvider({ children }) {
         if (eventId) {
           sessionStorage.removeItem(`myId_${eventId}`);
           sessionStorage.removeItem(`nickname_${eventId}`);
-          try { localStorage.removeItem(`myId_${eventId}`); } catch {}
-          try { localStorage.removeItem(`nickname_${eventId}`); } catch {}
-          try { localStorage.removeItem(`participant_${eventId}`); } catch {}
-          try { localStorage.removeItem(`auth_${eventId}`); } catch {}
-          try { localStorage.removeItem(`authcode_${eventId}`); } catch {}
         }
       } catch {}
       setParticipant(null);
     }
   }, [authCode, eventId]);
 
-
-  // ✅ authCode를 이벤트 단위로 영구 저장(iOS에서 홈/탭 전환 후 sessionStorage 초기화 대비)
-  useEffect(() => {
-    if (!eventId) return;
-    if (!authCode || !authCode.trim()) return;
-    try {
-      sessionStorage.setItem(`authcode_${eventId}`, String(authCode));
-      try { localStorage.setItem(`authcode_${eventId}`, String(authCode)); } catch {}
-    } catch {}
-  }, [authCode, eventId]);
-
   // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
+    const ref = doc(db, 'events', eventId);
+    const unsub = onSnapshot(ref, (snap) => {
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
+      setMode(md);
 
-    let unsub = () => {};
-    let cancelled = false;
+      // ✅ 모드별 참가자 리스트(스트로크/포볼) 분리 저장 지원
+      // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
+      // - (호환) 없으면 기존 participants를 사용
+      const f = participantsFieldByMode(md);
+      const rawParts =
+        (Array.isArray(data?.[f]) && data[f].length)
+          ? data[f]
+          : (Array.isArray(data.participants) ? data.participants : []);
+      const partArr = rawParts.map((p, i) => {
+        // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
+        const scoreRaw = p?.score;
+        const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
+        return {
+          ...((p && typeof p === 'object') ? p : {}),
+          id:       normId(p?.id ?? i),
+          nickname: normName(p?.nickname),
+          handicap: toInt(p?.handicap, 0),
+          group:    toInt(p?.group, 0),
+          authCode: (p?.authCode ?? '').toString(),
+          room:     p?.room ?? null,
+          partner:  p?.partner != null ? normId(p.partner) : null,
+          score:    scoreVal,
+          selected: !!p?.selected,
+        };
+      });
+      setParticipants(partArr);
 
-    (async () => {
-      try {
-        // ✅ 구독 시작 전에 auth 준비(읽기 규칙 대응)
-        await ensureAuthReady();
-      } catch (_) {}
-      if (cancelled) return;
+      const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
+      const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
+      setRoomCount(rc);
+      setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
+      setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
-      const ref = doc(db, 'events', eventId);
-      unsub = onSnapshot(
-        ref,
-        (snap) => {
-          const data = snap.exists() ? (snap.data() || {}) : {};
-          const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
-          setMode(md);
-
-          // ✅ 모드별 참가자 리스트(스트로크/포볼) 분리 저장 지원
-          // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
-          // - (호환) 없으면 기존 participants를 사용
-          const f = participantsFieldByMode(md);
-          const rawParts =
-            (Array.isArray(data?.[f]) && data[f].length)
-              ? data[f]
-              : (Array.isArray(data.participants) ? data.participants : []);
-          const partArr = rawParts.map((p, i) => {
-            // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
-            const scoreRaw = p?.score;
-            const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
-            return {
-              ...((p && typeof p === 'object') ? p : {}),
-              id:       normId(p?.id ?? i),
-              nickname: normName(p?.nickname),
-              handicap: toInt(p?.handicap, 0),
-              group:    toInt(p?.group, 0),
-              authCode: (p?.authCode ?? '').toString(),
-              room:     p?.room ?? null,
-              partner:  p?.partner != null ? normId(p.partner) : null,
-              score:    scoreVal,
-              selected: !!p?.selected,
-            };
-          });
-          setParticipants(partArr);
-
-          const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
-          const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
-          setRoomCount(rc);
-          setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
-          setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
-
-          let me = null;
-          if (authCode && authCode.trim()) {
-            me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
-          } else {
-            const authedThisEvent = (sessionStorage.getItem(`auth_${eventId}`) === 'true') || (localStorage.getItem(`auth_${eventId}`) === 'true');
-            if (authedThisEvent) {
-              let idCached  = '';
-              let nickCache = '';
-              try {
-                idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
-                nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
-              } catch {}
-              if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
-              if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
-              if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
-              if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
-            }
-          }
-
-          if (me) {
-            setParticipant(me);
-            localStorage.setItem('myId', normId(me.id));
-            localStorage.setItem('nickname', normName(me.nickname));
-            try {
-              sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
-              sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
-            } catch {}
-            try {
-              localStorage.setItem(`myId_${eventId}`, normId(me.id));
-              localStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
-            } catch {}
-            if (me.authCode) setAuthCode(me.authCode);
-            markEventAuthed(eventId, me.authCode, me);
-          } else {
-            setParticipant(null);
-          }
-        },
-        (err) => {
-          if (DEBUG) console.warn('[PlayerContext] events snapshot error', err);
+      let me = null;
+      if (authCode && authCode.trim()) {
+        me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
+      } else {
+        const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+        if (authedThisEvent) {
+          let idCached  = '';
+          let nickCache = '';
+          try {
+            idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
+            nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
+          } catch {}
+          if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+          if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+          if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
+          if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
         }
-      );
-    })();
+      }
 
-    return () => { cancelled = true; try { unsub(); } catch {} };
+      if (me) {
+        setParticipant(me);
+        localStorage.setItem('myId', normId(me.id));
+        localStorage.setItem('nickname', normName(me.nickname));
+        try {
+          sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
+          sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
+        } catch {}
+        if (me.authCode) setAuthCode(me.authCode);
+        markEventAuthed(eventId, me.authCode, me);
+      } else {
+        setParticipant(null);
+      }
+    });
+    return () => unsub();
   }, [eventId, authCode]);
 
   // ───────── ★★★ ADD: scores 서브컬렉션 구독 → participants에 즉시 합치기(ADMIN→PLAYER 실시간)

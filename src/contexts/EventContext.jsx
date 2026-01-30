@@ -76,7 +76,9 @@ function enrichParticipantsDerived(updates) {
 // - 문서 필드: participantsStroke / participantsFourball
 // - 기존 호환: participants는 "현재 모드"의 미러로 계속 유지
 function participantsFieldByMode(mode = 'stroke') {
-  return mode === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+  // ✅ mode 값이 'agm'으로 들어오는 케이스까지 포볼로 동일 취급
+  const m = String(mode || '').toLowerCase();
+  return (m === 'fourball' || m === 'agm') ? 'participantsFourball' : 'participantsStroke';
 }
 
 // room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
@@ -96,26 +98,35 @@ function ensureModeSplitParticipants(updates, currentMode) {
   try {
     if (!updates || typeof updates !== 'object') return updates;
 
+    // participants / participantsStroke / participantsFourball 중 하나라도 있으면 정규화 & 미러링 적용
     const hasParticipants = ('participants' in updates);
     const hasStroke = ('participantsStroke' in updates);
     const hasFourball = ('participantsFourball' in updates);
+    if (!hasParticipants && !hasStroke && !hasFourball) return updates;
+
+    const mode = updates.mode || currentMode || 'stroke';
+    const field = participantsFieldByMode(mode);
 
     // ✅ room/roomNumber 동기화(스트로크/포볼/참가자/운영자 화면 모두 동일 기준)
     if (hasParticipants) updates.participants = normalizeParticipantsRoomFields(updates.participants || []);
     if (hasStroke) updates.participantsStroke = normalizeParticipantsRoomFields(updates.participantsStroke || []);
     if (hasFourball) updates.participantsFourball = normalizeParticipantsRoomFields(updates.participantsFourball || []);
 
-    // ✅ 모드 혼선/탭 전환/스냅샷 타이밍으로 한쪽 필드만 갱신되면 "배정/점수 풀림"처럼 보일 수 있음
-    //    → participants / participantsStroke / participantsFourball 을 항상 동일 기준으로 미러링
-    const mode = updates.mode || currentMode || 'stroke';
-    const base =
-      (mode === 'fourball' && updates.participantsFourball) ? updates.participantsFourball :
-      (mode !== 'fourball' && updates.participantsStroke) ? updates.participantsStroke :
-      (updates.participants || updates.participantsStroke || updates.participantsFourball || []);
-
-    if (!hasParticipants) updates.participants = base;
-    if (!hasStroke) updates.participantsStroke = base;
-    if (!hasFourball) updates.participantsFourball = base;
+    // ✅ (핵심) participants만 저장하는 구버전/호환 로직
+    // - participants가 들어오면 현재 mode 필드(participantsStroke/Fourball)도 항상 같이 채움
+    // - 반대로, mode 전용 필드만 업데이트되는 경우(예: 포볼 배정 시 participantsFourball만 업데이트)
+    //   participants 미러도 같이 채워서 Player/Admin이 동일하게 보도록 보강
+    if (hasParticipants) {
+      if (!(field in updates)) {
+        updates[field] = updates.participants || [];
+      } else {
+        updates[field] = normalizeParticipantsRoomFields(updates[field] || []);
+      }
+    } else {
+      if ((field in updates) && !('participants' in updates)) {
+        updates.participants = updates[field] || [];
+      }
+    }
   } catch {}
   return updates;
 }
