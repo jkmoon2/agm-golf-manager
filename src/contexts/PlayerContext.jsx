@@ -57,10 +57,6 @@ const FOURBALL_USE_TRANSACTION = (() => {
 const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
-const toRoom   = (v) => {
-  const n = Number(v);
-  return (Number.isFinite(n) && n >= 1) ? n : null;
-};
 
 
 
@@ -254,7 +250,6 @@ export function PlayerProvider({ children }) {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
         const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
-        const roomVal = toRoom(p?.room ?? p?.roomNumber ?? null);
         return {
           ...((p && typeof p === 'object') ? p : {}),
           id:       normId(p?.id ?? i),
@@ -262,8 +257,7 @@ export function PlayerProvider({ children }) {
           handicap: toInt(p?.handicap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
-          room:     roomVal,
-          roomNumber: roomVal,
+          room:     p?.room ?? null,
           partner:  p?.partner != null ? normId(p.partner) : null,
           score:    scoreVal,
           selected: !!p?.selected,
@@ -391,12 +385,8 @@ export function PlayerProvider({ children }) {
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
 
-      // room/roomNumber 동기화(표시용)
-      const _roomBase = (out.room != null ? out.room : out.roomNumber);
-      const _roomNum  = Number(_roomBase);
-      const _roomNorm = (Number.isFinite(_roomNum) && _roomNum >= 1) ? _roomNum : null;
-      out.room = _roomNorm;
-      out.roomNumber = _roomNorm;
+      // roomNumber 동기화(표시용)
+      if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
 
       return out;
     });
@@ -537,18 +527,15 @@ export function PlayerProvider({ children }) {
             ? data[fieldParts]
             : (data.participants || []);
 
-	          const parts = (baseParts || []).map((p, i) => {
-	            const roomVal = toRoom(p?.room ?? p?.roomNumber ?? null);
-	            return ({
-	              ...((p && typeof p === 'object') ? p : {}),
-	              id: normId(p?.id ?? i),
-	              nickname: normName(p?.nickname),
-	              group: toInt(p?.group, 0),
-	              room: roomVal,
-	              roomNumber: roomVal,
-	              partner: p?.partner != null ? normId(p?.partner) : null,
-	            });
-	          });
+          const parts = (baseParts || []).map((p, i) => ({
+            ...((p && typeof p === 'object') ? p : {}),
+            id: normId(p?.id ?? i),
+            nickname: normName(p?.nickname),
+            group: toInt(p?.group, 0),
+            room: p?.room ?? null,
+            roomNumber: p?.roomNumber ?? (p?.room ?? null),
+            partner: p?.partner != null ? normId(p?.partner) : null,
+          }));
 
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');
@@ -561,9 +548,60 @@ export function PlayerProvider({ children }) {
           );
           const mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
+          const mate = mateId ? parts.find((p) => normId(p.id) === mateId) : null;
+          const selfPrevPartner = self?.partner ? normId(self.partner) : null;
+          const matePrevPartner = mate?.partner ? normId(mate.partner) : null;
+
           const next = parts.map((p) => {
-            if (normId(p.id) === pid) return { ...p, room: roomNumber, partner: mateId || null };
-            if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
+            const id = normId(p.id);
+            const partner = p?.partner != null ? normId(p.partner) : null;
+
+            // 이미 해당 2조가 다른 1조와 묶여 있거나, 내가 기존에 묶여 있던 2조가 있다면 -> 모두 해제
+            const shouldClear =
+              (selfPrevPartner && id === selfPrevPartner && id !== mateId) ||
+              (matePrevPartner && id === matePrevPartner && id !== pid) ||
+              (mateId && partner === mateId && id !== pid) ||
+              (partner === pid && (!mateId || id !== mateId));
+
+            if (id === pid) {
+              const newPartner = mateId || null;
+              return {
+                ...p,
+                room: roomNumber,
+                roomNumber: roomNumber,
+                partner: newPartner,
+                teammateId: newPartner,
+                teammate: newPartner,
+              };
+            }
+            if (mateId && id === mateId) {
+              return {
+                ...p,
+                room: roomNumber,
+                roomNumber: roomNumber,
+                partner: pid,
+                teammateId: pid,
+                teammate: pid,
+              };
+            }
+            if (shouldClear) {
+              return {
+                ...p,
+                room: null,
+                roomNumber: null,
+                partner: null,
+                teammateId: null,
+                teammate: null,
+              };
+            }
+
+            // roomNumber 보정: room만 있고 roomNumber가 비어 있으면 roomNumber = room
+            if (p?.room != null && p?.roomNumber == null) {
+              return { ...p, roomNumber: p.room };
+            }
+            if (p?.room == null && p?.roomNumber != null) {
+              return { ...p, roomNumber: null };
+            }
             return p;
           });
 
@@ -589,7 +627,7 @@ export function PlayerProvider({ children }) {
           setParticipants(result.next);
           if (participant && normId(participant.id) === pid) {
             setParticipant((prev) =>
-              prev && { ...prev, room: result.roomNumber, partner: result.mateId || null }
+              prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber, partner: result.mateId || null }
             );
           }
         }
@@ -610,14 +648,68 @@ export function PlayerProvider({ children }) {
     );
     mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
+    const selfPrevPartner = (participants.find((p) => normId(p.id) === pid) || {})?.partner
+      ? normId((participants.find((p) => normId(p.id) === pid) || {}).partner)
+      : null;
+    const matePrevPartner = mateId
+      ? (participants.find((p) => normId(p.id) === mateId) || {})?.partner
+        ? normId((participants.find((p) => normId(p.id) === mateId) || {}).partner)
+        : null
+      : null;
+
     const next = participants.map((p) => {
-      if (normId(p.id) === pid)    return { ...p, room: roomNumber, partner: mateId || null };
-      if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
+      const id = normId(p.id);
+      const partner = p?.partner != null ? normId(p.partner) : null;
+
+      const shouldClear =
+        (selfPrevPartner && id === selfPrevPartner && id !== mateId) ||
+        (matePrevPartner && id === matePrevPartner && id !== pid) ||
+        (mateId && partner === mateId && id !== pid) ||
+        (partner === pid && (!mateId || id !== mateId));
+
+      if (id === pid) {
+        const newPartner = mateId || null;
+        return {
+          ...p,
+          room: roomNumber,
+          roomNumber: roomNumber,
+          partner: newPartner,
+          teammateId: newPartner,
+          teammate: newPartner,
+        };
+      }
+      if (mateId && id === mateId) {
+        return {
+          ...p,
+          room: roomNumber,
+          roomNumber: roomNumber,
+          partner: pid,
+          teammateId: pid,
+          teammate: pid,
+        };
+      }
+      if (shouldClear) {
+        return {
+          ...p,
+          room: null,
+          roomNumber: null,
+          partner: null,
+          teammateId: null,
+          teammate: null,
+        };
+      }
+
+      if (p?.room != null && p?.roomNumber == null) {
+        return { ...p, roomNumber: p.room };
+      }
+      if (p?.room == null && p?.roomNumber != null) {
+        return { ...p, roomNumber: null };
+      }
       return p;
     });
     setParticipants(next);
     if (participant && normId(participant.id) === pid) {
-      setParticipant((prev) => prev && { ...prev, room: roomNumber, partner: mateId || null });
+      setParticipant((prev) => prev && { ...prev, room: roomNumber, roomNumber: roomNumber, partner: mateId || null });
     }
     await writeParticipants(next);
 
