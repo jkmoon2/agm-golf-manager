@@ -95,26 +95,27 @@ function normalizeParticipantsRoomFields(list) {
 function ensureModeSplitParticipants(updates, currentMode) {
   try {
     if (!updates || typeof updates !== 'object') return updates;
-    if (!('participants' in updates)) return updates;
+
+    const hasParticipants = ('participants' in updates);
+    const hasStroke = ('participantsStroke' in updates);
+    const hasFourball = ('participantsFourball' in updates);
 
     // ✅ room/roomNumber 동기화(스트로크/포볼/참가자/운영자 화면 모두 동일 기준)
-    updates.participants = normalizeParticipantsRoomFields(updates.participants || []);
+    if (hasParticipants) updates.participants = normalizeParticipantsRoomFields(updates.participants || []);
+    if (hasStroke) updates.participantsStroke = normalizeParticipantsRoomFields(updates.participantsStroke || []);
+    if (hasFourball) updates.participantsFourball = normalizeParticipantsRoomFields(updates.participantsFourball || []);
 
-    const strokeField = 'participantsStroke';
-    const fourballField = 'participantsFourball';
+    // ✅ 모드 혼선/탭 전환/스냅샷 타이밍으로 한쪽 필드만 갱신되면 "배정/점수 풀림"처럼 보일 수 있음
+    //    → participants / participantsStroke / participantsFourball 을 항상 동일 기준으로 미러링
+    const mode = updates.mode || currentMode || 'stroke';
+    const base =
+      (mode === 'fourball' && updates.participantsFourball) ? updates.participantsFourball :
+      (mode !== 'fourball' && updates.participantsStroke) ? updates.participantsStroke :
+      (updates.participants || updates.participantsStroke || updates.participantsFourball || []);
 
-    // mode 전용 필드도 항상 정규화(구형 코드/화면 호환 위해 양쪽 모두 동기화)
-    if (!(strokeField in updates)) {
-      updates[strokeField] = updates.participants || [];
-    } else {
-      updates[strokeField] = normalizeParticipantsRoomFields(updates[strokeField] || []);
-    }
-
-    if (!(fourballField in updates)) {
-      updates[fourballField] = updates.participants || [];
-    } else {
-      updates[fourballField] = normalizeParticipantsRoomFields(updates[fourballField] || []);
-    }
+    if (!hasParticipants) updates.participants = base;
+    if (!hasStroke) updates.participantsStroke = base;
+    if (!hasFourball) updates.participantsFourball = base;
   } catch {}
   return updates;
 }

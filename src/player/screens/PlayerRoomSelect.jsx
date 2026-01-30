@@ -151,20 +151,20 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   // 운영자 세션에서 참가자 탭을 동시에 사용할 때 UI가 바로 갱신되지 않는 케이스 대비
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
-  // room / roomNumber 혼용(또는 null) 케이스에서 Number(null)=0 으로 오인되어
-  // STEP1 버튼이 '배정완료' 비활성화 되는 문제 방지
-  const toRoom = (v) => {
-    const n = Number(v);
-    return Number.isFinite(n) && n >= 1 ? n : null;
-  };
-
   useEffect(() => {
-    const r = toRoom(participant?.roomNumber ?? participant?.room);
-    if (r != null) setOptimisticRoom(r);
-  }, [participant?.room, participant?.roomNumber]);
+    const r = Number(participant?.roomNumber ?? participant?.room);
+    if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
+  }, [participant?.roomNumber, participant?.room]);
 
-  const assignedRoom = toRoom(participant?.roomNumber ?? participant?.room) ?? toRoom(optimisticRoom);
-  const done = assignedRoom != null;
+  const roomVal = Number(participant?.roomNumber ?? participant?.room);
+  const optVal = Number(optimisticRoom);
+  const done =
+    (Number.isFinite(roomVal) && roomVal >= 1) ||
+    (Number.isFinite(optVal) && optVal >= 1);
+
+  const assignedRoom = (Number.isFinite(optVal) && optVal >= 1)
+    ? optVal
+    : ((Number.isFinite(roomVal) && roomVal >= 1) ? roomVal : null);
 
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
@@ -187,11 +187,11 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const isSyncing = participantsLoaded && !isMeReady;
 
   useEffect(() => {
-    if (assignedRoom != null && flowStep === 'idle') {
+    if (participant?.room != null && flowStep === 'idle') {
       setShowTeam(false);
       setFlowStep('show');
     }
-  }, [assignedRoom, flowStep]);
+  }, [participant?.room, flowStep]);
 
   const getLabel = (num) =>
     Array.isArray(roomNames) && roomNames[num - 1]?.trim()
@@ -287,9 +287,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   useEffect(() => {
-    const r = toRoom(participant?.roomNumber ?? participant?.room);
-    if (r != null) saveMyRoom(r);
-  }, [participant?.room, participant?.roomNumber]);
+    if (Number.isFinite(Number(participant?.room))) {
+      saveMyRoom(Number(participant.room));
+    }
+  }, [participant?.room]);
 
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
     try {
@@ -320,9 +321,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       setIsAssigning(true);
       await sleep(500);
       setIsAssigning(false);
-      if (assignedRoom != null) {
-        const roomLabel = getLabel(assignedRoom);
-        saveMyRoom(Number(assignedRoom));
+      if (participant?.room != null) {
+        const roomLabel = getLabel(participant.room);
+        saveMyRoom(Number(participant.room));
         setShowTeam(false);
         setFlowStep('show');
         alert(`${participant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
@@ -372,9 +373,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       const rn = Number(roomNumber);
       if (Number.isFinite(rn) && rn >= 1) setOptimisticRoom(rn);
 
-      if (Number.isFinite(rn) && rn >= 1) saveMyRoom(rn);
+      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
 
-      await ensureMembership(eid, (Number.isFinite(rn) && rn >= 1) ? rn : null);
+      await ensureMembership(eid, Number(roomNumber));
 
       setFlowStep('afterAssign');
 

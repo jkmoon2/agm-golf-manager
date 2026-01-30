@@ -295,9 +295,12 @@ export default function StepFlow() {
       copy.score = Number.isFinite(n) ? n : null;
     }
 
+    const roomVal = copy.roomNumber ?? copy.room ?? null;
+
     return {
       ...copy,
-      roomNumber: copy.room ?? null,
+      room: roomVal,
+      roomNumber: roomVal,
       teammateId: copy.partner ?? null,
       teammate: copy.partner ?? null,
     };
@@ -349,9 +352,8 @@ export default function StepFlow() {
         // - EventContext에서도 동일 미러를 수행하지만, StepFlow에서도 같이 기록해 두면
         //   기존 이벤트(필드 미존재)도 최초 저장 시 분리 필드가 생성되어 더 안정적임.
         try {
-          const mForMirror = (updates && updates.mode) || (eventData && eventData.mode) || mode || 'stroke';
-          if (mForMirror === 'fourball' || mForMirror === 'agm') clean.participantsFourball = compat;
-          else clean.participantsStroke = compat;
+          clean.participantsStroke = compat;
+          clean.participantsFourball = compat;
         } catch {}
         // [COMPAT] 참고용 roomTable도 같이 저장(읽지 않으면 무시됨)
         clean.roomTable   = buildRoomTable(compat);
