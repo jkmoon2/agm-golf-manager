@@ -64,10 +64,13 @@ function normalizeGate(g) {
   return norm;
 }
 
-const parseRoom = (v) => {
+
+
+// room/roomNumber 값 정규화 (null/''/undefined → null, 유효값은 1 이상만 인정)
+function parseRoom(v) {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1 ? n : null;
-};
+}
 
 export default function PlayerRoomSelect() {
   const { mode } = useContext(PlayerContext);
@@ -111,7 +114,7 @@ function FourballLikeSelect() {
 function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
   const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
-  const { eventId: ctxEventId, eventData } = useContext(EventContext);
+  const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
   // ✅ URL의 eventId가 PlayerContext의 eventId보다 우선 (이전 대회 localStorage 잔상/오배정 방지)
@@ -124,12 +127,18 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     } catch (_) {}
   }, [urlEventId, playerEventId, setEventId]);
 
+  useEffect(() => {
+    const eid = urlEventId || playerEventId;
+    if (eid && ctxEventId !== eid && typeof loadEvent === 'function') {
+      loadEvent(eid);
+    }
+  }, [urlEventId, playerEventId, ctxEventId, loadEvent]);
+
   const [fallbackGate, setFallbackGate] = useState(null);
   useEffect(() => {
-    const id = urlEventId || playerEventId;
+    const id = urlEventId || ctxEventId || playerEventId;
     if (!id) return;
-    const same = !!(ctxEventId && String(ctxEventId) === String(id));
-    if (same && eventData?.playerGate) { setFallbackGate(null); return; }
+    if (eventData?.playerGate) { setFallbackGate(null); return; }
     const ref = doc(db, 'events', id);
     const unsub = onSnapshot(ref, (snap) => {
       const d = snap.data();
@@ -151,19 +160,19 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
   useEffect(() => {
-    const r = Number(participant?.room);
-    if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [participant?.room]);
+    const r = parseRoom(participant?.roomNumber ?? participant?.room);
+    if (r != null) setOptimisticRoom(r);
+  }, [participant?.roomNumber, participant?.room]);
 
-  const done = parseRoom(participant?.roomNumber ?? participant?.room) != null || parseRoom(optimisticRoom) != null;
-  const assignedRoom = Number.isFinite(Number(participant?.room))
-    ? Number(participant?.room)
-    : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
+  const participantRoom = parseRoom(participant?.roomNumber ?? participant?.room);
+
+  const done = participantRoom != null || parseRoom(optimisticRoom) != null;
+  const assignedRoom = participantRoom ?? parseRoom(optimisticRoom);
 
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
-    const r = Number(assignedRoom);
-    if (eid && Number.isFinite(r) && r >= 1) {
+    const r = parseRoom(assignedRoom);
+    if (eid && r != null) {
       ensureMembership(eid, r);
     }
   }, [assignedRoom, playerEventId, ctxEventId, urlEventId]);
@@ -207,7 +216,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
-    return participants.filter((p) => Number(p.room) === Number(assignedRoom));
+    return participants.filter((p) => parseRoom(p.roomNumber ?? p.room) === parseRoom(assignedRoom));
   }, [done, assignedRoom, participants]);
 
   const teamMembers = useMemo(() => {
@@ -257,34 +266,36 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     const myGroup = Number(participant?.group) || 0;
     const sameGroupExists = participants.some(
       (p) =>
-        Number(p.room) === Number(roomNo) &&
+        parseRoom(p.roomNumber ?? p.room) === parseRoom(roomNo) &&
         Number(p.group) === myGroup &&
         String(p.id) !== String(participant?.id)
     );
-    const currentCount = participants.filter((p) => Number(p.room) === Number(roomNo)).length;
+    const currentCount = participants.filter((p) => parseRoom(p.roomNumber ?? p.room) === parseRoom(roomNo)).length;
     const isFull = currentCount >= 4;
     return !sameGroupExists && !isFull;
   };
 
   const isValidFourballRoom = (roomNo) => {
     if (variant !== 'fourball' || !roomNo) return true;
-    const currentCount = participants.filter((p) => Number(p.room) === Number(roomNo)).length;
+    const currentCount = participants.filter((p) => parseRoom(p.roomNumber ?? p.room) === parseRoom(roomNo)).length;
     return currentCount < 4;
   };
 
   const saveMyRoom = (roomNo) => {
-    if (!roomNo || !playerEventId) return;
+    const rn = parseRoom(roomNo);
+    if (!rn || !playerEventId) return;
     try {
-      localStorage.setItem(`player.currentRoom:${playerEventId}`, String(roomNo));
-      localStorage.setItem('player.currentRoom', String(roomNo));
+      localStorage.setItem(`player.currentRoom:${playerEventId}`, String(rn));
+      localStorage.setItem('player.currentRoom', String(rn));
     } catch {}
   };
 
   useEffect(() => {
-    if (Number.isFinite(Number(participant?.room))) {
-      saveMyRoom(Number(participant.room));
+    const r = parseRoom(participant?.roomNumber ?? participant?.room);
+    if (r != null) {
+      saveMyRoom(r);
     }
-  }, [participant?.room]);
+  }, [participant?.roomNumber, participant?.room]);
 
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
     try {
@@ -315,9 +326,10 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       setIsAssigning(true);
       await sleep(500);
       setIsAssigning(false);
-      if (participant?.room != null) {
-        const roomLabel = getLabel(participant.room);
-        saveMyRoom(Number(participant.room));
+      if (parseRoom(participant?.roomNumber ?? participant?.room) != null) {
+        const myRoom = parseRoom(participant?.roomNumber ?? participant?.room);
+        const roomLabel = getLabel(myRoom);
+        saveMyRoom(myRoom);
         setShowTeam(false);
         setFlowStep('show');
         alert(`${participant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
@@ -364,12 +376,12 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
       }
 
       // snapshot 반영 지연 대비: 방배정 결과를 UI에 즉시 반영하여 중복 클릭 방지
-      const rn = Number(roomNumber);
-      if (Number.isFinite(rn) && rn >= 1) setOptimisticRoom(rn);
+      const rn = parseRoom(roomNumber);
+      if (rn != null) setOptimisticRoom(rn);
 
-      if (Number.isFinite(Number(roomNumber))) saveMyRoom(Number(roomNumber));
+      if (rn != null) saveMyRoom(rn);
 
-      await ensureMembership(eid, Number(roomNumber));
+      await ensureMembership(eid, rn);
 
       setFlowStep('afterAssign');
 

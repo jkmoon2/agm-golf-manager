@@ -78,12 +78,31 @@ const getPlayerTabId = () => {
   }
 };
 const playerStorageKey = (eid, key) => `agm:player:${getPlayerTabId()}:${String(eid || '')}:${key}`;
+const toRoom   = (v) => {
+  const n = Number(v);
+  return (Number.isFinite(n) && n >= 1) ? n : null;
+};
 
 
 
 // ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
 function participantsFieldByMode(md = 'stroke') {
-  return (md === 'fourball' || md === 'agm') ? 'participantsFourball' : 'participantsStroke';
+  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
+
+// ✅ 모드별 participantsField + legacy participants를 id 기준으로 머지(SSOT 깨짐 방지)
+function mergeParticipantsById(primary, legacy) {
+  const map = new Map();
+  const put = (arr) => {
+    (Array.isArray(arr) ? arr : []).forEach((p, i) => {
+      const id = normId(p?.id ?? i);
+      const prev = map.get(id) || {};
+      map.set(id, { ...prev, ...(p && typeof p === 'object' ? p : {}), id });
+    });
+  };
+  put(legacy);
+  put(primary);
+  return Array.from(map.values());
 }
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
@@ -173,7 +192,7 @@ function markEventAuthed(id, code, meObj) {
     }
   } catch {}
 
-  // iOS/PWA에서 sessionStorage가 초기화되는 케이스 보강(탭/창 스코프 localStorage)
+  // ✅ iOS(PWA/Safari)에서 sessionStorage가 간헐적으로 초기화되는 케이스 보강 + 탭/창 단위 분리(SSOT)
   try {
     localStorage.setItem(playerStorageKey(id, 'authed'), 'true');
     if (code != null) localStorage.setItem(playerStorageKey(id, 'authCode'), String(code));
@@ -208,7 +227,7 @@ export function PlayerProvider({ children }) {
   const [eventId, setEventId]             = useState(() => {
     try { return localStorage.getItem('player.eventId') || localStorage.getItem('eventId') || ''; } catch { return ''; }
   });
-const [mode, setMode]                   = useState('stroke');
+  const [mode, setMode]                   = useState('stroke');
   const [roomCount, setRoomCount]         = useState(4);
   const [roomNames, setRoomNames]         = useState([]);
   const [rooms, setRooms]                 = useState([]);
@@ -218,6 +237,10 @@ const [mode, setMode]                   = useState('stroke');
   const [authCode, setAuthCode]           = useState('');
 
   const { pathname } = useLocation();
+
+  // ✅ authCode 변경 시에만 캐시를 초기화(스냅샷 재수화 과정의 불필요한 초기화/깜박임 방지)
+  const lastAuthCodeRef = useRef('');
+  const skipAuthCodeClearRef = useRef(false);
 
   useEffect(() => {
     // ✅ URL의 eventId가 localStorage에 남아있는 예전 eventId를 덮어쓰도록(가장 흔한 원인)
@@ -238,68 +261,60 @@ const [mode, setMode]                   = useState('stroke');
   useEffect(() => {
     if (!eventId) return;
     try {
-      // 우선순위: pending_code(로그인 직후) → sessionStorage(authcode_eventId) → 탭 스코프 localStorage 백업
-      const pending = sessionStorage.getItem('pending_code') || '';
-      const stored =
-        sessionStorage.getItem(`authcode_${eventId}`) ||
-        localStorage.getItem(playerStorageKey(eventId, 'authCode')) ||
-        '';
-      const code = (pending && pending.trim()) ? pending : stored;
-
-      if (code != null) setAuthCode(String(code));
-
-      // pending_code는 적용 후 정리(다른 이벤트로 새는 문제 방지)
-      if (pending && pending.trim()) {
-        sessionStorage.removeItem('pending_code');
-        sessionStorage.setItem(`authcode_${eventId}`, String(pending));
-        try { localStorage.setItem(playerStorageKey(eventId, 'authCode'), String(pending)); } catch {}
-      }
+      const code = sessionStorage.getItem(`authcode_${eventId}`)
+        || (localStorage.getItem(playerStorageKey(eventId, 'authCode')) || '')
+        || '';
+      setAuthCode(code);
     } catch {}
-  }, [eventId]);useEffect(() => {
+  }, [eventId]);
+
+  useEffect(() => {
     try { if (eventId) localStorage.setItem('player.eventId', eventId); } catch {}
   }, [eventId]);
 
-  // ✅ authCode 변경(=다른 닉네임/인증코드로 재로그인) 시에만 캐시를 정리
-  // - 초기 마운트/리로드 때 authCode가 세팅되는 과정에서 participant가 매번 null로 리셋되는 문제를 방지
-  const lastAuthCodeRef = useRef('');
   useEffect(() => {
-    // event가 바뀌면 비교 기준 초기화
-    lastAuthCodeRef.current = '';
-  }, [eventId]);
-
-  useEffect(() => {
-    const cur = (authCode || '').toString().trim();
+    const code = (authCode ?? '').toString().trim();
     if (!eventId) return;
 
-    // 첫 세팅은 정리하지 않고 기준만 잡는다(리로드/스냅샷 동기화 과정에서 풀림 방지)
-    if (lastAuthCodeRef.current === '') {
-      lastAuthCodeRef.current = cur;
+    // 빈값이면 초기화만
+    if (!code) {
+      lastAuthCodeRef.current = '';
       return;
     }
 
-    if (cur && lastAuthCodeRef.current !== cur) {
-      try {
-        sessionStorage.removeItem(`participant_${eventId}`);
-        sessionStorage.removeItem(`myId_${eventId}`);
-        sessionStorage.removeItem(`nickname_${eventId}`);
-        sessionStorage.removeItem(`auth_${eventId}`);
-        sessionStorage.removeItem(`authcode_${eventId}`);
-      } catch {}
-
-      try {
-        localStorage.removeItem(playerStorageKey(eventId, 'participant'));
-        localStorage.removeItem(playerStorageKey(eventId, 'myId'));
-        localStorage.removeItem(playerStorageKey(eventId, 'nickname'));
-        localStorage.removeItem(playerStorageKey(eventId, 'authed'));
-        localStorage.removeItem(playerStorageKey(eventId, 'authCode'));
-      } catch {}
-
-      setParticipant(null);
+    // 스냅샷에서 me를 찾으며 setAuthCode 된 경우(자동 수화)는 캐시 삭제를 건너뜁니다.
+    if (skipAuthCodeClearRef.current) {
+      skipAuthCodeClearRef.current = false;
+      lastAuthCodeRef.current = code;
+      return;
     }
 
-    lastAuthCodeRef.current = cur;
+    // 동일 코드 반복이면 아무 것도 하지 않음(깜박임/배정 풀림 방지)
+    if (code === lastAuthCodeRef.current) return;
+    lastAuthCodeRef.current = code;
+
+    // ✅ 다른 인증코드로 "새로" 로그인하는 경우에만, 이전 유저 캐시를 정리
+    try {
+      localStorage.removeItem('myId');
+      localStorage.removeItem('nickname');
+    } catch {}
+
+    try {
+      sessionStorage.removeItem(`myId_${eventId}`);
+      sessionStorage.removeItem(`nickname_${eventId}`);
+      sessionStorage.removeItem(`participant_${eventId}`);
+    } catch {}
+
+    try {
+      localStorage.removeItem(playerStorageKey(eventId, 'myId'));
+      localStorage.removeItem(playerStorageKey(eventId, 'nickname'));
+      localStorage.removeItem(playerStorageKey(eventId, 'participant'));
+    } catch {}
+
+    setParticipant(null);
   }, [authCode, eventId]);
-// ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
+
+  // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
@@ -312,49 +327,9 @@ const [mode, setMode]                   = useState('stroke');
       // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
       // - (호환) 없으면 기존 participants를 사용
       const f = participantsFieldByMode(md);
-
-      // ✅ SSOT: split 필드(participantsStroke/participantsFourball) + legacy(participants) 동시 존재 시 merge
-      // - Player/Admin 어느 쪽에서 저장하든 "방배정/팀원/점수"가 한쪽 필드에만 기록되는 경우가 있어
-      //   iOS에서 스냅샷 순서에 따라 "방배정 풀림/리스트 안뜸"이 발생할 수 있습니다.
-      const rawSplit  = Array.isArray(data?.[f]) ? data[f] : [];
-      const rawLegacy = Array.isArray(data.participants) ? data.participants : [];
-
-      const mergeById = (primary = [], secondary = []) => {
-        const map = new Map();
-        secondary.forEach((p, i) => {
-          const id = normId(p?.id ?? i);
-          map.set(id, (p && typeof p === 'object') ? p : {});
-        });
-        primary.forEach((p, i) => {
-          const id = normId(p?.id ?? i);
-          const base = map.get(id) || {};
-          const cur = (p && typeof p === 'object') ? p : {};
-          const out = { ...base, ...cur };
-
-          // 중요 필드: null/undefined가 덮어쓰지 않도록 보강
-          const pick = (k) => {
-            const a = cur?.[k];
-            const b = base?.[k];
-            if (a !== undefined && a !== null && a !== '') return a;
-            if (b !== undefined) return b;
-            return a;
-          };
-          out.room       = pick('room');
-          out.roomNumber = pick('roomNumber');
-          out.partner    = pick('partner');
-          out.score      = pick('score');
-          out.authCode   = pick('authCode');
-
-          map.set(id, out);
-        });
-        return Array.from(map.values());
-      };
-
-      let rawParts =
-        (rawSplit.length && rawLegacy.length)
-          ? mergeById(rawSplit, rawLegacy)
-          : (rawSplit.length ? rawSplit : rawLegacy);
-
+      const fieldArr  = (Array.isArray(data?.[f]) ? data[f] : []);
+      const legacyArr = (Array.isArray(data.participants) ? data.participants : []);
+      const rawParts  = fieldArr.length ? mergeParticipantsById(fieldArr, legacyArr) : legacyArr;
       const partArr = rawParts.map((p, i) => {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
@@ -366,8 +341,8 @@ const [mode, setMode]                   = useState('stroke');
           handicap: toInt(p?.handicap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
-          room:     (p?.room ?? p?.roomNumber) ?? null,
-          roomNumber: (p?.roomNumber ?? p?.room) ?? null,
+          room:     toRoom(p?.room ?? p?.roomNumber),
+          roomNumber: toRoom(p?.roomNumber ?? p?.room),
           partner:  p?.partner != null ? normId(p.partner) : null,
           score:    scoreVal,
           selected: !!p?.selected,
@@ -385,9 +360,8 @@ const [mode, setMode]                   = useState('stroke');
       if (authCode && authCode.trim()) {
         me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
-        const authedThisEvent =
-          sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
-          localStorage.getItem(playerStorageKey(eventId, 'authed')) === 'true';
+        const authedThisEvent = (sessionStorage.getItem(`auth_${eventId}`) === 'true')
+          || (localStorage.getItem(playerStorageKey(eventId, 'authed')) === 'true');
         if (authedThisEvent) {
           let idCached  = '';
           let nickCache = '';
@@ -397,6 +371,8 @@ const [mode, setMode]                   = useState('stroke');
           } catch {}
           if (!idCached)  { try { idCached  = normId(localStorage.getItem(playerStorageKey(eventId, 'myId')) || ''); } catch {} }
           if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
+          if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+          if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
           if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
           if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
         }
@@ -404,22 +380,13 @@ const [mode, setMode]                   = useState('stroke');
 
       if (me) {
         setParticipant(me);
-
-        // ✅ 탭/창 스코프 보강(다른 창 테스트 시 서로 덮어쓰기 방지 + iOS sessionStorage 유실 대비)
-        try {
-          localStorage.setItem(playerStorageKey(eventId, 'myId'), normId(me.id));
-          localStorage.setItem(playerStorageKey(eventId, 'nickname'), normName(me.nickname));
-          if (me.authCode) localStorage.setItem(playerStorageKey(eventId, 'authCode'), String(me.authCode));
-          localStorage.setItem(playerStorageKey(eventId, 'authed'), 'true');
-        } catch {}
-
         localStorage.setItem('myId', normId(me.id));
         localStorage.setItem('nickname', normName(me.nickname));
         try {
           sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
           sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
         } catch {}
-        if (me.authCode) setAuthCode(me.authCode);
+        if (me.authCode) { skipAuthCodeClearRef.current = true; setAuthCode(me.authCode); }
         markEventAuthed(eventId, me.authCode, me);
       } else {
         setParticipant(null);
@@ -494,11 +461,11 @@ const [mode, setMode]                   = useState('stroke');
       }
       if (out.room !== undefined && out.room !== null) {
         const n = Number(out.room);
-        out.room = Number.isFinite(n) ? n : String(out.room);
+        out.room = (Number.isFinite(n) && n >= 1) ? n : null;
       }
       if (out.roomNumber !== undefined && out.roomNumber !== null) {
         const n = Number(out.roomNumber);
-        out.roomNumber = Number.isFinite(n) ? n : String(out.roomNumber);
+        out.roomNumber = (Number.isFinite(n) && n >= 1) ? n : null;
       }
       if (out.partner !== undefined && out.partner !== null) {
         const n = Number(out.partner);
@@ -506,8 +473,9 @@ const [mode, setMode]                   = useState('stroke');
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
 
-      // roomNumber 동기화(표시용)
+      // room/roomNumber 동기화(표시/필터용)
       if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
+      if (out.room == null && out.roomNumber != null) out.room = out.roomNumber;
 
       return out;
     });
@@ -529,11 +497,11 @@ const [mode, setMode]                   = useState('stroke');
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
     const next = participants.map((p) =>
-      normId(p.id) === targetId ? { ...p, room: rid } : p
+      normId(p.id) === targetId ? { ...p, room: rid, roomNumber: rid } : p
     );
     setParticipants(next);
     if (participant && normId(participant.id) === targetId) {
-      setParticipant((prev) => prev && { ...prev, room: rid });
+      setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid });
     }
     await writeParticipants(next);
 
@@ -549,13 +517,13 @@ const [mode, setMode]                   = useState('stroke');
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
-      if (normId(p.id) === a) return { ...p, room: rid, partner: b };
-      if (normId(p.id) === b) return { ...p, room: rid, partner: a };
+      if (normId(p.id) === a) return { ...p, room: rid, roomNumber: rid, partner: b };
+      if (normId(p.id) === b) return { ...p, room: rid, roomNumber: rid, partner: a };
       return p;
     });
     setParticipants(next);
-    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, partner: b });
-    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, partner: a });
+    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: b });
+    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: a });
     await writeParticipants(next);
 
     try {
@@ -578,11 +546,11 @@ const [mode, setMode]                   = useState('stroke');
     const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
     const next = participants.map((p) =>
-      normId(p.id) === pid ? { ...p, room: chosenRoom } : p
+      normId(p.id) === pid ? { ...p, room: chosenRoom, roomNumber: chosenRoom } : p
     );
     setParticipants(next);
     if (participant && normId(participant.id) === pid) {
-      setParticipant((prev) => prev && { ...prev, room: chosenRoom });
+      setParticipant((prev) => prev && { ...prev, room: chosenRoom, roomNumber: chosenRoom });
     }
     await writeParticipants(next);
 
@@ -606,7 +574,7 @@ const [mode, setMode]                   = useState('stroke');
     if (toInt(me.group) !== 1) {
       const partnerNickname =
         (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
-      return { roomNumber: me.room ?? null, partnerNickname };
+      return { roomNumber: (me.roomNumber ?? me.room) ?? null, partnerNickname };
     }
 
     if (FOURBALL_USE_TRANSACTION) {
@@ -619,7 +587,7 @@ const [mode, setMode]                   = useState('stroke');
             setParticipants(result.nextParticipants);
             if (participant && normId(participant.id) === pid) {
               setParticipant((prev) =>
-                prev && { ...prev, room: result.roomNumber, partner: result.partnerId || null }
+                prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber, partner: result.partnerId || null }
               );
             }
           }
@@ -653,7 +621,8 @@ const [mode, setMode]                   = useState('stroke');
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
-            room: p?.room ?? null,
+            room: toRoom(p?.room ?? p?.roomNumber),
+            roomNumber: toRoom(p?.roomNumber ?? p?.room),
             partner: p?.partner != null ? normId(p?.partner) : null,
           }));
 
@@ -664,13 +633,13 @@ const [mode, setMode]                   = useState('stroke');
           const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
           const pool = parts.filter(
-            (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
+            (p) => toInt(p.group) === 2 && !p.partner && !p.room && normId(p.id) !== pid
           );
           const mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
           const next = parts.map((p) => {
-            if (normId(p.id) === pid) return { ...p, room: roomNumber, partner: mateId || null };
-            if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
+            if (normId(p.id) === pid) return { ...p, room: roomNumber, roomNumber, partner: mateId || null };
+            if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, roomNumber, partner: pid };
             return p;
           });
 
@@ -696,7 +665,7 @@ const [mode, setMode]                   = useState('stroke');
           setParticipants(result.next);
           if (participant && normId(participant.id) === pid) {
             setParticipant((prev) =>
-              prev && { ...prev, room: result.roomNumber, partner: result.mateId || null }
+              prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber, partner: result.mateId || null }
             );
           }
         }
@@ -713,18 +682,18 @@ const [mode, setMode]                   = useState('stroke');
 
     let mateId = '';
     const pool = participants.filter(
-      (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
+      (p) => toInt(p.group) === 2 && !p.partner && !p.room && normId(p.id) !== pid
     );
     mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
     const next = participants.map((p) => {
-      if (normId(p.id) === pid)    return { ...p, room: roomNumber, partner: mateId || null };
-      if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
+      if (normId(p.id) === pid)    return { ...p, room: roomNumber, roomNumber, partner: mateId || null };
+      if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, roomNumber, partner: pid };
       return p;
     });
     setParticipants(next);
     if (participant && normId(participant.id) === pid) {
-      setParticipant((prev) => prev && { ...prev, room: roomNumber, partner: mateId || null });
+      setParticipant((prev) => prev && { ...prev, room: roomNumber, roomNumber, partner: mateId || null });
     }
     await writeParticipants(next);
 
