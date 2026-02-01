@@ -64,6 +64,11 @@ function normalizeGate(g) {
   return norm;
 }
 
+const parseRoom = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+};
+
 export default function PlayerRoomSelect() {
   const { mode } = useContext(PlayerContext);
   const isFourball = mode === 'fourball' || mode === 'agm';
@@ -106,7 +111,7 @@ function FourballLikeSelect() {
 function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
   const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
-  const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
+  const { eventId: ctxEventId, eventData } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
   // ✅ URL의 eventId가 PlayerContext의 eventId보다 우선 (이전 대회 localStorage 잔상/오배정 방지)
@@ -115,22 +120,16 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     if (urlEventId === playerEventId) return;
     try {
       setEventId?.(urlEventId);
-      localStorage.setItem('eventId', urlEventId);
+      localStorage.setItem('player.eventId', urlEventId);
     } catch (_) {}
   }, [urlEventId, playerEventId, setEventId]);
 
-  useEffect(() => {
-    const eid = urlEventId || playerEventId;
-    if (eid && ctxEventId !== eid && typeof loadEvent === 'function') {
-      loadEvent(eid);
-    }
-  }, [urlEventId, playerEventId, ctxEventId, loadEvent]);
-
   const [fallbackGate, setFallbackGate] = useState(null);
   useEffect(() => {
-    const id = urlEventId || ctxEventId || playerEventId;
+    const id = urlEventId || playerEventId;
     if (!id) return;
-    if (eventData?.playerGate) { setFallbackGate(null); return; }
+    const same = !!(ctxEventId && String(ctxEventId) === String(id));
+    if (same && eventData?.playerGate) { setFallbackGate(null); return; }
     const ref = doc(db, 'events', id);
     const unsub = onSnapshot(ref, (snap) => {
       const d = snap.data();
@@ -152,19 +151,14 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
   useEffect(() => {
-    const r = Number(participant?.roomNumber ?? participant?.room);
+    const r = Number(participant?.room);
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [participant?.roomNumber, participant?.room]);
+  }, [participant?.room]);
 
-  const roomVal = Number(participant?.roomNumber ?? participant?.room);
-  const optVal = Number(optimisticRoom);
-  const done =
-    (Number.isFinite(roomVal) && roomVal >= 1) ||
-    (Number.isFinite(optVal) && optVal >= 1);
-
-  const assignedRoom = (Number.isFinite(optVal) && optVal >= 1)
-    ? optVal
-    : ((Number.isFinite(roomVal) && roomVal >= 1) ? roomVal : null);
+  const done = parseRoom(participant?.roomNumber ?? participant?.room) != null || parseRoom(optimisticRoom) != null;
+  const assignedRoom = Number.isFinite(Number(participant?.room))
+    ? Number(participant?.room)
+    : (Number.isFinite(Number(optimisticRoom)) ? Number(optimisticRoom) : null);
 
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;

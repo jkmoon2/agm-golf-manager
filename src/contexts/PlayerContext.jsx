@@ -1,6 +1,6 @@
 // /src/contexts/PlayerContext.jsx
 
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useRef } from 'react';
 import {
   doc,
   setDoc,
@@ -58,11 +58,32 @@ const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
+/**
+ * ✅ Player 탭/창 단위 SSOT 보조 저장소
+ * - Admin(EventContext)는 localStorage 'eventId' 를 사용합니다.
+ * - Player는 'player.eventId' + 탭/창(window.name) 스코프로 분리하여 서로 덮어쓰지 않도록 합니다.
+ * - iOS(PWA/Safari)에서 sessionStorage가 간헐적으로 초기화되는 케이스를 localStorage(탭 스코프)로 보강합니다.
+ */
+const PLAYER_TAB_PREFIX = 'agmPlayerTab:';
+const getPlayerTabId = () => {
+  try {
+    if (typeof window === 'undefined') return 'default';
+    const cur = String(window.name || '');
+    if (cur.startsWith(PLAYER_TAB_PREFIX)) return cur.slice(PLAYER_TAB_PREFIX.length) || 'default';
+    const id = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    window.name = PLAYER_TAB_PREFIX + id;
+    return id;
+  } catch {
+    return 'default';
+  }
+};
+const playerStorageKey = (eid, key) => `agm:player:${getPlayerTabId()}:${String(eid || '')}:${key}`;
+
 
 
 // ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
 function participantsFieldByMode(md = 'stroke') {
-  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+  return (md === 'fourball' || md === 'agm') ? 'participantsFourball' : 'participantsStroke';
 }
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
@@ -151,6 +172,17 @@ function markEventAuthed(id, code, meObj) {
       sessionStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
     }
   } catch {}
+
+  // iOS/PWA에서 sessionStorage가 초기화되는 케이스 보강(탭/창 스코프 localStorage)
+  try {
+    localStorage.setItem(playerStorageKey(id, 'authed'), 'true');
+    if (code != null) localStorage.setItem(playerStorageKey(id, 'authCode'), String(code));
+    if (meObj) {
+      localStorage.setItem(playerStorageKey(id, 'participant'), JSON.stringify(meObj));
+      localStorage.setItem(playerStorageKey(id, 'myId'), normId(meObj.id || ''));
+      localStorage.setItem(playerStorageKey(id, 'nickname'), normName(meObj.nickname || ''));
+    }
+  } catch {}
 }
 
 // ✅ 모든 쓰기 전에 인증 보장 + 콘솔 점검용 노출
@@ -174,9 +206,9 @@ async function ensureAuthReady() {
 
 export function PlayerProvider({ children }) {
   const [eventId, setEventId]             = useState(() => {
-    try { return localStorage.getItem('eventId') || ''; } catch { return ''; }
+    try { return localStorage.getItem('player.eventId') || localStorage.getItem('eventId') || ''; } catch { return ''; }
   });
-  const [mode, setMode]                   = useState('stroke');
+const [mode, setMode]                   = useState('stroke');
   const [roomCount, setRoomCount]         = useState(4);
   const [roomNames, setRoomNames]         = useState([]);
   const [rooms, setRooms]                 = useState([]);
@@ -198,7 +230,7 @@ export function PlayerProvider({ children }) {
       const urlEventId = m?.[2];
       if (urlEventId && urlEventId !== eventId) {
         setEventId(urlEventId);
-        try { localStorage.setItem('eventId', urlEventId); } catch {}
+        try { localStorage.setItem('player.eventId', urlEventId); } catch {}
       }
     }
   }, [pathname, eventId]);
@@ -206,58 +238,68 @@ export function PlayerProvider({ children }) {
   useEffect(() => {
     if (!eventId) return;
     try {
-      // ✅ (중요) 참가자 인증코드가 "첫번째 로그인 값으로 고정"되는 문제 방지
-      // - Edge 새창/새탭 테스트 시 localStorage 는 공유되지만, sessionStorage/pending_code 흐름은 탭 단위
-      // - LoginOrCode/PlayerRoomSelect 에서 pending_code 로 넘어오는 경우, 이를 최우선으로 적용
+      // 우선순위: pending_code(로그인 직후) → sessionStorage(authcode_eventId) → 탭 스코프 localStorage 백업
       const pending = sessionStorage.getItem('pending_code') || '';
-      const stored = sessionStorage.getItem(`authcode_${eventId}`) || '';
+      const stored =
+        sessionStorage.getItem(`authcode_${eventId}`) ||
+        localStorage.getItem(playerStorageKey(eventId, 'authCode')) ||
+        '';
+      const code = (pending && pending.trim()) ? pending : stored;
 
-      if (pending && String(pending).trim()) {
-        const next = String(pending).trim();
+      if (code != null) setAuthCode(String(code));
 
-        // 기존 세션 플래그/캐시가 남아있으면 "첫번째 로그인"이 계속 재사용될 수 있음
-        if (!stored || stored !== next) {
-          try {
-            sessionStorage.removeItem(`auth_${eventId}`);
-            sessionStorage.removeItem(`myId_${eventId}`);
-            sessionStorage.removeItem(`nickname_${eventId}`);
-          } catch {}
-          try {
-            localStorage.removeItem(`myId_${eventId}`);
-            localStorage.removeItem(`nickname_${eventId}`);
-          } catch {}
-          setParticipant(null);
-        }
-
-        sessionStorage.setItem(`authcode_${eventId}`, next);
-        setAuthCode(next);
-        // (선택) 한번 소비한 pending_code 는 제거해서 다른 이벤트로 새는 것 방지
+      // pending_code는 적용 후 정리(다른 이벤트로 새는 문제 방지)
+      if (pending && pending.trim()) {
         sessionStorage.removeItem('pending_code');
-      } else {
-        setAuthCode(stored);
+        sessionStorage.setItem(`authcode_${eventId}`, String(pending));
+        try { localStorage.setItem(playerStorageKey(eventId, 'authCode'), String(pending)); } catch {}
       }
     } catch {}
+  }, [eventId]);useEffect(() => {
+    try { if (eventId) localStorage.setItem('player.eventId', eventId); } catch {}
+  }, [eventId]);
+
+  // ✅ authCode 변경(=다른 닉네임/인증코드로 재로그인) 시에만 캐시를 정리
+  // - 초기 마운트/리로드 때 authCode가 세팅되는 과정에서 participant가 매번 null로 리셋되는 문제를 방지
+  const lastAuthCodeRef = useRef('');
+  useEffect(() => {
+    // event가 바뀌면 비교 기준 초기화
+    lastAuthCodeRef.current = '';
   }, [eventId]);
 
   useEffect(() => {
-    try { if (eventId) localStorage.setItem('eventId', eventId); } catch {}
-  }, [eventId]);
+    const cur = (authCode || '').toString().trim();
+    if (!eventId) return;
 
-  useEffect(() => {
-    if (authCode && authCode.trim()) {
-      localStorage.removeItem('myId');
-      localStorage.removeItem('nickname');
+    // 첫 세팅은 정리하지 않고 기준만 잡는다(리로드/스냅샷 동기화 과정에서 풀림 방지)
+    if (lastAuthCodeRef.current === '') {
+      lastAuthCodeRef.current = cur;
+      return;
+    }
+
+    if (cur && lastAuthCodeRef.current !== cur) {
       try {
-        if (eventId) {
-          sessionStorage.removeItem(`myId_${eventId}`);
-          sessionStorage.removeItem(`nickname_${eventId}`);
-        }
+        sessionStorage.removeItem(`participant_${eventId}`);
+        sessionStorage.removeItem(`myId_${eventId}`);
+        sessionStorage.removeItem(`nickname_${eventId}`);
+        sessionStorage.removeItem(`auth_${eventId}`);
+        sessionStorage.removeItem(`authcode_${eventId}`);
       } catch {}
+
+      try {
+        localStorage.removeItem(playerStorageKey(eventId, 'participant'));
+        localStorage.removeItem(playerStorageKey(eventId, 'myId'));
+        localStorage.removeItem(playerStorageKey(eventId, 'nickname'));
+        localStorage.removeItem(playerStorageKey(eventId, 'authed'));
+        localStorage.removeItem(playerStorageKey(eventId, 'authCode'));
+      } catch {}
+
       setParticipant(null);
     }
-  }, [authCode, eventId]);
 
-  // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
+    lastAuthCodeRef.current = cur;
+  }, [authCode, eventId]);
+// ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
@@ -270,10 +312,49 @@ export function PlayerProvider({ children }) {
       // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
       // - (호환) 없으면 기존 participants를 사용
       const f = participantsFieldByMode(md);
-      const rawParts =
-        (Array.isArray(data?.[f]) && data[f].length)
-          ? data[f]
-          : (Array.isArray(data.participants) ? data.participants : []);
+
+      // ✅ SSOT: split 필드(participantsStroke/participantsFourball) + legacy(participants) 동시 존재 시 merge
+      // - Player/Admin 어느 쪽에서 저장하든 "방배정/팀원/점수"가 한쪽 필드에만 기록되는 경우가 있어
+      //   iOS에서 스냅샷 순서에 따라 "방배정 풀림/리스트 안뜸"이 발생할 수 있습니다.
+      const rawSplit  = Array.isArray(data?.[f]) ? data[f] : [];
+      const rawLegacy = Array.isArray(data.participants) ? data.participants : [];
+
+      const mergeById = (primary = [], secondary = []) => {
+        const map = new Map();
+        secondary.forEach((p, i) => {
+          const id = normId(p?.id ?? i);
+          map.set(id, (p && typeof p === 'object') ? p : {});
+        });
+        primary.forEach((p, i) => {
+          const id = normId(p?.id ?? i);
+          const base = map.get(id) || {};
+          const cur = (p && typeof p === 'object') ? p : {};
+          const out = { ...base, ...cur };
+
+          // 중요 필드: null/undefined가 덮어쓰지 않도록 보강
+          const pick = (k) => {
+            const a = cur?.[k];
+            const b = base?.[k];
+            if (a !== undefined && a !== null && a !== '') return a;
+            if (b !== undefined) return b;
+            return a;
+          };
+          out.room       = pick('room');
+          out.roomNumber = pick('roomNumber');
+          out.partner    = pick('partner');
+          out.score      = pick('score');
+          out.authCode   = pick('authCode');
+
+          map.set(id, out);
+        });
+        return Array.from(map.values());
+      };
+
+      let rawParts =
+        (rawSplit.length && rawLegacy.length)
+          ? mergeById(rawSplit, rawLegacy)
+          : (rawSplit.length ? rawSplit : rawLegacy);
+
       const partArr = rawParts.map((p, i) => {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
@@ -285,7 +366,8 @@ export function PlayerProvider({ children }) {
           handicap: toInt(p?.handicap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
-          room:     p?.room ?? null,
+          room:     (p?.room ?? p?.roomNumber) ?? null,
+          roomNumber: (p?.roomNumber ?? p?.room) ?? null,
           partner:  p?.partner != null ? normId(p.partner) : null,
           score:    scoreVal,
           selected: !!p?.selected,
@@ -303,7 +385,9 @@ export function PlayerProvider({ children }) {
       if (authCode && authCode.trim()) {
         me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
-        const authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+        const authedThisEvent =
+          sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
+          localStorage.getItem(playerStorageKey(eventId, 'authed')) === 'true';
         if (authedThisEvent) {
           let idCached  = '';
           let nickCache = '';
@@ -311,8 +395,8 @@ export function PlayerProvider({ children }) {
             idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
             nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
           } catch {}
-          if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
-          if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+          if (!idCached)  { try { idCached  = normId(localStorage.getItem(playerStorageKey(eventId, 'myId')) || ''); } catch {} }
+          if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
           if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
           if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
         }
@@ -320,6 +404,15 @@ export function PlayerProvider({ children }) {
 
       if (me) {
         setParticipant(me);
+
+        // ✅ 탭/창 스코프 보강(다른 창 테스트 시 서로 덮어쓰기 방지 + iOS sessionStorage 유실 대비)
+        try {
+          localStorage.setItem(playerStorageKey(eventId, 'myId'), normId(me.id));
+          localStorage.setItem(playerStorageKey(eventId, 'nickname'), normName(me.nickname));
+          if (me.authCode) localStorage.setItem(playerStorageKey(eventId, 'authCode'), String(me.authCode));
+          localStorage.setItem(playerStorageKey(eventId, 'authed'), 'true');
+        } catch {}
+
         localStorage.setItem('myId', normId(me.id));
         localStorage.setItem('nickname', normName(me.nickname));
         try {
