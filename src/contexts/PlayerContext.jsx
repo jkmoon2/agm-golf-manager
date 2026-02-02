@@ -1,6 +1,6 @@
 // /src/contexts/PlayerContext.jsx
 
-import React, { createContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useState, useEffect } from 'react';
 import {
   doc,
   setDoc,
@@ -58,51 +58,50 @@ const normId   = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
+
 /**
- * ✅ Player 탭/창 단위 SSOT 보조 저장소
- * - Admin(EventContext)는 localStorage 'eventId' 를 사용합니다.
- * - Player는 'player.eventId' + 탭/창(window.name) 스코프로 분리하여 서로 덮어쓰지 않도록 합니다.
- * - iOS(PWA/Safari)에서 sessionStorage가 간헐적으로 초기화되는 케이스를 localStorage(탭 스코프)로 보강합니다.
+ * ✅ Player 탭(브라우저 윈도우/탭) 단위로 상태를 분리하기 위한 SSOT 보조키
+ * - Admin(localStorage.eventId 등)와 충돌 방지
+ * - iOS에서 sessionStorage가 날아가도 방배정/리스트가 풀리지 않도록 최소 백업
  */
-const PLAYER_TAB_PREFIX = 'agmPlayerTab:';
 const getPlayerTabId = () => {
   try {
-    if (typeof window === 'undefined') return 'default';
-    const cur = String(window.name || '');
-    if (cur.startsWith(PLAYER_TAB_PREFIX)) return cur.slice(PLAYER_TAB_PREFIX.length) || 'default';
-    const id = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-    window.name = PLAYER_TAB_PREFIX + id;
-    return id;
+    if (!window.name || !window.name.startsWith('AGM_PLAYER_TAB_')) {
+      window.name = `AGM_PLAYER_TAB_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    }
+    return window.name;
   } catch {
-    return 'default';
+    // window.name 접근이 막힌 환경(드물게) 대비
+    return 'AGM_PLAYER_TAB_FALLBACK';
   }
 };
-const playerStorageKey = (eid, key) => `agm:player:${getPlayerTabId()}:${String(eid || '')}:${key}`;
-const toRoom   = (v) => {
-  const n = Number(v);
-  return (Number.isFinite(n) && n >= 1) ? n : null;
+
+const playerStorageKey = (eid, key) => `agm:player:${getPlayerTabId()}:${eid || 'noevent'}:${key}`;
+
+// 모드별 participants 필드와 legacy participants를 "id 기준" 병합 (SSOT 보강)
+const mergeParticipantsById = (primary = [], legacy = []) => {
+  const map = new Map();
+  const push = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (const p of arr) {
+      if (!p) continue;
+      const id = normId(p.id || p.uid || p.authCode || '');
+      const k = id || JSON.stringify(p);
+      if (!map.has(k)) map.set(k, p);
+      else map.set(k, { ...map.get(k), ...p });
+    }
+  };
+  push(primary);
+  push(legacy);
+  return Array.from(map.values());
 };
+
 
 
 
 // ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
 function participantsFieldByMode(md = 'stroke') {
   return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
-}
-
-// ✅ 모드별 participantsField + legacy participants를 id 기준으로 머지(SSOT 깨짐 방지)
-function mergeParticipantsById(primary, legacy) {
-  const map = new Map();
-  const put = (arr) => {
-    (Array.isArray(arr) ? arr : []).forEach((p, i) => {
-      const id = normId(p?.id ?? i);
-      const prev = map.get(id) || {};
-      map.set(id, { ...prev, ...(p && typeof p === 'object' ? p : {}), id });
-    });
-  };
-  put(legacy);
-  put(primary);
-  return Array.from(map.values());
 }
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
@@ -190,17 +189,17 @@ function markEventAuthed(id, code, meObj) {
       sessionStorage.setItem(`myId_${id}`, normId(meObj.id || ''));
       sessionStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
     }
-  } catch {}
 
-  // ✅ iOS(PWA/Safari)에서 sessionStorage가 간헐적으로 초기화되는 케이스 보강 + 탭/창 단위 분리(SSOT)
-  try {
-    localStorage.setItem(playerStorageKey(id, 'authed'), 'true');
-    if (code != null) localStorage.setItem(playerStorageKey(id, 'authCode'), String(code));
-    if (meObj) {
-      localStorage.setItem(playerStorageKey(id, 'participant'), JSON.stringify(meObj));
-      localStorage.setItem(playerStorageKey(id, 'myId'), normId(meObj.id || ''));
-      localStorage.setItem(playerStorageKey(id, 'nickname'), normName(meObj.nickname || ''));
-    }
+    // ✅ iOS에서 sessionStorage가 초기화되는 케이스 대비 (운영자모드>참가자탭)
+    try {
+      localStorage.setItem(playerStorageKey(id, 'auth'), 'true');
+      if (code != null) localStorage.setItem(playerStorageKey(id, 'authcode'), String(code));
+      if (meObj) {
+        localStorage.setItem(playerStorageKey(id, 'participant'), JSON.stringify(meObj));
+        localStorage.setItem(playerStorageKey(id, 'myId'), normId(meObj.id || ''));
+        localStorage.setItem(playerStorageKey(id, 'nickname'), normName(meObj.nickname || ''));
+      }
+    } catch {}
   } catch {}
 }
 
@@ -238,10 +237,6 @@ export function PlayerProvider({ children }) {
 
   const { pathname } = useLocation();
 
-  // ✅ authCode 변경 시에만 캐시를 초기화(스냅샷 재수화 과정의 불필요한 초기화/깜박임 방지)
-  const lastAuthCodeRef = useRef('');
-  const skipAuthCodeClearRef = useRef(false);
-
   useEffect(() => {
     // ✅ URL의 eventId가 localStorage에 남아있는 예전 eventId를 덮어쓰도록(가장 흔한 원인)
     //   - /player/home/:eventId
@@ -261,10 +256,11 @@ export function PlayerProvider({ children }) {
   useEffect(() => {
     if (!eventId) return;
     try {
-      const code = sessionStorage.getItem(`authcode_${eventId}`)
-        || (localStorage.getItem(playerStorageKey(eventId, 'authCode')) || '')
-        || '';
-      setAuthCode(code);
+      const ssCode = sessionStorage.getItem(`authcode_${eventId}`) || '';
+    let lsCode = '';
+    try { lsCode = localStorage.getItem(playerStorageKey(eventId, 'authcode')) || ''; } catch {}
+    const code = ssCode || lsCode;
+    setAuthCode(code);
     } catch {}
   }, [eventId]);
 
@@ -273,46 +269,34 @@ export function PlayerProvider({ children }) {
   }, [eventId]);
 
   useEffect(() => {
-    const code = (authCode ?? '').toString().trim();
-    if (!eventId) return;
+  if (!eventId) return;
+  const next = (authCode ?? '').toString().trim();
+  if (!next) return;
 
-    // 빈값이면 초기화만
-    if (!code) {
-      lastAuthCodeRef.current = '';
-      return;
-    }
+  // ✅ 이미 저장된(인증된) 코드와 동일하면 "초기화" 금지 (방배정/리스트가 풀리는 현상 방지)
+  let stored = '';
+  try { stored = (sessionStorage.getItem(`authcode_${eventId}`) || '').toString(); } catch {}
+  if (!stored) { try { stored = (localStorage.getItem(playerStorageKey(eventId, 'authcode')) || '').toString(); } catch {} }
 
-    // 스냅샷에서 me를 찾으며 setAuthCode 된 경우(자동 수화)는 캐시 삭제를 건너뜁니다.
-    if (skipAuthCodeClearRef.current) {
-      skipAuthCodeClearRef.current = false;
-      lastAuthCodeRef.current = code;
-      return;
-    }
+  if (stored && stored === next) return;
 
-    // 동일 코드 반복이면 아무 것도 하지 않음(깜박임/배정 풀림 방지)
-    if (code === lastAuthCodeRef.current) return;
-    lastAuthCodeRef.current = code;
+  // ✅ 사용자가 다른 인증코드로 로그인하려는 케이스만 초기화
+  try {
+    sessionStorage.removeItem(`myId_${eventId}`);
+    sessionStorage.removeItem(`nickname_${eventId}`);
+    sessionStorage.removeItem(`participant_${eventId}`);
+    sessionStorage.removeItem(`auth_${eventId}`);
 
-    // ✅ 다른 인증코드로 "새로" 로그인하는 경우에만, 이전 유저 캐시를 정리
-    try {
-      localStorage.removeItem('myId');
-      localStorage.removeItem('nickname');
-    } catch {}
+    localStorage.removeItem(playerStorageKey(eventId, 'myId'));
+    localStorage.removeItem(playerStorageKey(eventId, 'nickname'));
+    localStorage.removeItem(playerStorageKey(eventId, 'participant'));
+    localStorage.removeItem(playerStorageKey(eventId, 'auth'));
+    localStorage.removeItem(playerStorageKey(eventId, 'authcode'));
+  } catch {}
 
-    try {
-      sessionStorage.removeItem(`myId_${eventId}`);
-      sessionStorage.removeItem(`nickname_${eventId}`);
-      sessionStorage.removeItem(`participant_${eventId}`);
-    } catch {}
+  setParticipant(null);
+}, [authCode, eventId]);
 
-    try {
-      localStorage.removeItem(playerStorageKey(eventId, 'myId'));
-      localStorage.removeItem(playerStorageKey(eventId, 'nickname'));
-      localStorage.removeItem(playerStorageKey(eventId, 'participant'));
-    } catch {}
-
-    setParticipant(null);
-  }, [authCode, eventId]);
 
   // ───────── events/{eventId} 구독: participants 원본 로드 (기존 유지)
   useEffect(() => {
@@ -327,9 +311,12 @@ export function PlayerProvider({ children }) {
       // - 현재 모드에 해당하는 participantsStroke/participantsFourball을 우선 사용
       // - (호환) 없으면 기존 participants를 사용
       const f = participantsFieldByMode(md);
-      const fieldArr  = (Array.isArray(data?.[f]) ? data[f] : []);
-      const legacyArr = (Array.isArray(data.participants) ? data.participants : []);
-      const rawParts  = fieldArr.length ? mergeParticipantsById(fieldArr, legacyArr) : legacyArr;
+
+// ✅ SSOT: 모드별 필드 + (호환) legacy participants를 병합
+const primaryParts = Array.isArray(data?.[f]) ? data[f] : [];
+const legacyParts  = Array.isArray(data.participants) ? data.participants : [];
+const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legacyParts) : legacyParts;
+
       const partArr = rawParts.map((p, i) => {
         // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
         const scoreRaw = p?.score;
@@ -341,8 +328,9 @@ export function PlayerProvider({ children }) {
           handicap: toInt(p?.handicap, 0),
           group:    toInt(p?.group, 0),
           authCode: (p?.authCode ?? '').toString(),
-          room:     toRoom(p?.room ?? p?.roomNumber),
-          roomNumber: toRoom(p?.roomNumber ?? p?.room),
+          // ✅ room / roomNumber를 단일 SSOT로 정규화(일부 페이지에서 roomNumber만 쓰는 경우 대비)
+          room:     (p?.room ?? p?.roomNumber ?? null),
+          roomNumber: (p?.room ?? p?.roomNumber ?? null),
           partner:  p?.partner != null ? normId(p.partner) : null,
           score:    scoreVal,
           selected: !!p?.selected,
@@ -360,8 +348,10 @@ export function PlayerProvider({ children }) {
       if (authCode && authCode.trim()) {
         me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
       } else {
-        const authedThisEvent = (sessionStorage.getItem(`auth_${eventId}`) === 'true')
-          || (localStorage.getItem(playerStorageKey(eventId, 'authed')) === 'true');
+        let authedThisEvent = false;
+        try { authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true'; } catch {}
+        if (!authedThisEvent) { try { authedThisEvent = (localStorage.getItem(playerStorageKey(eventId, 'auth')) === 'true'); } catch {} }
+
         if (authedThisEvent) {
           let idCached  = '';
           let nickCache = '';
@@ -370,9 +360,21 @@ export function PlayerProvider({ children }) {
             nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
           } catch {}
           if (!idCached)  { try { idCached  = normId(localStorage.getItem(playerStorageKey(eventId, 'myId')) || ''); } catch {} }
-          if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
           if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+          if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
           if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+
+// (추가) participant 캐시(탭 스코프)에서 id/nickname 복원 (sessionStorage가 초기화된 iOS 대비)
+if (!idCached) {
+  try {
+    const cachedP = localStorage.getItem(playerStorageKey(eventId, 'participant')) || '';
+    if (cachedP) {
+      const p = JSON.parse(cachedP);
+      idCached = normId(p?.id || '');
+      if (!nickCache) nickCache = normName(p?.nickname || '');
+    }
+  } catch {}
+}
           if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
           if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
         }
@@ -380,14 +382,28 @@ export function PlayerProvider({ children }) {
 
       if (me) {
         setParticipant(me);
+
+        // ✅ iOS(운영자모드>참가자탭)에서 sessionStorage가 날아가도 "방배정/리스트"가 풀리지 않도록
+        //    탭 스코프(localStorage + window.name)로 최소 백업
+        try {
+          localStorage.setItem(playerStorageKey(eventId, 'myId'), normId(me.id));
+          localStorage.setItem(playerStorageKey(eventId, 'nickname'), normName(me.nickname));
+          localStorage.setItem(playerStorageKey(eventId, 'participant'), JSON.stringify(me));
+          localStorage.setItem(playerStorageKey(eventId, 'auth'), 'true');
+          if (me.authCode) localStorage.setItem(playerStorageKey(eventId, 'authcode'), String(me.authCode));
+        } catch {}
+
+        // (호환) 기존 저장 방식은 유지
         localStorage.setItem('myId', normId(me.id));
         localStorage.setItem('nickname', normName(me.nickname));
         try {
           sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
           sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
         } catch {}
-        if (me.authCode) { skipAuthCodeClearRef.current = true; setAuthCode(me.authCode); }
+
+        // 먼저 저장 → authCode useEffect에서 "초기화"가 걸리지 않도록
         markEventAuthed(eventId, me.authCode, me);
+        if (me.authCode) setAuthCode(me.authCode);
       } else {
         setParticipant(null);
       }
@@ -461,11 +477,11 @@ export function PlayerProvider({ children }) {
       }
       if (out.room !== undefined && out.room !== null) {
         const n = Number(out.room);
-        out.room = (Number.isFinite(n) && n >= 1) ? n : null;
+        out.room = Number.isFinite(n) ? n : String(out.room);
       }
       if (out.roomNumber !== undefined && out.roomNumber !== null) {
         const n = Number(out.roomNumber);
-        out.roomNumber = (Number.isFinite(n) && n >= 1) ? n : null;
+        out.roomNumber = Number.isFinite(n) ? n : String(out.roomNumber);
       }
       if (out.partner !== undefined && out.partner !== null) {
         const n = Number(out.partner);
@@ -473,9 +489,8 @@ export function PlayerProvider({ children }) {
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
 
-      // room/roomNumber 동기화(표시/필터용)
+      // roomNumber 동기화(표시용)
       if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
-      if (out.room == null && out.roomNumber != null) out.room = out.roomNumber;
 
       return out;
     });
@@ -497,11 +512,11 @@ export function PlayerProvider({ children }) {
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
     const next = participants.map((p) =>
-      normId(p.id) === targetId ? { ...p, room: rid, roomNumber: rid } : p
+      normId(p.id) === targetId ? { ...p, room: rid } : p
     );
     setParticipants(next);
     if (participant && normId(participant.id) === targetId) {
-      setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid });
+      setParticipant((prev) => prev && { ...prev, room: rid });
     }
     await writeParticipants(next);
 
@@ -517,13 +532,13 @@ export function PlayerProvider({ children }) {
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
-      if (normId(p.id) === a) return { ...p, room: rid, roomNumber: rid, partner: b };
-      if (normId(p.id) === b) return { ...p, room: rid, roomNumber: rid, partner: a };
+      if (normId(p.id) === a) return { ...p, room: rid, partner: b };
+      if (normId(p.id) === b) return { ...p, room: rid, partner: a };
       return p;
     });
     setParticipants(next);
-    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: b });
-    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: a });
+    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, partner: b });
+    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, partner: a });
     await writeParticipants(next);
 
     try {
@@ -546,11 +561,11 @@ export function PlayerProvider({ children }) {
     const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
     const next = participants.map((p) =>
-      normId(p.id) === pid ? { ...p, room: chosenRoom, roomNumber: chosenRoom } : p
+      normId(p.id) === pid ? { ...p, room: chosenRoom } : p
     );
     setParticipants(next);
     if (participant && normId(participant.id) === pid) {
-      setParticipant((prev) => prev && { ...prev, room: chosenRoom, roomNumber: chosenRoom });
+      setParticipant((prev) => prev && { ...prev, room: chosenRoom });
     }
     await writeParticipants(next);
 
@@ -574,7 +589,7 @@ export function PlayerProvider({ children }) {
     if (toInt(me.group) !== 1) {
       const partnerNickname =
         (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
-      return { roomNumber: (me.roomNumber ?? me.room) ?? null, partnerNickname };
+      return { roomNumber: me.room ?? null, partnerNickname };
     }
 
     if (FOURBALL_USE_TRANSACTION) {
@@ -587,7 +602,7 @@ export function PlayerProvider({ children }) {
             setParticipants(result.nextParticipants);
             if (participant && normId(participant.id) === pid) {
               setParticipant((prev) =>
-                prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber, partner: result.partnerId || null }
+                prev && { ...prev, room: result.roomNumber, partner: result.partnerId || null }
               );
             }
           }
@@ -621,8 +636,7 @@ export function PlayerProvider({ children }) {
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
-            room: toRoom(p?.room ?? p?.roomNumber),
-            roomNumber: toRoom(p?.roomNumber ?? p?.room),
+            room: p?.room ?? null,
             partner: p?.partner != null ? normId(p?.partner) : null,
           }));
 
@@ -633,13 +647,13 @@ export function PlayerProvider({ children }) {
           const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
           const pool = parts.filter(
-            (p) => toInt(p.group) === 2 && !p.partner && !p.room && normId(p.id) !== pid
+            (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
           );
           const mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
           const next = parts.map((p) => {
-            if (normId(p.id) === pid) return { ...p, room: roomNumber, roomNumber, partner: mateId || null };
-            if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, roomNumber, partner: pid };
+            if (normId(p.id) === pid) return { ...p, room: roomNumber, partner: mateId || null };
+            if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
             return p;
           });
 
@@ -665,7 +679,7 @@ export function PlayerProvider({ children }) {
           setParticipants(result.next);
           if (participant && normId(participant.id) === pid) {
             setParticipant((prev) =>
-              prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber, partner: result.mateId || null }
+              prev && { ...prev, room: result.roomNumber, partner: result.mateId || null }
             );
           }
         }
@@ -682,18 +696,18 @@ export function PlayerProvider({ children }) {
 
     let mateId = '';
     const pool = participants.filter(
-      (p) => toInt(p.group) === 2 && !p.partner && !p.room && normId(p.id) !== pid
+      (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
     );
     mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
     const next = participants.map((p) => {
-      if (normId(p.id) === pid)    return { ...p, room: roomNumber, roomNumber, partner: mateId || null };
-      if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, roomNumber, partner: pid };
+      if (normId(p.id) === pid)    return { ...p, room: roomNumber, partner: mateId || null };
+      if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
       return p;
     });
     setParticipants(next);
     if (participant && normId(participant.id) === pid) {
-      setParticipant((prev) => prev && { ...prev, room: roomNumber, roomNumber, partner: mateId || null });
+      setParticipant((prev) => prev && { ...prev, room: roomNumber, partner: mateId || null });
     }
     await writeParticipants(next);
 
