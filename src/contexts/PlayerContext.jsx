@@ -548,6 +548,14 @@ if (!idCached) {
     } catch (_) {}
   }
 
+  // ✅ room 값 유효성 체크 (재배정 금지 가드용)
+  // - roomCount 범위 안의 숫자(1~roomCount)면 true
+  // - null/undefined/0/NaN 등은 false
+  const isValidRoom = (room) => {
+    const n = Number(room);
+    return Number.isFinite(n) && n >= 1 && n <= Number(roomCount || 0);
+  };
+
   async function assignStrokeForOne(participantId) {
     await ensureAuthReady();
 
@@ -555,6 +563,11 @@ if (!idCached) {
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
+
+    // ✅ 이미 방 배정된 경우: 재배정 금지(특히 iOS/운영자 참가자탭에서 상태가 풀려 보일 때 2회 클릭 방지)
+    if (isValidRoom(me?.room)) {
+      return { roomNumber: Number(me.room), alreadyAssigned: true };
+    }
 
     let candidates = validRoomsForStroke(participants, roomCount, me);
     if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
@@ -590,6 +603,14 @@ if (!idCached) {
       const partnerNickname =
         (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
       return { roomNumber: me.room ?? null, partnerNickname };
+    }
+
+    // ✅ 이미 방/파트너가 배정된 1조는 재배정 금지 (중복 클릭/복귀 이슈 방지)
+    if (isValidRoom(me?.room)) {
+      const partnerNickname = me.partner
+        ? (participants.find((p) => normId(p.id) === normId(me.partner))?.nickname || '')
+        : '';
+      return { roomNumber: Number(me.room), partnerId: me.partner, partnerNickname, alreadyAssigned: true };
     }
 
     if (FOURBALL_USE_TRANSACTION) {

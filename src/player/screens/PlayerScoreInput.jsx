@@ -103,6 +103,59 @@ export default function PlayerScoreInput() {
   const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
   const eventId = ctxEventId || routeEventId;
 
+
+  // ✅ SSOT: STEP4 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
+  // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
+  const effectiveParticipants = useMemo(() => {
+    const safeArr = (v) => (Array.isArray(v) ? v : []);
+    const modeFromEvent = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+    const field = (modeFromEvent === 'fourball') ? 'participantsFourball' : 'participantsStroke';
+    const primary = safeArr(eventData?.[field]);
+    const legacy  = safeArr(eventData?.participants);
+
+    let mergedRaw = legacy;
+    if (primary.length) {
+      const map = new Map();
+      legacy.forEach((p, i) => { map.set(String(p?.id ?? i), p); });
+      primary.forEach((p, i) => {
+        const id = String(p?.id ?? i);
+        map.set(id, { ...(map.get(id) || {}), ...(p || {}) });
+      });
+      mergedRaw = Array.from(map.values());
+    }
+
+    const normalized = mergedRaw
+      .filter(Boolean)
+      .map((p, i) => {
+        const obj = (p && typeof p === 'object') ? p : {};
+        const id = obj?.id ?? i;
+        const room = obj?.room ?? obj?.roomNumber ?? null;
+        return { ...obj, id, room, roomNumber: room };
+      });
+
+    return normalized.length ? normalized : safeArr(participants);
+  }, [
+    participants,
+    eventData?.mode,
+    eventData?.participants,
+    eventData?.participantsStroke,
+    eventData?.participantsFourball,
+  ]);
+
+  const viewParticipant = useMemo(() => {
+    if (!participant) return null;
+    const pid = participant?.id;
+    if (pid != null) {
+      const found = effectiveParticipants.find((p) => String(p.id) === String(pid));
+      if (found) return { ...participant, ...found };
+    }
+    if (participant?.authCode) {
+      const found = effectiveParticipants.find((p) => String(p?.authCode || '') === String(participant.authCode));
+      if (found) return { ...participant, ...found };
+    }
+    return participant;
+  }, [participant, effectiveParticipants]);
+
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
 
@@ -130,7 +183,7 @@ export default function PlayerScoreInput() {
 
   const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
-  const myRoom = participant?.room ?? null;
+  const myRoom = viewParticipant?.room ?? null;
 
   useEffect(() => {
     if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
@@ -144,8 +197,8 @@ export default function PlayerScoreInput() {
       : '';
 
   const roomPlayers = useMemo(
-    () => (myRoom ? toSafeParticipants(participants).filter((p) => (p?.room ?? null) === myRoom) : []),
-    [participants, myRoom]
+    () => (myRoom ? toSafeParticipants(effectiveParticipants).filter((p) => (p?.room ?? null) === myRoom) : []),
+    [effectiveParticipants, myRoom]
   );
   const orderedRoomPlayers = useMemo(() => orderByPair(roomPlayers), [roomPlayers]);
 
