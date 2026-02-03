@@ -666,14 +666,20 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
             {participants.map((p) => {
               const isDisabled = loadingId === p.id || getRoomValue(p) != null;
 
-              const liveScore = scoresMap?.[String(p.id)]?.score;
+              // ✅ 실시간 반영 우선순위 (Step7과 동일)
+              // - 편집 중(scoreRaw)은 로컬 입력값 유지
+              // - 그 외에는 Firestore scores(SSOT)가 있으면 그 값을 우선 표시
+              // - score가 null로 지워진 경우도 즉시 반영되도록 '문서 존재 여부(undef)'로 판단
+              const liveObj = scoresMap?.[String(p.id)];
+              const hasLiveDoc = liveObj !== undefined;
+              const liveScore = hasLiveDoc ? liveObj?.score : undefined;
               const displayScore =
                 p.scoreRaw !== undefined
                   ? p.scoreRaw
-                  : p.score != null
-                    ? p.score
-                    : liveScore != null
-                      ? liveScore
+                  : hasLiveDoc
+                    ? (liveScore == null ? '' : liveScore)
+                    : p.score != null
+                      ? p.score
                       : '';
 
               return (
