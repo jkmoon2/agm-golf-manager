@@ -135,3 +135,37 @@
 .eventItem:hover {
   background-color: #f5f5f5;
 }
+
+/* ---------------------------------------------------------------------------
+   [PWA/iOS Standalone 보정 - 원본 레이아웃 최대 유지 + 필요한 최소 수정]
+   - 홈화면 추가(standalone)에서는 브라우저 상/하단바가 없어지면서,
+     헤더가 상태바 바로 밑으로 붙어 보이거나(너무 위로 올라감),
+     하단 탭 글자가 작아 보이는 현상이 발생할 수 있음.
+   - 아래 스타일은 "standalone(홈화면 실행)"에서만 적용되어
+     기존(Safari/PC) 레이아웃 영향 최소화.
+--------------------------------------------------------------------------- */
+@media (display-mode: standalone) {
+  /* iOS safe-area(top) 만큼 헤더 상단 패딩을 주고, 높이도 그만큼 늘림 */
+  .header {
+    height: calc(56px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    box-sizing: border-box;
+  }
+
+  /* 콘텐츠 하단 여백도 safe-area(bottom) + 탭바 높이만큼 확보 */
+  .content {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  /* 탭바도 safe-area(bottom) 포함해서 실제 버튼 영역이 잘리지 않게 */
+  .tabbar {
+    height: calc(64px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    box-sizing: border-box;
+  }
+
+  /* 홈화면 실행 시 탭 글자가 작아 보이는 체감 보정(예전과 유사하게) */
+  .label {
+    font-size: 12px; /* 필요 시 11~13px 범위에서 미세 조정 가능 */
+  }
+}
