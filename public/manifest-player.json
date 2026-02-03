@@ -1,0 +1,17 @@
+{
+  "id": "/agm-player",
+  "name": "AGM 참가자",
+  "short_name": "AGM 참가자",
+  "start_url": "/player/events?entry=player",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1320",
+  "theme_color": "#0b1320",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}
