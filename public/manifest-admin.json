@@ -2,7 +2,7 @@
   "id": "/agm-admin",
   "name": "AGM 운영자",
   "short_name": "AGM 운영자",
-  "start_url": "/?entry=admin",
+  "start_url": "/install-admin.html",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0b1320",

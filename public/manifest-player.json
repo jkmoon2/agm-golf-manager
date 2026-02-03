@@ -2,7 +2,7 @@
   "id": "/agm-player",
   "name": "AGM 참가자",
   "short_name": "AGM 참가자",
-  "start_url": "/player/events?entry=player",
+  "start_url": "/install-player.html",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0b1320",

@@ -28,49 +28,34 @@ function Protected({ roles, children }) {
 }
 
 
-// ✅ 홈화면(운영자/참가자) 아이콘을 URL 기준으로 100% 분리하기 위한 엔트리 파라미터 처리
-// - /?entry=admin  : 운영자 로그인으로
-// - /?entry=player : 참가자 전용(/player/events)으로
-function getEntryParam() {
-  try {
-    const sp = new URLSearchParams(window.location.search || '');
-    const v = (sp.get('entry') || '').toLowerCase().trim();
-    if (v === 'admin' || v === 'player') return v;
-    return '';
-  } catch (e) {
-    return '';
-  }
-}
-
-function RootLanding() {
+// ✅ entry=player/admin 이 붙어 있는 경우, 어떤 경로로 시작하든 모드를 강제 고정(아이폰 홈화면 Web Clip 대응)
+// - 아이폰 홈화면 추가 아이콘이 간헐적으로 '/'로 열리거나, 저장소 분리로 인해 기본 로그인으로 튀는 케이스를 방지
+function EntryEnforcer() {
   const loc = useLocation();
-  // React Router location.search 사용 (SSR 없음)
-  let entry = '';
-  try {
-    const sp = new URLSearchParams(loc.search || '');
-    entry = (sp.get('entry') || '').toLowerCase().trim();
-  } catch (e) {
-    entry = '';
-  }
+  const navigate = useNavigate();
 
-  if (entry === 'player') return <Navigate to="/player/events" replace />;
-  // 기본은 운영자 로그인
-  return <Navigate to="/login?role=admin" replace />;
-}
+  useEffect(() => {
+    let entry = '';
+    try {
+      const sp = new URLSearchParams(loc.search || '');
+      entry = (sp.get('entry') || '').toLowerCase().trim();
+    } catch (e) {
+      entry = '';
+    }
+    if (entry !== 'player' && entry !== 'admin') return;
 
-function LoginLanding() {
-  const loc = useLocation();
-  let entry = '';
-  try {
-    const sp = new URLSearchParams(loc.search || '');
-    entry = (sp.get('entry') || '').toLowerCase().trim();
-  } catch (e) {
-    entry = '';
-  }
+    const path = loc.pathname || '/';
 
-  // 참가자 아이콘이 iOS PWA start_url 때문에 /login 으로 시작되는 경우를 강제 교정
-  if (entry === 'player') return <Navigate to="/player/events" replace />;
-  return <LoginScreen />;
+    if (entry === 'player') {
+      if (path.startsWith('/player')) return;
+      navigate('/player/events?entry=player', { replace: true });
+    } else if (entry === 'admin') {
+      if (path.startsWith('/admin')) return;
+      navigate('/login?role=admin&entry=admin', { replace: true });
+    }
+  }, [loc.pathname, loc.search, navigate]);
+
+  return null;
 }
 
 // '/player/home/:eventId/login' → '/player/home/:eventId'
@@ -121,12 +106,6 @@ function PwaStartRedirect() {
   const navigate = useNavigate();
 
   useEffect(() => {
-// ✅ entry 파라미터로 분기하는 경우(lastRoute 복원 로직이 간섭하지 않도록) 우선권 부여
-try {
-  const ep = new URLSearchParams(location.search || '').get('entry');
-  const v = (ep || '').toLowerCase().trim();
-  if (v === 'admin' || v === 'player') return;
-} catch (e) {}
     if (!isStandalonePWA()) return;
     // PWA는 start_url 때문에 '/' 또는 '/login'으로 뜨는 경우가 많음 → lastRoute로 되돌림
     if (location.pathname !== '/' && location.pathname !== '/login') return;
@@ -153,9 +132,10 @@ export default function AppRouter() {
         <EventProvider>
           <PwaRouteRememberer />
           <PwaStartRedirect />
+          <EntryEnforcer />
           <Routes>
-            <Route path="/" element={<RootLanding />} />
-            <Route path="/login" element={<LoginLanding />} />
+            <Route path="/" element={<Navigate to="/login?role=admin" replace />} />
+            <Route path="/login" element={<LoginScreen />} />
 
             {/* ───────── 참가자 영역 ───────── */}
             <Route
