@@ -2,16 +2,13 @@
   "id": "/agm-admin",
   "name": "AGM 운영자",
   "short_name": "AGM 운영자",
-  "start_url": "/install-admin.html",
+  "start_url": "/?entry=admin",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0b1320",
   "theme_color": "#0b1320",
   "icons": [
-    {
-      "src": "/favicon.ico",
-      "sizes": "any",
-      "type": "image/x-icon"
-    }
+    { "src": "/logo192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/logo512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
