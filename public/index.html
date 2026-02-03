@@ -15,20 +15,15 @@
     <!--
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
-    <link id="agm-manifest" rel="manifest" href="%PUBLIC_URL%/manifest-admin.json" />
-    <script>
+    -->    <script>
       (function () {
         try {
           var p = window.location.pathname || "";
-          var isPlayer = p.indexOf("/player") === 0;
-          var m = document.getElementById("agm-manifest");
-          if (m) {
-            m.setAttribute(
-              "href",
-              (isPlayer ? "%PUBLIC_URL%/manifest-player.json" : "%PUBLIC_URL%/manifest-admin.json")
-            );
-          }
+          var isPlayer = p.indexOf("/player") === 0; // "/player"로 시작하면 참가자
+          var href = (isPlayer ? "%PUBLIC_URL%/manifest-player.json" : "%PUBLIC_URL%/manifest-admin.json");
+          // iOS는 manifest를 매우 빨리 읽어가므로, link를 동적으로 생성해 초기 요청부터 정확히 맞춥니다.
+          document.write('<link rel="manifest" href="' + href + '">
+');
         } catch (e) {}
       })();
     </script>

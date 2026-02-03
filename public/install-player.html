@@ -24,7 +24,7 @@
     <li>이름을 “AGM 참가자”로 저장</li>
   </ol>
 
-  <a href="/player/events?entry=player"
+  <a href="/pwa-player.html?entry=player"
      style="display:inline-block; padding:10px 14px; background:#0b1320; color:#fff; text-decoration:none; border-radius:10px;">
     참가자 모드 열기
   </a>
@@ -38,7 +38,7 @@
       try {
         var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator && window.navigator.standalone);
         if (isStandalone) {
-          window.location.replace('/player/events?entry=player');
+          window.location.replace('/pwa-player.html?entry=player');
         }
       } catch(e){}
     })();

@@ -24,7 +24,7 @@
     <li>이름을 “AGM 운영자”로 저장</li>
   </ol>
 
-  <a href="/?entry=admin"
+  <a href="/pwa-admin.html?entry=admin"
      style="display:inline-block; padding:10px 14px; background:#0b1320; color:#fff; text-decoration:none; border-radius:10px;">
     운영자 모드 열기
   </a>
@@ -38,7 +38,7 @@
       try {
         var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator && window.navigator.standalone);
         if (isStandalone) {
-          window.location.replace('/?entry=admin');
+          window.location.replace('/pwa-admin.html?entry=admin');
         }
       } catch(e){}
     })();
