@@ -1,8 +1,16 @@
+<!-- /public/pwa-player.html -->
+
 <!doctype html>
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- ✅ iOS 홈화면(PWA) 풀스크린 + SafeArea 대응 (Safari 상/하단 바 제거) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="AGM 참가자">
+
     <title>AGM 참가자 모드</title>
   </head>
   <body>
@@ -11,6 +19,8 @@
         localStorage.setItem('agm.lastRoute', '/player/login-or-code');
         localStorage.setItem('agm.lastMode', 'player');
       } catch (e) {}
+
+      // ✅ 참가자 홈화면 아이콘 실행 시, 참가자 로그인 화면으로 고정
       location.replace('/player/login-or-code');
     </script>
   </body>
