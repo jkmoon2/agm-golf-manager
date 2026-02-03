@@ -20,6 +20,43 @@ import Settings          from './screens/Settings';
 import PreMembers        from './admin/screens/PreMembers';
 
 export default function App() {
+
+// ✅ iOS Safari/PWA에서 100vh 초기 계산이 흔들리며(상단/하단이 튀는 현상) 레이아웃이 달라지는 문제를 방지하기 위해
+//    실제 화면 높이(window.innerHeight / visualViewport)를 CSS 변수(--vh)에 반영합니다.
+//    *기존 레이아웃 값은 유지*하고, vh 계산만 안정화합니다.
+useEffect(() => {
+  const setVhVar = () => {
+    const h = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+    const vh = h * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
+  };
+
+  // 최초 1회
+  setVhVar();
+
+  // 리사이즈/회전/주소창 변화 대응 (iOS는 visualViewport 이벤트가 더 정확)
+  let rafId = null;
+  const schedule = () => {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(setVhVar);
+  };
+
+  window.addEventListener('resize', schedule);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', schedule);
+    window.visualViewport.addEventListener('scroll', schedule);
+  }
+
+  return () => {
+    window.removeEventListener('resize', schedule);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', schedule);
+      window.visualViewport.removeEventListener('scroll', schedule);
+    }
+    if (rafId) cancelAnimationFrame(rafId);
+  };
+}, []);
+
   return (
     <BrowserRouter>
       <Routes>
