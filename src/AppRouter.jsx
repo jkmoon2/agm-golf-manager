@@ -79,6 +79,35 @@ function PwaStartRedirect() {
     // PWA는 start_url 때문에 '/' 또는 '/login'으로 뜨는 경우가 많음 → lastRoute로 되돌림
     if (location.pathname !== '/' && location.pathname !== '/login') return;
 
+    // ✅ (대안B) iOS 홈화면에서 같은 도메인(origin)을 공유하면
+    // "마지막에 사용했던 경로(lastRoute)"가 운영자/참가자 사이에서 서로 덮어써지는 경우가 있어
+    // 참가자 아이콘인데도 운영자 로그인(/login)부터 뜨는 현상이 발생할 수 있음.
+    //
+    // 해결: pwa-player.html / pwa-admin.html에서 installMode를 한 번 저장해두고
+    // PWA로 시작할 때 '/' 또는 '/login'이면 installMode 기준으로 "최초 진입"을 우선 결정한다.
+    // (레이아웃/CSS에는 영향 없음)
+    let installMode = null;
+    try {
+      installMode = localStorage.getItem('agm.installMode');
+    } catch (e) {
+      installMode = null;
+    }
+
+    if (installMode === 'player') {
+      // 참가자 전용 기기/아이콘: 운영자 로그인으로 뜨면 즉시 참가자 로그인으로 복귀
+      navigate('/player/login-or-code', { replace: true });
+      return;
+    }
+
+    if (installMode === 'admin') {
+      // 운영자 전용 기기/아이콘: '/' 또는 '/login'으로 시작해도 운영자 로그인으로 고정
+      // (LoginScreen이 role 파라미터를 쓰는 경우가 있어도, 기존 구조를 건드리지 않기 위해 /login만 사용)
+      if (location.pathname !== '/login') {
+        navigate('/login', { replace: true });
+      }
+      return;
+    }
+
     let last = null;
     try {
       last = localStorage.getItem('agm.lastRoute');
