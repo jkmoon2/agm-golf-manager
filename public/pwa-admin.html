@@ -1,16 +1,8 @@
-<!-- /public/pwa-admin.html -->
-
 <!doctype html>
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-
-    <!-- ✅ iOS 홈화면(PWA) 풀스크린 + SafeArea 대응 (Safari 상/하단 바 제거) -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="AGM 운영자">
-
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AGM 운영자 모드</title>
   </head>
   <body>
@@ -19,8 +11,6 @@
         localStorage.setItem('agm.lastRoute', '/login');
         localStorage.setItem('agm.lastMode', 'admin');
       } catch (e) {}
-
-      // ✅ 운영자 홈화면 아이콘 실행 시, 운영자 로그인 화면으로 고정
       location.replace('/login');
     </script>
   </body>

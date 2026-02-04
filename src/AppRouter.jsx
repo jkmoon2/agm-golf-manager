@@ -27,37 +27,6 @@ function Protected({ roles, children }) {
   return children;
 }
 
-
-// ✅ entry=player/admin 이 붙어 있는 경우, 어떤 경로로 시작하든 모드를 강제 고정(아이폰 홈화면 Web Clip 대응)
-// - 아이폰 홈화면 추가 아이콘이 간헐적으로 '/'로 열리거나, 저장소 분리로 인해 기본 로그인으로 튀는 케이스를 방지
-function EntryEnforcer() {
-  const loc = useLocation();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    let entry = '';
-    try {
-      const sp = new URLSearchParams(loc.search || '');
-      entry = (sp.get('entry') || '').toLowerCase().trim();
-    } catch (e) {
-      entry = '';
-    }
-    if (entry !== 'player' && entry !== 'admin') return;
-
-    const path = loc.pathname || '/';
-
-    if (entry === 'player') {
-      if (path.startsWith('/player')) return;
-      navigate('/player/events?entry=player', { replace: true });
-    } else if (entry === 'admin') {
-      if (path.startsWith('/admin')) return;
-      navigate('/login?role=admin&entry=admin', { replace: true });
-    }
-  }, [loc.pathname, loc.search, navigate]);
-
-  return null;
-}
-
 // '/player/home/:eventId/login' → '/player/home/:eventId'
 function RedirectPlayerHomeNoLogin() {
   const { eventId } = useParams();
@@ -132,7 +101,6 @@ export default function AppRouter() {
         <EventProvider>
           <PwaRouteRememberer />
           <PwaStartRedirect />
-          <EntryEnforcer />
           <Routes>
             <Route path="/" element={<Navigate to="/login?role=admin" replace />} />
             <Route path="/login" element={<LoginScreen />} />

@@ -1,52 +1,20 @@
-<!-- /public/index.html -->
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-
-    <!-- ✅ iOS 홈화면(PWA) 풀스크린 + SafeArea 대응 (Safari 상/하단 바 제거 목적) -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="AGM Golf Manager" />
-
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
     <meta
       name="description"
       content="Web site created using create-react-app"
     />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-
     <!--
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-
-      ✅ NOTE
-      - iOS는 manifest를 매우 빠르게 읽고(때로는 캐싱) 홈화면 아이콘의 실행 모드(standalone 여부)에도 영향을 줍니다.
-      - 그래서 JS로 바꿔치기 "후"에 적용되면 늦을 수 있어, 초기 파싱 단계에서 올바른 manifest link를 생성합니다.
     -->
-    <script>
-      (function () {
-        try {
-          var p = window.location.pathname || "";
-          // 참가자 경로(/player...), 참가자 설치/엔트리 페이지는 참가자 manifest 사용
-          var isPlayer =
-            p.indexOf("/player") === 0 ||
-            p.indexOf("/pwa-player") === 0 ||
-            p.indexOf("/install-player") === 0;
-
-          var href = isPlayer
-            ? "%PUBLIC_URL%/manifest-player.json"
-            : "%PUBLIC_URL%/manifest-admin.json";
-
-          // 초기 파싱 시점에 link를 생성해서 iOS 캐시/타이밍 이슈를 최소화
-          document.write('<link rel="manifest" href="' + href + '">');
-        } catch (e) {}
-      })();
-    </script>
-
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <!--
       Notice the use of %PUBLIC_URL% in the tags above.
       It will be replaced with the URL of the `public` folder during the build.
@@ -56,12 +24,11 @@
       work correctly both with client-side routing and a non-root public URL.
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
-    <title>AGM Golf Manager</title>
+    <title>React App</title>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-
     <!--
       This HTML file is a template.
       If you open it directly in the browser, you will see an empty page.

@@ -10,31 +10,6 @@ import './index.css';
 // 위에서 만든 serviceWorker.js 불러오기
 import * as serviceWorker from './serviceWorker';
 
-// ------------------------------------------------------------
-// [iOS/PWA viewport fix]
-// iOS(특히 홈화면 추가/standalone)에서 첫 렌더 시 100vh가 흔들리면서
-// 헤더가 상태바(시계) 영역과 겹치거나, 하단 고정 영역/버튼 위치가 들쭉날쭉해지는 경우가 있음.
-// visualViewport 기반으로 실제 화면 높이를 CSS 변수로 주입해 레이아웃을 안정화한다.
-// ------------------------------------------------------------
-function setAppHeightVars() {
-  try {
-    const vv = window.visualViewport;
-    const h = (vv && vv.height) ? vv.height : window.innerHeight;
-    document.documentElement.style.setProperty('--app-height', `${h}px`);
-  } catch (e) {
-    // no-op
-  }
-}
-
-setAppHeightVars();
-window.addEventListener('resize', setAppHeightVars);
-window.addEventListener('orientationchange', setAppHeightVars);
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', setAppHeightVars);
-  // scroll 이벤트도 일부 iOS에서 height 계산 트리거가 됨
-  window.visualViewport.addEventListener('scroll', setAppHeightVars);
-}
-
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>

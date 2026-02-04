@@ -3,8 +3,7 @@
 .page {
   display: flex;
   flex-direction: column;
-  /* iOS/PWA에서 100vh 흔들림 방지: index.js가 --app-height(px) 주입 */
-  height: var(--app-height, 100vh);
+  height: 100vh;
 }
 
 /* ── 상단 헤더 (운영자와 동일하되, 왼쪽 정렬) ── */
@@ -12,14 +11,13 @@
   position: fixed;
   top: 0;
   width: 100%;
-  /* Safe-Area(top) 반영: 상태바(시계) 영역과 겹침 방지 */
-  height: calc(var(--app-header-h, 56px) + env(safe-area-inset-top));
+  height: 56px;
   background: #fff;
   border-bottom: 1px solid #eee;
   display: flex;
   align-items: center;
   justify-content: flex-start;   /* center → flex-start */
-  padding: env(safe-area-inset-top) 16px 0 16px; /* 상단 safe-area + 좌우 여백 */
+  padding: 0 16px;               /* 왼쪽 여백 확보 */
   font-size: 1.25rem;
   font-weight: bold;
   z-index: 10;
@@ -29,9 +27,8 @@
 .content {
   flex: 1;
   overflow-y: auto;
-  /* header + tabbar 높이를 정확히 확보 */
-  padding-top: calc(var(--app-header-h, 56px) + env(safe-area-inset-top));
-  padding-bottom: calc(var(--app-tab-h, 64px) + env(safe-area-inset-bottom));
+  padding-top: 56px;   /* header 높이 만큼 */
+  padding-bottom: 56px;/* tabbar 높이 만큼 */
 }
 
 /* ── 하단 탭바 (운영자 BottomTabBar.module.css과 완전히 동일) ── */
@@ -39,15 +36,13 @@
   position: fixed;
   bottom: 0;
   width: 100%;
-  /* 기존(정상) 레이아웃에 맞춰 탭바 높이를 64px 기준으로 고정 */
-  height: calc(var(--app-tab-h, 64px) + env(safe-area-inset-bottom));
+  height: 56px;
   background: #fff;
   border-top: 1px solid #ddd;
   display: flex;
   justify-content: space-around;
   align-items: center;
   z-index: 10;
-  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .tab {
@@ -69,7 +64,6 @@
 }
 
 .label {
-  /* iOS에서 작게 보이던 현상 개선 (기존과 동일한 체감 크기) */
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
 }

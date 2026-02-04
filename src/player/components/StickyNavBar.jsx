@@ -16,8 +16,7 @@ export default function StickyNavBar({ left, right, sideGap = 16 }) {
     position: 'fixed',
     left: sideGap,
     right: sideGap,
-    // 탭바 높이(기본 64px)는 CSS 변수(--app-tab-h)로 관리
-    bottom: 'calc(env(safe-area-inset-bottom) + var(--app-tab-h, 64px))',
+    bottom: 'calc(env(safe-area-inset-bottom) + 64px)',
     zIndex: 20,
     background: '#fff',
     padding: '12px 0',

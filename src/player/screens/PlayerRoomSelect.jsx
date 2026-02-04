@@ -499,7 +499,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     position: 'fixed',
     left: 16,
     right: 16,
-    bottom: 'calc(env(safe-area-inset-bottom) + var(--app-tab-h, 64px) + 12px)',
+    bottom: 'calc(env(safe-area-inset-bottom) + 64px + 12px)',
     zIndex: 20,
     background: 'transparent',
   };
