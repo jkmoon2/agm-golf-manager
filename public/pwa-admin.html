@@ -7,15 +7,15 @@
   </head>
   <body>
     <script>
-      try {
-        // ✅ (대안B) 이 기기/아이콘은 "운영자 모드"로 실행되길 원한다는 의도를 영구 저장
-        // - iOS 홈화면에서 동일 도메인(origin) 2아이콘은 세션/스토리지 공유로 인해 서로 덮어쓰는 경우가 있어
-        //   installMode 키로 "이 기기는 어떤 모드로 시작해야 하는지"를 고정해 둔다.
-        localStorage.setItem('agm.installMode', 'admin');
-        localStorage.setItem('agm.lastRoute', '/login');
-        localStorage.setItem('agm.lastMode', 'admin');
-      } catch (e) {}
-      location.replace('/login');
+      // public/pwa-admin.html
+      // 운영자 모드 의도를 Cookie로 저장 (iOS 홈화면/PWA에서 세션/스토리지 꼬임 대비)
+      (function () {
+        try {
+          document.cookie =
+            'agm_mode=admin; Max-Age=31536000; Path=/; SameSite=Lax';
+        } catch (e) {}
+        location.replace('/login');
+      })();
     </script>
   </body>
 </html>
