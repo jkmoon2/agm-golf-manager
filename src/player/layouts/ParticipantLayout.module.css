@@ -3,8 +3,7 @@
 .page {
   display: flex;
   flex-direction: column;
-  /* ✅ iOS(Safari/PWA)에서 100vh가 주소창/상태바 변화로 튀는 문제 방지
-     - src/index.js 에서 window.innerHeight를 --app-height로 주입(없으면 100vh fallback) */
+  /* iOS/PWA에서 100vh 흔들림 방지: index.js가 --app-height(px) 주입 */
   height: var(--app-height, 100vh);
 }
 
@@ -13,15 +12,14 @@
   position: fixed;
   top: 0;
   width: 100%;
-  /* ✅ safe-area(top) 반영: 시계/상태바 영역과 겹치지 않도록 */
-  padding-top: env(safe-area-inset-top);
-  height: calc(56px + env(safe-area-inset-top));
+  /* Safe-Area(top) 반영: 상태바(시계) 영역과 겹침 방지 */
+  height: calc(var(--app-header-h, 56px) + env(safe-area-inset-top));
   background: #fff;
   border-bottom: 1px solid #eee;
   display: flex;
   align-items: center;
   justify-content: flex-start;   /* center → flex-start */
-  padding: 0 16px;               /* 왼쪽 여백 확보 */
+  padding: env(safe-area-inset-top) 16px 0 16px; /* 상단 safe-area + 좌우 여백 */
   font-size: 1.25rem;
   font-weight: bold;
   z-index: 10;
@@ -31,9 +29,9 @@
 .content {
   flex: 1;
   overflow-y: auto;
-  /* ✅ header/tabbar + safe-area 만큼 확보 */
-  padding-top: calc(56px + env(safe-area-inset-top));
-  padding-bottom: calc(56px + env(safe-area-inset-bottom));
+  /* header + tabbar 높이를 정확히 확보 */
+  padding-top: calc(var(--app-header-h, 56px) + env(safe-area-inset-top));
+  padding-bottom: calc(var(--app-tab-h, 64px) + env(safe-area-inset-bottom));
 }
 
 /* ── 하단 탭바 (운영자 BottomTabBar.module.css과 완전히 동일) ── */
@@ -41,15 +39,15 @@
   position: fixed;
   bottom: 0;
   width: 100%;
-  height: 56px;
-  /* ✅ iOS 홈 인디케이터 영역 확보 */
-  padding-bottom: env(safe-area-inset-bottom);
+  /* 기존(정상) 레이아웃에 맞춰 탭바 높이를 64px 기준으로 고정 */
+  height: calc(var(--app-tab-h, 64px) + env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1px solid #ddd;
   display: flex;
   justify-content: space-around;
   align-items: center;
   z-index: 10;
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .tab {
@@ -71,7 +69,7 @@
 }
 
 .label {
-  /* ✅ 기존 체감 크기 복구 (PWA에서 상대적으로 작아 보이는 현상 보정) */
+  /* iOS에서 작게 보이던 현상 개선 (기존과 동일한 체감 크기) */
   font-size: 12px;
   line-height: 1;
 }

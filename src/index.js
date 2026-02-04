@@ -10,25 +10,32 @@ import './index.css';
 // 위에서 만든 serviceWorker.js 불러오기
 import * as serviceWorker from './serviceWorker';
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-
 // ------------------------------------------------------------
-// ✅ iOS(Safari/PWA) 뷰포트 높이 안정화
-// - iOS에서 100vh가 주소창/상태바 변화에 따라 튀면서
-//   상단 헤더가 시계 영역과 겹치거나, 하단 탭/버튼 위치가 흔들리는 문제가 있음.
-// - window.innerHeight 기반으로 CSS 변수(--app-height)를 주입해
-//   레이아웃이 "항상 현재 화면 높이"를 기준으로 잡히게 함.
+// [iOS/PWA viewport fix]
+// iOS(특히 홈화면 추가/standalone)에서 첫 렌더 시 100vh가 흔들리면서
+// 헤더가 상태바(시계) 영역과 겹치거나, 하단 고정 영역/버튼 위치가 들쭉날쭉해지는 경우가 있음.
+// visualViewport 기반으로 실제 화면 높이를 CSS 변수로 주입해 레이아웃을 안정화한다.
 // ------------------------------------------------------------
-function setAppHeightVar() {
+function setAppHeightVars() {
   try {
-    const h = window.innerHeight;
+    const vv = window.visualViewport;
+    const h = (vv && vv.height) ? vv.height : window.innerHeight;
     document.documentElement.style.setProperty('--app-height', `${h}px`);
-  } catch {}
+  } catch (e) {
+    // no-op
+  }
 }
 
-setAppHeightVar();
-window.addEventListener('resize', setAppHeightVar);
-window.addEventListener('orientationchange', setAppHeightVar);
+setAppHeightVars();
+window.addEventListener('resize', setAppHeightVars);
+window.addEventListener('orientationchange', setAppHeightVars);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setAppHeightVars);
+  // scroll 이벤트도 일부 iOS에서 height 계산 트리거가 됨
+  window.visualViewport.addEventListener('scroll', setAppHeightVars);
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     {/* ✅ EventProvider는 AppRouter 내부(<BrowserRouter> 안)에서 1회만 감싸도록 유지 */}

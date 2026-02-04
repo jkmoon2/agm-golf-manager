@@ -104,7 +104,7 @@
   position: fixed;
   left: 16px;
   right: 16px;
-  bottom: calc(env(safe-area-inset-bottom) + 64px); /* 탭바 높이에 맞게 64 조절 */
+  bottom: calc(env(safe-area-inset-bottom) + var(--app-tab-h, 64px)); /* 탭바 높이 기준 */
   z-index: 20;
   background: #fff;
   padding: 12px 16px;

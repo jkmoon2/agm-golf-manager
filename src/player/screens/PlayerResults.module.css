@@ -147,7 +147,7 @@
 /* 하단 고정 네비 */
 .footerNav{
   position:fixed; left:0; right:0;
-  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--app-tab-h, 64px));
   display:flex; gap:12px; justify-content:space-between; align-items:center;
   padding:10px 16px; background:#fff;
 }
