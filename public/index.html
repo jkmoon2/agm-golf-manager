@@ -14,34 +14,31 @@
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
     -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-
-    <!-- iOS 홈화면(standalone)에서 "참가자 아이콘인데 운영자 로그인"으로 열리는 현상 방지용 가드
-         - iOS는 홈화면 아이콘이 / 로 열리는 경우가 종종 있어, 마지막 모드(player/admin) 기록을 기준으로 올바른 진입 경로로 리다이렉트.
-         - 레이아웃/CSS에는 영향 없음(초기 라우팅만 보정). -->
+    <!--
+      iOS 홈화면(PWA)에서 "참가자(/player/*)"로 추가했는데도 앱 실행 시
+      운영자 start_url("/")로 열리는 문제를 방지하기 위해
+      pathname에 따라 manifest를 동적으로 선택한다.
+      - /player/*  -> manifest-player.json (start_url: /player/events, scope: /player/)
+      - 그 외      -> manifest-admin.json  (start_url: /, scope: /)
+      * 레이아웃/CSS/로직은 건드리지 않고 public(head)만 변경
+    -->
+    <link id="app-manifest" rel="manifest" href="%PUBLIC_URL%/manifest-admin.json" />
     <script>
+      // IMPORTANT: iOS 홈화면 앱 실행 시 현재 URL보다 manifest의 start_url을 우선 적용하는 경우가 있음.
+      // 따라서 첫 로드 시점에 pathname을 보고 manifest를 올바르게 바꿔준다.
       (function () {
         try {
-          var p = window.location.pathname || '/';
-          // 현재 경로 기반으로 lastMode/lastRoute 기록(새로고침/첫 진입 시에만)
-          if (p.indexOf('/player') === 0) {
-            localStorage.setItem('agm.lastMode', 'player');
-            localStorage.setItem('agm.lastRoute', p + window.location.search + window.location.hash);
-          } else {
-            localStorage.setItem('agm.lastMode', 'admin');
-            localStorage.setItem('agm.lastRoute', p + window.location.search + window.location.hash);
-          }
-
-          var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone;
-          // 홈화면에서 / 로 뜬 경우: lastMode 따라 올바른 시작 경로로 즉시 이동
-          if (standalone && (p === '/' || p === '/index.html')) {
-            var lastMode = localStorage.getItem('agm.lastMode');
-            if (lastMode === 'player') {
-              window.location.replace('/player/events');
-            }
+          var p = (location && location.pathname) ? location.pathname : "/";
+          var isPlayer = p === "/player" || p.indexOf("/player/") === 0;
+          var link = document.getElementById("app-manifest");
+          if (link) {
+            link.setAttribute(
+              "href",
+              (isPlayer ? "%PUBLIC_URL%/manifest-player.json" : "%PUBLIC_URL%/manifest-admin.json")
+            );
           }
         } catch (e) {
-          // ignore
+          // no-op
         }
       })();
     </script>
