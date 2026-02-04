@@ -15,6 +15,36 @@
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
     -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <!-- iOS 홈화면(standalone)에서 "참가자 아이콘인데 운영자 로그인"으로 열리는 현상 방지용 가드
+         - iOS는 홈화면 아이콘이 / 로 열리는 경우가 종종 있어, 마지막 모드(player/admin) 기록을 기준으로 올바른 진입 경로로 리다이렉트.
+         - 레이아웃/CSS에는 영향 없음(초기 라우팅만 보정). -->
+    <script>
+      (function () {
+        try {
+          var p = window.location.pathname || '/';
+          // 현재 경로 기반으로 lastMode/lastRoute 기록(새로고침/첫 진입 시에만)
+          if (p.indexOf('/player') === 0) {
+            localStorage.setItem('agm.lastMode', 'player');
+            localStorage.setItem('agm.lastRoute', p + window.location.search + window.location.hash);
+          } else {
+            localStorage.setItem('agm.lastMode', 'admin');
+            localStorage.setItem('agm.lastRoute', p + window.location.search + window.location.hash);
+          }
+
+          var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone;
+          // 홈화면에서 / 로 뜬 경우: lastMode 따라 올바른 시작 경로로 즉시 이동
+          if (standalone && (p === '/' || p === '/index.html')) {
+            var lastMode = localStorage.getItem('agm.lastMode');
+            if (lastMode === 'player') {
+              window.location.replace('/player/events');
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      })();
+    </script>
     <!--
       Notice the use of %PUBLIC_URL% in the tags above.
       It will be replaced with the URL of the `public` folder during the build.
