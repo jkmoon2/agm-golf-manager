@@ -11,6 +11,24 @@ import './index.css';
 import * as serviceWorker from './serviceWorker';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
+
+// ------------------------------------------------------------
+// ✅ iOS(Safari/PWA) 뷰포트 높이 안정화
+// - iOS에서 100vh가 주소창/상태바 변화에 따라 튀면서
+//   상단 헤더가 시계 영역과 겹치거나, 하단 탭/버튼 위치가 흔들리는 문제가 있음.
+// - window.innerHeight 기반으로 CSS 변수(--app-height)를 주입해
+//   레이아웃이 "항상 현재 화면 높이"를 기준으로 잡히게 함.
+// ------------------------------------------------------------
+function setAppHeightVar() {
+  try {
+    const h = window.innerHeight;
+    document.documentElement.style.setProperty('--app-height', `${h}px`);
+  } catch {}
+}
+
+setAppHeightVar();
+window.addEventListener('resize', setAppHeightVar);
+window.addEventListener('orientationchange', setAppHeightVar);
 root.render(
   <React.StrictMode>
     {/* ✅ EventProvider는 AppRouter 내부(<BrowserRouter> 안)에서 1회만 감싸도록 유지 */}

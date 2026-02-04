@@ -3,7 +3,9 @@
 .page {
   display: flex;
   flex-direction: column;
-  height: calc(var(--vh, 1vh) * 100);
+  /* ✅ iOS(Safari/PWA)에서 100vh가 주소창/상태바 변화로 튀는 문제 방지
+     - src/index.js 에서 window.innerHeight를 --app-height로 주입(없으면 100vh fallback) */
+  height: var(--app-height, 100vh);
 }
 
 /* ── 상단 헤더 (운영자와 동일하되, 왼쪽 정렬) ── */
@@ -11,9 +13,9 @@
   position: fixed;
   top: 0;
   width: 100%;
-  height: calc(56px + env(safe-area-inset-top));
+  /* ✅ safe-area(top) 반영: 시계/상태바 영역과 겹치지 않도록 */
   padding-top: env(safe-area-inset-top);
-  box-sizing: border-box;
+  height: calc(56px + env(safe-area-inset-top));
   background: #fff;
   border-bottom: 1px solid #eee;
   display: flex;
@@ -29,8 +31,9 @@
 .content {
   flex: 1;
   overflow-y: auto;
-  padding-top: calc(56px + env(safe-area-inset-top));   /* header 높이 만큼 */
-  padding-bottom: calc(56px + env(safe-area-inset-bottom));/* tabbar 높이 만큼 */
+  /* ✅ header/tabbar + safe-area 만큼 확보 */
+  padding-top: calc(56px + env(safe-area-inset-top));
+  padding-bottom: calc(56px + env(safe-area-inset-bottom));
 }
 
 /* ── 하단 탭바 (운영자 BottomTabBar.module.css과 완전히 동일) ── */
@@ -38,9 +41,9 @@
   position: fixed;
   bottom: 0;
   width: 100%;
-  height: calc(56px + env(safe-area-inset-top));
-  padding-top: env(safe-area-inset-top);
-  box-sizing: border-box;
+  height: 56px;
+  /* ✅ iOS 홈 인디케이터 영역 확보 */
+  padding-bottom: env(safe-area-inset-bottom);
   background: #fff;
   border-top: 1px solid #ddd;
   display: flex;
@@ -68,6 +71,7 @@
 }
 
 .label {
-  font-size: 12px; /* iOS 홈화면(PWA)에서 글자가 너무 작아 보이는 현상 보정 */
+  /* ✅ 기존 체감 크기 복구 (PWA에서 상대적으로 작아 보이는 현상 보정) */
+  font-size: 12px;
   line-height: 1;
 }

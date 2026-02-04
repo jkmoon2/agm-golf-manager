@@ -4,17 +4,22 @@
 :root {
   --card-max: 400px;
   --side-padding: 16px;
-  --bottom-nav-safe: 88px; /* 하단 탭 여유공간 */
+  /* MainLayout에서 이미 하단 탭(고정바) 여유를 확보하므로 여기서는 0으로 둠 */
+  --bottom-nav-safe: 0px;
 }
 
 * { box-sizing: border-box; }
 
 .wrap {
-  min-height: 100vh;
+  /* ✅ MainLayout.content 안에서 또 100vh로 계산되면 iOS(PWA)에서
+     주소창/상태바 변화에 따라 카드 위치가 흔들리거나 불필요한 빈공간이 생김.
+     content 영역 기준(100%)으로 중앙 배치하도록 변경 */
+  min-height: 100%;
   display: grid;
   place-items: center;            /* 본문 중앙 정렬 */
   padding: 16px var(--side-padding) calc(var(--bottom-nav-safe) + 16px);
-  background: #f3f6fb;
+  /* 기존 톤(배경)은 MainLayout이 담당. 여기서는 투명 유지 */
+  background: transparent;
 }
 
 .card {
