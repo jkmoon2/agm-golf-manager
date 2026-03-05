@@ -1,7 +1,15 @@
 // src/screens/Step5.jsx
 
+<<<<<<< Updated upstream
 import React, { useState, useEffect, useContext } from 'react';
 import { StepContext } from '../flows/StepFlow';
+=======
+import React, { useState, useEffect, useContext, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { StepContext } from '../flows/StepFlow';          // ✅ 경로 고정 (에러 방지)
+import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (에러 방지)
+import { serverTimestamp } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
+>>>>>>> Stashed changes
 import styles from './Step5.module.css';
 
 export default function Step5() {
@@ -14,6 +22,19 @@ export default function Step5() {
     goNext
   } = useContext(StepContext);
 
+<<<<<<< Updated upstream
+=======
+  // ✅ SSOT 통일: 점수는 /events/{eventId}/scores/{pid} 에만 저장(양방향 실시간)
+  //    - Step5/7/Admin, Player 모두 동일한 scores를 읽고/쓰도록 정리
+  //    - participants 배열에는 score를 영구 저장하지 않음(방배정/명단만 유지)
+  const { eventId, updateEventImmediate, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
+
+  const rooms = useMemo(
+    () => Array.from({ length: Number(roomCount || 0) }, (_, i) => i + 1),
+    [roomCount]
+  );
+
+>>>>>>> Stashed changes
   const [loadingId, setLoadingId] = useState(null);
   const [forceSelectingId, setForceSelectingId] = useState(null);
 
@@ -31,6 +52,7 @@ export default function Step5() {
     );
   };
 
+<<<<<<< Updated upstream
   // ── 2) 수동 배정 ──
   const onManualAssign = id => {
     setLoadingId(id);
@@ -38,6 +60,79 @@ export default function Step5() {
       const target = participants.find(p => p.id === id);
       if (!target) {
         setLoadingId(null);
+=======
+  const withRoomValue = (p, room) => {
+    if (room === '' || room === undefined || room == null) {
+      return { ...p, room: null, roomNumber: null };
+    }
+    const n = Number(room);
+    const v = Number.isFinite(n) ? n : null;
+    return { ...p, room: v, roomNumber: v };
+  };
+
+
+  useEffect(() => {
+    latestParticipantsRef.current = participants;
+  }, [participants]);
+  // ✅ SSOT: 점수는 EventContext(scoresMap/scoresReady)가 events/{eventId}/scores 를 단일 구독합니다.
+  //   - Step5는 별도 onSnapshot을 만들지 않고, scoresMap/scoresReady만 사용합니다.
+  // ✅ (추가) Step5에서는 “중간영역만 스크롤” 되도록 body 스크롤 잠금 (타이틀 고정 문제 해결)
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.overflow;
+    const prevBody = document.body.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.documentElement.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (A) 하단 버튼 위치를 Step4와 동일한 방식으로 맞추기 (bottomTabBar 높이 감지 + safe-area)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [__bottomGap, __setBottomGap] = useState(64);
+  useEffect(() => {
+    const probe = () => {
+      try {
+        const el =
+          document.querySelector('[data-bottom-nav]') ||
+          document.querySelector('#bottomTabBar') ||
+          document.querySelector('.bottomTabBar') ||
+          document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch (e) {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+
+  const __FOOTER_H = 56;
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+
+  const pageStyle = {
+    height: '100dvh',
+    overflow: 'hidden',
+    boxSizing: 'border-box',
+    // footer가 fixed라서, 본문이 footer 밑으로 들어가지 않게 paddingBottom 확보
+    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`,
+    display: 'flex',
+    flexDirection: 'column',
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // (B) Firestore에 participants[] 커밋 (A안: onBlur 시점에만 1회 커밋)
+  //  - updateEventImmediate({participants}, false) 로 “스킵” 방지
+  // ─────────────────────────────────────────────────────────────────────────────
+  const syncParticipantsToEvent = useCallback(
+    async (nextList) => {
+      if (!eventId || typeof updateEventImmediate !== 'function') return;
+
+      // ✅ in-flight면 "마지막 요청"만 저장해두고 종료 (마지막이 승리)
+      if (syncInFlightRef.current) {
+        queuedSyncRef.current = nextList || [];
+>>>>>>> Stashed changes
         return;
       }
 
@@ -177,6 +272,7 @@ export default function Step5() {
                 />
               </div>
 
+<<<<<<< Updated upstream
               {/* 수동 버튼 */}
               <div className={`${styles.cell} ${styles.manual}`}>
                 <button
@@ -189,6 +285,30 @@ export default function Step5() {
                     : '수동'}
                 </button>
               </div>
+=======
+              // ✅ 실시간 반영 우선순위 (Step7과 동일)
+              // - 편집 중(scoreRaw)은 로컬 입력값 유지
+              // - 그 외에는 Firestore scores(SSOT)가 있으면 그 값을 우선 표시
+              // - score가 null로 지워진 경우도 즉시 반영되도록 '문서 존재 여부(undef)'로 판단
+              const pidStr = String(p.id);
+              const map = scoresMap || {};
+              const ready = !!scoresReady;
+              const hasLiveKey = Object.prototype.hasOwnProperty.call(map, pidStr);
+              const liveScore = hasLiveKey ? map[pidStr] : null;
+
+              // ✅ 실시간 반영 우선순위 (Step7과 동일, SSOT 단일 구독)
+              // - 편집 중(scoreRaw)은 로컬 입력값 유지
+              // - scoresReady 이전에는 기존 participants.score를 유지(깜박임 방지)
+              // - scoresReady 이후에는 scoresMap이 SSOT: 키가 없으면 ''(미입력)로 간주
+              const displayScore =
+                p.scoreRaw !== undefined
+                  ? p.scoreRaw
+                  : ready
+                    ? (hasLiveKey ? (liveScore == null ? '' : liveScore) : '')
+                    : (hasLiveKey
+                        ? (liveScore == null ? '' : liveScore)
+                        : (p.score != null ? p.score : ''));
+>>>>>>> Stashed changes
 
               {/* 강제 버튼 & 메뉴 */}
               <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>

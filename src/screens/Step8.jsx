@@ -5,6 +5,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';
 import { StepContext } from '../flows/StepFlow';
+<<<<<<< Updated upstream
 
 export default function Step8() {
 const {
@@ -17,6 +18,56 @@ const {
 
   const MAX_PER_ROOM = 4; // 한 방에 최대 4명
 
+=======
+// [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
+//         Step8에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
+
+// [PATCH] scores 구독은 EventContext에서 단일 수행(중복 리스너/읽기 감소)
+
+export default function Step8() {
+  const {
+    participants,
+    roomCount,
+    roomNames,
+    goPrev,
+    goNext,
+    setStep
+  } = useContext(StepContext);
+
+  const { eventId, eventData, updateEventImmediate, scoresMap, overlayScoresToParticipants } = useContext(EventContext) || {};
+  // [PATCH] eventData는 EventContext에서 실시간으로 갱신됨
+
+  const MAX_PER_ROOM = 4; // 한 방에 최대 4명
+
+  // ───────────────────────────────────────────────────────────
+  // [NEW] 하단 고정 버튼을 위한 안전영역/여백 계산 (STEP5/7과 동일 패턴)
+  // ───────────────────────────────────────────────────────────
+  const [__bottomGap, __setBottomGap] = useState(64);
+  useEffect(() => {
+    const probe = () => {
+      try {
+        const el =
+          document.querySelector('[data-bottom-nav]') ||
+          document.querySelector('#bottomTabBar') ||
+          document.querySelector('.bottomTabBar') ||
+          document.querySelector('.BottomTabBar');
+        __setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {}
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    return () => window.removeEventListener('resize', probe);
+  }, []);
+  const __FOOTER_H   = 56; // 하단 버튼 영역 높이(대략)
+  const __safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${__bottomGap}px)`;
+  const __pageStyle  = {
+    minHeight: '100dvh',
+    boxSizing: 'border-box',
+    paddingBottom: `calc(${__FOOTER_H}px + ${__safeBottom})`, // 컨텐츠가 버튼 뒤로 숨지 않게
+  };
+  // ───────────────────────────────────────────────────────────
+
+>>>>>>> Stashed changes
   // ── 1) UI 상태 ───────────────────────────────────────────
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
@@ -98,6 +149,26 @@ const {
   );
 
   // ── 5) participants를 방별로 묶은 2차원 배열 ─────────────────────
+<<<<<<< Updated upstream
+=======
+  const sourceParticipants = (participants && participants.length)
+    ? participants
+    : ((eventData?.participants && eventData.participants.length) ? eventData.participants : []);
+
+  // [PATCH] 점수 오버레이: EventContext의 scoresMap/overlay를 사용(중복 구독 제거)
+  const participantsWithScore = useMemo(() => {
+    if (typeof overlayScoresToParticipants === 'function') {
+      return overlayScoresToParticipants(sourceParticipants || []);
+    }
+    const map = scoresMap || {};
+    return (sourceParticipants || []).map((p) => {
+      const key = String(p.id);
+      const s = map[key];
+      return (s === undefined) ? p : { ...p, score: s };
+    });
+  }, [sourceParticipants, scoresMap, overlayScoresToParticipants]);
+
+>>>>>>> Stashed changes
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participants || []).forEach(p => {

@@ -1,0 +1,526 @@
+// /src/player/screens/PlayerScoreInput.jsx
+
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { db, auth } from '../../firebase';
+import { PlayerContext } from '../../contexts/PlayerContext';
+import { EventContext } from '../../contexts/EventContext';
+import styles from './PlayerScoreInput.module.css';
+
+function normalizeGate(raw){
+  if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
+  const g = { ...raw };
+  const steps = g.steps || {};
+  const out = { steps:{}, step1:{ ...(g.step1 || {}) } };
+  for (let i=1;i<=8;i+=1) out.steps[i] = steps[i] || 'enabled';
+  if (typeof out.step1.teamConfirmEnabled !== 'boolean') out.step1.teamConfirmEnabled = true;
+  return out;
+}
+function pickGateByMode(playerGate, mode){
+  const isFour = (mode === 'fourball' || mode === 'agm');
+  const nested = isFour ? playerGate?.fourball : playerGate?.stroke;
+  const base = nested && typeof nested === 'object' ? nested : playerGate;
+  return normalizeGate(base);
+}
+function tsToMillis(ts){
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  return Number(ts) || 0;
+}
+
+const asArray = (v) => Array.isArray(v) ? v : [];
+const toSafeParticipants = (arr) =>
+  asArray(arr)
+    .filter(Boolean)
+    .map((p) => ({ ...p, id: p?.id ?? p?.pid ?? p?.uid ?? p?._id ?? null }))
+    .filter((p) => p.id != null);
+
+// 포볼 A/B/A/B 고정: group===1 + partner 매칭 기반
+function orderByPair(list) {
+  const slot = [null, null, null, null];
+  const used = new Set();
+
+  // 1조를 기준으로 짝을 찾고, 첫 번째 짝은 slot[0,1], 두 번째 짝은 slot[2,3]
+  (list || [])
+    .filter((p) => Number(p?.group) === 1)
+    .forEach((p1) => {
+      if (used.has(p1.id)) return;
+      const p2 = (list || []).find((x) => String(x?.id) === String(p1?.partner));
+      if (p2 && !used.has(p2.id)) {
+        const pos = slot[0] ? 2 : 0;
+        slot[pos] = p1;
+        slot[pos + 1] = p2;
+        used.add(p1.id);
+        used.add(p2.id);
+      }
+    });
+
+  // 남은 사람은 빈 칸에 순서대로 채우기
+  (list || []).forEach((p) => {
+    if (!used.has(p.id)) {
+      const i = slot.findIndex((s) => s === null);
+      if (i >= 0) { slot[i] = p; used.add(p.id); }
+    }
+  });
+
+  for (let i = 0; i < 4; i += 1) {
+    if (!slot[i]) slot[i] = { id: `empty-${i}`, nickname: '', handicap: '', score: null, __empty: true };
+  }
+  return slot.slice(0, 4);
+}
+
+const toNumberOrNull = (v) => {
+  if (v === '' || v == null) return null;
+  if (v === '-' || v === '+') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+// 규칙 통과(memberships) 보조
+async function ensureMembership(eventId, myRoom) {
+  try {
+    const uid = auth?.currentUser?.uid || null;
+    if (!uid || !eventId || !myRoom) return;
+    const ref = doc(db, 'events', eventId, 'memberships', uid);
+    await setDoc(ref, { room: myRoom }, { merge: true });
+  } catch (e) {
+    console.warn('ensureMembership failed', e);
+  }
+}
+
+export default function PlayerScoreInput() {
+  const {
+    eventId: ctxEventId,
+    participants = [],
+    participant,
+    roomNames = [],
+  } = useContext(PlayerContext);
+
+  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
+  const params = useParams();
+  const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
+  const eventId = ctxEventId || routeEventId;
+
+
+  // ✅ SSOT: STEP4 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
+  // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
+  const effectiveParticipants = useMemo(() => {
+    const safeArr = (v) => (Array.isArray(v) ? v : []);
+    const modeFromEvent = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+    const field = (modeFromEvent === 'fourball') ? 'participantsFourball' : 'participantsStroke';
+    const primary = safeArr(eventData?.[field]);
+    const legacy  = safeArr(eventData?.participants);
+
+    let mergedRaw = legacy;
+    if (primary.length) {
+      const map = new Map();
+      legacy.forEach((p, i) => { map.set(String(p?.id ?? i), p); });
+      primary.forEach((p, i) => {
+        const id = String(p?.id ?? i);
+        map.set(id, { ...(map.get(id) || {}), ...(p || {}) });
+      });
+      mergedRaw = Array.from(map.values());
+    }
+
+    const normalized = mergedRaw
+      .filter(Boolean)
+      .map((p, i) => {
+        const obj = (p && typeof p === 'object') ? p : {};
+        const id = obj?.id ?? i;
+        const room = obj?.room ?? obj?.roomNumber ?? null;
+        return { ...obj, id, room, roomNumber: room };
+      });
+
+    return normalized.length ? normalized : safeArr(participants);
+  }, [
+    participants,
+    eventData?.mode,
+    eventData?.participants,
+    eventData?.participantsStroke,
+    eventData?.participantsFourball,
+  ]);
+
+  const viewParticipant = useMemo(() => {
+    if (!participant) return null;
+    const pid = participant?.id;
+    if (pid != null) {
+      const found = effectiveParticipants.find((p) => String(p.id) === String(pid));
+      if (found) return { ...participant, ...found };
+    }
+    if (participant?.authCode) {
+      const found = effectiveParticipants.find((p) => String(p?.authCode || '') === String(participant.authCode));
+      if (found) return { ...participant, ...found };
+    }
+    return participant;
+  }, [participant, effectiveParticipants]);
+
+  const [fallbackGate, setFallbackGate] = useState(null);
+  const [fallbackAt, setFallbackAt] = useState(0);
+
+  useEffect(() => {
+    if (!eventId) return;
+    const ref = doc(db, 'events', eventId);
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.data();
+      if (d?.playerGate) {
+        setFallbackGate(d.playerGate);
+        setFallbackAt(tsToMillis(d?.gateUpdatedAt));
+      }
+    });
+    return unsub;
+  }, [eventId]);
+
+  const latestGate = useMemo(() => {
+    const mode = ((eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke');
+    const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
+    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const fbG   = pickGateByMode(fallbackGate || {}, mode);
+    const fbAt  = fallbackAt;
+    return (ctxAt >= fbAt) ? ctxG : fbG;
+  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
+
+  const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
+
+  const myRoom = viewParticipant?.room ?? null;
+
+  useEffect(() => {
+    if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
+  }, [eventId, myRoom]);
+
+  const roomLabel =
+    myRoom && roomNames[myRoom - 1]?.trim()
+      ? roomNames[myRoom - 1].trim()
+      : myRoom
+      ? `${myRoom}번방`
+      : '';
+
+  const roomPlayers = useMemo(
+    () => (myRoom ? toSafeParticipants(effectiveParticipants).filter((p) => (p?.room ?? null) === myRoom) : []),
+    [effectiveParticipants, myRoom]
+  );
+  const orderedRoomPlayers = useMemo(() => orderByPair(roomPlayers), [roomPlayers]);
+
+  useEffect(() => {
+    try {
+      const a = orderedRoomPlayers;
+      if (Array.isArray(a)) {
+        const safe = a.filter((p) => !!p && typeof p === 'object' && p.id != null);
+        Object.defineProperty(a, 'forEach', {
+          configurable: true,
+          writable: true,
+          value: function (cb, thisArg) { return safe.forEach(cb, thisArg); }
+        });
+      }
+    } catch {}
+  }, [orderedRoomPlayers]);
+
+  const paddedRows = useMemo(() => {
+    const rows = [...orderedRoomPlayers];
+    while (rows.length < 4) {
+      rows.push({ id: `empty-${rows.length}`, nickname: '', handicap: '', score: null, __empty: true });
+    }
+    return rows;
+  }, [orderedRoomPlayers]);
+
+  // ✅ scores SSOT: EventContext 제공 scoresMap 사용 (중복 구독 금지)
+  const scoresReady = Boolean(ctxScoresReady);
+  const scoresMap = (ctxScoresMap && typeof ctxScoresMap === 'object') ? ctxScoresMap : {};
+
+
+  // ★ 기준 스냅샷 & 현재 입력
+  const [baseDraft, setBaseDraft] = useState({});
+  const [draft, setDraft] = useState({});
+  const bootstrappedRef = useRef(false); // 최초 1회 플래그
+  const [hasEdited, setHasEdited] = useState(false); // ★ 입력 발생 여부
+
+  // 기준 스냅샷 생성
+  useEffect(() => {
+    const base = {};
+    orderedRoomPlayers.forEach((p) => {
+      const key = String(p.id);
+      // ✅ [PATCH] scores SSOT: scoresReady 이후에는 /scores 기준 (문서 없으면 null)
+      const baseScore = scoresReady
+        ? (Object.prototype.hasOwnProperty.call(scoresMap, key) ? scoresMap[key] : null)
+        : p.score;
+      base[key] = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
+    });
+    setBaseDraft(base);
+
+    // 저장 직후(hasEdited=false)에는 저장된 값을 드래프트로 동기화
+    if (!bootstrappedRef.current || !hasEdited) {
+      setDraft(base);
+      bootstrappedRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedRoomPlayers, scoresMap, hasEdited]);
+
+  // Dirty 계산
+  const isReady = useMemo(
+    () => Object.keys(baseDraft).length > 0 && orderedRoomPlayers.length > 0,
+    [baseDraft, orderedRoomPlayers.length]
+  );
+  const isDirty = useMemo(() => {
+    const keys = Object.keys(baseDraft);
+    if (!keys.length) return false;
+    for (const k of keys) {
+      if ((draft[k] ?? '') !== (baseDraft[k] ?? '')) return true;
+    }
+    return false;
+  }, [baseDraft, draft]);
+
+  const onChangeScore = (pid, val) => {
+    const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
+    setDraft((d) => ({ ...d, [String(pid)]: clean }));
+    setHasEdited(true);
+  };
+
+  const saveScoresDraft = async () => {
+    if (!eventId) return;
+    try{
+      await ensureMembership(eventId, myRoom);
+      const ops = [];
+
+      orderedRoomPlayers.forEach((p) => {
+        const key = String(p.id);
+        const raw = draft[key];
+        const before = baseDraft[key] ?? '';
+        if (raw === undefined || String(raw) === String(before)) return;
+
+        const newScore = toNumberOrNull(raw);
+        const ref = doc(db, 'events', eventId, 'scores', key);
+        ops.push(setDoc(ref, { room: myRoom, score: newScore, updatedAt: serverTimestamp() }, { merge: true }));
+      });
+
+      await Promise.all(ops);
+
+      // 저장 후 스냅샷 승격 → dirty 해제
+      setBaseDraft((prev) => {
+        const next = { ...prev };
+        orderedRoomPlayers.forEach((p) => {
+          const key = String(p.id);
+          if (draft[key] !== undefined) next[key] = draft[key] ?? '';
+        });
+        return next;
+      });
+      setHasEdited(false);
+
+      alert('저장되었습니다.');
+    }catch(e){
+      console.error('saveScoresDraft failed', e);
+      alert('저장 중 오류가 발생했습니다.');
+    }
+  };
+
+  const inputRefs = useRef({});
+  const holdMapRef = useRef({});
+  const LONG_PRESS_MS = 1000;
+  const MOVE_CANCEL_PX = 10;
+
+  // ✅ [PATCH] Android(특히 Chrome)에서 input의 long-press가 PointerEvent로 안정적으로 전달되지 않는 케이스가 있어
+  // touch/mouse 이벤트에서도 동일 로직이 동작하도록 좌표 추출을 통합
+  const getPointFromEvt = (e) => {
+    const ne = e?.nativeEvent || e;
+    if (!ne) return { x: 0, y: 0 };
+    const t = (ne.touches && ne.touches[0]) || (ne.changedTouches && ne.changedTouches[0]);
+    if (t) return { x: t.clientX ?? 0, y: t.clientY ?? 0 };
+    if (typeof ne.clientX === 'number' || typeof ne.clientY === 'number') return { x: ne.clientX ?? 0, y: ne.clientY ?? 0 };
+    return { x: 0, y: 0 };
+  };
+
+  const ensureMap = (pid) => {
+    const key = String(pid);
+    if (!holdMapRef.current[key]) holdMapRef.current[key] = { timer: null, x: 0, y: 0, fired: false };
+    return holdMapRef.current[key];
+  };
+  const startHold = (pid, e) => {
+    const m = ensureMap(pid);
+    m.fired = false;
+    // ✅ [PATCH] Pointer/Touch/Mouse 모두 동일 좌표 기준
+    const pt = getPointFromEvt(e);
+    m.x = pt.x;
+    m.y = pt.y;
+    if (m.timer) clearTimeout(m.timer);
+    m.timer = setTimeout(() => {
+      m.fired = true;
+      setDraft((d) => {
+        const key = String(pid);
+        const cur = String(d[key] ?? '');
+        if (cur.startsWith('-')) return d;
+        const next = { ...d, [key]: cur ? `-${cur}` : '-' };
+        requestAnimationFrame(() => {
+          const el = inputRefs.current[key];
+          if (el && typeof el.setSelectionRange === 'function') {
+            const end = (next[key] || '').length;
+            try { el.setSelectionRange(end, end); } catch {}
+          }
+          try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+        });
+        return next;
+      });
+      setHasEdited(true);
+    }, LONG_PRESS_MS);
+  };
+  const moveHold = (pid, e) => {
+    const m = ensureMap(pid);
+    if (!m.timer) return;
+    // ✅ [PATCH] Pointer/Touch/Mouse 모두 동일 좌표 기준
+    const pt = getPointFromEvt(e);
+    const dx = Math.abs((pt.x ?? 0) - (m.x ?? 0));
+    const dy = Math.abs((pt.y ?? 0) - (m.y ?? 0));
+    if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) { clearTimeout(m.timer); m.timer = null; }
+  };
+  const endHold = (pid) => {
+    const m = ensureMap(pid);
+    if (m.timer) { clearTimeout(m.timer); m.timer = null; }
+  };
+  const preventContextMenu = (e) => { e.preventDefault(); };
+
+  const totals = useMemo(() => {
+    let sumH = 0, sumS = 0, sumR = 0;
+    orderedRoomPlayers.forEach((p) => {
+      const key = String(p.id);
+      const s = toNumberOrNull(draft[key]);
+      const h = Number(p.handicap || 0);
+      sumH += h;
+      sumS += (s ?? 0);
+      sumR += (s ?? 0) - h;
+    });
+    return { sumH, sumS, sumR };
+  }, [orderedRoomPlayers, draft]);
+
+  // 드래프트 미준비 시 항상 비활성(초기 깜빡임 제거)
+  const hasDraftKeys = Object.keys(draft).length > 0;
+  const saveDisabled = !(isReady && hasDraftKeys && (isDirty || hasEdited));
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.card}>
+        {roomLabel && <div className={styles.roomTitle}>{roomLabel}</div>}
+
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <colgroup>
+              <col style={{ width: '35%' }} />
+              <col style={{ width: '21.666%' }} />
+              <col style={{ width: '21.666%' }} />
+              <col style={{ width: '21.666%' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className={styles.th}>닉네임</th>
+                <th className={styles.th}>G핸디</th>
+                <th className={styles.th}>점수</th>
+                <th className={styles.th}>결과</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paddedRows.map((p) => {
+                if (p.__empty) {
+                  return (
+                    <tr key={p.id}>
+                      <td className={`${styles.td} ${styles.nickCell}`} />
+                      <td className={styles.td} />
+                      <td className={`${styles.td} ${styles.scoreTd}`} />
+                      <td className={`${styles.td} ${styles.resultTd}`} />
+                    </tr>
+                  );
+                }
+
+                const key = String(p.id);
+                const raw = draft[key] ?? '';
+                const s = toNumberOrNull(raw);
+                const h = Number(p.handicap || 0);
+                const r = (s ?? 0) - h;
+
+                return (
+                  <tr key={p.id}>
+                    <td className={`${styles.td} ${styles.nickCell}`}>
+                      <span className={styles.nick}>{p.nickname}</span>
+                    </td>
+                    <td className={styles.td}>
+                      <span>{p.handicap}</span>
+                    </td>
+                    <td className={`${styles.td} ${styles.scoreTd}`}>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        pattern="[0-9.+\\-]*"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        className={styles.cellInput}
+                        value={raw}
+                        onChange={(e) => onChangeScore(p.id, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                        onPointerDown={(e) => startHold(p.id, e)}
+                        onPointerUp={() => endHold(p.id)}
+                        onPointerCancel={() => endHold(p.id)}
+                        onPointerLeave={() => endHold(p.id)}
+                        onPointerMove={(e) => moveHold(p.id, e)}
+
+                        // ✅ [PATCH] Android 일부 기기에서 PointerEvent 대신 TouchEvent만 안정적으로 들어오는 케이스 대응
+                        onTouchStart={(e) => startHold(p.id, e)}
+                        onTouchEnd={() => endHold(p.id)}
+                        onTouchCancel={() => endHold(p.id)}
+                        onTouchMove={(e) => moveHold(p.id, e)}
+
+                        onContextMenu={preventContextMenu}
+                        ref={(el) => {
+                          if (el) inputRefs.current[key] = el;
+                          else delete inputRefs.current[key];
+                        }}
+                      />
+                    </td>
+                    <td className={`${styles.td} ${styles.resultTd}`}>
+                      <span className={styles.resultRed}>{r}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td className={`${styles.td} ${styles.totalLabel}`}>합계</td>
+                <td className={`${styles.td} ${styles.totalBlack}`}>{totals.sumH}</td>
+                <td className={`${styles.td} ${styles.totalBlue}`}>{totals.sumS}</td>
+                <td className={`${styles.td} ${styles.totalRed}`}>{totals.sumR}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div className={styles.footerNav}>
+        <Link to={`/player/home/${eventId}/3`} className={`${styles.navBtn} ${styles.navPrev}`}>이전</Link>
+
+        <button
+          className={`${styles.navBtn}`}
+          onClick={saveScoresDraft}
+          disabled={saveDisabled}
+          aria-disabled={saveDisabled}
+          style={saveDisabled
+            ? { opacity: 0.5, pointerEvents: 'none' }
+            : { boxShadow: '0 0 0 2px rgba(59,130,246,.35) inset, 0 2px 6px rgba(0,0,0,.05)', fontWeight: 600 }
+          }
+        >
+          저장
+        </button>
+
+        <Link
+          to={nextDisabled ? '#' : `/player/home/${eventId}/5`}
+          className={`${styles.navBtn} ${styles.navNext}`}
+          onClick={(e)=>{ if (nextDisabled) { e.preventDefault(); e.stopPropagation(); } }}
+          aria-disabled={nextDisabled}
+          data-disabled={nextDisabled ? '1' : '0'}
+          style={{ opacity: nextDisabled ? 0.5 : 1, pointerEvents: nextDisabled ? 'none' : 'auto' }}
+          tabIndex={nextDisabled ? -1 : 0}
+        >
+          다음
+        </Link>
+      </div>
+    </div>
+  );
+}

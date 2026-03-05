@@ -3,6 +3,21 @@
 import React, { useState, useContext } from 'react';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
+<<<<<<< Updated upstream
+=======
+import { EventContext } from '../contexts/EventContext';
+import { serverTimestamp } from 'firebase/firestore';
+
+const LONG_PRESS_MS = 600;
+const MAX_ROOM_CAPACITY = 4;
+
+// 점수 입력 시 부분 숫자(-, 빈문자 등) 허용하는 헬퍼 (기존 그대로)
+function isPartialNumber(str) {
+  if (str === '') return true;
+  if (str === '-' || str === '.' || str === '-.') return true;
+  return /^-?\d+(\.\d*)?$/.test(str);
+}
+>>>>>>> Stashed changes
 
 export default function Step7() {
   const {
@@ -17,12 +32,88 @@ export default function Step7() {
     goNext
   } = useContext(StepContext);
 
+<<<<<<< Updated upstream
   const half = participants.length / 2;
   const [loadingId, setLoadingId] = useState(null);
 
   // “파트너까지 붙어 있으면 완료” 판단
   const isCompleted = id => {
     const me = participants.find(p => p.id === id);
+=======
+  const {
+    eventId,
+    updateEventImmediate,
+    upsertScores,
+    persistRoomsFromParticipants,
+    scoresMap,
+  } = useContext(EventContext) || {};
+
+  // ✅ 자동 브리지(useEffect) ON/OFF 플래그 (기본 OFF)
+  // - StepFlow(save)가 이미 participants를 저장하므로, Step7에서 추가로 events/rooms/scores를 때리면
+  //   스냅샷 루프/쓰기 폭주가 발생할 수 있어 기본 OFF로 둡니다.
+  const AUTO_BRIDGE_USEEFFECT = false;
+
+  // 로딩 상태(수동 버튼용)
+  const [loadingId, setLoadingId] = useState(null);
+
+  // 점수 입력용 draft 상태(id → 문자열)
+  const [scoreDraft, setScoreDraft] = useState({});
+
+  const getDisplayScore = (pid, fallbackScore) => {
+    if (Object.prototype.hasOwnProperty.call(scoreDraft || {}, pid)) {
+      const v = scoreDraft?.[pid];
+      return v == null ? '' : String(v);
+    }
+    const ss = scoresMap?.[pid];
+    if (ss !== undefined) return ss == null ? '' : String(ss);
+    return fallbackScore == null ? '' : String(fallbackScore);
+  };
+  const pressTimersRef = useRef({}); // 점수 입력 롱프레스용
+
+  // ✅ “완료 버튼” 롱프레스용 타이머 & 플래그
+  const manualPressTimersRef = useRef({});
+  const manualLongPressFlagRef = useRef(false);
+
+  // 하단 탭바/네비 영역 높이 계산 (모바일에서 버튼 가리지 않도록)
+  const [bottomGap, setBottomGap] = useState(64);
+  useEffect(() => {
+    const measure = () => {
+      try {
+        const el =
+          document.querySelector('[data-bottom-nav]') ||
+          document.querySelector('#bottomTabBar') ||
+          document.querySelector('.bottomTabBar') ||
+          document.querySelector('.BottomTabBar');
+        setBottomGap(el && el.offsetHeight ? el.offsetHeight : 64);
+      } catch {
+        // ignore
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  const FOOTER_H = 56;
+  const safeBottom = `calc(env(safe-area-inset-bottom, 0px) + ${bottomGap}px)`;
+  const pageStyle = {
+    minHeight: '100dvh',
+    boxSizing: 'border-box',
+    paddingBottom: `calc(${FOOTER_H}px + ${safeBottom})`,
+    WebkitOverflowScrolling: 'touch',
+    touchAction: 'pan-y',
+  };
+
+  // 1조/2조 판별 (group 필드 우선, 없으면 id로 fallback)
+  const isGroup1 = (p) =>
+    Number.isFinite(Number(p?.group))
+      ? Number(p.group) % 2 === 1
+      : p.id % 2 === 1;
+
+  // 완료 여부: 방 + 파트너 둘 다 할당되어 있으면 완료로 간주
+  const isCompleted = (id) => {
+    const me = participants.find((p) => p.id === id);
+>>>>>>> Stashed changes
     return !!(me && me.room != null && me.partner != null);
   };
 

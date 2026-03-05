@@ -1,7 +1,17 @@
 .app {
   display: flex;
   flex-direction: column;
+  /* iOS Safari/PWA에서 100vh가 주소창/하단바 때문에 실제 뷰포트와 어긋나
+     하단 탭바에 컨텐츠가 가려지는(잘림) 현상이 생길 수 있습니다.
+     100dvh를 우선 사용하고, 구형 브라우저는 100vh로 fallback 합니다. */
+  height: 100dvh;
   height: 100vh;
+
+  /* 하단 탭바/세이프에어리어(홈 인디케이터) 보정값을 공통 변수로 제공합니다.
+     (StepPage 등 내부 스크롤 컨테이너에서도 재사용) */
+  --agm-tabbar-h: 64px;
+  --agm-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --agm-bottom-inset: calc(var(--agm-tabbar-h) + var(--agm-safe-bottom));
 }
 .header {
   position: fixed;
@@ -23,15 +33,23 @@
 }
 .content {
   flex: 1;
+<<<<<<< Updated upstream
   padding-top: 56px;
   padding-bottom: 64px;
+=======
+  padding-top: 0;       /* 헤더 바로 아래부터 시작 */
+  /* 하단 탭바 + iOS 세이프에어리어만큼 공간을 미리 확보 */
+  padding-bottom: var(--agm-bottom-inset);
+>>>>>>> Stashed changes
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
 }
 .tabbar {
   position: fixed;
   bottom: 0;
   width: 100%;
-  height: 64px;
+  height: var(--agm-tabbar-h);
   background: #fff;
   border-top: 1px solid #eee;
   display: flex;

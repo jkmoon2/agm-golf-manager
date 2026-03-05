@@ -5,6 +5,14 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step6.module.css';
 import { StepContext } from '../flows/StepFlow';
+<<<<<<< Updated upstream
+=======
+import { EventContext } from '../contexts/EventContext';
+// [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
+//         Step6에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
+
+// [PATCH] scores 구독은 EventContext에서 단일 수행(중복 리스너/읽기 감소)
+>>>>>>> Stashed changes
 
 export default function Step6() {
   // Context로부터 상태와 내비게이션 함수 가져오기
@@ -16,9 +24,19 @@ export default function Step6() {
     setStep            // 특정 단계로 이동 (홈은 1)
   } = useContext(StepContext);
 
+<<<<<<< Updated upstream
   const maxRows = 4; // 한 방당 최대 4명
 
   // ───── UI 상태 ─────
+=======
+  // 이벤트 컨텍스트
+  const { eventId, eventData, updateEventImmediate, scoresMap, overlayScoresToParticipants } = useContext(EventContext) || {};
+  // [PATCH] 중복 리스너 제거: eventData는 EventContext onSnapshot으로 실시간 갱신됨
+  //         (※ 잘못된 재선언 방지)
+
+  // 표시 옵션 상태
+  // ※ hiddenRooms 는 **1-based(방번호)** Set<number>로 유지 (Step8/Player와 동일)
+>>>>>>> Stashed changes
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const [menuOpen, setMenuOpen]             = useState(false);
@@ -90,7 +108,29 @@ export default function Step6() {
     roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`
   );
 
+<<<<<<< Updated upstream
   // ───── participants → 방별로 묶기 ─────
+=======
+  // 참가자 소스: StepContext 비어있으면 eventData.participants 폴백
+  const sourceParticipants = (participants && participants.length)
+    ? participants
+    : ((eventData && Array.isArray(eventData.participants)) ? eventData.participants : []);
+
+  // [PATCH] 점수 오버레이: EventContext의 scoresMap/overlay를 사용(중복 구독 제거)
+  const participantsWithScore = useMemo(() => {
+    if (typeof overlayScoresToParticipants === 'function') {
+      return overlayScoresToParticipants(sourceParticipants || []);
+    }
+    const map = scoresMap || {};
+    return (sourceParticipants || []).map((p) => {
+      const key = String(p.id);
+      const s = map[key];
+      return (s === undefined) ? p : { ...p, score: s };
+    });
+  }, [sourceParticipants, scoresMap, overlayScoresToParticipants]);
+
+  // 방별 그룹
+>>>>>>> Stashed changes
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     participants.forEach(p => {
