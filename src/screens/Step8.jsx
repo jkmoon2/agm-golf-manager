@@ -1,24 +1,12 @@
-// src/screens/Step8.jsx
+// /src/screens/Step8.jsx
 
-import React, { useState, useRef, useMemo, useContext } from 'react';
+import React, { useState, useRef, useMemo, useContext, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';
+import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
+import { EventContext } from '../contexts/EventContext';
 import { StepContext } from '../flows/StepFlow';
-<<<<<<< Updated upstream
-
-export default function Step8() {
-const {
-  participants,
-  roomCount,
-  roomNames,
-  goPrev,
-  goNext
-} = useContext(StepContext);
-
-  const MAX_PER_ROOM = 4; // 한 방에 최대 4명
-
-=======
 // [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
 //         Step8에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
 
@@ -67,22 +55,152 @@ export default function Step8() {
   };
   // ───────────────────────────────────────────────────────────
 
->>>>>>> Stashed changes
   // ── 1) UI 상태 ───────────────────────────────────────────
+  // ※ hiddenRooms를 **1-based(방번호)** 세트로 유지합니다.
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
   const [visibleMetrics, setVisibleMetrics] = useState({
     score: true,
     banddang: true
   });
+  const showScore    = visibleMetrics.score;
+  const setShowScore = (v) => setVisibleMetrics((m) => ({ ...m, score: v }));
+  const showHalved   = visibleMetrics.banddang;
+  const setShowHalved = (v) => setVisibleMetrics((m) => ({ ...m, banddang: v }));
+
+  // ─────────────────────────────────────────────────────────────
+  // ✅ [WIDTH TUNING] STEP8 표(방배정표/최종결과표/팀결과표) 컬럼 폭 조정
+  // - 아래 숫자(px)만 바꾸면 바로 폭이 바뀝니다. (CSS는 그대로 유지)
+  // - 닉네임/G핸디/점수/반땅/결과 + 팀결과표(방/총점/순위)까지 컬럼별로 각각 조정 가능
+  // ─────────────────────────────────────────────────────────────
+  const __COL_W = {
+    // [EDIT HERE] 방배정표(닉네임/G핸디)
+    alloc: {
+      nick: 110,
+      ghandi: 50,
+    },
+    // [EDIT HERE] 최종결과표(닉네임/G핸디/점수/반땅/결과)
+    result: {
+      nick: 110,
+      ghandi: 50,
+      score: 50,
+      banddang: 50,
+      result: 50,
+    },
+    // [EDIT HERE] 팀결과표(방/닉네임/G핸디/점수/결과/총점/순위)
+    team: {
+      room: 58,
+      nick: 110,
+      ghandi: 50,
+      score: 50,
+      result: 50,
+      total: 52,
+      rank: 55,
+    },
+  };
+  const __W = (n) => ({ width: `${n}px`, minWidth: `${n}px`, maxWidth: `${n}px` });
+  const __COL = {
+    // allocation
+    allocNick: __W(__COL_W.alloc.nick),
+    allocGhandi: __W(__COL_W.alloc.ghandi),
+    // result
+    resultNick: __W(__COL_W.result.nick),
+    resultGhandi: __W(__COL_W.result.ghandi),
+    resultScore: __W(__COL_W.result.score),
+    resultBanddang: __W(__COL_W.result.banddang),
+    resultResult: __W(__COL_W.result.result),
+    // team
+    teamRoom: __W(__COL_W.team.room),
+    teamNick: __W(__COL_W.team.nick),
+    teamGhandi: __W(__COL_W.team.ghandi),
+    teamScore: __W(__COL_W.team.score),
+    teamResult: __W(__COL_W.team.result),
+    teamTotal: __W(__COL_W.team.total),
+    teamRank: __W(__COL_W.team.rank),
+  };
+
+
+  // 외부 클릭으로 드롭다운 닫기
+  const menuRef = useRef(null);
+  const menuBtnRef = useRef(null);
+  useEffect(() => {
+    if (!selectMenuOpen) return;
+    const onDoc = (e) => {
+      if (menuRef.current && menuRef.current.contains(e.target)) return;
+      if (menuBtnRef.current && menuBtnRef.current.contains(e.target)) return;
+      setSelectMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
+  }, [selectMenuOpen]);
+
+  // 공통 헬퍼(인덱스 → 1-based Set 판정)
+  const isHiddenIdx = (i) => hiddenRooms.has(i + 1);
+
+  // Firestore/로컬 동기화 훅(저장은 1-based로 처리됨)
+  usePersistRoomTableSelection({
+    eventId,
+    hiddenRooms,
+    setHiddenRooms,
+    showScore,
+    setShowScore,
+    showHalved,
+    setShowHalved,
+    syncToFirestore: true,
+  });
+
+  // 🔒 Admin 값 고정: Firestore publicView를 **권위 소스**로 복원(과거 0-based도 자동 보정)
+  useEffect(() => {
+    const pv = eventData?.publicView;
+    if (!pv) return;
+    const nums = (pv.hiddenRooms || []).map(Number).filter(Number.isFinite);
+    const looksZeroBased = nums.some(v => v === 0);
+    const toOneBased = looksZeroBased ? nums.map(v => v + 1) : nums;
+    const nextHidden = new Set(
+      toOneBased.filter(n => n >= 1 && n <= roomCount)
+    );
+    setHiddenRooms(nextHidden);
+
+    const vm = pv.visibleMetrics || pv.metrics || {};
+    setVisibleMetrics({
+      score: typeof vm.score === 'boolean' ? vm.score : true,
+      banddang: typeof vm.banddang === 'boolean' ? vm.banddang : true
+    });
+  }, [eventData?.publicView, roomCount]);
+
+  // 운영자 즉시 저장(홈으로 나가지 않아도 Player 반영)
+  const persistPublicViewNow = async (nextHiddenRoomsSet = hiddenRooms, nextVisible = visibleMetrics) => {
+    if (!updateEventImmediate) return;
+    try {
+      const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a,b)=>a-b); // 1-based
+      await updateEventImmediate({
+        publicView: {
+          hiddenRooms: hiddenArr,
+          visibleMetrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
+          metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang }
+        }
+      });
+    } catch (e) {
+      console.warn('[Step8] persistPublicViewNow failed:', e);
+    }
+  };
 
   const toggleRoom = idx => {
     const s = new Set(hiddenRooms);
-    s.has(idx) ? s.delete(idx) : s.add(idx);
+    const roomNo = idx + 1; // 1-based
+    s.has(roomNo) ? s.delete(roomNo) : s.add(roomNo);
     setHiddenRooms(s);
+    // 즉시 반영
+    persistPublicViewNow(s, visibleMetrics);
+    setSelectMenuOpen(false);
   };
-  const toggleMetric = key =>
-    setVisibleMetrics(vm => ({ ...vm, [key]: !vm[key] }));
+  const toggleMetric = key => {
+    const next = { ...visibleMetrics, [key]: !visibleMetrics[key] };
+    setVisibleMetrics(next);
+    // 즉시 반영
+    persistPublicViewNow(hiddenRooms, next);
+    setSelectMenuOpen(false);
+  };
 
   // ── 2) 캡처용 refs ───────────────────────────────────────
   const allocRef       = useRef();
@@ -94,17 +212,14 @@ export default function Step8() {
     const elem = ref.current;
     if (!elem) return;
 
-    // (1) 원본 overflow, width 백업
     const origOverflow = elem.style.overflow;
     const origWidth    = elem.style.width;
 
-    // (2) 숨겨진 영역까지 보이도록 강제
     elem.style.overflow = 'visible';
     elem.style.width    = `${elem.scrollWidth}px`;
     elem.scrollLeft = 0;
     elem.scrollTop  = 0;
 
-    // (3) html2canvas로 전체 영역 캡처
     const canvas = await html2canvas(elem, {
       scrollX:      0,
       scrollY:      0,
@@ -114,7 +229,6 @@ export default function Step8() {
       windowHeight: elem.scrollHeight
     });
 
-    // (4) 스타일 복원
     elem.style.overflow = origOverflow;
     elem.style.width    = origWidth;
 
@@ -124,7 +238,6 @@ export default function Step8() {
       link.href     = canvas.toDataURL('image/jpeg');
       link.click();
     } else {
-      // PDF 저장: 한 페이지에 모두 들어가도록 축소
       const imgData    = canvas.toDataURL('image/png');
       const pdf        = new jsPDF({ orientation: 'landscape' });
       const pageWidth  = pdf.internal.pageSize.getWidth();
@@ -149,8 +262,6 @@ export default function Step8() {
   );
 
   // ── 5) participants를 방별로 묶은 2차원 배열 ─────────────────────
-<<<<<<< Updated upstream
-=======
   const sourceParticipants = (participants && participants.length)
     ? participants
     : ((eventData?.participants && eventData.participants.length) ? eventData.participants : []);
@@ -168,41 +279,39 @@ export default function Step8() {
     });
   }, [sourceParticipants, scoresMap, overlayScoresToParticipants]);
 
->>>>>>> Stashed changes
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
-    (participants || []).forEach(p => {
-      if (p.room != null && p.room >= 1 && p.room <= roomCount) {
-        arr[p.room - 1].push(p);
+    (participantsWithScore || []).forEach(p => {
+      const rRaw = (p?.roomNumber ?? p?.room);
+      if (rRaw == null || rRaw === '') return;
+      const r = Number(rRaw);
+      if (Number.isFinite(r) && r >= 1 && r <= roomCount) {
+        arr[r - 1].push(p);
       }
     });
     return arr;
-  }, [participants, roomCount]);
+  }, [participantsWithScore, roomCount]);
 
-  // ── 6) “1조=slot[0,2], 2조=slot[1,3]” 규칙 → 4칸 확보 ─────────────
-  //      + 콘솔 로그로 순서 확인 가능
+  // ── 6) 1조/2조 짝 → slot[0,1], slot[2,3] 고정 ─────────────
   const orderedByRoom = useMemo(() => {
-    const half = participants.length / 2;
-    return byRoom.map((roomArr, roomIdx) => {
-      console.group(`📂 orderedByRoom: roomIdx = ${roomIdx}`);
-      console.log("roomArr =", JSON.stringify(roomArr, null, 2));
-
+    return byRoom.map((roomArr) => {
       // 네 칸 slot 초기화
       const slot = [null, null, null, null];
       const used = new Set();
 
-      // ① “방에 속한 1조(p.id < half)와 짝(p.partner) → pairs 배열에 저장”
+      // ① “방에 속한 1조와 그 파트너(2조)”를 순서대로 pairs 배열에 저장
       const pairs = [];
-      roomArr.filter(p => p.id < half).forEach(p1 => {
-        if (used.has(p1.id)) return;
-        const partner = roomArr.find(x => x.id === p1.partner);
-        if (partner && !used.has(partner.id)) {
-          pairs.push([p1, partner]);
-          used.add(p1.id);
-          used.add(partner.id);
-        }
-      });
-      console.log("→ pairs =", pairs.map(pair => pair.map(x => x.nickname)));
+      roomArr
+        .filter(p => Number(p?.group) === 1)
+        .forEach(p1 => {
+          if (used.has(p1.id)) return;
+          const partner = roomArr.find(x => String(x.id) === String(p1.partner));
+          if (partner && !used.has(partner.id)) {
+            pairs.push([p1, partner]);
+            used.add(p1.id);
+            used.add(partner.id);
+          }
+        });
 
       // ② “pairs[0] → slot[0],slot[1], pairs[1] → slot[2],slot[3]”
       pairs.forEach((pair, idx) => {
@@ -214,9 +323,8 @@ export default function Step8() {
           slot[3] = pair[1];
         }
       });
-      console.log("→ after placing pairs:", slot.map(p => (p ? p.nickname : null)));
 
-      // ③ “나머지(used에 없는) 한 사람씩 빈 slot[]에 순서대로 채우기”
+      // ③ 남은 사람들(used가 아닌)은 빈칸에 순서대로 채우기
       roomArr.forEach(p => {
         if (!used.has(p.id)) {
           const emptyIdx = slot.findIndex(x => x === null);
@@ -226,13 +334,11 @@ export default function Step8() {
           }
         }
       });
-      console.log("→ final slot array:", slot.map(p => (p ? p.nickname : null)));
-      console.groupEnd();
 
-      // slot 내에 null 없이 객체만 들어가게(렌더링 편의)
+      // 렌더링 편의를 위해 null 제거
       return slot.map(p => (p ? p : { nickname: '', handicap: 0, score: 0 }));
     });
-  }, [byRoom, participants]);
+  }, [byRoom]);
 
   // ── 7) 방배정표 Rows 생성 ─────────────────────────────────
   const allocRows = Array.from({ length: MAX_PER_ROOM }, (_, ri) =>
@@ -272,7 +378,7 @@ export default function Step8() {
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
-      .filter(x => !hiddenRooms.has(x.idx))
+      .filter(x => !isHiddenIdx(x.idx)) // ← 1-based 세트로 판정
       .sort((a, b) => {
         if (a.tot !== b.tot) return a.tot - b.tot;
         return a.hd - b.hd;
@@ -280,7 +386,7 @@ export default function Step8() {
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
 
-  // ── 10) 팀결과표용: 방별 2인씩 팀A/팀B 로 묶어서 합산 ───────────
+  // ── 10) 팀결과표용: 방별 2인씩 팀A/팀B ─────────────────────
   const teamsByRoom = useMemo(() => {
     const list = [];
     orderedByRoom.forEach((roomArr, roomIdx) => {
@@ -320,7 +426,7 @@ export default function Step8() {
   // ── 11) 모든 팀 중 “낮은 합산점수=1등” 순위 계산 ─────────────────
   const teamRankMap = useMemo(() => {
     const mapWithIdx   = teamsByRoom.map((t, idx) => ({ ...t, idxInOriginal: idx }));
-    const visibleTeams = mapWithIdx.filter(t => !hiddenRooms.has(t.roomIdx));
+    const visibleTeams = mapWithIdx.filter(t => !isHiddenIdx(t.roomIdx));
 
     visibleTeams.sort((a, b) => {
       if (a.sumResult !== b.sumResult) return a.sumResult - b.sumResult;
@@ -347,27 +453,24 @@ export default function Step8() {
   }, [teamsByRoom, hiddenRooms]);
 
   return (
-    <div className={styles.step}>
-
+    <div className={styles.step} style={__pageStyle}>
       {/* ─── “선택” 버튼 + 드롭다운 ─── */}
       <div className={styles.selectWrapper}>
         <button
+          ref={menuBtnRef}
           className={styles.selectButton}
           onClick={() => setSelectMenuOpen(o => !o)}
         >
           선택
         </button>
         {selectMenuOpen && (
-          <div className={styles.dropdownMenu}>
+          <div ref={menuRef} className={styles.dropdownMenu}>
             {headers.map((h, i) => (
               <label key={`toggle-room-${i}`}>
                 <input
                   type="checkbox"
-                  checked={!hiddenRooms.has(i)}
-                  onChange={() => {
-                    toggleRoom(i);
-                    setSelectMenuOpen(false);
-                  }}
+                  checked={!isHiddenIdx(i)}
+                  onChange={() => toggleRoom(i)}
                 />
                 {h}
               </label>
@@ -377,20 +480,14 @@ export default function Step8() {
               <input
                 type="checkbox"
                 checked={visibleMetrics.score}
-                onChange={() => {
-                  toggleMetric('score');
-                  setSelectMenuOpen(false);
-                }}
+                onChange={() => toggleMetric('score')}
               /> 점수
             </label>
             <label key="toggle-banddang">
               <input
                 type="checkbox"
                 checked={visibleMetrics.banddang}
-                onChange={() => {
-                  toggleMetric('banddang');
-                  setSelectMenuOpen(false);
-                }}
+                onChange={() => toggleMetric('banddang')}
               /> 반땅
             </label>
           </div>
@@ -398,7 +495,15 @@ export default function Step8() {
       </div>
 
       {/* ─── 중간 컨텐츠(스크롤) ─── */}
-      <div className={styles.contentWrapper}>
+      <div
+        className={styles.contentWrapper}
+        style={{
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-y',
+          overscrollBehavior: 'contain'
+        }}
+      >
 
         {/* ── [Allocation Table] 방배정표 ── */}
         <div ref={allocRef} className={styles.tableContainer}>
@@ -407,7 +512,7 @@ export default function Step8() {
             <thead>
               <tr>
                 {headers.map((h, i) =>
-                  !hiddenRooms.has(i) && (
+                  !isHiddenIdx(i) && (
                     <th key={`header-room-${i}`} colSpan={2} className={styles.header}>
                       {h}
                     </th>
@@ -416,10 +521,10 @@ export default function Step8() {
               </tr>
               <tr>
                 {headers.map((_, i) =>
-                  !hiddenRooms.has(i) && (
+                  !isHiddenIdx(i) && (
                     <React.Fragment key={`subhdr-room-${i}`}>
-                      <th className={styles.header}>닉네임</th>
-                      <th className={styles.header}>G핸디</th>
+                      <th className={styles.header} style={__COL.allocNick}>닉네임</th>
+                      <th className={styles.header} style={__COL.allocGhandi}>G핸디</th>
                     </React.Fragment>
                   )
                 )}
@@ -429,10 +534,10 @@ export default function Step8() {
               {allocRows.map((row, ri) => (
                 <tr key={`slot-${ri}`}>
                   {row.map((c, ci) =>
-                    !hiddenRooms.has(ci) && (
+                    !isHiddenIdx(ci) && (
                       <React.Fragment key={`room-${ci}-slot-${ri}`}>
-                        <td className={styles.cell}>{c.nickname}</td>
-                        <td className={styles.cell} style={{ color: 'blue' }}>
+                        <td className={styles.cell} style={__COL.allocNick}>{c.nickname}</td>
+                        <td className={styles.cell} style={{ ...__COL.allocGhandi, color: 'blue' }}>
                           {c.handicap}
                         </td>
                       </React.Fragment>
@@ -444,17 +549,17 @@ export default function Step8() {
             <tfoot>
               <tr>
                 {byRoom.map((room, ci) =>
-                  !hiddenRooms.has(ci) && (
+                  !isHiddenIdx(ci) && (
                     <React.Fragment key={`footer-room-${ci}`}>
                       <td
                         className={styles.footerLabel}
-                        style={{ background: '#f7f7f7' }}
+                        style={{ ...__COL.allocNick, background: '#f7f7f7' }}
                       >
                         합계
                       </td>
                       <td
                         className={styles.footerValue}
-                        style={{ color: 'blue', background: '#f7f7f7' }}
+                        style={{ ...__COL.allocGhandi, color: 'blue', background: '#f7f7f7' }}
                       >
                         {room.reduce((s, p) => s + (p.handicap || 0), 0)}
                       </td>
@@ -484,14 +589,14 @@ export default function Step8() {
             <thead>
               <tr>
                 {headers.map((h, i) =>
-                  !hiddenRooms.has(i) && (
+                  !isHiddenIdx(i) && (
                     <th
                       key={`res-header-room-${i}`}
                       colSpan={
-                        2 // 닉네임+G핸디
+                        2
                         + (visibleMetrics.score    ? 1 : 0)
                         + (visibleMetrics.banddang ? 1 : 0)
-                        + 1 // 결과
+                        + 1
                       }
                       className={styles.header}
                     >
@@ -502,13 +607,13 @@ export default function Step8() {
               </tr>
               <tr>
                 {headers.map((_, i) =>
-                  !hiddenRooms.has(i) && (
+                  !isHiddenIdx(i) && (
                     <React.Fragment key={`res-subhdr-room-${i}`}>
-                      <th className={styles.header}>닉네임</th>
-                      <th className={styles.header}>G핸디</th>
-                      {visibleMetrics.score    && <th className={styles.header}>점수</th>}
-                      {visibleMetrics.banddang && <th className={styles.header}>반땅</th>}
-                      <th className={styles.header}>결과</th>
+                      <th className={styles.header} style={__COL.resultNick}>닉네임</th>
+                      <th className={styles.header} style={__COL.resultGhandi}>G핸디</th>
+                      {visibleMetrics.score    && <th className={styles.header} style={__COL.resultScore}>점수</th>}
+                      {visibleMetrics.banddang && <th className={styles.header} style={__COL.resultBanddang}>반땅</th>}
+                      <th className={styles.header} style={__COL.resultResult}>결과</th>
                     </React.Fragment>
                   )
                 )}
@@ -518,19 +623,19 @@ export default function Step8() {
               {Array.from({ length: MAX_PER_ROOM }).map((_, ri) => (
                 <tr key={`res-slot-${ri}`}>
                   {resultByRoom.map((room, ci) =>
-                    !hiddenRooms.has(ci) && (
+                    !isHiddenIdx(ci) && (
                       <React.Fragment key={`res-room-${ci}-slot-${ri}`}>
-                        <td className={styles.cell}>{room.detail[ri].nickname}</td>
-                        <td className={styles.cell}>{room.detail[ri].handicap}</td>
+                        <td className={styles.cell} style={__COL.resultNick}>{room.detail[ri].nickname}</td>
+                        <td className={styles.cell} style={__COL.resultGhandi}>{room.detail[ri].handicap}</td>
                         {visibleMetrics.score    && (
-                          <td className={styles.cell}>{room.detail[ri].score}</td>
+                          <td className={styles.cell} style={__COL.resultScore}>{room.detail[ri].score}</td>
                         )}
                         {visibleMetrics.banddang && (
-                          <td className={styles.cell} style={{ color: 'blue' }}>
+                          <td className={styles.cell} style={{ ...__COL.resultBanddang, color: 'blue' }}>
                             {room.detail[ri].banddang}
                           </td>
                         )}
-                        <td className={styles.cell} style={{ color: 'red' }}>
+                        <td className={styles.cell} style={{ ...__COL.resultResult, color: 'red' }}>
                           {room.detail[ri].result}
                         </td>
                       </React.Fragment>
@@ -542,24 +647,24 @@ export default function Step8() {
             <tfoot>
               <tr>
                 {resultByRoom.map((room, ci) =>
-                  !hiddenRooms.has(ci) && (
+                  !isHiddenIdx(ci) && (
                     <React.Fragment key={`res-footer-room-${ci}`}>
                       <td
                         className={styles.footerLabel}
-                        style={{ background: '#f7f7f7' }}
+                        style={{ ...__COL.resultNick, background: '#f7f7f7' }}
                       >
                         합계
                       </td>
                       <td
                         className={styles.footerValue}
-                        style={{ color: 'black', background: '#f7f7f7' }}
+                        style={{ ...__COL.resultGhandi, color: 'black', background: '#f7f7f7' }}
                       >
                         {room.sumHandicap}
                       </td>
                       {visibleMetrics.score    && (
                         <td
                           className={styles.footerValue}
-                          style={{ color: 'black', background: '#f7f7f7' }}
+                          style={{ ...__COL.resultScore, color: 'black', background: '#f7f7f7' }}
                         >
                           {room.sumScore}
                         </td>
@@ -567,14 +672,14 @@ export default function Step8() {
                       {visibleMetrics.banddang && (
                         <td
                           className={styles.footerBanddang}
-                          style={{ background: '#f7f7f7' }}
+                          style={{ ...__COL.resultBanddang, background: '#f7f7f7' }}
                         >
                           {room.sumBanddang}
                         </td>
                       )}
                       <td
                         className={styles.footerResult}
-                        style={{ background: '#f7f7f7' }}
+                        style={{ ...__COL.resultResult, background: '#f7f7f7' }}
                       >
                         {room.sumResult}
                       </td>
@@ -584,11 +689,11 @@ export default function Step8() {
               </tr>
               <tr>
                 {headers.map((_, i) =>
-                  !hiddenRooms.has(i) && (
+                  !isHiddenIdx(i) && (
                     <React.Fragment key={`res-rank-room-${i}`}>
                       <td
                         colSpan={
-                          2 // 닉네임+G핸디
+                          2
                           + (visibleMetrics.score    ? 1 : 0)
                           + (visibleMetrics.banddang ? 1 : 0)
                         }
@@ -621,18 +726,18 @@ export default function Step8() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th className={styles.header}>방</th>
-                  <th className={styles.header}>닉네임</th>
-                  <th className={styles.header}>G핸디</th>
-                  <th className={styles.header}>점수</th>
-                  <th className={styles.header}>결과</th>
-                  <th className={styles.header}>총점</th>
-                  <th className={styles.header}>순위</th>
+                  <th className={styles.header} style={__COL.teamRoom}>방</th>
+                  <th className={styles.header} style={__COL.teamNick}>닉네임</th>
+                  <th className={styles.header} style={__COL.teamGhandi}>G핸디</th>
+                  <th className={styles.header} style={__COL.teamScore}>점수</th>
+                  <th className={styles.header} style={__COL.teamResult}>결과</th>
+                  <th className={styles.header} style={__COL.teamTotal}>총점</th>
+                  <th className={styles.header} style={__COL.teamRank}>순위</th>
                 </tr>
               </thead>
               <tbody>
                 {Array.from({ length: roomCount }).map((_, roomIdx) => {
-                  if (hiddenRooms.has(roomIdx)) return null;
+                  if (isHiddenIdx(roomIdx)) return null;
 
                   const idxA = teamsByRoom.findIndex(
                     t => t.roomIdx === roomIdx && t.teamIdx === 0
@@ -647,62 +752,59 @@ export default function Step8() {
 
                   return (
                     <React.Fragment key={`team-room-${roomIdx}`}>
-                      {/* ① “방” 셀을 rowSpan=4 로 병합합니다. */}
+                      {/* ① “방” 셀을 rowSpan=4 로 병합 */}
                       <tr key={`team-room-${roomIdx}-A0`}>
-                        <td rowSpan={4} className={styles.cell}>
+                        <td rowSpan={4} className={styles.cell} style={__COL.teamRoom}>
                           {teamA.roomName}
                         </td>
-                        <td className={styles.cell}>{teamA.members[0]?.nickname}</td>
-                        <td className={styles.cell}>{teamA.members[0]?.handicap}</td>
-                        <td className={styles.cell} style={{ color: 'blue' }}>
+                        <td className={styles.cell} style={__COL.teamNick}>{teamA.members[0]?.nickname}</td>
+                        <td className={styles.cell} style={__COL.teamGhandi}>{teamA.members[0]?.handicap}</td>
+                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
                           {teamA.members[0]?.score}
                         </td>
-                        <td className={styles.cell} style={{ color: 'red' }}>
+                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
                           {(teamA.members[0]?.score || 0) - (teamA.members[0]?.handicap || 0)}
                         </td>
-                        <td rowSpan={2} className={styles.footerResult}>
+                        <td rowSpan={2} className={styles.footerResult} style={__COL.teamTotal}>
                           {teamA.sumResult}
                         </td>
-                        <td rowSpan={2} className={styles.footerRank}>
+                        <td rowSpan={2} className={styles.footerRank} style={__COL.teamRank}>
                           {rankA}등
                         </td>
                       </tr>
-                      {/* 팀 A 두 번째 행 */}
                       <tr key={`team-room-${roomIdx}-A1`}>
-                        <td className={styles.cell}>{teamA.members[1]?.nickname}</td>
-                        <td className={styles.cell}>{teamA.members[1]?.handicap}</td>
-                        <td className={styles.cell} style={{ color: 'blue' }}>
+                        <td className={styles.cell} style={__COL.teamNick}>{teamA.members[1]?.nickname}</td>
+                        <td className={styles.cell} style={__COL.teamGhandi}>{teamA.members[1]?.handicap}</td>
+                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
                           {teamA.members[1]?.score}
                         </td>
-                        <td className={styles.cell} style={{ color: 'red' }}>
+                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
                           {(teamA.members[1]?.score || 0) - (teamA.members[1]?.handicap || 0)}
                         </td>
                       </tr>
-                      {/* 팀 B 첫 번째 행 */}
                       <tr key={`team-room-${roomIdx}-B0`}>
-                        <td className={styles.cell}>{teamB.members[0]?.nickname}</td>
-                        <td className={styles.cell}>{teamB.members[0]?.handicap}</td>
-                        <td className={styles.cell} style={{ color: 'blue' }}>
+                        <td className={styles.cell} style={__COL.teamNick}>{teamB.members[0]?.nickname}</td>
+                        <td className={styles.cell} style={__COL.teamGhandi}>{teamB.members[0]?.handicap}</td>
+                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
                           {teamB.members[0]?.score}
                         </td>
-                        <td className={styles.cell} style={{ color: 'red' }}>
+                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
                           {(teamB.members[0]?.score || 0) - (teamB.members[0]?.handicap || 0)}
                         </td>
-                        <td rowSpan={2} className={styles.footerResult}>
+                        <td rowSpan={2} className={styles.footerResult} style={__COL.teamTotal}>
                           {teamB.sumResult}
                         </td>
-                        <td rowSpan={2} className={styles.footerRank}>
+                        <td rowSpan={2} className={styles.footerRank} style={__COL.teamRank}>
                           {rankB}등
                         </td>
                       </tr>
-                      {/* 팀 B 두 번째 행 */}
                       <tr key={`team-room-${roomIdx}-B1`}>
-                        <td className={styles.cell}>{teamB.members[1]?.nickname}</td>
-                        <td className={styles.cell}>{teamB.members[1]?.handicap}</td>
-                        <td className={styles.cell} style={{ color: 'blue' }}>
+                        <td className={styles.cell} style={__COL.teamNick}>{teamB.members[1]?.nickname}</td>
+                        <td className={styles.cell} style={__COL.teamGhandi}>{teamB.members[1]?.handicap}</td>
+                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
                           {teamB.members[1]?.score}
                         </td>
-                        <td className={styles.cell} style={{ color: 'red' }}>
+                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
                           {(teamB.members[1]?.score || 0) - (teamB.members[1]?.handicap || 0)}
                         </td>
                       </tr>
@@ -749,18 +851,18 @@ export default function Step8() {
           >
             <thead>
               <tr>
-                <th style={captureHeaderStyle}>방</th>
-                <th style={captureHeaderStyle}>닉네임</th>
-                <th style={captureHeaderStyle}>G핸디</th>
-                <th style={captureHeaderStyle}>점수</th>
-                <th style={captureHeaderStyle}>결과</th>
-                <th style={captureHeaderStyle}>총점</th>
-                <th style={captureHeaderStyle}>순위</th>
+                <th style={{ ...captureHeaderStyle, ...__COL.teamRoom }}>방</th>
+                <th style={{ ...captureHeaderStyle, ...__COL.teamNick }}>닉네임</th>
+                <th style={{ ...captureHeaderStyle, ...__COL.teamGhandi }}>G핸디</th>
+                <th style={{ ...captureHeaderStyle, ...__COL.teamScore }}>점수</th>
+                <th style={{ ...captureHeaderStyle, ...__COL.teamResult }}>결과</th>
+                <th style={{ ...captureHeaderStyle, ...__COL.teamTotal }}>총점</th>
+                <th style={{ ...captureHeaderStyle, ...__COL.teamRank }}>순위</th>
               </tr>
             </thead>
             <tbody>
               {Array.from({ length: roomCount }).map((_, roomIdx) => {
-                if (hiddenRooms.has(roomIdx)) return null;
+                if (isHiddenIdx(roomIdx)) return null;
 
                 const idxA = teamsByRoom.findIndex(
                   t => t.roomIdx === roomIdx && t.teamIdx === 0
@@ -778,58 +880,58 @@ export default function Step8() {
                     <tr key={`offscreen-team-room-${roomIdx}-A0`}>
                       <td
                         rowSpan={4}
-                        style={captureCellStyle}
+                        style={{ ...captureCellStyle, ...__COL.teamRoom }}
                       >
                         {teamA.roomName}
                       </td>
-                      <td style={captureCellStyle}>{teamA.members[0]?.nickname}</td>
-                      <td style={captureCellStyle}>{teamA.members[0]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, color: 'blue' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamA.members[0]?.nickname}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamA.members[0]?.handicap}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
                         {teamA.members[0]?.score}
                       </td>
-                      <td style={{ ...captureCellStyle, color: 'red' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
                         {(teamA.members[0]?.score || 0) - (teamA.members[0]?.handicap || 0)}
                       </td>
-                      <td rowSpan={2} style={captureFooterResultStyle}>
+                      <td rowSpan={2} style={{ ...captureFooterResultStyle, ...__COL.teamTotal }}>
                         {teamA.sumResult}
                       </td>
-                      <td rowSpan={2} style={captureFooterRankStyle}>
+                      <td rowSpan={2} style={{ ...captureFooterRankStyle, ...__COL.teamRank }}>
                         {rankA}등
                       </td>
                     </tr>
                     <tr key={`offscreen-team-room-${roomIdx}-A1`}>
-                      <td style={captureCellStyle}>{teamA.members[1]?.nickname}</td>
-                      <td style={captureCellStyle}>{teamA.members[1]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, color: 'blue' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamA.members[1]?.nickname}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamA.members[1]?.handicap}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
                         {teamA.members[1]?.score}
                       </td>
-                      <td style={{ ...captureCellStyle, color: 'red' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
                         {(teamA.members[1]?.score || 0) - (teamA.members[1]?.handicap || 0)}
                       </td>
                     </tr>
                     <tr key={`offscreen-team-room-${roomIdx}-B0`}>
-                      <td style={captureCellStyle}>{teamB.members[0]?.nickname}</td>
-                      <td style={captureCellStyle}>{teamB.members[0]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, color: 'blue' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamB.members[0]?.nickname}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamB.members[0]?.handicap}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
                         {teamB.members[0]?.score}
                       </td>
-                      <td style={{ ...captureCellStyle, color: 'red' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
                         {(teamB.members[0]?.score || 0) - (teamB.members[0]?.handicap || 0)}
                       </td>
-                      <td rowSpan={2} style={captureFooterResultStyle}>
+                      <td rowSpan={2} style={{ ...captureFooterResultStyle, ...__COL.teamTotal }}>
                         {teamB.sumResult}
                       </td>
-                      <td rowSpan={2} style={captureFooterRankStyle}>
+                      <td rowSpan={2} style={{ ...captureFooterRankStyle, ...__COL.teamRank }}>
                         {rankB}등
                       </td>
                     </tr>
                     <tr key={`offscreen-team-room-${roomIdx}-B1`}>
-                      <td style={captureCellStyle}>{teamB.members[1]?.nickname}</td>
-                      <td style={captureCellStyle}>{teamB.members[1]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, color: 'blue' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamB.members[1]?.nickname}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamB.members[1]?.handicap}</td>
+                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
                         {teamB.members[1]?.score}
                       </td>
-                      <td style={{ ...captureCellStyle, color: 'red' }}>
+                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
                         {(teamB.members[1]?.score || 0) - (teamB.members[1]?.handicap || 0)}
                       </td>
                     </tr>
@@ -851,20 +953,31 @@ export default function Step8() {
         </div>
       </div>
 
-      {/* ─── 하단 버튼 ─── */}
-      <div className={styles.stepFooter}>
+      {/* ─── 하단 버튼 (고정 + 좌/우/하단 여백) ─── */}
+      <div
+        className={styles.stepFooter}
+        style={{
+          position: 'fixed',
+          left: 0,
+          right: 0,
+          bottom: __safeBottom,          // 아이폰 홈바/탭바 위로 안전하게
+          zIndex: 20,
+          boxSizing: 'border-box',
+          padding: '12px 16px',          // 좌/우 여백 STEP1~7과 동일
+          background: '#fff',
+          borderTop: '1px solid #e5e5e5'
+        }}
+      >
         <button onClick={goPrev}>← 이전</button>
-        <button onClick={goNext}>홈</button>
+        <button onClick={() => { try{localStorage.setItem('homeViewMode','fourball')}catch{}; setStep(0); }}>홈</button>
       </div>
     </div>
   );
 }
 
 // ──────────────────────────────────────────────────────────────────
-// 아래 스타일 객체들은 “off‐screen 팀결과표 복제본”에 쓰이는 inline 스타일입니다.
-// on‐screen CSS와 동일한 테두리·배경을 적용하여, 캡처 시 실선이 보이도록 합니다.
+// off-screen 캡처용 인라인 스타일
 // ──────────────────────────────────────────────────────────────────
-
 const captureHeaderStyle = {
   border: '1px solid #ddd',
   background: '#f7f7f7',

@@ -1,8 +1,5 @@
-// src/contexts/PlayerContext.jsx
+// /src/contexts/PlayerContext.jsx
 
-<<<<<<< Updated upstream
-import React, { createContext, useState } from 'react';
-=======
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import {
   doc,
@@ -18,23 +15,214 @@ import { db } from '../firebase';
 import { EventContext } from './EventContext';
 import { useLocation } from 'react-router-dom';
 import { getAuth, signInAnonymously } from 'firebase/auth';
->>>>>>> Stashed changes
 
-export const PlayerContext = createContext({
-  eventId:       null,
-  authCode:      '',
-  participant:   null,
-  setEventId:    () => {},
-  setAuthCode:   () => {},
-  setParticipant:() => {}
-});
+// (선택) 남아 있던 import — 사용하지 않아도 빌드 가능한 상태라면 그대로 두셔도 됩니다.
+// import { pickRoomForStroke } from '../player/logic/assignStroke';
+import {
+  pickRoomAndPartnerForFourball,
+  transactionalAssignFourball,
+} from '../player/logic/assignFourball';
+
+export const PlayerContext = createContext(null);
+
+// ──────────────────────────────────────────────────────────────
+// ✅ 콘솔 진단 도구 (켜는 법: 콘솔에서 localStorage.setItem('AGM_DEBUG','1'); 후 새로고침)
+const DEBUG = (() => {
+  try { return (localStorage.getItem('AGM_DEBUG') === '1'); } catch { return false; }
+})();
+function exposeDiag(part) {
+  try {
+    const prev = (window.__AGM_DIAG || {});
+    window.__AGM_DIAG = { ...prev, ...part };
+    if (DEBUG) console.log('[AGM][diag]', window.__AGM_DIAG);
+  } catch {}
+}
+// ──────────────────────────────────────────────────────────────
+
+const ASSIGN_STRATEGY_STROKE   = 'uniform';
+const ASSIGN_STRATEGY_FOURBALL = 'uniform';
+
+const FOURBALL_USE_TRANSACTION = (() => {
+  try {
+    const env = (process.env.REACT_APP_FOURBALL_USE_TRANSACTION ?? '').toString().toLowerCase();
+    const ls  = (localStorage.getItem('FOURBALL_USE_TRANSACTION') ?? '').toString().toLowerCase();
+    const v   = (ls || env || 'true');
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+  } catch {
+    return true;
+  }
+})();
+
+// ─ helpers ─
+const normId   = (v) => String(v ?? '').trim();
+const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
+const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
+
+/**
+ * ✅ Player 탭(브라우저 윈도우/탭) 단위로 상태를 분리하기 위한 SSOT 보조키
+ * - Admin(localStorage.eventId 등)와 충돌 방지
+ * - iOS에서 sessionStorage가 날아가도 방배정/리스트가 풀리지 않도록 최소 백업
+ */
+const getPlayerTabId = () => {
+  try {
+    if (!window.name || !window.name.startsWith('AGM_PLAYER_TAB_')) {
+      window.name = `AGM_PLAYER_TAB_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    }
+    return window.name;
+  } catch {
+    // window.name 접근이 막힌 환경(드물게) 대비
+    return 'AGM_PLAYER_TAB_FALLBACK';
+  }
+};
+
+const playerStorageKey = (eid, key) => `agm:player:${getPlayerTabId()}:${eid || 'noevent'}:${key}`;
+
+// 모드별 participants 필드와 legacy participants를 "id 기준" 병합 (SSOT 보강)
+const mergeParticipantsById = (primary = [], legacy = []) => {
+  const map = new Map();
+  const push = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (const p of arr) {
+      if (!p) continue;
+      const id = normId(p.id || p.uid || p.authCode || '');
+      const k = id || JSON.stringify(p);
+      if (!map.has(k)) map.set(k, p);
+      else map.set(k, { ...map.get(k), ...p });
+    }
+  };
+  push(primary);
+  push(legacy);
+  return Array.from(map.values());
+};
+
+
+
+
+// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
+function participantsFieldByMode(md = 'stroke') {
+  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
+const makeLabel = (roomNames, num) => {
+  const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
+    ? roomNames[num - 1].trim()
+    : '';
+  return n || `${num}번방`;
+};
+
+const cryptoRand = () =>
+  (typeof crypto !== 'undefined' && crypto.getRandomValues)
+    ? crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32
+    : Math.random();
+
+const shuffle = (arr) => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(cryptoRand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+const pickUniform = (roomCount) => 1 + Math.floor(cryptoRand() * roomCount);
+
+// 현재 participants 기준으로 방별 인원수 (1-indexed room)
+const countInRoom = (list, roomCount) => {
+  const counts = Array.from({ length: roomCount }, () => 0);
+  list.forEach(p => {
+    const r = toInt(p?.room, 0);
+    if (r >= 1 && r <= roomCount) counts[r - 1] += 1;
+  });
+  return counts;
+};
+
+// 스트로크용: “같은 조 중복 금지 + 정원 4미만”을 만족하는 방 목록
+const validRoomsForStroke = (list, roomCount, me) => {
+  const myGroup = toInt(me?.group, 0);
+  const counts = countInRoom(list, roomCount);
+  const rooms = [];
+  for (let r = 1; r <= roomCount; r++) {
+    const sameGroupExists = list.some(p => toInt(p.room) === r && toInt(p.group) === myGroup && normId(p.id) !== normId(me?.id));
+    if (!sameGroupExists && counts[r - 1] < 4) rooms.push(r);
+  }
+  if (rooms.length === 0) {
+    for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < 4) rooms.push(r);
+  }
+  return rooms;
+};
+
+// 포볼용: “정원 4미만”을 만족하는 방 목록
+const validRoomsForFourball = (list, roomCount) => {
+  const counts = countInRoom(list, roomCount);
+  const rooms = [];
+  for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < 4) rooms.push(r);
+  return rooms.length ? rooms : Array.from({ length: roomCount }, (_, i) => i + 1);
+};
+
+// Firestore sanitize
+function sanitizeForFirestore(v) {
+  if (Array.isArray(v)) {
+    return v.map(sanitizeForFirestore).filter((x) => x !== undefined);
+  }
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v)) {
+      const val = v[k];
+      if (val === undefined) continue;
+      if (typeof val === 'number' && Number.isNaN(val)) { out[k] = null; continue; }
+      out[k] = sanitizeForFirestore(val);
+    }
+    return out;
+  }
+  if (typeof v === 'number' && Number.isNaN(v)) return null;
+  return v;
+}
+
+// 세션 인증 플래그
+function markEventAuthed(id, code, meObj) {
+  if (!id) return;
+  try {
+    sessionStorage.setItem(`auth_${id}`, 'true');
+    if (code != null) sessionStorage.setItem(`authcode_${id}`, String(code));
+    if (meObj) {
+      sessionStorage.setItem(`participant_${id}`, JSON.stringify(meObj));
+      sessionStorage.setItem(`myId_${id}`, normId(meObj.id || ''));
+      sessionStorage.setItem(`nickname_${id}`, normName(meObj.nickname || ''));
+    }
+
+    // ✅ iOS에서 sessionStorage가 초기화되는 케이스 대비 (운영자모드>참가자탭)
+    try {
+      localStorage.setItem(playerStorageKey(id, 'auth'), 'true');
+      if (code != null) localStorage.setItem(playerStorageKey(id, 'authcode'), String(code));
+      if (meObj) {
+        localStorage.setItem(playerStorageKey(id, 'participant'), JSON.stringify(meObj));
+        localStorage.setItem(playerStorageKey(id, 'myId'), normId(meObj.id || ''));
+        localStorage.setItem(playerStorageKey(id, 'nickname'), normName(meObj.nickname || ''));
+      }
+    } catch {}
+  } catch {}
+}
+
+// ✅ 모든 쓰기 전에 인증 보장 + 콘솔 점검용 노출
+async function ensureAuthReady() {
+  const auth = getAuth();
+  if (!auth.currentUser) {
+    const cred = await signInAnonymously(auth);
+    await cred.user.getIdToken(true);
+  } else {
+    await auth.currentUser.getIdToken(true);
+  }
+  if (DEBUG) {
+    const a = getAuth();
+    exposeDiag({
+      projectId: a?.app?.options?.projectId ?? null,
+      uid: a?.currentUser?.uid ?? null,
+      isAnonymous: !!a?.currentUser?.isAnonymous,
+    });
+  }
+}
 
 export function PlayerProvider({ children }) {
-<<<<<<< Updated upstream
-  const [eventId, setEventId]         = useState(null);
-  const [authCode, setAuthCode]       = useState('');
-  const [participant, setParticipant] = useState(null);
-=======
   const [eventId, setEventId]             = useState(() => {
     try { return localStorage.getItem('player.eventId') || localStorage.getItem('eventId') || ''; } catch { return ''; }
   });
@@ -536,18 +724,24 @@ if (!idCached) {
     const partnerNickname = (participants.find((p) => normId(p.id) === mateId) || {})?.nickname || '';
     return { roomNumber, partnerId: mateId || null, partnerNickname };
   }
->>>>>>> Stashed changes
 
   return (
-    <PlayerContext.Provider value={{
-      eventId,
-      authCode,
-      participant,
-      setEventId,
-      setAuthCode,
-      setParticipant
-    }}>
+    <PlayerContext.Provider
+      value={{
+        eventId, setEventId,
+        mode, roomCount, roomNames, rooms,
+        participants, participant,
+        setParticipant,
+        authCode, setAuthCode,
+        allowTeamView, setAllowTeamView,
+        joinRoom, joinFourBall,
+        assignStrokeForOne,
+        assignFourballForOneAndPartner,
+      }}
+    >
       {children}
     </PlayerContext.Provider>
   );
 }
+
+export default PlayerProvider;

@@ -1,3 +1,5 @@
+/* src/screens/Step6.module.css */
+
 /* ───────── Step6StrokeResults.module.css ───────── */
 
 /* ───────── step wrapper ───────── */
@@ -379,4 +381,40 @@
   overflow-x: auto;                   /* 가로 스크롤 허용 */
   -webkit-overflow-scrolling: touch;   /* iOS 부드러운 스크롤 */
   touch-action: pan-x;                 /* 수평 제스처 우선, 부모 스와이프 방지 */
+}
+
+/* ===================================================== */
+/*  ============== ⬇︎⬇︎ 추가: 행높이 고정 규칙 ⬇︎⬇︎ ============== */
+/* 빈칸이어도 “최종결과표”와 동일한 높이를 보장하기 위한 보완 */
+:root {
+  --row-h-step6: 40px; /* 필요시 36~44px로 조정 가능 */
+}
+
+/* 두 테이블 모두에 붙일 고정행높이 클래스 */
+.fixedRows thead th,
+.fixedRows tbody td {
+  height: var(--row-h-step6);
+  line-height: var(--row-h-step6);
+  padding-top: 0;
+  padding-bottom: 0;
+  vertical-align: middle;
+}
+
+/* 내용이 비어도 높이가 유지되도록 NBSP 자동 주입 */
+.fixedRows td:empty::before {
+  content: "\00a0";
+}
+
+/* === 칸 높이 복원: 방배정표와 최종결과표 모두 동일 높이로(기존 수준) === */
+:root {
+  /* 필요하면 30~34px 사이에서 미세 조정 가능 */
+  --row-h-step6: 30px;
+}
+
+.fixedRows thead th,
+.fixedRows tbody td {
+  height: var(--row-h-step6);
+  line-height: var(--row-h-step6);
+  padding-top: 0;
+  padding-bottom: 0;
 }

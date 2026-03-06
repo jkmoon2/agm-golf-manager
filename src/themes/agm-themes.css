@@ -1,0 +1,172 @@
+/* /src/themes/agm-themes.css
+   AGM Theme Pack (A,B,C,D,F,I,L,K,O) + density/contrast toggles
+   - 기존 코드 100% 유지: 기존 컴포넌트는 그대로, body에 클래스만 붙여서 테마 적용
+   - 적용 방법: document.body.classList.add('theme-A') 등
+*/
+
+/* reset-safe base tokens (fallbacks) */
+:root{
+  --agm-bg: #f8fafc;
+  --agm-surface: #ffffff;
+  --agm-surface-2: #f5f7fb;
+  --agm-border: #e5e9f0;
+  --agm-shadow-1: 0 4px 12px rgba(0,0,0,.06);
+  --agm-shadow-2: 0 8px 24px rgba(0,0,0,.08);
+  --agm-text: #203050;
+  --agm-muted:#8a94a6;
+  --agm-accent:#1E55C6;
+
+  --agm-radius-card: 22px;
+  --agm-gap: 24px;
+
+  /* bottom nav defaults */
+  --bottom-nav-h: 56px;
+  --bottom-nav-bg: var(--agm-surface);
+  --bottom-nav-border: var(--agm-border);
+  --bottom-nav-shadow: 0 -8px 24px rgba(20,40,80,.08);
+  --bottom-nav-radius: 20px;
+  --bottom-nav-active: var(--agm-accent);
+  --bottom-nav-muted: var(--agm-muted);
+}
+
+/* ================== DENSITY / CONTRAST toggles ================== */
+.density-compact { --agm-gap: 16px; --agm-radius-card: 18px; }
+.density-relaxed { --agm-gap: 28px; --agm-radius-card: 26px; }
+
+.contrast-low    { --agm-text: #33415c; --agm-muted:#9aa7bb; }
+.contrast-high   { --agm-text: #0f172a; --agm-muted:#6b7280; }
+
+/* ================== THEME PRESETS ================== */
+/* A) Soft Neumorph Light */
+.theme-A{
+  --agm-bg:#f2f6fa;
+  --agm-surface:#f8fbff;
+  --agm-surface-2:#f6f9fc;
+  --agm-border:#dce4ec;
+  --agm-shadow-1:0 6px 18px rgba(20,40,80,.08);
+  --agm-shadow-2:0 10px 30px rgba(20,40,80,.12);
+  --agm-text:#142850;
+  --agm-muted:#8896a9;
+  --agm-accent:#1E55C6;
+}
+/* B) Pastel Elevation Blue */
+.theme-B{
+  --agm-bg:#f0f5ff;
+  --agm-surface:#ffffff;
+  --agm-surface-2:#e6eeff;
+  --agm-border:#c8d2eb;
+  --agm-shadow-1:0 8px 24px rgba(60,90,150,.15);
+  --agm-shadow-2:0 16px 40px rgba(60,90,150,.13);
+  --agm-text:#14203c;
+  --agm-muted:#7b89a8;
+  --agm-accent:#78a0ff;
+}
+/* C) Glassmorphism */
+.theme-C{
+  --agm-bg:#e1ebf5;
+  --agm-surface:rgba(255,255,255,.85);
+  --agm-surface-2:rgba(255,255,255,.75);
+  --agm-border:#d2d8e0;
+  --agm-shadow-1:0 8px 22px rgba(30,50,95,.12);
+  --agm-shadow-2:0 12px 36px rgba(30,50,95,.18);
+  --agm-text:#1a345f;
+  --agm-muted:#78859a;
+  --agm-accent:#86a7ff;
+  backdrop-filter: blur(10px);
+}
+/* D) Outline Minimal */
+.theme-D{
+  --agm-bg:#f8fafe;
+  --agm-surface:#ffffff;
+  --agm-surface-2:#f0f3fa;
+  --agm-border:#d2d7e1;
+  --agm-shadow-1:none;
+  --agm-shadow-2:none;
+  --agm-text:#233c6e;
+  --agm-muted:#788499;
+  --agm-accent:#3d6ae0;
+}
+/* F) Dark Glow */
+.theme-F{
+  --agm-bg:#0a0c10;
+  --agm-surface:#12161c;
+  --agm-surface-2:#10141a;
+  --agm-border:#1c2026;
+  --agm-shadow-1:0 12px 30px rgba(0,0,0,.6);
+  --agm-shadow-2:0 20px 50px rgba(0,0,0,.6);
+  --agm-text:#e6eefc;
+  --agm-muted:#97a4c2;
+  --agm-accent:#508cff;
+}
+/* I) Paper Emboss */
+.theme-I{
+  --agm-bg:#fcfcf8;
+  --agm-surface:#ffffff;
+  --agm-surface-2:#f7f7f0;
+  --agm-border:#e6e6dc;
+  --agm-shadow-1:none;
+  --agm-shadow-2:none;
+  --agm-text:#374150;
+  --agm-muted:#82878f;
+  --agm-accent:#6f86ff;
+}
+/* L) Muted Sandstone + Teal */
+.theme-L{
+  --agm-bg:#f7f4f0;
+  --agm-surface:#ffffff;
+  --agm-surface-2:#fdfaf7;
+  --agm-border:#e6e0d8;
+  --agm-shadow-1:0 8px 22px rgba(120,110,100,.15);
+  --agm-shadow-2:0 16px 36px rgba(120,110,100,.12);
+  --agm-text:#3c4450;
+  --agm-muted:#8a8278;
+  --agm-accent:#228b8c;
+}
+/* K) HighContrast Tabs AGM Blue */
+.theme-K{
+  --agm-bg:#eef3fc;
+  --agm-surface:#ffffff;
+  --agm-surface-2:#f6f9ff;
+  --agm-border:#d0daf0;
+  --agm-shadow-1:0 10px 28px rgba(60,90,160,.16);
+  --agm-shadow-2:0 16px 42px rgba(60,90,160,.12);
+  --agm-text:#123796;
+  --agm-muted:#7d88aa;
+  --agm-accent:#5082ff;
+}
+/* O) Crisp White + Cut Corners Purple */
+.theme-O{
+  --agm-bg:#f8f8ff;
+  --agm-surface:#ffffff;
+  --agm-surface-2:#fafaff;
+  --agm-border:#e6e6f5;
+  --agm-shadow-1:0 8px 24px rgba(90,70,160,.12);
+  --agm-shadow-2:0 14px 40px rgba(90,70,160,.12);
+  --agm-text:#3c3278;
+  --agm-muted:#8f88b3;
+  --agm-accent:#7a5cff;
+}
+
+/* ================== GENERIC SURFACES ================== */
+body{
+  background: var(--agm-bg);
+  color: var(--agm-text);
+}
+.agm-surface{ background: var(--agm-surface); border:1px solid var(--agm-border); border-radius: var(--agm-radius-card); box-shadow: var(--agm-shadow-1); }
+.agm-card   { background: var(--agm-surface); border:1px solid var(--agm-border); border-radius: var(--agm-radius-card); box-shadow: var(--agm-shadow-2); }
+
+/* ================== BOTTOM NAV (높이 고정) ================== */
+.bottom-nav{
+  position: sticky; inset-block-end: 0;
+  height: var(--bottom-nav-h);
+  background: var(--bottom-nav-bg);
+  border: 1px solid var(--bottom-nav-border);
+  border-radius: var(--bottom-nav-radius) var(--bottom-nav-radius) 0 0;
+  box-shadow: var(--bottom-nav-shadow);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.bottom-nav .item{
+  height: 100%; display: grid; place-items: center;
+  gap: 4px; color: var(--bottom-nav-muted);
+}
+.bottom-nav .item.is-active{ color: var(--bottom-nav-active); }

@@ -57,7 +57,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 
-  /* ─── 여기에 메인 타이틀 검정색을 추가 ─── */
+  /* ─── 메인 타이틀 색상 검정으로 강제 ─── */
   color: #000 !important;
 }
 

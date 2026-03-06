@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AGM 참가자 모드</title>
+  </head>
+  <body>
+    <script>
+      // public/pwa-player.html
+      // 참가자 모드 의도를 Cookie로 저장 (iOS 홈화면/PWA에서 세션/스토리지 꼬임 대비)
+      (function () {
+        try {
+          document.cookie =
+            'agm_mode=player; Max-Age=31536000; Path=/; SameSite=Lax';
+        } catch (e) {}
+        // 참가자 로그인 라우트로 이동
+        location.replace('/player/login-or-code');
+      })();
+    </script>
+  </body>
+</html>

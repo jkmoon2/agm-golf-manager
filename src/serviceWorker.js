@@ -48,6 +48,21 @@ export function unregister() {
 }
 
 // PWA 내부: 대기 중인 워커에 SKIP_WAITING 메시지를 받으면 즉시 활성화
+
+/**
+ * ⚠️ IMPORTANT
+ * 아래 블록은 "실제 Service Worker 스크립트(global scope)"에서만 동작해야 합니다.
+ * 그런데 CRA/React 앱에서는 이 파일이 번들에 포함되어 window에서도 실행될 수 있습니다.
+ * window 환경에서 self.addEventListener("message") 등이 동작하면 예기치 않은 에러가 날 수 있어,
+ * Service Worker 환경에서만 실행되도록 가드합니다.
+ */
+const __isServiceWorkerGlobal =
+  typeof window === "undefined" &&
+  typeof self !== "undefined" &&
+  typeof self.skipWaiting === "function" &&
+  typeof self.clients === "object";
+
+if (__isServiceWorkerGlobal) {
 self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
@@ -63,3 +78,4 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
 });
+}

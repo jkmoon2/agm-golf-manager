@@ -1,0 +1,14 @@
+# /netlify.toml  (기존 내용 유지)
+[build]
+  command = "CI=false npm run build"
+  publish = "build"
+
+[build.environment]
+  CI = "false"
+  EXTEND_ESLINT = "true"
+
+# 👇 SPA 라우팅 보강: 모든 경로를 index.html로 전달
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

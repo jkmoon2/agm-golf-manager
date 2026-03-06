@@ -1,8 +1,12 @@
-// src/screens/LoginScreen.jsx
+// /src/screens/LoginScreen.jsx
+// 변경 요약(기존 코드 100% 유지 + 최소 보완):
+// 1) ?role=admin|player, ?redirect=/some/path 쿼리 파라미터 읽기
+// 2) 로그인 성공 시 redirect가 있으면 그쪽으로 이동
+// 3) 참가자 로그인 완료 후에는 '/player/events'로 보내 참가자 첫 화면을 일관화
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth }          from '../contexts/AuthContext';
-import { useNavigate }      from 'react-router-dom';
+import { useNavigate, useLocation }      from 'react-router-dom';
 import styles               from './LoginScreen.module.css';
 
 export default function LoginScreen() {
@@ -13,41 +17,43 @@ export default function LoginScreen() {
   const [error, setError]       = useState('');
   const { loginAdmin, loginPlayer } = useAuth();
   const navigate                = useNavigate();
+  const { search }              = useLocation();
 
-  // .env.local 에서 불러오는 관리자 정보
+  // .env.local
   const ADMIN_EMAIL    = process.env.REACT_APP_ADMIN_EMAIL;
   const ADMIN_PASSWORD = process.env.REACT_APP_ADMIN_PASSWORD;
 
   const validAdmin  = email.trim() === ADMIN_EMAIL && password === ADMIN_PASSWORD;
   const validPlayer = code.trim().length > 0;
 
+  // ✅ 쿼리 파라미터로 기본 탭/리다이렉트 제어
+  const params    = React.useMemo(() => new URLSearchParams(search), [search]);
+  const qRole     = (params.get('role') || '').toLowerCase();       // 'admin' | 'player'
+  const redirect  = params.get('redirect') || '';
+
+  useEffect(() => {
+    if (qRole === 'player') setRole('player');
+    else if (qRole === 'admin') setRole('admin');
+  }, [qRole]);
+
   const handleSubmit = async e => {
     e.preventDefault();
     setError('');
 
     if (role === 'admin') {
-      // 운영자 인증
-      if (!validAdmin) {
-        setError('이메일 또는 비밀번호가 올바르지 않습니다.');
-        return;
-      }
+      if (!validAdmin) { setError('이메일 또는 비밀번호가 올바르지 않습니다.'); return; }
       try {
-        // AuthContext 내부에서 Firebase 로그인 처리
         await loginAdmin(ADMIN_EMAIL, ADMIN_PASSWORD);
-        // 로그인 후 관리자 홈(10버튼)으로 이동
-        navigate('/admin', { replace: true });
+        navigate(redirect || '/admin', { replace: true }); // ✅ redirect 우선
       } catch (err) {
         setError('관리자 인증 실패: ' + err.message);
       }
     } else {
-      // 참가자 인증
-      if (!validPlayer) {
-        setError('인증 코드를 입력하세요.');
-        return;
-      }
+      if (!validPlayer) { setError('인증 코드를 입력하세요.'); return; }
       try {
         await loginPlayer(code.trim());
-        navigate('/player/home', { replace: true });
+        // 참가자 성공 시: 참가자 홈(대회 리스트)로 통일
+        navigate('/player/events', { replace: true });      // ✅ 포인트
       } catch (err) {
         setError('참가자 인증 실패: ' + err.message);
       }
@@ -114,13 +120,6 @@ export default function LoginScreen() {
 
           {error && <div className={styles.error}>{error}</div>}
 
-          {/* 디버깅용 출력 */}
-          <div style={{ fontSize:12, color:'#999', marginBottom:8 }}>
-            email: “{email}”<br/>
-            ADMIN_EMAIL: “{ADMIN_EMAIL}”<br/>
-            validAdmin: {String(validAdmin)}
-          </div>
-
           <button
             type="submit"
             className={styles.submit}
@@ -131,5 +130,5 @@ export default function LoginScreen() {
         </form>
       </div>
     </div>
-);
+  );
 }

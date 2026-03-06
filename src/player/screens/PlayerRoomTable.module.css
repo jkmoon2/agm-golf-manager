@@ -1,0 +1,137 @@
+/* src/player/screens/PlayerRoomTable.module.css */
+
+/* ******************************************************************
+   🔧 미세 조정 가이드 (한 곳에서 전부 제어)
+   - 칸 높이:                 --row-h
+   - 닉네임 최대 길이(ch):    --nick-ch  (JS가 주입, 필요 시 수동 ↑)
+   - G핸디 칼럼 폭(px):       --hand-w   (요청: 40px 고정)
+   - 표 폰트크기:             --tbl-title-fz / --tbl-body-fz / --tbl-sum-fz
+   - 하단(이전/다음) 버튼:    --nav-btn-py / --nav-btn-px / --nav-font
+   - JPG/PDF 버튼(독립):      --dl-btn-py / --dl-btn-px / --dl-btn-font
+   - 닉 폭 스케일(CJK 보정):  --nick-scale (0.62~0.72em 범위 권장)
+   - 닉 텍스트 좌우 여백(px): --nick-pad-x
+   ****************************************************************** */
+
+.page{
+  /* ===== 셀/테이블 공통 ===== */
+  --row-h: 32px;           /* ▷ 칸 높이(줄 두께). 28~38px 사이에서 미세 조정 */
+  --nick-ch: 10;           /* ▷ 최장 닉네임 문자수(ch). JS가 자동 주입; 타이트하면 수동으로 ↑ */
+  --cols: 4;               /* ▷ 보이는 방(열) 수. JS가 자동 주입 */
+  --hand-w: 40px;          /* ▷ G핸디 칼럼 폭(px) — 요청: 40px 고정 */
+
+  /* ===== 표 폰트(STEP1 팀원목록과 동일 톤) ===== */
+  --tbl-title-fz: 0.95rem; /* ▷ 타이틀(닉네임/G핸디) 폰트 크기 */
+  --tbl-body-fz:  0.95rem; /* ▷ 본문(참가자 행) 폰트 크기 */
+  --tbl-sum-fz:   0.95rem; /* ▷ 합계 행 폰트 크기 */
+
+  /* ===== 하단 네비(이전/다음) — STEP3 동일 ===== */
+  --nav-btn-py: .60rem;    /* ▷ 버튼 ‘두께’(세로 패딩). 두껍게 → 값↑, 얇게 → 값↓ */
+  --nav-btn-px: 1.0rem;    /* ▷ 좌/우 여백(가로 패딩). 버튼 가로 폭 느낌 조절 */
+  --nav-font:   16px;      /* ▷ 버튼 글자 크기 */
+
+  /* ===== JPG/PDF 다운로드 버튼(네비와 완전 독립) ===== */
+  --dl-btn-py:  .52rem;    /* ▷ 두께(세로 패딩) */
+  --dl-btn-px:  .9rem;     /* ▷ 좌/우 여백(가로 패딩) */
+  --dl-btn-font: 14px;     /* ▷ 글자 크기(일반체). 네비와 연동되지 않음 */
+
+  /* ===== 닉네임 폭 보정(가변식) =====
+     ch 단위는 CJK(한글 등)에서 과소추정되는 경향 → em 스케일로 보정 */
+  --nick-scale: 0.66em;    /* ▷ 0.62~0.72em 범위에서 미세 조정(커 보이면 값↑, 작아 보이면 값↓) */
+  --nick-pad-x: 4px;       /* ▷ 닉 텍스트 좌/우 여백(시각적 여유) */
+
+  display:flex; flex-direction:column; min-height:100vh;
+}
+
+/* 페이지 내부 여백 (하단 네비 영역 확보) */
+.content{ padding:12px; padding-bottom:148px; }
+
+/* 카드 레이아웃 */
+.card{ background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+.cardHeader{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid #eee; }
+.cardTitle{ font-weight:700; }
+
+/* ====== 표 컨테이너 ====== */
+.tableWrap{ overflow-x:auto; margin:12px; }
+
+/* 테이블: 실선 그리드 + 최소 가로폭(열 개수에 따라 자동 계산) */
+.roomTable{
+  border-collapse: collapse;     /* ▷ 실선 테이블 */
+  width: 100%;
+  table-layout: auto;
+
+  /* ▷ 닉 칼럼 폭 = (최장닉 + 여유 2) × 스케일 */
+  --nick-w: calc((var(--nick-ch) + 2) * var(--nick-scale));
+
+  /* ▷ 보이는 열 수 × (닉 폭 + 핸디 폭 + 여분) → 최소 가로폭(부족 시 가로 스크롤) */
+  min-width: calc(var(--cols) * ( var(--nick-w) + var(--hand-w) + 12px ));
+  background:#fff;
+}
+
+/* 공통 셀 테두리/정렬 */
+.th, .subTh, .td { border:1px solid #d0d7de; text-align:center; vertical-align:middle; }
+.th{ background:#fafafa; font-weight:700; padding:.42rem 0; font-size:var(--tbl-title-fz); }
+.subTh{ background:#fafafa; font-weight:600; padding:.36rem 0; font-size:var(--tbl-title-fz); }
+.td{ padding:0; height:var(--row-h); font-size:var(--tbl-body-fz); }
+
+/* ▷ 닉 칼럼: ‘열’이 폭을 갖고, 텍스트 박스는 중앙 배치 */
+.nickCol{ min-width: var(--nick-w); }  /* 헤더(닉네임) 칼럼 폭 */
+.nickCell{ 
+  min-width: var(--nick-w);           /* 본문/합계 닉 칼럼 폭 */
+  text-align: center;                 /* 셀 자체 중앙 정렬 성향 강화 */
+}
+
+/* ▷ 닉 텍스트: 고정폭 박스를 셀 중앙에 두기(margin: auto) → 모든 길이에서 완전 중앙 */
+.nick{
+  display:block;
+  width: var(--nick-w);               /* 텍스트 컨테이너 고정폭(테이블 공통 닉 폭과 동일) */
+  margin: 0 auto;                     /* 박스 자체 중앙 정렬 (좌/우 자동 여백) */
+  white-space:nowrap;
+  overflow:visible;
+  text-overflow:clip;                 /* 말줄임 필요 시 ellipsis로 교체 */
+  padding: 0 var(--nick-pad-x);       /* 좌/우 여백(시각적 여유/균형감) */
+  text-align:center;                  /* 박스 내부 텍스트도 중앙 정렬 */
+}
+
+/* ▷ G핸디 텍스트/셀 */
+.hand{
+  display:inline-block;
+  min-width: var(--hand-w);           /* 40px 고정폭 — 요청 사항 */
+  color:#1e40ff;                      /* 파란색 */
+  padding:0 8px;
+}
+
+/* ▷ 합계 행 스타일(타이틀 라인과 톤 맞춤) */
+.totalLabel{ background:#fafafa; font-weight:600; font-size:var(--tbl-sum-fz); }
+.totalValue{ background:#fafafa; font-weight:700; color:#1e40ff; font-size:var(--tbl-sum-fz); }
+
+/* ===== 카드 우하단 다운로드 버튼(네비와 완전 독립) ===== */
+.cardFooterRight{ display:flex; justify-content:flex-end; gap:10px; padding:8px 12px 12px; }
+.dlBtn{
+  padding: var(--dl-btn-py) var(--dl-btn-px);  /* ▷ 두께/가로 여백 — 네비와 연동되지 않음 */
+  font-size: var(--dl-btn-font);               /* ▷ 글자 크기 — 네비와 연동되지 않음 */
+  border-radius:10px;
+  font-weight:400;                             /* 일반체 */
+}
+.btnPrev{ background:#f3f4f6; color:#333; border:1px solid #d0d7de; }   /* JPG(이전 톤) */
+.btnNext{ background:#eef4ff; color:#2f6feb; border:1px solid #bcd0ff; }/* PDF(다음 톤) */
+
+/* ===== 하단 고정 네비(이전/다음) — STEP3 동일 ===== */
+.footerNav{
+  position:fixed; left:0; right:0;
+  bottom: calc(env(safe-area-inset-bottom) + 64px); /* ▷ 아이콘 탭 위로 띄우기 */
+  display:flex; gap:12px; justify-content:space-between; align-items:center;
+  padding:10px 16px; background:#fff;
+}
+.navBtn{
+  flex:1; min-width:0;
+  padding: var(--nav-btn-py) var(--nav-btn-px); /* ▷ 두께/좌우 여백: 여기서 미세 조정 */
+  font-size: var(--nav-font);                   /* ▷ 글자 크기: 여기서 미세 조정 */
+  border-radius:10px; font-weight:400; border:1px solid #d0d7de;
+}
+/* ▷ 좌/우 버튼 너비 비율을 달리하고 싶으면 flex 값 변경(선택)
+   예) .navPrev{flex:.9} .navNext{flex:1.1} */
+.navPrev{ background:#f3f4f6; color:#333; }
+.navNext{ background:#eef4ff; color:#2f6feb; border-color:#bcd0ff; }
+
+/* 빈 상태 */
+.empty{ padding:24px 16px; text-align:center; color:#666; }
