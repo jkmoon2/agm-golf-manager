@@ -1,0 +1,130 @@
+/* /src/screens/Step0.module.css */
+
+/* ───────── 기존 내용 유지 ───────── */
+.container { padding: 1rem; max-width: 420px; margin: 0 auto; }
+.tabContainer { display:flex; gap:.5rem; margin-bottom:.75rem; }
+.tabBtn { flex:1; height:38px; border:1px solid #d1d5db; border-radius:10px; background:#fff; }
+.active { background:#eaf3ff; border-color:#bcd7ff; }
+
+.list { display:grid; gap:.75rem; padding:0; margin:0; list-style:none; }
+.item { background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.03); padding:.75rem; }
+.selected { outline:2px solid #cde5ff; }
+
+.cardRow { display:flex; align-items:stretch; justify-content:space-between; gap:.5rem; }
+.cardMain { flex:1; min-width:0; }
+
+.titleRow { display:flex; align-items:center; gap:.5rem; flex-wrap: nowrap; }
+.title { margin:0; font-size:1rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.badge { font-size:.72rem; padding:.16rem .45rem; border-radius:999px; border:1px solid #ddd; flex-shrink:0; }
+.badgeStroke { background:#eaf3ff; color:#1e63c6; }
+.badgeFour   { background:#fff7e8; color:#9a5b00; }
+
+.subline {
+  display:flex; gap:.75rem; align-items:center;
+  margin-top:.28rem; font-size:.86rem; color:#555;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+.closed {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.moreWrap { position:relative; flex-shrink:0; display:flex; align-items:center; }
+.moreBtn {
+  width:40px; height:40px; line-height:40px;
+  border:1px solid #e5e7eb; border-radius:10px; background:#fff;
+  font-size:18px; text-align:center; cursor:pointer;
+}
+.moreMenu {
+  position:absolute; top:44px; right:0;
+  background:#fff; border:1px solid #e5e7eb; border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+  min-width:150px; padding:.3rem; z-index:20;
+}
+.moreItem, .moreItemDanger {
+  width:100%; text-align:left; padding:.55rem .7rem; border:none; background:#fff; border-radius:8px; cursor:pointer;
+  font-size:.92rem;
+}
+.moreItem:hover { background:#f3f4f6; }
+.moreItemDanger { color:#b91c1c; }
+.moreItemDanger:hover { background:#fff1f1; }
+
+.bottomDockFixed {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  width: calc(100vw - 2rem);
+  max-width: 420px;
+  z-index: 40;
+}
+.dockInner {
+  display:flex;
+  gap:.75rem;
+  background: transparent;
+  padding: .25rem 0;
+  border: none;
+  box-shadow: none;
+}
+.primaryBtn, .secondaryBtn {
+  flex:1;
+  height:40px;
+  border:none;
+  border-radius:10px;
+  font-weight:700;
+  font-size:.95rem;
+}
+.primaryBtn  { background:#2e8b57; color:#fff; }
+.secondaryBtn{ background:#1e63c6; color:#fff; }
+
+.btnFlex { flex: 1; }
+.bottomSpacer { height: 96px; }
+
+/* ───────── (이전 보완) iOS vw 보정/가로 드래그 방지 ───────── */
+.container { overflow-x: hidden; }
+@supports (width: min(100%, 100%)) {
+  .bottomDockFixed { width: min(420px, calc(100% - 2rem)); }
+}
+@supports not (width: min(100%, 100%)) {
+  .bottomDockFixed { width: calc(100% - 2rem); max-width: 420px; }
+}
+.moreMenu { max-width: calc(100vw - 2rem); }
+
+/* ───────── (이전 보완) 좌/우 동일 여백 변수화 ───────── */
+:root { --padL: 1rem; --padR: 1rem; }
+@supports (padding: max(0px)) {
+  :root {
+    --padL: max(1rem, env(safe-area-inset-left));
+    --padR: max(1rem, env(safe-area-inset-right));
+  }
+}
+.container {
+  padding-left: var(--padL);
+  padding-right: var(--padR);
+  overflow-x: visible;
+}
+@supports (width: min(100%, 100%)) {
+  .bottomDockFixed { width: min(420px, calc(100% - (var(--padL) + var(--padR)))); }
+}
+@supports not (width: min(100%, 100%)) {
+  .bottomDockFixed { width: calc(100% - (var(--padL) + var(--padR))); max-width: 420px; }
+}
+.moreMenu { max-width: calc(100vw - (var(--padL) + var(--padR))); }
+
+/* ──────────────────────────────────────────────── */
+/* ▼▼ 이번 이슈 전용 오버라이드 (AGM 포볼 우측 여백 불일치) ▼▼ */
+/* 원인: flex 컨테이너에서 `justify-content: space-between`과 `gap`이 결합되면
+   항목 수/문자 폭/서브픽셀 라운딩에 따라 우측 끝 여백이 들쭉날쭉해질 수 있습니다.
+   해결: 정렬을 '내용-왼쪽 정렬'로 고정하고, trailing 요소(.moreWrap)에만
+   `margin-left:auto`를 주어 **항상 오른쪽 패딩에 정확히 붙도록** 강제. */
+/* 덮어쓰기만 추가(기존 선언 유지) */
+.cardRow { justify-content: flex-start; }   /* space-between → flex-start */
+.moreWrap { margin-left: auto; }            /* 오른쪽 끝으로 고정(패딩 기준) */

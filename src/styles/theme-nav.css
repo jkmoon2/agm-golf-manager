@@ -1,0 +1,76 @@
+/* /src/styles/theme-nav.css
+   ─ 기존 파일 100% 유지하면서, 하단 아이콘/문자 간격(붙여서) & 세로 가운데 정렬만 보완 ─ */
+
+.bottom-nav{
+  position: sticky;
+  inset-block-end: 0;
+  background: var(--bottom-nav-bg, #fff);
+  border: 1px solid var(--bottom-nav-border, #e5e9f0);
+  border-radius: var(--bottom-nav-radius, 20px) var(--bottom-nav-radius, 20px) 0 0;
+  box-shadow: var(--bottom-nav-shadow, 0 -8px 24px rgba(20,40,80,.08));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ▼ 핵심 보정: 아이콘/문자를 '붙이고', 세로 가운데 정렬 */
+.bottom-nav .item{
+  height: 100%;                     /* 바 높이를 가득 채워 세로 중앙 정렬 가능 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;          /* 세로 중앙 */
+  gap: 0;                           /* 아이콘-문자 간격 0 → '붙이기'  */
+  color: var(--bottom-nav-muted, #8a94a6);
+  text-decoration: none;
+  text-align: center;
+}
+
+/* 아이콘 baseline 여백 제거(딱 붙게) */
+.bottom-nav .item > svg{
+  display: block;
+  margin: 0;
+}
+
+/* 두 번째 자식(라벨) 위쪽 여백이 모듈 CSS에 있더라도 0으로 재설정 */
+.bottom-nav .item > :nth-child(2){
+  margin-top: 0 !important;
+  line-height: 1;
+}
+
+/* 활성 색상은 기존 클래스/상태를 그대로 따르되, 공통 규칙만 보강 */
+.bottom-nav .itemActive,
+.bottom-nav .item.is-active,
+.bottom-nav [aria-current="page"].item{
+  color: var(--bottom-nav-active, #1E55C6);
+}
+
+/* 아이콘 컬러는 글자색과 동기화 */
+.bottom-nav .item svg { color: currentColor; }
+
+/* ===== [추가] 탭 활성 상태 일원화 (모듈 클래스에 의존하지 않음) ===== */
+
+/* NavLink가 활성일 때 자동으로 생기는 aria-current="page"와
+   우리가 임의로 붙일 data-active="true" 두 경우 모두를 파란색 처리 */
+.bottom-nav .item[aria-current="page"],
+.bottom-nav .item[data-active="true"]{
+  color: var(--bottom-nav-active, #1E55C6);
+}
+
+/* 아이콘/라벨이 클래스 색을 그대로 따르도록 강제 동기화 */
+.bottom-nav .item svg{
+  color: currentColor !important;
+  stroke: currentColor !important; /* Lucide/Heroicons(Outline) */
+}
+.bottom-nav .item .label{
+  color: currentColor !important;
+}
+
+/* (이미 적용했다면 생략 가능) 아이콘-라벨 '붙이기' & 세로 중앙 정렬 */
+.bottom-nav .item{
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center; /* 세로 중앙 */
+  gap: 0; /* 붙이기 */
+}
+.bottom-nav .item > :nth-child(2){ margin-top: 0 !important; line-height: 1; }

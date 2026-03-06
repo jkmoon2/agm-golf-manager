@@ -1,0 +1,24 @@
+/* src/components/StepPage.module.css */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.stepHeader {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: #f9f9f9;
+  border-bottom: 1px solid #ddd;
+}
+.stepTitle {
+  font-size: 1.125rem;
+  margin: 0;
+}
+.stepContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}

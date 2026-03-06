@@ -1,0 +1,97 @@
+// /firestore.rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ── helper 함수 ─────────────────────────────────────────────
+    // 운영자 여부: email 기반 대신 커스텀 클레임이나 특정 UID를 사용하세요.
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.token.email == 'a@a.com';
+    }
+    // 참가자 여부: 익명 포함, 로그인만 되어 있으면 true
+    function isParticipant() {
+      return request.auth != null;
+    }
+
+    // 🆕 보조 함수: 본인 문서 여부
+    function isSelf(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // 🆕 보조 함수: 이벤트 멤버십(선택)
+    //    /events/{eventId}/memberships/{uid} 문서 존재 여부 검사
+    function isEventMember(eventId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/events/$(eventId)/memberships/$(request.auth.uid));
+    }
+
+    // ── 이벤트 컬렉션 ────────────────────────────────────────────
+    match /events/{eventId} {
+      // 운영자만 대회 생성 가능
+      allow create: if isAdmin();
+
+      // 🆕 플레이어 공개 목록/접속용: 이벤트 문서는 로그인 없이 읽기 허용(get/list)
+      //    ※ 서브컬렉션(participants/rooms 등)은 아래 규칙대로 여전히 인증 필요
+      allow get, list: if true; // 🆕
+
+      // 운영자는 전체 읽기·쓰기·삭제
+      allow read, update, delete: if isAdmin();
+
+      // 참가자는 로그인만 되어 있으면 대회 기본 정보 읽기·수정(예: 인증 결과 기록) 허용
+      allow read, update: if isParticipant();
+
+      // ── 참가자 서브컬렉션 ────────────────────────────────────────
+      match /participants/{pid} {
+        // 운영자는 언제나 자유롭게
+        allow read, write: if isAdmin();
+        // 참가자는 로그인만 되어 있으면 자신의 데이터 읽기·쓰기 가능
+        allow read, write: if isParticipant();
+      }
+
+      // ── 방 정보 서브컬렉션 ───────────────────────────────────────
+      match /rooms/{roomId} {
+        // 운영자는 자유롭게
+        allow read, write: if isAdmin();
+        // 참가자는 로그인만 되어 있으면 방 조회·배정(update) 허용
+        allow read, update: if isParticipant();
+      }
+
+      // ── 포볼 방 정보 서브컬렉션 ─────────────────────────────────
+      match /fourballRooms/{roomId} {
+        // 운영자는 자유롭게
+        allow read, write: if isAdmin();
+        // 참가자는 로그인만 되어 있으면 팀 조회·배정(update) 허용
+        allow read, update: if isParticipant();
+      }
+
+      // 🆕 (선택) 이벤트 멤버십 컬렉션: 회원제 이벤트 운영 시 사용
+      //    - 읽기: 본인/관리자
+      //    - 생성/수정: 본인 또는 관리자
+      //    - 삭제: 관리자
+      match /memberships/{uid} {
+        allow read: if isAdmin() || isSelf(uid);
+        allow create: if isAdmin() || isSelf(uid);
+        allow update: if isAdmin() || isSelf(uid);
+        allow delete: if isAdmin();
+      }
+    }
+
+    // 🆕 유저 프로필 컬렉션: 이메일/비번 로그인(회원제) 도입 시 프로필 저장 용도
+    //    - 읽기: 본인/관리자
+    //    - 생성: 본인
+    //    - 수정: 본인 또는 관리자
+    //    - 삭제: 관리자
+    match /users/{uid} {
+      allow read: if isAdmin() || isSelf(uid);
+      allow create: if isSelf(uid);                // [NOTE] 회원가입 직후 cred.user.uid 기준으로 허용
+      allow update: if isSelf(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── 그 외 모든 경로 금지 ────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

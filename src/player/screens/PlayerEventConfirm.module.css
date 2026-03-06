@@ -1,0 +1,71 @@
+/* /src/player/screens/PlayerEventConfirm.module.css
+   - 카드 좌/우 폭을 버튼 영역과 동일하게 보이도록 확장
+   - 표(중앙정렬/행높이/폰트)는 이전과 동일
+*/
+
+:root {
+  --row-h: 32px;
+  --cell-px: 10px;
+  --cell-py: 0px;
+
+  --bd: 1px solid #e5e7eb;
+  --bd-soft: 1px solid #eef2f7;
+
+  --card-bg: #fff;
+  --card-radius: 14px;
+  --card-shadow: 0 2px 10px rgba(0,0,0,.06);
+
+  --thead-bg: #f8fafc;
+  --thead-color: #111827;
+
+  --font-size: 14px;
+  --title-size: 16px;
+  --title-weight: 700;
+}
+
+.eventCard {
+  background: var(--card-bg);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  border: var(--bd);
+  overflow: hidden;
+
+  /* 🔧 핵심: 컨텐츠 영역의 좌/우 패딩(≈12px)을 상쇄해서
+     하단 버튼과 동일한 시각 폭으로 보이게 함 */
+  margin-left: -12px !important;
+  margin-right: -12px !important;
+}
+
+/* 카드 사이 간격은 그대로 */
+.eventCard + .eventCard { margin-top: 12px; }
+
+.eventTitle { font-size: var(--title-size); font-weight: var(--title-weight); line-height: 1.2; }
+
+.noOverflow { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+.table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; }
+.table thead .cell { background: var(--thead-bg); color: var(--thead-color); font-weight: 600; border-bottom: var(--bd); }
+
+.cell{
+  padding: var(--cell-py) var(--cell-px);
+  height: var(--row-h);
+  line-height: var(--row-h);
+  border-bottom: var(--bd-soft);
+  font-size: var(--font-size);
+  text-align: center; /* 중앙정렬 유지 */
+  white-space: nowrap;
+}
+
+/* 마지막 행 하단 보더 제거 */
+.table tbody tr:last-child .cell{ border-bottom:none; }
+/* 1위 강조 */
+.table tbody tr:first-child .cell{ font-weight:700; }
+
+/* 작은 화면에서도 과도한 확장을 방지(필요시 값 조정 가능) */
+@media (max-width: 360px){
+  .eventCard{ margin-left:-8px !important; margin-right:-8px !important; }
+}
+
+@media (max-width: 380px){
+  .table { min-width: 340px; }
+}

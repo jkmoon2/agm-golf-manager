@@ -1,0 +1,97 @@
+/* src/screens/LoginScreen.module.css */
+
+.fullscreen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f5f7fa;
+}
+
+.card {
+  width: 100%;
+  max-width: 360px;
+  padding: 24px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+
+.title {
+  margin: 0 0 16px;
+  font-size: 22px;
+  font-weight: bold;
+  text-align: center;
+  color: #222;
+}
+
+.tabContainer {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 24px;
+}
+
+.tab, .tabActive {
+  flex: 1;
+  padding: 10px 0;
+  font-size: 16px;
+  text-align: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.2s, border-bottom 0.2s;
+}
+
+.tab {
+  color: #555;
+}
+
+.tabActive {
+  color: #0969da;
+  border-bottom: 2px solid #0969da;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  border-color: #0969da;
+}
+
+.error {
+  color: #d32f2f;
+  font-size: 13px;
+  text-align: center;
+}
+
+.submit {
+  width: 100%;
+  padding: 12px 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #fff;
+  background-color: #0969da;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.submit:disabled {
+  background-color: #c0c4c8;
+  cursor: not-allowed;
+}

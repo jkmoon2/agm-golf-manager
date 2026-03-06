@@ -1,0 +1,13 @@
+# 빌드/의존성
+build/
+node_modules/
+
+# Firebase 관리자 SDK 파일(민감 정보)
+service-account.json
+**/service-account.json
+*.service-account.json
+agm-golf-manager-firebase-adminsdk-*.json
+
+# 환경 설정 파일
+.env
+.env.*
