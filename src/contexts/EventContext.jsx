@@ -879,16 +879,35 @@ export function EventProvider({ children }) {
         });
       }
 
-      // 2) 하위 컬렉션 재구성
+      Object.keys(roomsById).forEach((rid) => {
+        roomsById[rid].sort((a, b) => {
+          const ga = Number(a?.group ?? 0);
+          const gb = Number(b?.group ?? 0);
+          if (ga !== gb) return ga - gb;
+          return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+        });
+      });
+
+      // 2) 하위 컬렉션 diff 반영
       const root = collection(db, 'events', eid, 'rooms');
       const existing = await getDocs(root);
-      const delJobs = existing.docs.map((d) => deleteDoc(d.ref));
-      if (delJobs.length) await Promise.all(delJobs);
+      const existingMap = new Map(existing.docs.map((d) => [String(d.id), d.data() || {}]));
+      const jobs = [];
 
-      const setJobs = Object.entries(roomsById).map(([rid, members]) =>
-        setDoc(doc(root, rid), { members, updatedAt: serverTimestamp() }),
-      );
-      if (setJobs.length) await Promise.all(setJobs);
+      existing.docs.forEach((d) => {
+        if (!Object.prototype.hasOwnProperty.call(roomsById, String(d.id))) {
+          jobs.push(deleteDoc(d.ref));
+        }
+      });
+
+      Object.entries(roomsById).forEach(([rid, members]) => {
+        const prev = Array.isArray(existingMap.get(rid)?.members) ? existingMap.get(rid).members : [];
+        if (!deepEqual(prev, members)) {
+          jobs.push(setDoc(doc(root, rid), { members, updatedAt: serverTimestamp() }));
+        }
+      });
+
+      if (jobs.length) await Promise.all(jobs);
 
       // 3) 이벤트 루트에도 roomTable 저장(경량 미러)
       await updateEventImmediate({ roomTable: roomsById }, false);
