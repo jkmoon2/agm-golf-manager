@@ -16,7 +16,7 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { mergeEventInputs, eventInputDocToNested } from '../utils/playerRealtime';
+import { buildLiveEventInputsMapFromDocs, mergeEventInputs } from '../player/utils/playerEventData';
 
 import {
   getAuth,
@@ -309,7 +309,6 @@ export function EventProvider({ children }) {
         const data = snap.data();
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
-        withGate.eventInputs = mergeEventInputs(withGate.eventInputs || {}, eventInputsLiveRef.current || {});
 
         // ✅ 모드별 participants 분리: participantsStroke/participantsFourball 지원
         // - split 필드가 '빈 배열'로만 존재하는 경우(생성 템플릿 잔상)는 기존 participants(mirror) 우선
@@ -329,6 +328,10 @@ export function EventProvider({ children }) {
             else if (mirrorArr.length > 0) withGate.participants = mirrorArr;
             else withGate.participants = Array.isArray(splitArr) ? splitArr : [];
           }
+        } catch {}
+
+        try {
+          withGate.eventInputs = mergeEventInputs(withGate?.eventInputs || {}, eventInputsLiveRef.current || {});
         } catch {}
 
         // ✅ includeMetadataChanges: true 환경에서 pendingWrites 스냅샷을 무조건 무시하면
@@ -355,37 +358,28 @@ export function EventProvider({ children }) {
       eventInputsLiveRef.current = {};
       return;
     }
-    let unsub = null;
+
     let cancelled = false;
-
-    ensureAuthed().then(() => {
+    const colRef = collection(db, 'events', eventId, 'eventInputs');
+    const unsub = onSnapshot(colRef, (snap) => {
       if (cancelled) return;
-      const colRef = collection(db, 'events', eventId, 'eventInputs');
-      unsub = onSnapshot(colRef, (snap) => {
-        const nextLive = {};
-        snap.forEach((d) => {
-          const parsed = eventInputDocToNested(d.data() || {});
-          if (!parsed) return;
-          if (!nextLive[parsed.evId]) nextLive[parsed.evId] = { person: {} };
-          nextLive[parsed.evId].person[parsed.pid] = parsed.value;
-        });
+      const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+      const liveMap = buildLiveEventInputsMapFromDocs(docs);
+      eventInputsLiveRef.current = liveMap;
 
-        if (deepEqual(eventInputsLiveRef.current || {}, nextLive || {})) return;
-        eventInputsLiveRef.current = nextLive;
-
-        const prev = lastEventDataRef.current || {};
-        const mergedInputs = mergeEventInputs(prev.eventInputs || {}, nextLive);
-        if (deepEqual(prev.eventInputs || {}, mergedInputs || {})) return;
-
-        const nextData = { ...prev, eventInputs: mergedInputs };
-        lastEventDataRef.current = nextData;
-        setEventData((curr) => (curr ? { ...curr, eventInputs: mergedInputs } : { eventInputs: mergedInputs }));
+      setEventData((prev) => {
+        if (!prev) return prev;
+        const mergedInputs = mergeEventInputs(prev?.eventInputs || {}, liveMap);
+        if (deepEqual(prev?.eventInputs || {}, mergedInputs)) return prev;
+        const next = { ...prev, eventInputs: mergedInputs };
+        lastEventDataRef.current = next;
+        return next;
       });
     });
 
     return () => {
       cancelled = true;
-      if (unsub) unsub();
+      unsub && unsub();
     };
   }, [eventId]);
 
@@ -921,24 +915,16 @@ export function EventProvider({ children }) {
         });
       }
 
-      // 2) 하위 컬렉션 diff 반영(전체 삭제/재생성 금지)
+      // 2) 하위 컬렉션 재구성
       const root = collection(db, 'events', eid, 'rooms');
       const existing = await getDocs(root);
-      const existingMap = {};
-      existing.docs.forEach((d) => {
-        existingMap[d.id] = (d.data() || {}).members || [];
-      });
+      const delJobs = existing.docs.map((d) => deleteDoc(d.ref));
+      if (delJobs.length) await Promise.all(delJobs);
 
-      const jobs = [];
-      Object.entries(roomsById).forEach(([rid, members]) => {
-        if (!deepEqual(existingMap[rid] || [], members || [])) {
-          jobs.push(setDoc(doc(root, rid), { members, updatedAt: serverTimestamp() }));
-        }
-      });
-      Object.keys(existingMap).forEach((rid) => {
-        if (!(rid in roomsById)) jobs.push(deleteDoc(doc(root, rid)));
-      });
-      if (jobs.length) await Promise.all(jobs);
+      const setJobs = Object.entries(roomsById).map(([rid, members]) =>
+        setDoc(doc(root, rid), { members, updatedAt: serverTimestamp() }),
+      );
+      if (setJobs.length) await Promise.all(setJobs);
 
       // 3) 이벤트 루트에도 roomTable 저장(경량 미러)
       await updateEventImmediate({ roomTable: roomsById }, false);

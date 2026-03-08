@@ -5,9 +5,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
-import { getEffectiveParticipantsFromEvent, readPlayerRoomFromStorage, writePlayerRoomToStorage } from '../../utils/playerRealtime';
+import { getEffectiveParticipantsFromEvent } from '../utils/playerEventData';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -29,6 +29,23 @@ function tsToMillis(ts){
   if (typeof ts.toMillis === 'function') return ts.toMillis();
   if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
   return Number(ts) || 0;
+}
+
+function readRoomFromLocal(eventId){
+  const tryKeys = [
+    `player.currentRoom:${eventId}`,
+    'player.currentRoom',
+    'player.home.room',
+    'player.auth.room',
+  ];
+  for (const k of tryKeys) {
+    try {
+      const v = localStorage.getItem(k);
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 1) return n;
+    } catch {}
+  }
+  return NaN;
 }
 
 const MAX_PER_ROOM = 4;
@@ -146,8 +163,8 @@ export default function PlayerEventInput(){
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
   const participants = useMemo(
-    () => getEffectiveParticipantsFromEvent(eventData, [], null),
-    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+    () => getEffectiveParticipantsFromEvent(eventData),
+    [eventData]
   );
   const events = useMemo(
     () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
@@ -181,7 +198,7 @@ export default function PlayerEventInput(){
   );
 
   const roomIdx = useMemo(() => {
-    const ls  = readPlayerRoomFromStorage(eventId);
+    const ls  = readRoomFromLocal(eventId);
     const pick = [roomFromCtx, ls, roomFromSelf].find(
       n => Number.isFinite(n) && allRoomNos.includes(n)
     );
@@ -190,7 +207,7 @@ export default function PlayerEventInput(){
 
   useEffect(() => {
     if (Number.isFinite(roomIdx) && roomIdx >= 1) {
-      writePlayerRoomToStorage(eventId, roomIdx);
+      try { localStorage.setItem(`player.currentRoom:${eventId}`, String(roomIdx)); } catch {}
     }
   }, [roomIdx, eventId]);
 
@@ -392,13 +409,22 @@ export default function PlayerEventInput(){
             const ref = doc(db, 'events', _id, 'eventInputs', docId);
             const payload = { room: roomIdx, pid: String(pid), evId: String(evId) };
             if (val && typeof val === 'object' && Array.isArray(val.values)) {
+              const hasAny = val.values.some((x) => String(x ?? '').trim() !== '');
+              if (!hasAny) {
+                _writes.push(deleteDoc(ref).catch(() => {}));
+                return;
+              }
               payload.values = val.values.slice();
               if (val.bonus !== undefined) payload.bonus = val.bonus;
             } else {
-              payload.value = (val === '' || val == null) ? null : val;
+              if (val === '' || val == null) {
+                _writes.push(deleteDoc(ref).catch(() => {}));
+                return;
+              }
+              payload.value = val;
               if (val && typeof val === 'object' && val.bonus !== undefined) payload.bonus = val.bonus;
             }
-            _writes.push(setDoc(ref, payload, { merge: true }));
+            _writes.push(setDoc(ref, payload, { merge: false }));
           });
         });
         if (_writes.length) { await Promise.all(_writes); }

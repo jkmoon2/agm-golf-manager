@@ -8,7 +8,7 @@
 import React, { useContext, useMemo, useState, useEffect, useRef } from 'react';
 import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
-import { doc, getDoc, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, deleteField, collection, getDocs, deleteDoc, setDoc } from 'firebase/firestore';
 import css from './EventManager.module.css';
 import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } from '../eventTemplates/registry';
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
@@ -271,6 +271,16 @@ if (form.template === 'group-battle') {
           [`eventInputs.${ev.id}`]: deleteField(),
           inputsUpdatedAt: serverTimestamp(),
         });
+
+        try {
+          const snap = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
+          const jobs = snap.docs
+            .filter((d) => String(d.data()?.evId || '') === String(ev.id))
+            .map((d) => deleteDoc(d.ref));
+          if (jobs.length) await Promise.all(jobs);
+        } catch (subErr) {
+          console.warn('[clearInputs] subcollection cleanup failed:', subErr);
+        }
       }
     } catch (e) {
       console.warn('[clearInputs] remote patch failed:', e);
@@ -689,6 +699,28 @@ if (editForm?.template === 'group-battle') {
           [`eventInputs.${ev.id}`]: slot,
           inputsUpdatedAt: serverTimestamp(),
         });
+
+        if (quickTarget === 'person') {
+          const ref = doc(db, 'events', eventId, 'eventInputs', `${String(quickKey)}__${String(ev.id)}`);
+          const isAccum = ev.inputMode === 'accumulate';
+          const emptySingle = (quickValues[0] === '' || quickValues[0] == null);
+          const emptyAccum = quickValues.every((v) => v === '' || v == null);
+          const shouldDelete = isAccum ? emptyAccum : emptySingle;
+
+          if (shouldDelete) {
+            await deleteDoc(ref).catch(() => {});
+          } else if (isAccum) {
+            const values = Array.from({ length: Math.max(2, Math.min(Number(ev.attempts || 4), 20)) }, (_, i) => {
+              const v = quickValues[i];
+              return (v === '' || v == null) ? '' : Number(v);
+            });
+            const payload = { pid: String(quickKey), evId: String(ev.id), values };
+            if (ev.template === 'range-convert-bonus') payload.bonus = Array.from({ length: values.length }, (_, i) => quickBonus[i] ?? '');
+            await setDoc(ref, payload, { merge: false });
+          } else {
+            await setDoc(ref, { pid: String(quickKey), evId: String(ev.id), value: Number(quickValues[0]) }, { merge: false });
+          }
+        }
       }
     } catch (e) {
       console.warn('[applyQuick] remote patch failed:', e);

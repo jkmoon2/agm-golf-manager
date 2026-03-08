@@ -15,7 +15,7 @@ import tCss    from './PlayerEventConfirm.module.css';
 
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
-import { getEffectiveParticipantsFromEvent } from '../../utils/playerRealtime';
+import { getEffectiveParticipantsFromEvent } from '../utils/playerEventData';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -89,8 +89,8 @@ export default function PlayerEventConfirm() {
     }
   }, [urlEventId, eventId, loadEvent]);
   const participantsBase = useMemo(
-    () => getEffectiveParticipantsFromEvent(eventData, [], null),
-    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+    () => getEffectiveParticipantsFromEvent(eventData),
+    [eventData]
   );
   const participants = useMemo(
     () => (typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(participantsBase) : participantsBase),
