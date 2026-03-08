@@ -244,12 +244,6 @@ export default function StepFlow() {
         }
       }
 
-      // ✅ [ADD] 저장 전 로컬 편집이 더 최신이면 서버 participants로 덮어쓰지 않음 (STEP5 입력 보호)
-      const localDirtyAt = localDirtyParticipantsMsRef.current || 0;
-      if (localDirtyAt && remoteAt && remoteAt < localDirtyAt) {
-        return prevList;
-      }  
-
       return remoteList;
     });
     applyingRemoteParticipantsRef.current = false;

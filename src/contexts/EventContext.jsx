@@ -16,7 +16,6 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { buildLiveEventInputsMapFromDocs, mergeEventInputs } from '../player/utils/playerEventData';
 
 import {
   getAuth,
@@ -83,6 +82,22 @@ function participantsFieldByMode(mode = 'stroke') {
 }
 
 // room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
+function mergeParticipantsById(primary = [], legacy = []) {
+  const map = new Map();
+  const push = (arr) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach((p, i) => {
+      if (!p) return;
+      const id = String(p?.id ?? i);
+      const prev = map.get(id) || {};
+      map.set(id, { ...prev, ...p });
+    });
+  };
+  push(legacy);
+  push(primary);
+  return Array.from(map.values());
+}
+
 function normalizeParticipantsRoomFields(list) {
   if (!Array.isArray(list)) return [];
   return list.map((p) => {
@@ -197,7 +212,6 @@ export function EventProvider({ children }) {
   const scoresReadyRef = useRef(false);
 
   const lastEventDataRef = useRef(null);
-  const eventInputsLiveRef = useRef({});
   const queuedUpdatesRef = useRef(null);
   const debounceTimerRef = useRef(null);
 
@@ -330,10 +344,6 @@ export function EventProvider({ children }) {
           }
         } catch {}
 
-        try {
-          withGate.eventInputs = mergeEventInputs(withGate?.eventInputs || {}, eventInputsLiveRef.current || {});
-        } catch {}
-
         // ✅ includeMetadataChanges: true 환경에서 pendingWrites 스냅샷을 무조건 무시하면
         //   (Player가 방배정/점수 입력 직후) Admin STEP7/STEP8 최초 진입 시
         //   방배정 반영이 늦고, 홈으로 나갔다가 재진입해야 반영되는 현상이 발생할 수 있음.
@@ -350,36 +360,6 @@ export function EventProvider({ children }) {
     return () => {
       cancelled = true;
       if (unsub) unsub();
-    };
-  }, [eventId]);
-
-  useEffect(() => {
-    if (!eventId) {
-      eventInputsLiveRef.current = {};
-      return;
-    }
-
-    let cancelled = false;
-    const colRef = collection(db, 'events', eventId, 'eventInputs');
-    const unsub = onSnapshot(colRef, (snap) => {
-      if (cancelled) return;
-      const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-      const liveMap = buildLiveEventInputsMapFromDocs(docs);
-      eventInputsLiveRef.current = liveMap;
-
-      setEventData((prev) => {
-        if (!prev) return prev;
-        const mergedInputs = mergeEventInputs(prev?.eventInputs || {}, liveMap);
-        if (deepEqual(prev?.eventInputs || {}, mergedInputs)) return prev;
-        const next = { ...prev, eventInputs: mergedInputs };
-        lastEventDataRef.current = next;
-        return next;
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      unsub && unsub();
     };
   }, [eventId]);
 

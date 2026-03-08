@@ -421,7 +421,7 @@ if (!idCached) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // participants 저장 (변경된 참가자만 서버 최신값 기준으로 병합 저장)
+  // participants 저장 (화이트리스트 + updateDoc)
   async function writeParticipants(next) {
     if (!eventId) return;
     await ensureAuthReady();
@@ -441,12 +441,21 @@ if (!idCached) {
       for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
       if (out.id === undefined) out.id = String(p?.id ?? i);
 
+      // 숫자 정규화
       if (out.group !== undefined) {
         out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
       }
       if (out.handicap !== undefined) {
         const n = Number(out.handicap);
         out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
+      }
+      if (out.score !== undefined) {
+        // ★ FIX: 빈값은 null 유지
+        if (out.score === '' || out.score == null) out.score = null;
+        else {
+          const n = Number(out.score);
+          out.score = Number.isFinite(n) ? n : null;
+        }
       }
       if (out.room !== undefined && out.room !== null) {
         const n = Number(out.room);
@@ -461,53 +470,18 @@ if (!idCached) {
         out.partner = Number.isFinite(n) ? n : String(out.partner);
       }
       if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
+
+      // roomNumber 동기화(표시용)
       if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
+
       return out;
     });
 
-    const prevMap = new Map((Array.isArray(participants) ? participants : []).map((p, i) => [String(p?.id ?? i), p]));
-    const changedIds = cleaned
-      .filter((p, i) => JSON.stringify(prevMap.get(String(p?.id ?? i)) || null) !== JSON.stringify((next || [])[i] || null))
-      .map((p, i) => String(p?.id ?? i));
-
-    if (!changedIds.length) return;
-
-    const changedMap = new Map(cleaned.map((p, i) => [String(p?.id ?? i), p]));
-
     try {
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(eref);
-        const data = snap.exists() ? (snap.data() || {}) : {};
-        const fieldParts = participantsFieldByMode(mode);
-        const primaryParts = Array.isArray(data?.[fieldParts]) ? data[fieldParts] : [];
-        const legacyParts = Array.isArray(data?.participants) ? data.participants : [];
-        const baseParts = primaryParts.length ? mergeParticipantsById(primaryParts, legacyParts) : legacyParts;
-
-        const seen = new Set();
-        const merged = (Array.isArray(baseParts) ? baseParts : []).map((p, i) => {
-          const id = String(p?.id ?? i);
-          if (!changedIds.includes(id)) return p;
-          seen.add(id);
-          return { ...(p || {}), ...(changedMap.get(id) || {}) };
-        });
-
-        changedIds.forEach((id) => {
-          if (seen.has(id)) return;
-          const changed = changedMap.get(id);
-          if (changed) merged.push(changed);
-        });
-
-        tx.set(
-          eref,
-          sanitizeForFirestore({
-            participants: merged,
-            [fieldParts]: merged,
-            participantsUpdatedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }),
-          { merge: true }
-        );
-      });
+      await updateDoc(
+        eref,
+        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
+      );
     } catch (e) {
       exposeDiag({ lastWriteError: e?.message || String(e) });
       throw e;
@@ -568,71 +542,95 @@ if (!idCached) {
     await ensureAuthReady();
 
     const pid = normId(participantId || participant?.id);
-    let resultRoom = null;
-    let nextParticipants = null;
+    const me = participants.find((p) => normId(p.id) === pid) ||
+               (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
+    if (!me) throw new Error('Participant not found');
 
-    await runTransaction(db, async (tx) => {
-      const eref = doc(db, 'events', eventId);
-      const snap = await tx.get(eref);
-      const data = snap.exists() ? (snap.data() || {}) : {};
-      const fieldParts = participantsFieldByMode(mode);
-      const primaryParts = Array.isArray(data?.[fieldParts]) ? data[fieldParts] : [];
-      const legacyParts = Array.isArray(data?.participants) ? data.participants : [];
-      const baseParts = primaryParts.length ? mergeParticipantsById(primaryParts, legacyParts) : legacyParts;
-      const parts = (Array.isArray(baseParts) ? baseParts : []).map((p, i) => ({
-        ...((p && typeof p === 'object') ? p : {}),
-        id: normId(p?.id ?? i),
-        nickname: normName(p?.nickname),
-        group: toInt(p?.group, 0),
-        room: p?.room ?? p?.roomNumber ?? null,
-        roomNumber: p?.room ?? p?.roomNumber ?? null,
-      }));
+    if (isValidRoom(me?.room)) {
+      return { roomNumber: Number(me.room), alreadyAssigned: true };
+    }
 
-      const me = parts.find((p) => normId(p.id) === pid) ||
-        (participant ? parts.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
-      if (!me) throw new Error('Participant not found');
+    try {
+      const result = await runTransaction(db, async (tx) => {
+        const eref = doc(db, 'events', eventId);
+        const snap = await tx.get(eref);
+        const data = snap.exists() ? (snap.data() || {}) : {};
+        const fieldParts = participantsFieldByMode(mode);
+        const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
+          ? data[fieldParts]
+          : (Array.isArray(data?.participants) ? data.participants : []);
 
-      if (isValidRoom(me?.room)) {
-        resultRoom = Number(me.room);
-        nextParticipants = parts;
-        return;
-      }
+        const parts = (baseParts || []).map((p, i) => ({
+          ...((p && typeof p === 'object') ? p : {}),
+          id: normId(p?.id ?? i),
+          nickname: normName(p?.nickname),
+          handicap: toInt(p?.handicap, 0),
+          group: toInt(p?.group, 0),
+          authCode: (p?.authCode ?? '').toString(),
+          room: (p?.room ?? p?.roomNumber ?? null),
+          roomNumber: (p?.room ?? p?.roomNumber ?? null),
+          partner: p?.partner != null ? normId(p.partner) : null,
+          selected: !!p?.selected,
+        }));
 
-      let candidates = validRoomsForStroke(parts, roomCount, me);
-      if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
-      const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
+        const self = parts.find((p) => normId(p.id) === pid);
+        if (!self) throw new Error('Participant not found');
+        if (isValidRoom(self?.room)) {
+          return { roomNumber: Number(self.room), alreadyAssigned: true, next: parts };
+        }
 
-      const next = parts.map((p) =>
-        normId(p.id) === pid ? { ...p, room: chosenRoom, roomNumber: chosenRoom } : p
-      );
+        let candidates = validRoomsForStroke(parts, roomCount, self);
+        if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+        const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
-      tx.set(
-        eref,
-        sanitizeForFirestore({
+        const next = parts.map((p) => (normId(p.id) === pid ? { ...p, room: chosenRoom, roomNumber: chosenRoom } : p));
+
+        tx.set(eref, sanitizeForFirestore({
           participants: next,
           [fieldParts]: next,
           participantsUpdatedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        }),
-        { merge: true }
-      );
+        }), { merge: true });
 
-      resultRoom = chosenRoom;
-      nextParticipants = next;
-    });
+        return { roomNumber: chosenRoom, next, alreadyAssigned: false };
+      });
 
-    if (Array.isArray(nextParticipants)) setParticipants(nextParticipants);
-    if (participant && normId(participant.id) === pid && Number.isFinite(Number(resultRoom))) {
-      setParticipant((prev) => prev && { ...prev, room: Number(resultRoom), roomNumber: Number(resultRoom) });
+      if (result?.next) {
+        setParticipants(result.next);
+        if (participant && normId(participant.id) === pid) {
+          setParticipant((prev) => prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber });
+        }
+      }
+
+      try {
+        const rref = doc(db, 'events', eventId, 'rooms', String(result.roomNumber));
+        await setDoc(rref, { members: arrayUnion(pid) }, { merge: true });
+      } catch (_) {}
+
+      return { roomNumber: result.roomNumber, roomLabel: makeLabel(roomNames, result.roomNumber), alreadyAssigned: !!result?.alreadyAssigned };
+    } catch (err) {
+      console.warn('[stroke tx] fallback to non-tx:', err?.message);
     }
 
+    let candidates = validRoomsForStroke(participants, roomCount, me);
+    if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+    const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
+
+    const next = participants.map((p) =>
+      normId(p.id) === pid ? { ...p, room: chosenRoom, roomNumber: chosenRoom } : p
+    );
+    setParticipants(next);
+    if (participant && normId(participant.id) === pid) {
+      setParticipant((prev) => prev && { ...prev, room: chosenRoom, roomNumber: chosenRoom });
+    }
+    await writeParticipants(next);
+
     try {
-      await ensureAuthReady();
-      const rref = doc(db, 'events', eventId, 'rooms', String(resultRoom));
+      const rref = doc(db, 'events', eventId, 'rooms', String(chosenRoom));
       await setDoc(rref, { members: arrayUnion(pid) }, { merge: true });
     } catch (_) {}
 
-    return { roomNumber: resultRoom, roomLabel: makeLabel(roomNames, resultRoom) };
+    return { roomNumber: chosenRoom, roomLabel: makeLabel(roomNames, chosenRoom) };
   }
 
   async function assignFourballForOneAndPartner(participantId) {

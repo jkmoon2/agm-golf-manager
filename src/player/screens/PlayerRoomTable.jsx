@@ -11,7 +11,7 @@ import { EventContext } from '../../contexts/EventContext';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { getEffectiveParticipantsFromEvent } from '../utils/playerEventData';
+import { getEffectiveParticipantsFromEvent, readPlayerRoomFromStorage, writePlayerRoomToStorage } from '../utils/playerSync';
 
 // ★ patch: gate helpers + ts
 function normalizeGate(raw){
@@ -71,7 +71,7 @@ function normalizeHiddenRooms(pv, roomCount, viewKey) {
   const min = Math.min(...nums);
   const max = Math.max(...nums);
   const looksOneBased =
-    min >= 1 && max <= roomCount || nums.some(v => v === 1 || v === roomCount);
+    (min >= 1 && max <= roomCount) || nums.some(v => v === 1 || v === roomCount);
 
   const idxs = looksOneBased ? nums.map(v => v - 1) : nums.slice();
   const filtered = idxs.filter(i => i >= 0 && i < roomCount);
@@ -183,7 +183,7 @@ export default function PlayerRoomTable() {
     ];
     const roomNo = candidates.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
     if (Number.isFinite(roomNo)) {
-      try { localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo)); } catch {}
+      try { writePlayerRoomToStorage(paramId, roomNo); } catch {}
     }
   }, [eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
 
@@ -198,7 +198,7 @@ export default function PlayerRoomTable() {
   }, [eventData]);
 
   const participants = useMemo(
-    () => getEffectiveParticipantsFromEvent(eventData),
+    () => getEffectiveParticipantsFromEvent(eventData, []),
     [eventData]
   );
 
@@ -295,12 +295,11 @@ export default function PlayerRoomTable() {
                 try {
                   const cands = [
                     eventData?.myRoom,
-                    localStorage.getItem(`player.currentRoom:${paramId}`),
-                    localStorage.getItem('player.currentRoom'),
+                    readPlayerRoomFromStorage(paramId),
                   ];
                   const roomNo = cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
                   if (Number.isFinite(roomNo)) {
-                    localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo));
+                    writePlayerRoomToStorage(paramId, roomNo);
                   }
                 } catch {}
                 if (!nextDisabled) navigate(`/player/home/${paramId}/3`);

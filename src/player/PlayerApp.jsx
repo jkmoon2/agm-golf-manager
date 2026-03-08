@@ -16,7 +16,7 @@ import { PlayerContext }  from '../contexts/PlayerContext';
 import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 안전망
 import { db } from '../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
-import { getEffectiveParticipantsFromEvent } from './utils/playerEventData';
+import { readPlayerIdentityFromStorage, writePlayerIdentityToStorage, readTicketFromStorage, getEffectiveParticipantsFromDocData } from './utils/playerSync';
 
 export default function PlayerApp() {
   const { eventId } = useParams();
@@ -46,44 +46,26 @@ export default function PlayerApp() {
           try {
             if (codeStr) {
               setAuthCode?.(codeStr);
-              try { sessionStorage.setItem(`auth_${eventId}`, 'true'); } catch {}
-              try { sessionStorage.setItem(`authcode_${eventId}`, codeStr); } catch {}
-              try { localStorage.setItem(`authcode:${eventId}`, codeStr); } catch {}
-            }
+                          }
             if (participantObj) {
               setParticipant?.(participantObj);
-              try { sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(participantObj)); } catch {}
-              try { localStorage.setItem(`participant:${eventId}`, JSON.stringify(participantObj)); } catch {}
-            }
+                          }
           } catch {}
+          writePlayerIdentityToStorage(eventId, codeStr, participantObj);
         };
 
-        // 1) sessionStorage 우선
-        const codeSS = sessionStorage.getItem(`authcode_${eventId}`) || '';
-        if (codeSS) setAuthCode?.(codeSS);
-
-        const partSS = sessionStorage.getItem(`participant_${eventId}`);
-        if (partSS) {
-          try { applyAuthAndParticipant(codeSS, JSON.parse(partSS)); } catch {}
+        const restored = readPlayerIdentityFromStorage(eventId);
+        if (restored?.code) setAuthCode?.(restored.code);
+        if (restored?.participant) {
+          applyAuthAndParticipant(restored.code, restored.participant);
           return;
         }
 
-        // 2) localStorage fallback (iOS/PWA에서 sessionStorage가 초기화되는 케이스 대응)
-        const partLS = localStorage.getItem(`participant:${eventId}`);
-        const codeLS = localStorage.getItem(`authcode:${eventId}`) || '';
-        if (partLS) {
-          try { applyAuthAndParticipant(codeLS, JSON.parse(partLS)); } catch {}
-          return;
-        }
-
-        // 3) ticket:${eventId} (코드만 저장되어 있는 경우) → Firestore에서 참가자 재조회
+        // 2) ticket:${eventId} (코드만 저장되어 있는 경우) → Firestore에서 참가자 재조회
         let ticketCode = '';
         try {
-          const ticketRaw = localStorage.getItem(`ticket:${eventId}`);
-          if (ticketRaw) {
-            const t = JSON.parse(ticketRaw);
-            ticketCode = String(t?.code || '').trim();
-          }
+          const t = readTicketFromStorage(eventId);
+          ticketCode = String(t?.code || '').trim();
         } catch {}
 
         if (ticketCode) {
@@ -94,7 +76,7 @@ export default function PlayerApp() {
             const snap = await getDoc(doc(db, 'events', eventId));
             if (snap.exists()) {
               const data = snap.data() || {};
-              const arr = getEffectiveParticipantsFromEvent(data);
+              const arr = getEffectiveParticipantsFromDocData(data, []);
               if (Array.isArray(arr)) {
                 found = arr.find(p => norm(p?.authCode ?? p?.code ?? p?.auth_code ?? p?.authcode ?? '') === norm(ticketCode)) || null;
               }

@@ -7,7 +7,7 @@ import { db }                          from '../../firebase';
 import { PlayerContext }              from '../../contexts/PlayerContext';
 import styles                          from './PlayerLoginScreen.module.css';
 import { useNavigate, useParams }      from 'react-router-dom';
-import { writePlayerScopedLocal }       from '../../utils/playerRealtime';
+import { readPlayerIdentityFromStorage, writePlayerIdentityToStorage, writeTicketToStorage, getEffectiveParticipantsFromDocData } from '../utils/playerSync';
 
 export default function PlayerLoginScreen() {
   const [inputCode, setInputCode] = useState('');
@@ -26,14 +26,11 @@ export default function PlayerLoginScreen() {
   useEffect(() => {
     setEventId?.(routeEventId);
     try {
-      const authed = sessionStorage.getItem(`auth_${routeEventId}`) === 'true';
-      if (authed) {
-        const code = sessionStorage.getItem(`authcode_${routeEventId}`) || '';
-        const partJson = sessionStorage.getItem(`participant_${routeEventId}`);
-        if (code) setAuthCode?.(code);
-        if (partJson) setParticipant?.(JSON.parse(partJson));
-        // ✅ StepFlow 게이트 통과용 티켓 보강
-        try { writePlayerScopedLocal(routeEventId, 'ticket', JSON.stringify({ via:'legacy', ts: Date.now() }), [`ticket:${routeEventId}`]); } catch {}
+      const restored = readPlayerIdentityFromStorage(routeEventId);
+      if (restored?.code && restored?.participant) {
+        setAuthCode?.(restored.code);
+        setParticipant?.(restored.participant);
+        writeTicketToStorage(routeEventId, restored.code);
         nav(`/player/home/${routeEventId}/1`, { replace: true });
       }
     } catch {}
@@ -42,9 +39,9 @@ export default function PlayerLoginScreen() {
 
   // (보조) 컨텍스트가 이미 갖춰졌다면 홈으로
   useEffect(() => {
-    const isAuth = sessionStorage.getItem(`auth_${routeEventId}`) === 'true';
-    if (isAuth && ctxEventId === routeEventId && participant) {
-      try { writePlayerScopedLocal(routeEventId, 'ticket', JSON.stringify({ via:'legacy', ts: Date.now() }), [`ticket:${routeEventId}`]); } catch {}
+    const restored = readPlayerIdentityFromStorage(routeEventId);
+    if ((restored?.code || restored?.participant) && ctxEventId === routeEventId && participant) {
+      writeTicketToStorage(routeEventId, restored?.code || '');
       nav(`/player/home/${routeEventId}/1`, { replace: true });
     }
   }, [ctxEventId, participant, routeEventId, nav]);
@@ -64,7 +61,7 @@ export default function PlayerLoginScreen() {
     try {
       const snap = await getDoc(doc(db, 'events', routeEventId));
       if (!snap.exists()) { alert('존재하지 않는 대회 ID입니다.'); return; }
-      part = snap.data().participants?.find(p => String(p.authCode) === inputCode.trim());
+      part = getEffectiveParticipantsFromDocData(snap.data() || {}, []).find(p => String(p.authCode) === inputCode.trim());
       if (!part) { alert('인증 코드가 일치하지 않습니다.'); return; }
     } catch (err) {
       console.error('로그인 중 오류', err);
@@ -79,10 +76,8 @@ export default function PlayerLoginScreen() {
 
     // 4) 인증 상태는 "세션"에만 기록(재시작하면 초기화됨) + StepFlow 게이트용 티켓 추가
     try {
-      sessionStorage.setItem(`auth_${routeEventId}`, 'true');
-      sessionStorage.setItem(`authcode_${routeEventId}`, inputCode.trim());
-      sessionStorage.setItem(`participant_${routeEventId}`, JSON.stringify(part));
-      writePlayerScopedLocal(routeEventId, 'ticket', JSON.stringify({ code: inputCode.trim(), ts: Date.now() }), [`ticket:${routeEventId}`]);
+      writePlayerIdentityToStorage(routeEventId, inputCode.trim(), part);
+      writeTicketToStorage(routeEventId, inputCode.trim());
     } catch {}
 
     // 5) 이동

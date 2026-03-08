@@ -2,12 +2,9 @@
 
 import React, { useState, useEffect, useContext, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { useLocation } from 'react-router-dom';
 import { StepContext } from '../flows/StepFlow';          // ✅ 경로 고정 (에러 방지)
 import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (에러 방지)
 import { serverTimestamp } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
-import { useAuth } from '../contexts/AuthContext';
-import { setupAuthSessionDebug } from '../utils/authSessionDebug';
 import styles from './Step5.module.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,39 +54,6 @@ export default function Step5() {
   //    - Step5/7/Admin, Player 모두 동일한 scores를 읽고/쓰도록 정리
   //    - participants 배열에는 score를 영구 저장하지 않음(방배정/명단만 유지)
   const { eventId, updateEventImmediate, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
-  const { firebaseUser, appRole } = useAuth() || {};
-  const location = useLocation();
-
-  const authDebugRef = useRef(null);
-  const debugAuthSnapshot = useCallback((reason, extra = {}) => {
-    try {
-      return authDebugRef.current?.emit?.(reason, extra);
-    } catch (e) {
-      console.warn('[Step5] debugAuthSnapshot failed:', e);
-      return null;
-    }
-  }, []);
-
-  useEffect(() => {
-    const ctrl = setupAuthSessionDebug({
-      screen: 'AdminStep5',
-      eventId,
-      route: location.pathname,
-      appRole,
-      firebaseUser,
-    });
-    authDebugRef.current = ctrl;
-
-    return () => {
-      try {
-        ctrl?.emit?.('unmount');
-      } catch {}
-      try {
-        ctrl?.teardown?.();
-      } catch {}
-      if (authDebugRef.current === ctrl) authDebugRef.current = null;
-    };
-  }, [eventId, location.pathname, appRole, firebaseUser?.uid, firebaseUser?.isAnonymous]);
 
   const rooms = useMemo(
     () => Array.from({ length: Number(roomCount || 0) }, (_, i) => i + 1),
@@ -406,7 +370,6 @@ export default function Step5() {
   // (D) 수동 배정(딜레이 + 스핀)
   // ─────────────────────────────────────────────────────────────────────────────
   const onManualAssign = (id) => {
-    debugAuthSnapshot('manual-assign:click', { participantId: id });
     // 이미 로딩 중이면 무시
     if (loadingId != null) return;
 
@@ -537,7 +500,6 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
   }, [forceSelectingId, forceAnchorRect, rooms.length, __bottomGap, roomNames]); // ✅ bottomGap도 반영
 
   const onForceAssign = (id, room) => {
-    debugAuthSnapshot('force-assign:click', { participantId: id, room: room ?? null });
     let targetNickname = null;
     let prevRoom = null;
     let nextList = null;
@@ -587,7 +549,6 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
   // (F) 자동 배정 / 초기화
   // ─────────────────────────────────────────────────────────────────────────────
   const onAutoAssign = () => {
-    debugAuthSnapshot('auto-assign:click', { participantCount: Array.isArray(participants) ? participants.length : 0 });
     let nextSnapshot = null;
 
     setParticipants((ps) => {
@@ -618,7 +579,6 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
   };
 
   const onReset = () => {
-    debugAuthSnapshot('reset:click', { participantCount: Array.isArray(participants) ? participants.length : 0 });
     let nextSnapshot = null;
 
     // ✅ [ADD] reset 이전에 예약된 onBlur 커밋(Promise)을 무효화
@@ -655,7 +615,6 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
   };
 
   const onNext = async () => {
-    debugAuthSnapshot('next:click', { participantCount: Array.isArray(participants) ? participants.length : 0 });
     try {
       await syncParticipantsToEvent(latestParticipantsRef.current || participants);
     } catch (e) {
