@@ -1,10 +1,13 @@
 // src/screens/Step7.jsx
 
-import React, { useState, useContext, useRef, useEffect } from 'react';
+import React, { useState, useContext, useRef, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import styles from './Step7.module.css';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
+import { useAuth } from '../contexts/AuthContext';
+import { setupAuthSessionDebug } from '../utils/authSessionDebug';
 
 const LONG_PRESS_MS = 600;
 const MAX_ROOM_CAPACITY = 4;
@@ -40,6 +43,39 @@ export default function Step7() {
     persistRoomsFromParticipants,
     scoresMap,
   } = useContext(EventContext) || {};
+  const { firebaseUser, appRole } = useAuth() || {};
+  const location = useLocation();
+
+  const authDebugRef = useRef(null);
+  const debugAuthSnapshot = useCallback((reason, extra = {}) => {
+    try {
+      return authDebugRef.current?.emit?.(reason, extra);
+    } catch (e) {
+      console.warn('[Step7] debugAuthSnapshot failed:', e);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const ctrl = setupAuthSessionDebug({
+      screen: 'AdminStep7',
+      eventId,
+      route: location.pathname,
+      appRole,
+      firebaseUser,
+    });
+    authDebugRef.current = ctrl;
+
+    return () => {
+      try {
+        ctrl?.emit?.('unmount');
+      } catch {}
+      try {
+        ctrl?.teardown?.();
+      } catch {}
+      if (authDebugRef.current === ctrl) authDebugRef.current = null;
+    };
+  }, [eventId, location.pathname, appRole, firebaseUser?.uid, firebaseUser?.isAnonymous]);
 
   // ✅ 자동 브리지(useEffect) ON/OFF 플래그 (기본 OFF)
   // - StepFlow(save)가 이미 participants를 저장하므로, Step7에서 추가로 events/rooms/scores를 때리면
@@ -466,6 +502,7 @@ export default function Step7() {
 
   // 점수 입력 종료(blur 시 실제 숫자 반영)
   const handleScoreBlur = async (id) => {
+    debugAuthSnapshot('score-blur', { participantId: id });
     const raw = scoreDraft[id];
     if (raw === undefined) return;
 
@@ -546,6 +583,7 @@ export default function Step7() {
 
   // ✅ 수동 버튼 클릭 시: 롱프레스에서 이미 처리한 경우는 클릭 무시
   const handleManualButtonClick = (id) => {
+    debugAuthSnapshot('manual-assign:click', { participantId: id });
     if (manualLongPressFlagRef.current) {
       // 롱프레스에서 이미 처리했으므로 일반 클릭은 소모만 하고 끝
       manualLongPressFlagRef.current = false;
@@ -556,6 +594,7 @@ export default function Step7() {
 
   // 취소 버튼 클릭
   const handleCancelClick = (id) => {
+    debugAuthSnapshot('cancel:click', { participantId: id });
     if (!onCancel) return;
     const me = findParticipant(id);
     onCancel(id);
@@ -566,12 +605,14 @@ export default function Step7() {
 
   // 자동 배정
   const handleAutoClick = () => {
+    debugAuthSnapshot('auto-assign:click', { participantCount: Array.isArray(participants) ? participants.length : 0 });
     if (!onAutoAssign) return;
     onAutoAssign();
   };
 
   // 초기화
   const handleResetClick = () => {
+    debugAuthSnapshot('reset:click', { participantCount: Array.isArray(participants) ? participants.length : 0 });
     if (!onReset) return;
     setScoreDraft({});
     onReset();
@@ -656,6 +697,11 @@ export default function Step7() {
       }
     })();
   }, [participants, eventId, updateEventImmediate, upsertScores, persistRoomsFromParticipants]);
+
+  const handleNextClick = () => {
+    debugAuthSnapshot('next:click', { participantCount: Array.isArray(participants) ? participants.length : 0 });
+    goNext();
+  };
 
   // ─────────────────────────────
   //  렌더링
@@ -794,7 +840,7 @@ export default function Step7() {
         <button onClick={handleResetClick} className={styles.textOnly}>
           초기화
         </button>
-        <button onClick={goNext}>다음 →</button>
+        <button onClick={handleNextClick}>다음 →</button>
       </div>
     </div>
   );

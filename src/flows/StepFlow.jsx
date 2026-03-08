@@ -352,8 +352,26 @@ export default function StepFlow() {
         // - EventContext에서도 동일 미러를 수행하지만, StepFlow에서도 같이 기록해 두면
         //   기존 이벤트(필드 미존재)도 최초 저장 시 분리 필드가 생성되어 더 안정적임.
         try {
-          clean.participantsStroke = compat;
-          clean.participantsFourball = compat;
+          const m = (clean.mode || mode || (eventData && eventData.mode) || 'stroke');
+          const mm = String(m || '').toLowerCase();
+          const isFour = (mm === 'fourball' || mm === 'agm');
+
+          // ✅ [SSOT/SAFE] 모드별 participants 분리 필드가 이미 존재하는 이벤트에서는
+          // 현재 모드 필드만 갱신하고, 다른 모드 필드는 건드리지 않음(교차 덮어쓰기 방지)
+          const hadSplit = !!(eventData && (
+            Object.prototype.hasOwnProperty.call(eventData, 'participantsStroke') ||
+            Object.prototype.hasOwnProperty.call(eventData, 'participantsFourball')
+          ));
+
+          // 기존 이벤트(분리 필드 없음) 최초 저장 시에는 호환을 위해 양쪽 필드를 1회 생성
+          if (!hadSplit) {
+            clean.participantsStroke = compat;
+            clean.participantsFourball = compat;
+          } else if (isFour) {
+            clean.participantsFourball = compat;
+          } else {
+            clean.participantsStroke = compat;
+          }
         } catch {}
         // [COMPAT] 참고용 roomTable도 같이 저장(읽지 않으면 무시됨)
         clean.roomTable   = buildRoomTable(compat);
@@ -591,6 +609,13 @@ export default function StepFlow() {
 
   // 🔹 추가: 두 사람을 **한 번의 저장으로** 같은 방/상호 파트너로 확정하는 헬퍼
 
+  // ✅ [PATCH][SSOT] score-only 업데이트 감지 (점수는 /scores SSOT로만 저장)
+  const isScoreOnlyFields = (fields) => {
+    if (!fields || typeof fields !== 'object') return false;
+    const keys = Object.keys(fields);
+    return keys.length > 0 && keys.every((k) => k === 'score');
+  };
+
   const updateParticipantsBulkNow = async (changes) => {
     const base = participantsRef.current || [];
     const map = new Map((changes || []).map((c) => [String(c.id), c.fields || {}]));
@@ -600,6 +625,36 @@ export default function StepFlow() {
     );
 
     setParticipants(next);
+
+    // ✅ [PATCH][SSOT] score-only bulk update는 participants 저장(save) 금지 (방배정 덮어쓰기/레이스 방지)
+    const allScoreOnly = Array.isArray(changes) && changes.length > 0 && changes.every((c) => isScoreOnlyFields(c.fields));
+    if (allScoreOnly) {
+      if (typeof upsertScores === 'function') {
+        try {
+          const payload = (changes || []).map((c) => {
+            const id = c.id;
+            const raw = (c.fields && Object.prototype.hasOwnProperty.call(c.fields, 'score')) ? c.fields.score : null;
+            const v = raw === '' ? null : Number(raw);
+            const me = (next || []).find((p) => p.id === id) || (participantsRef.current || []).find((p) => p.id === id);
+            const room = me?.room ?? me?.roomNumber ?? null;
+            return { id, score: Number.isFinite(v) ? v : null, room };
+          });
+
+          // id별 sig 기록(중복 호출 방지)
+          const mapSig = lastScoresSigMapRef.current || {};
+          payload.forEach(({ id, score, room }) => {
+            mapSig[String(id)] = `${id}:${score ?? 'null'}:${room ?? 'null'}`;
+          });
+          lastScoresSigMapRef.current = mapSig;
+
+          await Promise.resolve(upsertScores(payload));
+        } catch (e) {
+          console.warn('[StepFlow] upsertScores(score-only bulk) failed (continue):', e);
+        }
+      }
+      return;
+    }
+
     await save({ participants: next, dateStart, dateEnd });
   };
 
@@ -612,6 +667,34 @@ export default function StepFlow() {
   };
 
   const updateParticipantNow = async (id, fields) => {
+    // ✅ [PATCH][SSOT] score-only single update는 participants 저장(save) 금지 (점수는 /scores SSOT)
+    if (isScoreOnlyFields(fields)) {
+      const raw = (fields && Object.prototype.hasOwnProperty.call(fields, 'score')) ? fields.score : null;
+      const v = raw === '' ? null : Number(raw);
+
+      // 로컬 즉시 반영
+      setParticipants((prev) => prev.map((p) => (p.id === id ? { ...p, score: Number.isFinite(v) ? v : null } : p)));
+
+      // /scores 서브컬렉션 반영(가능할 때만)
+      if (typeof upsertScores === 'function') {
+        try {
+          const me = (participantsRef.current || []).find((p) => p.id === id);
+          const room = me?.room ?? me?.roomNumber ?? null;
+          const sig = `${id}:${(Number.isFinite(v) ? v : null) ?? 'null'}:${room ?? 'null'}`;
+
+          const mapSig = lastScoresSigMapRef.current || {};
+          if (mapSig[String(id)] !== sig) {
+            mapSig[String(id)] = sig;
+            lastScoresSigMapRef.current = mapSig;
+            await Promise.resolve(upsertScores([{ id, score: Number.isFinite(v) ? v : null, room }]));
+          }
+        } catch (e) {
+          console.warn('[StepFlow] upsertScores(score-only single) failed (continue):', e);
+        }
+      }
+      return;
+    }
+
     const base = participantsRef.current || [];
     const next = base.map((p) => (p.id === id ? { ...p, ...fields } : p));
     setParticipants(next);

@@ -90,9 +90,24 @@ function normalizeParticipantsRoomFields(list) {
     const roomNumber = p.roomNumber;
     if (room == null && roomNumber != null) return { ...p, room: roomNumber };
     if (room != null && roomNumber == null) return { ...p, roomNumber: room };
+    // ✅ [SSOT/SAFE] participants에 score/scoreRaw를 저장하지 않음 (점수는 /scores SSOT)
+    // - 실시간 동기화 레이스(방배정/접속 상태 덮어쓰기) 확률을 줄이기 위한 안전장치
+    try {
+      if (p && typeof p === 'object') {
+        const hasScore = Object.prototype.hasOwnProperty.call(p, 'score');
+        const hasScoreRaw = Object.prototype.hasOwnProperty.call(p, 'scoreRaw');
+        if (hasScore || hasScoreRaw) {
+          const cp = { ...p };
+          if (hasScore) delete cp.score;
+          if (hasScoreRaw) delete cp.scoreRaw;
+          p = cp;
+        }
+      }
+    } catch {}
+
     return p;
   });
-}
+  }
 
 function ensureModeSplitParticipants(updates, currentMode) {
   try {
