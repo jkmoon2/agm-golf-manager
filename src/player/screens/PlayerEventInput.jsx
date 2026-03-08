@@ -5,7 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 
 function normalizeGate(raw){
@@ -130,7 +130,7 @@ async function ensureMembership(eventId, myRoom) {
 export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
-  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
+  const { eventId: ctxId, loadEvent, eventData } = useContext(EventContext) || {};
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
@@ -420,10 +420,47 @@ export default function PlayerEventInput(){
         if (_writes.length) { await Promise.all(_writes); }
       }
 
-      if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged }, false);
-      } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
+      {
+        const ref = doc(db, 'events', eventId || ctxId);
+        const fieldUpdates = { inputsUpdatedAt: serverTimestamp() };
+        let hasFieldUpdate = false;
+
+        const allEventIds = new Set([
+          ...Object.keys(base || {}),
+          ...Object.keys(src || {}),
+        ]);
+
+        allEventIds.forEach((evId) => {
+          const basePerson = base?.[evId]?.person || {};
+          const srcPerson  = src?.[evId]?.person || {};
+
+          roomPids.forEach((pid) => {
+            const path = `eventInputs.${evId}.person.${pid}`;
+            const hasSrc = Object.prototype.hasOwnProperty.call(srcPerson, pid);
+            const hasBase = Object.prototype.hasOwnProperty.call(basePerson, pid);
+
+            if (!hasSrc) {
+              if (hasBase) {
+                fieldUpdates[path] = deleteField();
+                hasFieldUpdate = true;
+              }
+              return;
+            }
+
+            const val = srcPerson[pid];
+            const isEmptyObj = !!(val && typeof val === 'object' && !Array.isArray(val.values) && !Object.keys(val).length);
+            if (val === '' || val == null || isEmptyObj) {
+              fieldUpdates[path] = deleteField();
+            } else {
+              fieldUpdates[path] = val;
+            }
+            hasFieldUpdate = true;
+          });
+        });
+
+        if (hasFieldUpdate) {
+          await updateDoc(ref, fieldUpdates);
+        }
       }
 
       setDraft({});
