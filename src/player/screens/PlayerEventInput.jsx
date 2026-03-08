@@ -5,8 +5,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import { doc, onSnapshot, setDoc, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+import { getEffectiveParticipantsFromEvent, readPlayerRoomFromStorage, writePlayerRoomToStorage } from '../../utils/playerRealtime';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -28,23 +29,6 @@ function tsToMillis(ts){
   if (typeof ts.toMillis === 'function') return ts.toMillis();
   if (typeof ts.seconds === 'number') return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
   return Number(ts) || 0;
-}
-
-function readRoomFromLocal(eventId){
-  const tryKeys = [
-    `player.currentRoom:${eventId}`,
-    'player.currentRoom',
-    'player.home.room',
-    'player.auth.room',
-  ];
-  for (const k of tryKeys) {
-    try {
-      const v = localStorage.getItem(k);
-      const n = Number(v);
-      if (Number.isFinite(n) && n >= 1) return n;
-    } catch {}
-  }
-  return NaN;
 }
 
 const MAX_PER_ROOM = 4;
@@ -130,7 +114,7 @@ async function ensureMembership(eventId, myRoom) {
 export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
-  const { eventId: ctxId, loadEvent, eventData } = useContext(EventContext) || {};
+  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
@@ -162,8 +146,8 @@ export default function PlayerEventInput(){
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
   const participants = useMemo(
-    () => Array.isArray(eventData?.participants) ? eventData.participants : [],
-    [eventData]
+    () => getEffectiveParticipantsFromEvent(eventData, [], null),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
   );
   const events = useMemo(
     () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
@@ -197,7 +181,7 @@ export default function PlayerEventInput(){
   );
 
   const roomIdx = useMemo(() => {
-    const ls  = readRoomFromLocal(eventId);
+    const ls  = readPlayerRoomFromStorage(eventId);
     const pick = [roomFromCtx, ls, roomFromSelf].find(
       n => Number.isFinite(n) && allRoomNos.includes(n)
     );
@@ -206,7 +190,7 @@ export default function PlayerEventInput(){
 
   useEffect(() => {
     if (Number.isFinite(roomIdx) && roomIdx >= 1) {
-      try { localStorage.setItem(`player.currentRoom:${eventId}`, String(roomIdx)); } catch {}
+      writePlayerRoomToStorage(eventId, roomIdx);
     }
   }, [roomIdx, eventId]);
 
@@ -420,50 +404,13 @@ export default function PlayerEventInput(){
         if (_writes.length) { await Promise.all(_writes); }
       }
 
-      {
-        const ref = doc(db, 'events', eventId || ctxId);
-        const fieldUpdates = { inputsUpdatedAt: serverTimestamp() };
-        let hasFieldUpdate = false;
-
-        const allEventIds = new Set([
-          ...Object.keys(base || {}),
-          ...Object.keys(src || {}),
-        ]);
-
-        allEventIds.forEach((evId) => {
-          const basePerson = base?.[evId]?.person || {};
-          const srcPerson  = src?.[evId]?.person || {};
-
-          roomPids.forEach((pid) => {
-            const path = `eventInputs.${evId}.person.${pid}`;
-            const hasSrc = Object.prototype.hasOwnProperty.call(srcPerson, pid);
-            const hasBase = Object.prototype.hasOwnProperty.call(basePerson, pid);
-
-            if (!hasSrc) {
-              if (hasBase) {
-                fieldUpdates[path] = deleteField();
-                hasFieldUpdate = true;
-              }
-              return;
-            }
-
-            const val = srcPerson[pid];
-            const isEmptyObj = !!(val && typeof val === 'object' && !Array.isArray(val.values) && !Object.keys(val).length);
-            if (val === '' || val == null || isEmptyObj) {
-              fieldUpdates[path] = deleteField();
-            } else {
-              fieldUpdates[path] = val;
-            }
-            hasFieldUpdate = true;
-          });
-        });
-
-        if (hasFieldUpdate) {
-          await updateDoc(ref, fieldUpdates);
-        }
+      if (typeof updateEventImmediate === 'function') {
+        await updateEventImmediate({ eventInputs: merged }, false);
+      } else {
+        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
       }
 
-      setDraft({});
+      setDraft(merged ? JSON.parse(JSON.stringify(merged)) : {});
       setDirty(false);
       alert('저장되었습니다.');
     }catch(e){

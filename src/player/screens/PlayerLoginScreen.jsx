@@ -7,6 +7,7 @@ import { db }                          from '../../firebase';
 import { PlayerContext }              from '../../contexts/PlayerContext';
 import styles                          from './PlayerLoginScreen.module.css';
 import { useNavigate, useParams }      from 'react-router-dom';
+import { writePlayerScopedLocal }       from '../../utils/playerRealtime';
 
 export default function PlayerLoginScreen() {
   const [inputCode, setInputCode] = useState('');
@@ -32,7 +33,7 @@ export default function PlayerLoginScreen() {
         if (code) setAuthCode?.(code);
         if (partJson) setParticipant?.(JSON.parse(partJson));
         // ✅ StepFlow 게이트 통과용 티켓 보강
-        try { localStorage.setItem(`ticket:${routeEventId}`, JSON.stringify({ via:'legacy', ts: Date.now() })); } catch {}
+        try { writePlayerScopedLocal(routeEventId, 'ticket', JSON.stringify({ via:'legacy', ts: Date.now() }), [`ticket:${routeEventId}`]); } catch {}
         nav(`/player/home/${routeEventId}/1`, { replace: true });
       }
     } catch {}
@@ -43,7 +44,7 @@ export default function PlayerLoginScreen() {
   useEffect(() => {
     const isAuth = sessionStorage.getItem(`auth_${routeEventId}`) === 'true';
     if (isAuth && ctxEventId === routeEventId && participant) {
-      try { localStorage.setItem(`ticket:${routeEventId}`, JSON.stringify({ via:'legacy', ts: Date.now() })); } catch {}
+      try { writePlayerScopedLocal(routeEventId, 'ticket', JSON.stringify({ via:'legacy', ts: Date.now() }), [`ticket:${routeEventId}`]); } catch {}
       nav(`/player/home/${routeEventId}/1`, { replace: true });
     }
   }, [ctxEventId, participant, routeEventId, nav]);
@@ -81,7 +82,7 @@ export default function PlayerLoginScreen() {
       sessionStorage.setItem(`auth_${routeEventId}`, 'true');
       sessionStorage.setItem(`authcode_${routeEventId}`, inputCode.trim());
       sessionStorage.setItem(`participant_${routeEventId}`, JSON.stringify(part));
-      localStorage.setItem(`ticket:${routeEventId}`, JSON.stringify({ code: inputCode.trim(), ts: Date.now() }));
+      writePlayerScopedLocal(routeEventId, 'ticket', JSON.stringify({ code: inputCode.trim(), ts: Date.now() }), [`ticket:${routeEventId}`]);
     } catch {}
 
     // 5) 이동

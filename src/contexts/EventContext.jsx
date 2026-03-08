@@ -16,6 +16,7 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { mergeEventInputs, eventInputDocToNested } from '../utils/playerRealtime';
 
 import {
   getAuth,
@@ -196,6 +197,7 @@ export function EventProvider({ children }) {
   const scoresReadyRef = useRef(false);
 
   const lastEventDataRef = useRef(null);
+  const eventInputsLiveRef = useRef({});
   const queuedUpdatesRef = useRef(null);
   const debounceTimerRef = useRef(null);
 
@@ -307,6 +309,7 @@ export function EventProvider({ children }) {
         const data = snap.data();
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
+        withGate.eventInputs = mergeEventInputs(withGate.eventInputs || {}, eventInputsLiveRef.current || {});
 
         // ✅ 모드별 participants 분리: participantsStroke/participantsFourball 지원
         // - split 필드가 '빈 배열'로만 존재하는 경우(생성 템플릿 잔상)는 기존 participants(mirror) 우선
@@ -341,6 +344,45 @@ export function EventProvider({ children }) {
         lastEventDataRef.current = withGate;
       });
     });
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [eventId]);
+
+  useEffect(() => {
+    if (!eventId) {
+      eventInputsLiveRef.current = {};
+      return;
+    }
+    let unsub = null;
+    let cancelled = false;
+
+    ensureAuthed().then(() => {
+      if (cancelled) return;
+      const colRef = collection(db, 'events', eventId, 'eventInputs');
+      unsub = onSnapshot(colRef, (snap) => {
+        const nextLive = {};
+        snap.forEach((d) => {
+          const parsed = eventInputDocToNested(d.data() || {});
+          if (!parsed) return;
+          if (!nextLive[parsed.evId]) nextLive[parsed.evId] = { person: {} };
+          nextLive[parsed.evId].person[parsed.pid] = parsed.value;
+        });
+
+        if (deepEqual(eventInputsLiveRef.current || {}, nextLive || {})) return;
+        eventInputsLiveRef.current = nextLive;
+
+        const prev = lastEventDataRef.current || {};
+        const mergedInputs = mergeEventInputs(prev.eventInputs || {}, nextLive);
+        if (deepEqual(prev.eventInputs || {}, mergedInputs || {})) return;
+
+        const nextData = { ...prev, eventInputs: mergedInputs };
+        lastEventDataRef.current = nextData;
+        setEventData((curr) => (curr ? { ...curr, eventInputs: mergedInputs } : { eventInputs: mergedInputs }));
+      });
+    });
+
     return () => {
       cancelled = true;
       if (unsub) unsub();
@@ -879,34 +921,23 @@ export function EventProvider({ children }) {
         });
       }
 
-      Object.keys(roomsById).forEach((rid) => {
-        roomsById[rid].sort((a, b) => {
-          const ga = Number(a?.group ?? 0);
-          const gb = Number(b?.group ?? 0);
-          if (ga !== gb) return ga - gb;
-          return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
-        });
-      });
-
-      // 2) 하위 컬렉션 diff 반영
+      // 2) 하위 컬렉션 diff 반영(전체 삭제/재생성 금지)
       const root = collection(db, 'events', eid, 'rooms');
       const existing = await getDocs(root);
-      const existingMap = new Map(existing.docs.map((d) => [String(d.id), d.data() || {}]));
-      const jobs = [];
-
+      const existingMap = {};
       existing.docs.forEach((d) => {
-        if (!Object.prototype.hasOwnProperty.call(roomsById, String(d.id))) {
-          jobs.push(deleteDoc(d.ref));
-        }
+        existingMap[d.id] = (d.data() || {}).members || [];
       });
 
+      const jobs = [];
       Object.entries(roomsById).forEach(([rid, members]) => {
-        const prev = Array.isArray(existingMap.get(rid)?.members) ? existingMap.get(rid).members : [];
-        if (!deepEqual(prev, members)) {
+        if (!deepEqual(existingMap[rid] || [], members || [])) {
           jobs.push(setDoc(doc(root, rid), { members, updatedAt: serverTimestamp() }));
         }
       });
-
+      Object.keys(existingMap).forEach((rid) => {
+        if (!(rid in roomsById)) jobs.push(deleteDoc(doc(root, rid)));
+      });
       if (jobs.length) await Promise.all(jobs);
 
       // 3) 이벤트 루트에도 roomTable 저장(경량 미러)

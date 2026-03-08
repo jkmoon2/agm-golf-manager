@@ -11,6 +11,7 @@ import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { getEffectiveParticipantsFromEvent } from '../../utils/playerRealtime';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
@@ -145,7 +146,10 @@ export default function PlayerResults() {
   const mode         = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
   const roomCount    = eventData?.roomCount || 0;
   const roomNames    = eventData?.roomNames || [];
-  const participants = Array.isArray(eventData?.participants) ? eventData.participants : [];
+  const participants = useMemo(
+    () => getEffectiveParticipantsFromEvent(eventData, [], null),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+  );
 
   const [hiddenRooms, setHiddenRooms] = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });

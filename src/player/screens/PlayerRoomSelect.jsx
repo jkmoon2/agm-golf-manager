@@ -8,6 +8,7 @@ import styles from './PlayerRoomSelect.module.css';
 
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+import { getEffectiveParticipantsFromEvent, writePlayerRoomToStorage } from '../../utils/playerRealtime';
 import { signInAnonymously } from 'firebase/auth';
 
 const TIMINGS = {
@@ -112,48 +113,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   // ✅ SSOT: STEP1 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
   // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
   const effectiveParticipants = useMemo(() => {
-    const safeArr = (v) => (Array.isArray(v) ? v : []);
-    const modeFromEvent = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
-    const md = (variant === 'fourball' || variant === 'stroke') ? variant : modeFromEvent;
-    const field = (md === 'fourball') ? 'participantsFourball' : 'participantsStroke';
-
-    const primary = safeArr(eventData?.[field]);
-    const legacy  = safeArr(eventData?.participants);
-
-    // 모드별 필드가 있으면 legacy와 id 기준으로 병합(호환)
-    const mergedRaw = primary.length
-      ? (() => {
-          const map = new Map();
-          legacy.forEach((p, i) => {
-            const obj = (p && typeof p === 'object') ? p : {};
-            const id = String(obj?.id ?? i);
-            map.set(id, obj);
-          });
-          primary.forEach((p, i) => {
-            const obj = (p && typeof p === 'object') ? p : {};
-            const id = String(obj?.id ?? i);
-            map.set(id, { ...(map.get(id) || {}), ...obj });
-          });
-          return Array.from(map.values());
-        })()
-      : legacy;
-
-    const normalized = mergedRaw.map((p, i) => {
-      const obj = (p && typeof p === 'object') ? p : {};
-      const id = (obj?.id ?? i);
-      const room = (obj?.room ?? obj?.roomNumber ?? null);
-      return { ...obj, id, room, roomNumber: room };
-    });
-
-    return normalized.length ? normalized : safeArr(participants);
-  }, [
-    variant,
-    participants,
-    eventData?.mode,
-    eventData?.participants,
-    eventData?.participantsStroke,
-    eventData?.participantsFourball,
-  ]);
+    return getEffectiveParticipantsFromEvent(eventData, participants, variant);
+  }, [variant, participants, eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]);
 
   const effectiveParticipant = useMemo(() => {
     if (!participant) return null;
@@ -344,11 +305,9 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   const saveMyRoom = (roomNo) => {
-    if (!roomNo || !playerEventId) return;
-    try {
-      localStorage.setItem(`player.currentRoom:${playerEventId}`, String(roomNo));
-      localStorage.setItem('player.currentRoom', String(roomNo));
-    } catch {}
+    const eid = playerEventId || ctxEventId || urlEventId;
+    if (!roomNo || !eid) return;
+    writePlayerRoomToStorage(eid, roomNo);
   };
 
   useEffect(() => {

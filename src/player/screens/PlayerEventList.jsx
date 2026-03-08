@@ -4,6 +4,7 @@ import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
+import { writePlayerScopedLocal } from '../../utils/playerRealtime';
 import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
 import styles from './EventSelectScreen.module.css';
 import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장
@@ -113,7 +114,9 @@ export default function PlayerEventList() {
       sessionStorage.setItem(`auth_${eventId}`, 'true');
       sessionStorage.setItem(`authcode_${eventId}`, sessionStorage.getItem('pending_code') || '');
       sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(participant));
-      localStorage.setItem(`ticket:${eventId}`, JSON.stringify({ code: sessionStorage.getItem('pending_code') || '', ts: Date.now() }));
+      writePlayerScopedLocal(eventId, 'ticket', JSON.stringify({ code: sessionStorage.getItem('pending_code') || '', ts: Date.now() }), [`ticket:${eventId}`]);
+      writePlayerScopedLocal(eventId, 'authcode', sessionStorage.getItem('pending_code') || '', []);
+      writePlayerScopedLocal(eventId, 'participant', JSON.stringify(participant), []);
       return { ok:true, participant };
     } catch {
       return { ok:false };

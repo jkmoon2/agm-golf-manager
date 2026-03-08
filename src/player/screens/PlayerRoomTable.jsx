@@ -11,6 +11,7 @@ import { EventContext } from '../../contexts/EventContext';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { getEffectiveParticipantsFromEvent, readPlayerRoomFromStorage, writePlayerRoomToStorage } from '../../utils/playerRealtime';
 
 // ★ patch: gate helpers + ts
 function normalizeGate(raw){
@@ -182,7 +183,7 @@ export default function PlayerRoomTable() {
     ];
     const roomNo = candidates.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
     if (Number.isFinite(roomNo)) {
-      try { localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo)); } catch {}
+      writePlayerRoomToStorage(paramId, roomNo);
     }
   }, [eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
 
@@ -197,8 +198,8 @@ export default function PlayerRoomTable() {
   }, [eventData]);
 
   const participants = useMemo(
-    () => (Array.isArray(eventData?.participants) ? eventData.participants : []),
-    [eventData]
+    () => getEffectiveParticipantsFromEvent(eventData, [], null),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
   );
 
   // Admin의 선택(숨김 방) 복원 – 루트/모드별/0·1기반 혼용 모두 흡수
@@ -294,12 +295,11 @@ export default function PlayerRoomTable() {
                 try {
                   const cands = [
                     eventData?.myRoom,
-                    localStorage.getItem(`player.currentRoom:${paramId}`),
-                    localStorage.getItem('player.currentRoom'),
+                    readPlayerRoomFromStorage(paramId),
                   ];
                   const roomNo = cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
                   if (Number.isFinite(roomNo)) {
-                    localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo));
+                    writePlayerRoomToStorage(paramId, roomNo);
                   }
                 } catch {}
                 if (!nextDisabled) navigate(`/player/home/${paramId}/3`);
@@ -410,12 +410,11 @@ export default function PlayerRoomTable() {
             try {
               const cands = [
                 eventData?.myRoom,
-                localStorage.getItem(`player.currentRoom:${paramId}`),
-                localStorage.getItem('player.currentRoom'),
+                readPlayerRoomFromStorage(paramId),
               ];
               const roomNo = cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
               if (Number.isFinite(roomNo)) {
-                localStorage.setItem(`player.currentRoom:${paramId}`, String(roomNo));
+                writePlayerRoomToStorage(paramId, roomNo);
               }
             } catch {}
             if (!nextDisabled) navigate(`/player/home/${paramId}/3`);
