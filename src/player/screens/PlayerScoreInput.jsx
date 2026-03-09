@@ -6,8 +6,8 @@ import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
-import { getEffectiveParticipantsFromEvent } from '../utils/playerEventData';
 import styles from './PlayerScoreInput.module.css';
+import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -108,14 +108,9 @@ export default function PlayerScoreInput() {
   // ✅ SSOT: STEP4 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
   // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
   const effectiveParticipants = useMemo(() => {
-    const merged = getEffectiveParticipantsFromEvent(eventData).map((p, i) => {
-      const obj = (p && typeof p === 'object') ? p : {};
-      const id = obj?.id ?? i;
-      const room = obj?.room ?? obj?.roomNumber ?? null;
-      return { ...obj, id, room, roomNumber: room };
-    });
-    return merged.length ? merged : (Array.isArray(participants) ? participants : []);
+    return getEffectiveParticipantsFromEvent(eventData, participants, eventData?.mode);
   }, [participants, eventData]);
+
 
   const viewParticipant = useMemo(() => {
     if (!participant) return null;

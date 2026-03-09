@@ -8,6 +8,7 @@ import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { useApplyTheme } from '../../themes/useTheme';
 import LoginOrCode from '../screens/LoginOrCode';
+import { readPlayerTicket } from '../utils/playerState';
 
 export const StepContext = createContext(null);
 
@@ -50,9 +51,8 @@ export default function StepFlowProvider({ children }) {
   const hasTicket = useMemo(() => {
     try {
       if (!eventId) return false;
-      const raw = localStorage.getItem(`ticket:${eventId}`);
-      if (!raw) return false;
-      const t = JSON.parse(raw);
+      const t = readPlayerTicket(eventId, true);
+      if (!t) return false;
       return !!(t?.code || t?.via);
     } catch { return false; }
   }, [eventId]);

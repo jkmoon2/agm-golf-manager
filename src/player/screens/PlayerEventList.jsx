@@ -4,10 +4,10 @@ import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
-import { writePlayerScopedLocal } from '../../utils/playerRealtime';
 import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
 import styles from './EventSelectScreen.module.css';
 import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장
+import { markPlayerAuthed, writePlayerTicket } from '../utils/playerState';
 
 export default function PlayerEventList() {
   const nav = useNavigate();
@@ -111,12 +111,8 @@ export default function PlayerEventList() {
       if (!participant) return { ok:false };
 
       // 통과 처리 (세션 보존)
-      sessionStorage.setItem(`auth_${eventId}`, 'true');
-      sessionStorage.setItem(`authcode_${eventId}`, sessionStorage.getItem('pending_code') || '');
-      sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(participant));
-      writePlayerScopedLocal(eventId, 'ticket', JSON.stringify({ code: sessionStorage.getItem('pending_code') || '', ts: Date.now() }), [`ticket:${eventId}`]);
-      writePlayerScopedLocal(eventId, 'authcode', sessionStorage.getItem('pending_code') || '', []);
-      writePlayerScopedLocal(eventId, 'participant', JSON.stringify(participant), []);
+      markPlayerAuthed(eventId, sessionStorage.getItem('pending_code') || '', participant);
+      writePlayerTicket(eventId, { code: sessionStorage.getItem('pending_code') || '', ts: Date.now() });
       return { ok:true, participant };
     } catch {
       return { ok:false };

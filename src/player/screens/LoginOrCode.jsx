@@ -15,6 +15,7 @@ import styles from './LoginOrCode.module.css';
 import SignupModal from '../components/SignupModal';
 import ResetPasswordModal from '../components/ResetPasswordModal';
 import { getAuth } from 'firebase/auth';
+import { writePlayerTicket } from '../utils/playerState';
 
 function InnerLoginOrCode({ onEnter }) {
   const navigate = useNavigate();
@@ -104,7 +105,7 @@ function InnerLoginOrCode({ onEnter }) {
     try {
       const cred = await signInEmail(email.trim(), pw);
       await ensureUserDoc(cred?.user);
-      try { localStorage.setItem(`ticket:${eventId || 'global'}`, JSON.stringify({ via:'login', ts:Date.now() })); } catch {}
+      try { writePlayerTicket(eventId || 'global', { via:'login', ts:Date.now() }); } catch {}
       // 이벤트가 지정되지 않은 일반 로그인은 리스트로
       if (eventId) goHome(eventId);
       else navigate('/player/events', { replace: true });

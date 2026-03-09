@@ -6,7 +6,6 @@ import React, { useMemo, useContext, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { PlayerContext } from '../../contexts/PlayerContext';
-import { getEffectiveParticipantsFromEvent } from '../utils/playerSync';
 import { EventContext }   from '../../contexts/EventContext';
 import StickyNavBar       from '../components/StickyNavBar';
 
@@ -16,6 +15,7 @@ import tCss    from './PlayerEventConfirm.module.css';
 
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
+import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -88,10 +88,7 @@ export default function PlayerEventConfirm() {
       loadEvent(urlEventId);
     }
   }, [urlEventId, eventId, loadEvent]);
-  const participantsBase = useMemo(
-    () => getEffectiveParticipantsFromEvent(eventData, []),
-    [eventData]
-  );
+  const participantsBase = useMemo(() => getEffectiveParticipantsFromEvent(eventData, [], eventData?.mode), [eventData]);
   const participants = useMemo(
     () => (typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(participantsBase) : participantsBase),
     [participantsBase, overlayScoresToParticipants]

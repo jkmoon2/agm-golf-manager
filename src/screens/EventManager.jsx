@@ -8,7 +8,7 @@
 import React, { useContext, useMemo, useState, useEffect, useRef } from 'react';
 import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
-import { doc, getDoc, updateDoc, serverTimestamp, deleteField, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import css from './EventManager.module.css';
 import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } from '../eventTemplates/registry';
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
@@ -262,31 +262,24 @@ if (form.template === 'group-battle') {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
     const all = { ...(eventData?.eventInputs || {}) };
     delete all[ev.id];
-
+    // ★★★ 핵심 보완: 실시간 반영 트리거 타임스탬프 추가
+    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    // ★★★ Firestore에서도 해당 이벤트 입력 필드를 삭제 + 트리거 필드 갱신
     try {
       if (eventId) {
         await updateDoc(doc(db, 'events', eventId), {
           [`eventInputs.${ev.id}`]: deleteField(),
           inputsUpdatedAt: serverTimestamp(),
         });
-
-        try {
-          const qs = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
-          const jobs = [];
-          qs.forEach((d) => {
-            const row = d.data() || {};
-            if (String(row?.evId || '').trim() === String(ev.id)) jobs.push(deleteDoc(d.ref));
-          });
-          if (jobs.length) await Promise.all(jobs);
-        } catch (subErr) {
-          console.warn('[clearInputs] subcollection cleanup failed:', subErr);
-        }
+        const snap = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
+        const jobs = snap.docs
+          .filter((d) => String(d.data()?.evId || '') === String(ev.id))
+          .map((d) => deleteDoc(d.ref));
+        if (jobs.length) await Promise.all(jobs);
       }
     } catch (e) {
       console.warn('[clearInputs] remote patch failed:', e);
     }
-
-    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));
   };

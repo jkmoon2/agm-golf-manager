@@ -15,6 +15,7 @@ import { db } from '../firebase';
 import { EventContext } from './EventContext';
 import { useLocation } from 'react-router-dom';
 import { getAuth, signInAnonymously } from 'firebase/auth';
+import { mergeParticipantsById, playerStorageKey, participantsFieldByMode, normalizeMode } from '../player/utils/playerState';
 
 // (선택) 남아 있던 import — 사용하지 않아도 빌드 가능한 상태라면 그대로 두셔도 됩니다.
 // import { pickRoomForStroke } from '../player/logic/assignStroke';
@@ -64,45 +65,7 @@ const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
  * - Admin(localStorage.eventId 등)와 충돌 방지
  * - iOS에서 sessionStorage가 날아가도 방배정/리스트가 풀리지 않도록 최소 백업
  */
-const getPlayerTabId = () => {
-  try {
-    if (!window.name || !window.name.startsWith('AGM_PLAYER_TAB_')) {
-      window.name = `AGM_PLAYER_TAB_${Math.random().toString(36).slice(2)}_${Date.now()}`;
-    }
-    return window.name;
-  } catch {
-    // window.name 접근이 막힌 환경(드물게) 대비
-    return 'AGM_PLAYER_TAB_FALLBACK';
-  }
-};
 
-const playerStorageKey = (eid, key) => `agm:player:${getPlayerTabId()}:${eid || 'noevent'}:${key}`;
-
-// 모드별 participants 필드와 legacy participants를 "id 기준" 병합 (SSOT 보강)
-const mergeParticipantsById = (primary = [], legacy = []) => {
-  const map = new Map();
-  const push = (arr) => {
-    if (!Array.isArray(arr)) return;
-    for (const p of arr) {
-      if (!p) continue;
-      const id = normId(p.id || p.uid || p.authCode || '');
-      const k = id || JSON.stringify(p);
-      if (!map.has(k)) map.set(k, p);
-      else map.set(k, { ...map.get(k), ...p });
-    }
-  };
-  push(primary);
-  push(legacy);
-  return Array.from(map.values());
-};
-
-
-
-
-// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
-function participantsFieldByMode(md = 'stroke') {
-  return md === 'fourball' ? 'participantsFourball' : 'participantsStroke';
-}
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
     ? roomNames[num - 1].trim()
@@ -224,7 +187,7 @@ async function ensureAuthReady() {
 
 export function PlayerProvider({ children }) {
   const [eventId, setEventId]             = useState(() => {
-    try { return localStorage.getItem('player.eventId') || localStorage.getItem('eventId') || ''; } catch { return ''; }
+    try { return localStorage.getItem('player.eventId') || ''; } catch { return ''; }
   });
   const [mode, setMode]                   = useState('stroke');
   const [roomCount, setRoomCount]         = useState(4);
@@ -421,71 +384,74 @@ if (!idCached) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  // participants 저장 (화이트리스트 + updateDoc)
-  async function writeParticipants(next) {
-    if (!eventId) return;
+  const sanitizeParticipantForWrite = (p = {}, i = 0) => {
+    const out = {};
+    const ALLOWED = ['id','group','nickname','handicap','room','roomNumber','partner','authCode','selected'];
+    for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
+    if (out.id === undefined) out.id = String(p?.id ?? i);
+
+    if (out.group !== undefined) {
+      out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
+    }
+    if (out.handicap !== undefined) {
+      const n = Number(out.handicap);
+      out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
+    }
+    if (out.room !== undefined && out.room !== null) {
+      const n = Number(out.room);
+      out.room = Number.isFinite(n) ? n : String(out.room);
+    }
+    if (out.roomNumber !== undefined && out.roomNumber !== null) {
+      const n = Number(out.roomNumber);
+      out.roomNumber = Number.isFinite(n) ? n : String(out.roomNumber);
+    }
+    if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
+    if (out.partner !== undefined && out.partner !== null) out.partner = normId(out.partner);
+    if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
+    return out;
+  };
+
+  async function writeParticipants(next, touchedIds = []) {
+    if (!eventId) return Array.isArray(next) ? next : [];
     await ensureAuthReady();
 
     const eref = doc(db, 'events', eventId);
+    const modeNow = normalizeMode(mode || 'stroke');
+    const field = participantsFieldByMode(modeNow);
+    const touched = new Set((Array.isArray(touchedIds) ? touchedIds : []).map((v) => normId(v)));
+    const incomingMap = new Map((Array.isArray(next) ? next : []).map((p, i) => [normId(p?.id ?? i), sanitizeParticipantForWrite(p, i)]));
 
-    const exists = (await getDoc(eref)).exists();
-    if (DEBUG) exposeDiag({ eventId, eventExists: exists });
-    if (!exists) {
-      alert('이벤트 문서가 존재하지 않습니다. 관리자에게 문의해 주세요.');
-      throw new Error('Event document does not exist');
-    }
+    const result = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(eref);
+      if (!snap.exists()) throw new Error('Event document does not exist');
+      const data = snap.data() || {};
+      const latestPrimary = Array.isArray(data?.[field]) ? data[field] : [];
+      const latestLegacy = Array.isArray(data?.participants) ? data.participants : [];
+      const latest = latestPrimary.length ? mergeParticipantsById(latestPrimary, latestLegacy) : latestLegacy;
 
-    const ALLOWED = ['id','group','nickname','handicap','room','roomNumber','partner','authCode','selected'];
-    const cleaned = (Array.isArray(next) ? next : []).map((p, i) => {
-      const out = {};
-      for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
-      if (out.id === undefined) out.id = String(p?.id ?? i);
+      const nextList = (Array.isArray(latest) ? latest : []).map((p, i) => {
+        const id = normId(p?.id ?? i);
+        if (touched.size && !touched.has(id)) return sanitizeParticipantForWrite(p, i);
+        return incomingMap.has(id) ? sanitizeParticipantForWrite({ ...p, ...incomingMap.get(id) }, i) : sanitizeParticipantForWrite(p, i);
+      });
 
-      // 숫자 정규화
-      if (out.group !== undefined) {
-        out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
+      if (touched.size) {
+        touched.forEach((id) => {
+          if (!nextList.some((p) => normId(p?.id) === id) && incomingMap.has(id)) {
+            nextList.push(incomingMap.get(id));
+          }
+        });
       }
-      if (out.handicap !== undefined) {
-        const n = Number(out.handicap);
-        out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
-      }
-      if (out.score !== undefined) {
-        // ★ FIX: 빈값은 null 유지
-        if (out.score === '' || out.score == null) out.score = null;
-        else {
-          const n = Number(out.score);
-          out.score = Number.isFinite(n) ? n : null;
-        }
-      }
-      if (out.room !== undefined && out.room !== null) {
-        const n = Number(out.room);
-        out.room = Number.isFinite(n) ? n : String(out.room);
-      }
-      if (out.roomNumber !== undefined && out.roomNumber !== null) {
-        const n = Number(out.roomNumber);
-        out.roomNumber = Number.isFinite(n) ? n : String(out.roomNumber);
-      }
-      if (out.partner !== undefined && out.partner !== null) {
-        const n = Number(out.partner);
-        out.partner = Number.isFinite(n) ? n : String(out.partner);
-      }
-      if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
 
-      // roomNumber 동기화(표시용)
-      if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
-
-      return out;
+      tx.update(eref, sanitizeForFirestore({
+        participants: nextList,
+        [field]: nextList,
+        participantsUpdatedAt: serverTimestamp(),
+      }));
+      return nextList;
     });
 
-    try {
-      await updateDoc(
-        eref,
-        sanitizeForFirestore({ participants: cleaned, [participantsFieldByMode(mode)]: cleaned, participantsUpdatedAt: serverTimestamp() })
-      );
-    } catch (e) {
-      exposeDiag({ lastWriteError: e?.message || String(e) });
-      throw e;
-    }
+    return result;
   }
 
   // ─ API (원본 유지) ─
@@ -496,11 +462,11 @@ if (!idCached) {
     const next = participants.map((p) =>
       normId(p.id) === targetId ? { ...p, room: rid } : p
     );
-    setParticipants(next);
+    const saved = await writeParticipants(next, [targetId]);
+    setParticipants(saved);
     if (participant && normId(participant.id) === targetId) {
-      setParticipant((prev) => prev && { ...prev, room: rid });
+      setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid });
     }
-    await writeParticipants(next);
 
     try {
       await ensureAuthReady();
@@ -514,14 +480,14 @@ if (!idCached) {
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
-      if (normId(p.id) === a) return { ...p, room: rid, partner: b };
-      if (normId(p.id) === b) return { ...p, room: rid, partner: a };
+      if (normId(p.id) === a) return { ...p, room: rid, roomNumber: rid, partner: b };
+      if (normId(p.id) === b) return { ...p, room: rid, roomNumber: rid, partner: a };
       return p;
     });
-    setParticipants(next);
-    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, partner: b });
-    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, partner: a });
-    await writeParticipants(next);
+    const saved = await writeParticipants(next, [a, b]);
+    setParticipants(saved);
+    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: b });
+    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: a });
 
     try {
       await ensureAuthReady();
@@ -546,86 +512,50 @@ if (!idCached) {
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
 
+    // ✅ 이미 방 배정된 경우: 재배정 금지(특히 iOS/운영자 참가자탭에서 상태가 풀려 보일 때 2회 클릭 방지)
     if (isValidRoom(me?.room)) {
       return { roomNumber: Number(me.room), alreadyAssigned: true };
     }
 
-    try {
-      const result = await runTransaction(db, async (tx) => {
-        const eref = doc(db, 'events', eventId);
-        const snap = await tx.get(eref);
-        const data = snap.exists() ? (snap.data() || {}) : {};
-        const fieldParts = participantsFieldByMode(mode);
-        const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts]?.length)
-          ? data[fieldParts]
-          : (Array.isArray(data?.participants) ? data.participants : []);
+    let chosenRoom = null;
+    const saved = await runTransaction(db, async (tx) => {
+      const eref = doc(db, 'events', eventId);
+      const snap = await tx.get(eref);
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      const field = participantsFieldByMode(normalizeMode(mode || 'stroke'));
+      const latestPrimary = Array.isArray(data?.[field]) ? data[field] : [];
+      const latestLegacy = Array.isArray(data?.participants) ? data.participants : [];
+      const latest = latestPrimary.length ? mergeParticipantsById(latestPrimary, latestLegacy) : latestLegacy;
+      const currentMe = latest.find((p, i) => normId(p?.id ?? i) === pid) || me;
 
-        const parts = (baseParts || []).map((p, i) => ({
-          ...((p && typeof p === 'object') ? p : {}),
-          id: normId(p?.id ?? i),
-          nickname: normName(p?.nickname),
-          handicap: toInt(p?.handicap, 0),
-          group: toInt(p?.group, 0),
-          authCode: (p?.authCode ?? '').toString(),
-          room: (p?.room ?? p?.roomNumber ?? null),
-          roomNumber: (p?.room ?? p?.roomNumber ?? null),
-          partner: p?.partner != null ? normId(p.partner) : null,
-          selected: !!p?.selected,
-        }));
-
-        const self = parts.find((p) => normId(p.id) === pid);
-        if (!self) throw new Error('Participant not found');
-        if (isValidRoom(self?.room)) {
-          return { roomNumber: Number(self.room), alreadyAssigned: true, next: parts };
-        }
-
-        let candidates = validRoomsForStroke(parts, roomCount, self);
-        if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
-        const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
-
-        const next = parts.map((p) => (normId(p.id) === pid ? { ...p, room: chosenRoom, roomNumber: chosenRoom } : p));
-
-        tx.set(eref, sanitizeForFirestore({
-          participants: next,
-          [fieldParts]: next,
-          participantsUpdatedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        }), { merge: true });
-
-        return { roomNumber: chosenRoom, next, alreadyAssigned: false };
-      });
-
-      if (result?.next) {
-        setParticipants(result.next);
-        if (participant && normId(participant.id) === pid) {
-          setParticipant((prev) => prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber });
-        }
+      if (isValidRoom(currentMe?.room)) {
+        chosenRoom = Number(currentMe.room);
+        return latest.map((p, i) => sanitizeParticipantForWrite(p, i));
       }
 
-      try {
-        const rref = doc(db, 'events', eventId, 'rooms', String(result.roomNumber));
-        await setDoc(rref, { members: arrayUnion(pid) }, { merge: true });
-      } catch (_) {}
+      let candidates = validRoomsForStroke(latest, roomCount, currentMe);
+      if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+      chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
-      return { roomNumber: result.roomNumber, roomLabel: makeLabel(roomNames, result.roomNumber), alreadyAssigned: !!result?.alreadyAssigned };
-    } catch (err) {
-      console.warn('[stroke tx] fallback to non-tx:', err?.message);
-    }
+      const next = latest.map((p, i) =>
+        normId(p?.id ?? i) === pid ? sanitizeParticipantForWrite({ ...p, room: chosenRoom, roomNumber: chosenRoom }, i) : sanitizeParticipantForWrite(p, i)
+      );
 
-    let candidates = validRoomsForStroke(participants, roomCount, me);
-    if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
-    const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
+      tx.update(eref, sanitizeForFirestore({
+        participants: next,
+        [field]: next,
+        participantsUpdatedAt: serverTimestamp(),
+      }));
+      return next;
+    });
 
-    const next = participants.map((p) =>
-      normId(p.id) === pid ? { ...p, room: chosenRoom, roomNumber: chosenRoom } : p
-    );
-    setParticipants(next);
+    setParticipants(saved);
     if (participant && normId(participant.id) === pid) {
       setParticipant((prev) => prev && { ...prev, room: chosenRoom, roomNumber: chosenRoom });
     }
-    await writeParticipants(next);
 
     try {
+      await ensureAuthReady();
       const rref = doc(db, 'events', eventId, 'rooms', String(chosenRoom));
       await setDoc(rref, { members: arrayUnion(pid) }, { merge: true });
     } catch (_) {}
@@ -768,11 +698,11 @@ if (!idCached) {
       if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
       return p;
     });
-    setParticipants(next);
     if (participant && normId(participant.id) === pid) {
       setParticipant((prev) => prev && { ...prev, room: roomNumber, partner: mateId || null });
     }
-    await writeParticipants(next);
+    const saved = await writeParticipants(next, [pid, mateId].filter(Boolean));
+    setParticipants(saved);
 
     try {
       await ensureAuthReady();

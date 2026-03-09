@@ -16,6 +16,7 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { getEffectiveParticipantsFromEvent } from '../player/utils/playerState';
 
 import {
   getAuth,
@@ -82,22 +83,6 @@ function participantsFieldByMode(mode = 'stroke') {
 }
 
 // room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
-function mergeParticipantsById(primary = [], legacy = []) {
-  const map = new Map();
-  const push = (arr) => {
-    if (!Array.isArray(arr)) return;
-    arr.forEach((p, i) => {
-      if (!p) return;
-      const id = String(p?.id ?? i);
-      const prev = map.get(id) || {};
-      map.set(id, { ...prev, ...p });
-    });
-  };
-  push(legacy);
-  push(primary);
-  return Array.from(map.values());
-}
-
 function normalizeParticipantsRoomFields(list) {
   if (!Array.isArray(list)) return [];
   return list.map((p) => {
@@ -204,6 +189,8 @@ export function EventProvider({ children }) {
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
+  const [eventInputsLive, setEventInputsLive] = useState({});
+  const eventInputsLiveRef = useRef({});
 
   // ✅ scores 서브컬렉션 SSOT: Admin↔Player 공용 점수 맵(읽기 전용, 루트 문서에 미러링하지 않음)
   const [scoresMap, setScoresMap] = useState({});
@@ -311,6 +298,8 @@ export function EventProvider({ children }) {
   useEffect(() => {
     if (!eventId) {
       setEventData(null);
+      eventInputsLiveRef.current = {};
+      setEventInputsLive({});
       lastEventDataRef.current = null;
       return;
     }
@@ -324,24 +313,11 @@ export function EventProvider({ children }) {
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
 
-        // ✅ 모드별 participants 분리: participantsStroke/participantsFourball 지원
-        // - split 필드가 '빈 배열'로만 존재하는 경우(생성 템플릿 잔상)는 기존 participants(mirror) 우선
-        // - split 필드에 실제 데이터가 존재하면 해당 모드 필드를 participants로 매핑
         try {
-          const mirrorArr = Array.isArray(withGate?.participants) ? withGate.participants : [];
-          const strokeArr = Array.isArray(withGate?.participantsStroke) ? withGate.participantsStroke : [];
-          const fourArr   = Array.isArray(withGate?.participantsFourball) ? withGate.participantsFourball : [];
-          const splitEnabled = (strokeArr.length > 0) || (fourArr.length > 0);
-
-          if (splitEnabled) {
-            const m = withGate?.mode || 'stroke';
-            const f = participantsFieldByMode(m);
-            const splitArr = withGate?.[f];
-
-            if (Array.isArray(splitArr) && splitArr.length > 0) withGate.participants = splitArr;
-            else if (mirrorArr.length > 0) withGate.participants = mirrorArr;
-            else withGate.participants = Array.isArray(splitArr) ? splitArr : [];
-          }
+          withGate.participants = getEffectiveParticipantsFromEvent(withGate, withGate?.participants || [], withGate?.mode);
+          const baseInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
+          const liveInputs = (eventInputsLiveRef.current && typeof eventInputsLiveRef.current === 'object') ? eventInputsLiveRef.current : {};
+          withGate.eventInputs = Object.keys(liveInputs).length ? { ...baseInputs, ...liveInputs } : baseInputs;
         } catch {}
 
         // ✅ includeMetadataChanges: true 환경에서 pendingWrites 스냅샷을 무조건 무시하면
@@ -355,6 +331,54 @@ export function EventProvider({ children }) {
 
         setEventData(withGate);
         lastEventDataRef.current = withGate;
+      });
+    });
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [eventId]);
+
+
+  // eventInputs 서브컬렉션 실시간 병합(플레이어 입력 SSOT 보강)
+  useEffect(() => {
+    if (!eventId) {
+      setEventInputsLive({});
+      return;
+    }
+    let unsub = null;
+    let cancelled = false;
+    ensureAuthed().then(() => {
+      if (cancelled) return;
+      const colRef = collection(db, 'events', eventId, 'eventInputs');
+      unsub = onSnapshot(colRef, (snap) => {
+        const next = {};
+        snap.forEach((d) => {
+          const v = d.data() || {};
+          const evId = String(v.evId || '').trim();
+          const pid = String(v.pid || '').trim();
+          if (!evId || !pid) return;
+          if (!next[evId]) next[evId] = {};
+          const slot = next[evId];
+          const person = { ...(slot.person || {}) };
+          if (Array.isArray(v.values)) {
+            const obj = { values: v.values.slice() };
+            if (Object.prototype.hasOwnProperty.call(v, 'bonus')) obj.bonus = v.bonus;
+            person[pid] = obj;
+          } else if (Object.prototype.hasOwnProperty.call(v, 'value')) {
+            if (v.value === '' || v.value == null) {
+              delete person[pid];
+            } else {
+              person[pid] = v.value;
+            }
+          }
+          slot.person = person;
+          next[evId] = slot;
+        });
+        if (!deepEqual(eventInputsLiveRef.current || {}, next || {})) {
+          eventInputsLiveRef.current = next;
+          setEventInputsLive(next);
+        }
       });
     });
     return () => {

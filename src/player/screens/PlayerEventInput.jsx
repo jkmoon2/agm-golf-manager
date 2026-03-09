@@ -5,9 +5,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
-import { getEffectiveParticipantsFromEvent, readPlayerRoomFromStorage, writePlayerRoomToStorage } from '../utils/playerSync';
+import { getEffectiveParticipantsFromEvent, readPlayerRoom, writePlayerRoom } from '../utils/playerState';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -32,8 +32,9 @@ function tsToMillis(ts){
 }
 
 function readRoomFromLocal(eventId){
-  return readPlayerRoomFromStorage(eventId);
+  return readPlayerRoom(eventId, false);
 }
+
 
 const MAX_PER_ROOM = 4;
 
@@ -149,10 +150,7 @@ export default function PlayerEventInput(){
 
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
-  const participants = useMemo(
-    () => getEffectiveParticipantsFromEvent(eventData, []),
-    [eventData]
-  );
+  const participants = useMemo(() => getEffectiveParticipantsFromEvent(eventData, [], eventData?.mode), [eventData]);
   const events = useMemo(
     () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
     [eventData]
@@ -194,7 +192,7 @@ export default function PlayerEventInput(){
 
   useEffect(() => {
     if (Number.isFinite(roomIdx) && roomIdx >= 1) {
-      try { writePlayerRoomToStorage(eventId, roomIdx); } catch {}
+      try { writePlayerRoom(eventId, roomIdx); } catch {}
     }
   }, [roomIdx, eventId]);
 
@@ -387,6 +385,7 @@ export default function PlayerEventInput(){
 
       {
         const _writes = [];
+        const _deletes = [];
         const _id = (eventId || ctxId);
         Object.entries(src).forEach(([evId, slot]) => {
           const sPerson = slot?.person || {};
@@ -395,6 +394,10 @@ export default function PlayerEventInput(){
             const docId = `${String(pid)}__${String(evId)}`;
             const ref = doc(db, 'events', _id, 'eventInputs', docId);
             const payload = { room: roomIdx, pid: String(pid), evId: String(evId) };
+            if (val === '' || val == null) {
+              _deletes.push(deleteDoc(ref));
+              return;
+            }
             if (val && typeof val === 'object' && Array.isArray(val.values)) {
               payload.values = val.values.slice();
               if (val.bonus !== undefined) payload.bonus = val.bonus;
@@ -405,13 +408,23 @@ export default function PlayerEventInput(){
             _writes.push(setDoc(ref, payload, { merge: true }));
           });
         });
+        events.forEach((ev) => {
+          roomPids.forEach((pid) => {
+            const exists = Object.prototype.hasOwnProperty.call(merged?.[ev.id]?.person || {}, String(pid));
+            if (!exists) {
+              const ref = doc(db, 'events', _id, 'eventInputs', `${String(pid)}__${String(ev.id)}`);
+              _deletes.push(deleteDoc(ref));
+            }
+          });
+        });
         if (_writes.length) { await Promise.all(_writes); }
+        if (_deletes.length) { await Promise.all(_deletes); }
       }
 
       if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: Date.now() }, false);
+        await updateEventImmediate({ eventInputs: merged }, false);
       } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: Date.now() }, { merge: true });
+        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
       }
 
       setDraft(merged ? JSON.parse(JSON.stringify(merged)) : {});
