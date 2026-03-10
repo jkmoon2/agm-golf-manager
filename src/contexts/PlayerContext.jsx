@@ -22,6 +22,7 @@ import {
   pickRoomAndPartnerForFourball,
   transactionalAssignFourball,
 } from '../player/logic/assignFourball';
+import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 
 export const PlayerContext = createContext(null);
 
@@ -439,6 +440,58 @@ if (!idCached) {
     return () => unsub();
   }, [eventId, authCode]);
 
+  async function refreshPlayerStateNow() {
+    if (!eventId) return;
+    try {
+      await ensureAuthReady();
+      const snap = await getDoc(doc(db, 'events', eventId));
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      const md = normalizeMode(data.mode || 'stroke');
+      setMode(md);
+      const f = participantsFieldByMode(md);
+      const primaryParts = Array.isArray(data?.[f]) ? data[f] : [];
+      const legacyParts = Array.isArray(data?.participants) ? data.participants : [];
+      const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legacyParts) : legacyParts;
+      const partArr = rawParts.map((p, i) => normalizeParticipantRecord(p, i));
+      setParticipants(typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(partArr) : partArr);
+      const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
+      const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
+      setRoomCount(rc);
+      setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
+      setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
+      setParticipant((prev) => {
+        if (!prev) return prev;
+        const latest = partArr.find((p) => normId(p.id) === normId(prev.id));
+        return latest || prev;
+      });
+    } catch {}
+  }
+
+  useEffect(() => {
+    if (!eventId) return;
+    let raf = 0;
+    const scheduleRefresh = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => { refreshPlayerStateNow(); });
+    };
+    const onFocus = () => scheduleRefresh();
+    const onPageShow = () => scheduleRefresh();
+    const onVisible = () => {
+      try { if (document.visibilityState === 'visible') scheduleRefresh(); } catch { scheduleRefresh(); }
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('visibilitychange', onVisible);
+    const unsubSync = subscribeEventSync(eventId, () => scheduleRefresh());
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onPageShow);
+      document.removeEventListener('visibilitychange', onVisible);
+      try { unsubSync(); } catch {}
+    };
+  }, [eventId, overlayScoresToParticipants]);
+
   // participants 저장 (최신 서버 기준 patch merge)
   async function writeParticipants(next) {
     if (!eventId) return participants;
@@ -506,6 +559,7 @@ if (!idCached) {
       setParticipant((prev) => prev && { ...prev, room: rid });
     }
     const committed = await writeParticipants(next);
+    try { broadcastEventSync(eventId, { reason: 'joinRoom' }); } catch {}
     if (participant && normId(participant.id) === targetId) {
       const latestMe = (committed || []).find((p) => normId(p?.id) === targetId);
       if (latestMe) setParticipant(latestMe);
@@ -531,6 +585,7 @@ if (!idCached) {
     if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, partner: b });
     if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, partner: a });
     const committed = await writeParticipants(next);
+    try { broadcastEventSync(eventId, { reason: 'joinFourBall' }); } catch {}
     if (participant && (normId(participant.id) === a || normId(participant.id) === b)) {
       const latestMe = (committed || []).find((p) => normId(p?.id) === normId(participant.id));
       if (latestMe) setParticipant(latestMe);
@@ -601,6 +656,7 @@ if (!idCached) {
     const latestMe = withScores.find((p) => normId(p?.id) === pid);
     if (latestMe) setParticipant(latestMe);
 
+    try { broadcastEventSync(eventId, { reason: 'assignStrokeForOne' }); } catch {}
     return {
       roomNumber: result?.roomNumber ?? null,
       roomLabel: result?.roomLabel || (result?.roomNumber ? makeLabel(roomNames, result.roomNumber) : ''),
@@ -646,6 +702,7 @@ if (!idCached) {
           }
           const partnerNickname =
             (participants.find((p) => normId(p.id) === result?.partnerId) || {})?.nickname || '';
+          try { broadcastEventSync(eventId, { reason: 'assignFourballTxUtil' }); } catch {}
           return {
             roomNumber: result?.roomNumber ?? null,
             partnerId: result?.partnerId || null,
@@ -723,6 +780,7 @@ if (!idCached) {
         }
         const partnerNickname =
           (participants.find((p) => normId(p.id) === result?.mateId) || {})?.nickname || '';
+        try { broadcastEventSync(eventId, { reason: 'assignFourballTx' }); } catch {}
         return { roomNumber: result?.roomNumber ?? null, partnerId: result?.mateId || null, partnerNickname };
       } catch (err) {
         console.warn('[fourball tx manual] fallback to non-tx:', err?.message);
@@ -748,6 +806,7 @@ if (!idCached) {
       setParticipant((prev) => prev && { ...prev, room: roomNumber, partner: mateId || null });
     }
     const committed = await writeParticipants(next);
+    try { broadcastEventSync(eventId, { reason: 'assignFourballFallback' }); } catch {}
     if (participant && normId(participant.id) === pid) {
       const latestMe = (committed || []).find((p) => normId(p?.id) === pid);
       if (latestMe) setParticipant(latestMe);

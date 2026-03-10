@@ -1,7 +1,7 @@
 // /src/contexts/EventContext.jsx
 // (원본 최대 유지 + 필요한 최소 보강: 익명 인증 보장, participants 파생필드, scores 브리지/초기화, 업로드 파일명 유지)
 
-import React, { createContext, useState, useEffect, useRef, useContext } from 'react';
+import React, { createContext, useState, useEffect, useRef, useContext, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import {
@@ -13,9 +13,11 @@ import {
   deleteDoc,
   serverTimestamp,
   getDoc,
+  getDocFromServer,
   getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 
 import {
   getAuth,
@@ -308,6 +310,39 @@ export function EventProvider({ children }) {
     };
   }, []);
 
+  const applyIncomingEventData = useCallback((raw) => {
+    const withPV = normalizePublicView(raw || {});
+    const withGate = normalizePlayerGate(withPV);
+
+    try {
+      const modeNow = normalizeMode(withGate?.mode || 'stroke');
+      const field = participantsFieldByMode(modeNow);
+      const primaryArr = Array.isArray(withGate?.[field]) ? normalizeParticipantsRoomFields(withGate[field]) : [];
+      const legacyArr = Array.isArray(withGate?.participants) ? normalizeParticipantsRoomFields(withGate.participants) : [];
+      const mergedArr = primaryArr.length ? mergeParticipantsById(primaryArr, legacyArr) : legacyArr;
+      withGate[field] = mergedArr;
+      withGate.participants = mergedArr;
+    } catch {}
+
+    setEventData(withGate);
+    lastEventDataRef.current = withGate;
+    return withGate;
+  }, []);
+
+  const refreshEventNow = useCallback(async () => {
+    if (!eventId) return;
+    try {
+      await ensureAuthed();
+      const snap = await getDocFromServer(doc(db, 'events', eventId));
+      if (snap.exists()) applyIncomingEventData(snap.data() || {});
+    } catch (e) {
+      try {
+        const snap = await getDoc(doc(db, 'events', eventId));
+        if (snap.exists()) applyIncomingEventData(snap.data() || {});
+      } catch {}
+    }
+  }, [eventId, applyIncomingEventData]);
+
   // 선택 이벤트 구독
   useEffect(() => {
     if (!eventId) {
@@ -321,23 +356,7 @@ export function EventProvider({ children }) {
       if (cancelled) return;
       const docRef = doc(db, 'events', eventId);
       unsub = onSnapshot(docRef, { includeMetadataChanges: true }, (snap) => {
-        const data = snap.data();
-        const withPV = normalizePublicView(data || {});
-        const withGate = normalizePlayerGate(withPV);
-
-        // ✅ 모드별 participants 분리: 항상 현재 모드 split 필드를 우선하고, legacy participants는 fallback/보강으로만 사용
-        try {
-          const modeNow = normalizeMode(withGate?.mode || 'stroke');
-          const field = participantsFieldByMode(modeNow);
-          const primaryArr = Array.isArray(withGate?.[field]) ? normalizeParticipantsRoomFields(withGate[field]) : [];
-          const legacyArr = Array.isArray(withGate?.participants) ? normalizeParticipantsRoomFields(withGate.participants) : [];
-          const mergedArr = primaryArr.length ? mergeParticipantsById(primaryArr, legacyArr) : legacyArr;
-          withGate[field] = mergedArr;
-          withGate.participants = mergedArr;
-        } catch {}
-
-        setEventData(withGate);
-        lastEventDataRef.current = withGate;
+        applyIncomingEventData(snap.data());
       });
     });
     return () => {
@@ -345,6 +364,39 @@ export function EventProvider({ children }) {
       if (unsub) unsub();
     };
   }, [eventId]);
+
+  useEffect(() => {
+    if (!eventId) return;
+
+    let raf = 0;
+    const scheduleRefresh = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => { refreshEventNow(); });
+    };
+
+    const onFocus = () => scheduleRefresh();
+    const onPageShow = () => scheduleRefresh();
+    const onVisible = () => {
+      try {
+        if (document.visibilityState === 'visible') scheduleRefresh();
+      } catch {
+        scheduleRefresh();
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('visibilitychange', onVisible);
+    const unsubSync = subscribeEventSync(eventId, () => scheduleRefresh());
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onPageShow);
+      document.removeEventListener('visibilitychange', onVisible);
+      try { unsubSync(); } catch {}
+    };
+  }, [eventId, refreshEventNow]);
 
   const loadEvent = async (id) => {
     setEventId(id);
@@ -384,6 +436,7 @@ export function EventProvider({ children }) {
           await setDoc(ref, sanitizeUndefinedDeep(toWrite), { merge: true });
           lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...toWrite };
           setEventData((prev) => (prev ? { ...prev, ...toWrite } : toWrite));
+          try { broadcastEventSync(eventId, { reason: 'updateEvent' }); } catch {}
         } catch (e) {
           console.warn('[EventContext] updateEvent (debounced) failed:', e, 'payload:', toWrite);
         } finally {
@@ -428,6 +481,7 @@ export function EventProvider({ children }) {
 
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...enriched };
       setEventData((prev) => (prev ? { ...prev, ...enriched } : enriched));
+      try { broadcastEventSync(eventId, { reason: 'updateEventImmediate' }); } catch {}
     } catch (e) {
       console.warn('[EventContext] updateEventImmediate failed:', e);
       throw e;
@@ -437,6 +491,7 @@ export function EventProvider({ children }) {
   const updateEventById = async (id, updates) => {
     await ensureAuthed();
     await updateDoc(doc(db, 'events', id), updates);
+    try { broadcastEventSync(id, { reason: 'updateEventById' }); } catch {}
   };
 
   const deleteEvent = async (id) => {
