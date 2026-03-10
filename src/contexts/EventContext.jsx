@@ -15,6 +15,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
@@ -343,6 +344,33 @@ export function EventProvider({ children }) {
     }
   }, [eventId, applyIncomingEventData]);
 
+  const refreshScoresNow = useCallback(async () => {
+    if (!eventId) return;
+    if (document?.hidden) return;
+    try {
+      await ensureAuthed();
+      let snap = null;
+      try {
+        snap = await getDocsFromServer(collection(db, 'events', eventId, 'scores'));
+      } catch {
+        snap = await getDocs(collection(db, 'events', eventId, 'scores'));
+      }
+      const nextMap = {};
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        if (Object.prototype.hasOwnProperty.call(data, 'score')) nextMap[String(d.id)] = data.score ?? null;
+      });
+      if (!deepEqual(scoresMapRef.current || {}, nextMap || {})) {
+        scoresMapRef.current = nextMap;
+        setScoresMap(nextMap);
+      }
+      if (!scoresReadyRef.current) {
+        scoresReadyRef.current = true;
+        setScoresReady(true);
+      }
+    } catch {}
+  }, [eventId]);
+
   // 선택 이벤트 구독
   useEffect(() => {
     if (!eventId) {
@@ -371,7 +399,7 @@ export function EventProvider({ children }) {
     let raf = 0;
     const scheduleRefresh = () => {
       if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => { refreshEventNow(); });
+      raf = requestAnimationFrame(() => { refreshEventNow(); refreshScoresNow(); });
     };
 
     const onFocus = () => scheduleRefresh();
@@ -396,7 +424,7 @@ export function EventProvider({ children }) {
       document.removeEventListener('visibilitychange', onVisible);
       try { unsubSync(); } catch {}
     };
-  }, [eventId, refreshEventNow]);
+  }, [eventId, refreshEventNow, refreshScoresNow]);
 
   const loadEvent = async (id) => {
     setEventId(id);
@@ -771,6 +799,7 @@ export function EventProvider({ children }) {
     } catch (e) {
       console.warn('[EventContext] upsertScores failed:', e);
     }
+    try { broadcastEventSync(eventId, { reason: 'upsertScores' }); } catch {}
   };
 
 
@@ -882,6 +911,7 @@ export function EventProvider({ children }) {
     } catch (e) {
       console.warn('[EventContext] resetScores failed:', e);
     }
+    try { broadcastEventSync(eventId, { reason: 'resetScores' }); } catch {}
   };
 
 

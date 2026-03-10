@@ -339,7 +339,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
   const roomCount = useMemo(() => (Array.isArray(roomNames) ? roomNames.length : 0), [roomNames]);
   const isValidStrokeRoom = (roomNo) => {
-    if (variant !== 'stroke' || !roomNo) return true;
+    if (variant !== 'stroke') return true;
+    if (!roomNo) return false;
     const myGroup = Number(viewParticipant?.group) || 0;
     const sameGroupExists = effectiveParticipants.some(
       (p) =>
@@ -353,7 +354,8 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
   };
 
   const isValidFourballRoom = (roomNo) => {
-    if (variant !== 'fourball' || !roomNo) return true;
+    if (variant !== 'fourball') return true;
+    if (!roomNo) return false;
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
     return currentCount < 4;
   };

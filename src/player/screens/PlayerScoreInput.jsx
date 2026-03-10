@@ -99,7 +99,7 @@ export default function PlayerScoreInput() {
     roomNames = [],
   } = useContext(PlayerContext);
 
-  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
+  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady, upsertScores } = useContext(EventContext) || {};
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
   const eventId = ctxEventId || routeEventId;
@@ -128,6 +128,7 @@ export default function PlayerScoreInput() {
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     if (!eventId) return;
@@ -218,13 +219,23 @@ export default function PlayerScoreInput() {
     });
     setBaseDraft(base);
 
-    // 저장 직후(hasEdited=false)에는 저장된 값을 드래프트로 동기화
-    if (!bootstrappedRef.current || !hasEdited) {
+    if (!bootstrappedRef.current) {
       setDraft(base);
       bootstrappedRef.current = true;
+      return;
+    }
+
+    if (savingRef.current) {
+      const mismatch = Object.keys(base).some((k) => String(base[k] ?? '') !== String(draft[k] ?? ''));
+      if (!mismatch) savingRef.current = false;
+      return;
+    }
+
+    if (!hasEdited) {
+      setDraft(base);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedRoomPlayers, scoresMap, hasEdited]);
+  }, [orderedRoomPlayers, scoresMap, scoresReady, hasEdited, draft]);
 
   // Dirty 계산
   const isReady = useMemo(
@@ -250,7 +261,8 @@ export default function PlayerScoreInput() {
     if (!eventId) return;
     try{
       await ensureMembership(eventId, myRoom);
-      const ops = [];
+      const payload = [];
+      const committedDraft = { ...baseDraft };
 
       orderedRoomPlayers.forEach((p) => {
         const key = String(p.id);
@@ -259,21 +271,24 @@ export default function PlayerScoreInput() {
         if (raw === undefined || String(raw) === String(before)) return;
 
         const newScore = toNumberOrNull(raw);
-        const ref = doc(db, 'events', eventId, 'scores', key);
-        ops.push(setDoc(ref, { room: myRoom, score: newScore, updatedAt: serverTimestamp() }, { merge: true }));
+        payload.push({ id: key, room: myRoom, score: newScore });
+        committedDraft[key] = raw ?? '';
       });
 
-      await Promise.all(ops);
+      if (payload.length > 0) {
+        if (typeof upsertScores === 'function') {
+          await upsertScores(payload);
+        } else {
+          await Promise.all(payload.map((it) => {
+            const ref = doc(db, 'events', eventId, 'scores', String(it.id));
+            return setDoc(ref, { room: it.room, score: it.score ?? null, updatedAt: serverTimestamp() }, { merge: true });
+          }));
+        }
+      }
 
-      // 저장 후 스냅샷 승격 → dirty 해제
-      setBaseDraft((prev) => {
-        const next = { ...prev };
-        orderedRoomPlayers.forEach((p) => {
-          const key = String(p.id);
-          if (draft[key] !== undefined) next[key] = draft[key] ?? '';
-        });
-        return next;
-      });
+      savingRef.current = true;
+      setBaseDraft(committedDraft);
+      setDraft(committedDraft);
       setHasEdited(false);
 
       alert('저장되었습니다.');

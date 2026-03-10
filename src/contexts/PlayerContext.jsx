@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   updateDoc,        // ✅ update만 사용 (create 금지)
   getDoc,           // ✅ 이벤트 문서 존재 확인
+  getDocFromServer,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { EventContext } from './EventContext';
@@ -444,7 +445,12 @@ if (!idCached) {
     if (!eventId) return;
     try {
       await ensureAuthReady();
-      const snap = await getDoc(doc(db, 'events', eventId));
+      let snap = null;
+      try {
+        snap = await getDocFromServer(doc(db, 'events', eventId));
+      } catch {
+        snap = await getDoc(doc(db, 'events', eventId));
+      }
       const data = snap.exists() ? (snap.data() || {}) : {};
       const md = normalizeMode(data.mode || 'stroke');
       setMode(md);
