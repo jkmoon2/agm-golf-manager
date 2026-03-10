@@ -11,7 +11,53 @@ import { EventContext } from '../../contexts/EventContext';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { getEffectiveParticipantsFromEvent, readPlayerRoom, writePlayerRoom } from '../utils/playerState';
+
+
+function getPlayerTabId(){
+  try {
+    if (!window.name || !window.name.startsWith('AGM_PLAYER_TAB_')) {
+      window.name = `AGM_PLAYER_TAB_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    }
+    return window.name;
+  } catch {
+    return 'AGM_PLAYER_TAB_FALLBACK';
+  }
+}
+function playerStorageKey(eventId, key){
+  return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
+}
+
+
+function getEffectiveParticipants(eventData){
+  const safeArr = (v) => (Array.isArray(v) ? v : []);
+  const mode = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+  const field = (mode === 'fourball') ? 'participantsFourball' : 'participantsStroke';
+  const primary = safeArr(eventData?.[field]);
+  const legacy = safeArr(eventData?.participants);
+  if (!primary.length) {
+    return legacy.map((p, i) => {
+      const obj = (p && typeof p === 'object') ? p : {};
+      const room = (obj?.room ?? obj?.roomNumber ?? null);
+      return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+    });
+  }
+  const map = new Map();
+  legacy.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  primary.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  return Array.from(map.values()).map((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const room = (obj?.room ?? obj?.roomNumber ?? null);
+    return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+  });
+}
 
 // ★ patch: gate helpers + ts
 function normalizeGate(raw){
@@ -71,7 +117,7 @@ function normalizeHiddenRooms(pv, roomCount, viewKey) {
   const min = Math.min(...nums);
   const max = Math.max(...nums);
   const looksOneBased =
-    (min >= 1 && max <= roomCount) || nums.some(v => v === 1 || v === roomCount);
+    min >= 1 && max <= roomCount || nums.some(v => v === 1 || v === roomCount);
 
   const idxs = looksOneBased ? nums.map(v => v - 1) : nums.slice();
   const filtered = idxs.filter(i => i >= 0 && i < roomCount);
@@ -183,7 +229,7 @@ export default function PlayerRoomTable() {
     ];
     const roomNo = candidates.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
     if (Number.isFinite(roomNo)) {
-      try { writePlayerRoom(paramId, roomNo); } catch {}
+      try { localStorage.setItem(playerStorageKey(paramId, 'currentRoom'), String(roomNo)); } catch {}
     }
   }, [eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
 
@@ -197,7 +243,10 @@ export default function PlayerRoomTable() {
       : [];
   }, [eventData]);
 
-  const participants = useMemo(() => getEffectiveParticipantsFromEvent(eventData, [], eventData?.mode), [eventData]);
+  const participants = useMemo(
+    () => getEffectiveParticipants(eventData),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+  );
 
   // Admin의 선택(숨김 방) 복원 – 루트/모드별/0·1기반 혼용 모두 흡수
   const hiddenRooms = useMemo(() => {
@@ -292,11 +341,11 @@ export default function PlayerRoomTable() {
                 try {
                   const cands = [
                     eventData?.myRoom,
-                    readPlayerRoom(paramId, false),
+                    localStorage.getItem(playerStorageKey(paramId, 'currentRoom')),
                   ];
                   const roomNo = cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
                   if (Number.isFinite(roomNo)) {
-                    writePlayerRoom(paramId, roomNo);
+                    localStorage.setItem(playerStorageKey(paramId, 'currentRoom'), String(roomNo));
                   }
                 } catch {}
                 if (!nextDisabled) navigate(`/player/home/${paramId}/3`);
@@ -407,11 +456,11 @@ export default function PlayerRoomTable() {
             try {
               const cands = [
                 eventData?.myRoom,
-                readPlayerRoom(paramId, false),
+                localStorage.getItem(playerStorageKey(paramId, 'currentRoom')),
               ];
               const roomNo = cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
               if (Number.isFinite(roomNo)) {
-                writePlayerRoom(paramId, roomNo);
+                localStorage.setItem(playerStorageKey(paramId, 'currentRoom'), String(roomNo));
               }
             } catch {}
             if (!nextDisabled) navigate(`/player/home/${paramId}/3`);

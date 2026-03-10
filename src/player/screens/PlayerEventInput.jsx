@@ -5,9 +5,55 @@ import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import { deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
-import { getEffectiveParticipantsFromEvent, readPlayerRoom, writePlayerRoom } from '../utils/playerState';
+
+
+function getPlayerTabId(){
+  try {
+    if (!window.name || !window.name.startsWith('AGM_PLAYER_TAB_')) {
+      window.name = `AGM_PLAYER_TAB_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    }
+    return window.name;
+  } catch {
+    return 'AGM_PLAYER_TAB_FALLBACK';
+  }
+}
+function playerStorageKey(eventId, key){
+  return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
+}
+
+
+function getEffectiveParticipants(eventData){
+  const safeArr = (v) => (Array.isArray(v) ? v : []);
+  const mode = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+  const field = (mode === 'fourball') ? 'participantsFourball' : 'participantsStroke';
+  const primary = safeArr(eventData?.[field]);
+  const legacy = safeArr(eventData?.participants);
+  if (!primary.length) {
+    return legacy.map((p, i) => {
+      const obj = (p && typeof p === 'object') ? p : {};
+      const room = (obj?.room ?? obj?.roomNumber ?? null);
+      return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+    });
+  }
+  const map = new Map();
+  legacy.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  primary.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  return Array.from(map.values()).map((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const room = (obj?.room ?? obj?.roomNumber ?? null);
+    return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+  });
+}
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -32,9 +78,13 @@ function tsToMillis(ts){
 }
 
 function readRoomFromLocal(eventId){
-  return readPlayerRoom(eventId, false);
+  try {
+    const v = localStorage.getItem(playerStorageKey(eventId, 'currentRoom'));
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 1) return n;
+  } catch {}
+  return NaN;
 }
-
 
 const MAX_PER_ROOM = 4;
 
@@ -150,7 +200,10 @@ export default function PlayerEventInput(){
 
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
-  const participants = useMemo(() => getEffectiveParticipantsFromEvent(eventData, [], eventData?.mode), [eventData]);
+  const participants = useMemo(
+    () => getEffectiveParticipants(eventData),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+  );
   const events = useMemo(
     () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
     [eventData]
@@ -192,7 +245,7 @@ export default function PlayerEventInput(){
 
   useEffect(() => {
     if (Number.isFinite(roomIdx) && roomIdx >= 1) {
-      try { writePlayerRoom(eventId, roomIdx); } catch {}
+      try { localStorage.setItem(playerStorageKey(eventId, 'currentRoom'), String(roomIdx)); } catch {}
     }
   }, [roomIdx, eventId]);
 
@@ -383,43 +436,6 @@ export default function PlayerEventInput(){
         merged[evId] = mSlot;
       });
 
-      {
-        const _writes = [];
-        const _deletes = [];
-        const _id = (eventId || ctxId);
-        Object.entries(src).forEach(([evId, slot]) => {
-          const sPerson = slot?.person || {};
-          Object.entries(sPerson).forEach(([pid, val]) => {
-            if (!roomPids.has(String(pid))) return;
-            const docId = `${String(pid)}__${String(evId)}`;
-            const ref = doc(db, 'events', _id, 'eventInputs', docId);
-            const payload = { room: roomIdx, pid: String(pid), evId: String(evId) };
-            if (val === '' || val == null) {
-              _deletes.push(deleteDoc(ref));
-              return;
-            }
-            if (val && typeof val === 'object' && Array.isArray(val.values)) {
-              payload.values = val.values.slice();
-              if (val.bonus !== undefined) payload.bonus = val.bonus;
-            } else {
-              payload.value = (val === '' || val == null) ? null : val;
-              if (val && typeof val === 'object' && val.bonus !== undefined) payload.bonus = val.bonus;
-            }
-            _writes.push(setDoc(ref, payload, { merge: true }));
-          });
-        });
-        events.forEach((ev) => {
-          roomPids.forEach((pid) => {
-            const exists = Object.prototype.hasOwnProperty.call(merged?.[ev.id]?.person || {}, String(pid));
-            if (!exists) {
-              const ref = doc(db, 'events', _id, 'eventInputs', `${String(pid)}__${String(ev.id)}`);
-              _deletes.push(deleteDoc(ref));
-            }
-          });
-        });
-        if (_writes.length) { await Promise.all(_writes); }
-        if (_deletes.length) { await Promise.all(_deletes); }
-      }
 
       if (typeof updateEventImmediate === 'function') {
         await updateEventImmediate({ eventInputs: merged }, false);

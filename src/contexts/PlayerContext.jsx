@@ -15,7 +15,6 @@ import { db } from '../firebase';
 import { EventContext } from './EventContext';
 import { useLocation } from 'react-router-dom';
 import { getAuth, signInAnonymously } from 'firebase/auth';
-import { mergeParticipantsById, playerStorageKey, participantsFieldByMode, normalizeMode } from '../player/utils/playerState';
 
 // (선택) 남아 있던 import — 사용하지 않아도 빌드 가능한 상태라면 그대로 두셔도 됩니다.
 // import { pickRoomForStroke } from '../player/logic/assignStroke';
@@ -65,7 +64,81 @@ const toInt    = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
  * - Admin(localStorage.eventId 등)와 충돌 방지
  * - iOS에서 sessionStorage가 날아가도 방배정/리스트가 풀리지 않도록 최소 백업
  */
+const getPlayerTabId = () => {
+  try {
+    if (!window.name || !window.name.startsWith('AGM_PLAYER_TAB_')) {
+      window.name = `AGM_PLAYER_TAB_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    }
+    return window.name;
+  } catch {
+    // window.name 접근이 막힌 환경(드물게) 대비
+    return 'AGM_PLAYER_TAB_FALLBACK';
+  }
+};
 
+const playerStorageKey = (eid, key) => `agm:player:${getPlayerTabId()}:${eid || 'noevent'}:${key}`;
+
+function normalizeMode(md = 'stroke') {
+  return (String(md || '').toLowerCase() === 'fourball' || String(md || '').toLowerCase() === 'agm') ? 'fourball' : 'stroke';
+}
+
+// 모드별 participants 필드와 legacy participants를 "id 기준" 병합 (SSOT 보강)
+const mergeParticipantsById = (primary = [], legacy = []) => {
+  const map = new Map();
+  const push = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (const p of arr) {
+      if (!p) continue;
+      const id = normId(p.id || p.uid || p.authCode || '');
+      const k = id || JSON.stringify(p);
+      if (!map.has(k)) map.set(k, p);
+      else map.set(k, { ...map.get(k), ...p });
+    }
+  };
+  push(legacy);
+  push(primary);
+  return Array.from(map.values());
+};
+
+function normalizeParticipantRecord(p, fallbackId = '') {
+  const scoreRaw = p?.score;
+  const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
+  const room = (p?.room ?? p?.roomNumber ?? null);
+  return {
+    ...((p && typeof p === 'object') ? p : {}),
+    id: normId(p?.id ?? fallbackId),
+    nickname: normName(p?.nickname),
+    handicap: toInt(p?.handicap, 0),
+    group: toInt(p?.group, 0),
+    authCode: (p?.authCode ?? '').toString(),
+    room,
+    roomNumber: room,
+    partner: p?.partner != null ? normId(p.partner) : null,
+    score: scoreVal,
+    selected: !!p?.selected,
+  };
+}
+
+function sanitizeParticipantForWrite(p) {
+  const src = normalizeParticipantRecord(p);
+  const out = { ...src };
+  delete out.score;
+  delete out.scoreRaw;
+  return out;
+}
+
+function participantsComparableString(p) {
+  try {
+    return JSON.stringify(sanitizeParticipantForWrite(p));
+  } catch {
+    return String(p?.id || '');
+  }
+}
+
+// ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
+function participantsFieldByMode(md = 'stroke') {
+  return normalizeMode(md) === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
     ? roomNames[num - 1].trim()
@@ -277,7 +350,7 @@ export function PlayerProvider({ children }) {
     const ref = doc(db, 'events', eventId);
     const unsub = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : {};
-      const md = (data.mode === 'fourball' || data.mode === 'agm') ? 'fourball' : 'stroke';
+      const md = normalizeMode(data.mode || 'stroke');
       setMode(md);
 
       // ✅ 모드별 참가자 리스트(스트로크/포볼) 분리 저장 지원
@@ -290,25 +363,7 @@ const primaryParts = Array.isArray(data?.[f]) ? data[f] : [];
 const legacyParts  = Array.isArray(data.participants) ? data.participants : [];
 const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legacyParts) : legacyParts;
 
-      const partArr = rawParts.map((p, i) => {
-        // ★ FIX: 점수 기본값 0 → null 보정(초기화 오해 방지)
-        const scoreRaw = p?.score;
-        const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
-        return {
-          ...((p && typeof p === 'object') ? p : {}),
-          id:       normId(p?.id ?? i),
-          nickname: normName(p?.nickname),
-          handicap: toInt(p?.handicap, 0),
-          group:    toInt(p?.group, 0),
-          authCode: (p?.authCode ?? '').toString(),
-          // ✅ room / roomNumber를 단일 SSOT로 정규화(일부 페이지에서 roomNumber만 쓰는 경우 대비)
-          room:     (p?.room ?? p?.roomNumber ?? null),
-          roomNumber: (p?.room ?? p?.roomNumber ?? null),
-          partner:  p?.partner != null ? normId(p.partner) : null,
-          score:    scoreVal,
-          selected: !!p?.selected,
-        };
-      });
+      const partArr = rawParts.map((p, i) => normalizeParticipantRecord(p, i));
       setParticipants(typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(partArr) : partArr);
 
       const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
@@ -384,74 +439,58 @@ if (!idCached) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  const sanitizeParticipantForWrite = (p = {}, i = 0) => {
-    const out = {};
-    const ALLOWED = ['id','group','nickname','handicap','room','roomNumber','partner','authCode','selected'];
-    for (const k of ALLOWED) if (p[k] !== undefined) out[k] = p[k] ?? null;
-    if (out.id === undefined) out.id = String(p?.id ?? i);
-
-    if (out.group !== undefined) {
-      out.group = Number.isFinite(+out.group) ? +out.group : String(out.group ?? '');
-    }
-    if (out.handicap !== undefined) {
-      const n = Number(out.handicap);
-      out.handicap = Number.isFinite(n) ? n : (out.handicap == null ? null : String(out.handicap));
-    }
-    if (out.room !== undefined && out.room !== null) {
-      const n = Number(out.room);
-      out.room = Number.isFinite(n) ? n : String(out.room);
-    }
-    if (out.roomNumber !== undefined && out.roomNumber !== null) {
-      const n = Number(out.roomNumber);
-      out.roomNumber = Number.isFinite(n) ? n : String(out.roomNumber);
-    }
-    if (out.roomNumber == null && out.room != null) out.roomNumber = out.room;
-    if (out.partner !== undefined && out.partner !== null) out.partner = normId(out.partner);
-    if (typeof out.selected !== 'boolean' && out.selected != null) out.selected = !!out.selected;
-    return out;
-  };
-
-  async function writeParticipants(next, touchedIds = []) {
-    if (!eventId) return Array.isArray(next) ? next : [];
+  // participants 저장 (최신 서버 기준 patch merge)
+  async function writeParticipants(next) {
+    if (!eventId) return participants;
     await ensureAuthReady();
 
-    const eref = doc(db, 'events', eventId);
-    const modeNow = normalizeMode(mode || 'stroke');
-    const field = participantsFieldByMode(modeNow);
-    const touched = new Set((Array.isArray(touchedIds) ? touchedIds : []).map((v) => normId(v)));
-    const incomingMap = new Map((Array.isArray(next) ? next : []).map((p, i) => [normId(p?.id ?? i), sanitizeParticipantForWrite(p, i)]));
-
-    const result = await runTransaction(db, async (tx) => {
-      const snap = await tx.get(eref);
-      if (!snap.exists()) throw new Error('Event document does not exist');
-      const data = snap.data() || {};
-      const latestPrimary = Array.isArray(data?.[field]) ? data[field] : [];
-      const latestLegacy = Array.isArray(data?.participants) ? data.participants : [];
-      const latest = latestPrimary.length ? mergeParticipantsById(latestPrimary, latestLegacy) : latestLegacy;
-
-      const nextList = (Array.isArray(latest) ? latest : []).map((p, i) => {
-        const id = normId(p?.id ?? i);
-        if (touched.size && !touched.has(id)) return sanitizeParticipantForWrite(p, i);
-        return incomingMap.has(id) ? sanitizeParticipantForWrite({ ...p, ...incomingMap.get(id) }, i) : sanitizeParticipantForWrite(p, i);
-      });
-
-      if (touched.size) {
-        touched.forEach((id) => {
-          if (!nextList.some((p) => normId(p?.id) === id) && incomingMap.has(id)) {
-            nextList.push(incomingMap.get(id));
-          }
-        });
-      }
-
-      tx.update(eref, sanitizeForFirestore({
-        participants: nextList,
-        [field]: nextList,
-        participantsUpdatedAt: serverTimestamp(),
-      }));
-      return nextList;
+    const nextMap = new Map((Array.isArray(next) ? next : []).map((p) => [normId(p?.id), p]).filter(([id]) => !!id));
+    const currentMap = new Map((participants || []).map((p) => [normId(p?.id), p]));
+    const changedIds = Array.from(nextMap.keys()).filter((id) => {
+      return participantsComparableString(currentMap.get(id)) !== participantsComparableString(nextMap.get(id));
     });
 
-    return result;
+    if (!changedIds.length) return participants;
+
+    const merged = await runTransaction(db, async (tx) => {
+      const eref = doc(db, 'events', eventId);
+      const snap = await tx.get(eref);
+      if (!snap.exists()) throw new Error('Event document does not exist');
+
+      const data = snap.data() || {};
+      const md = normalizeMode(data.mode || mode || 'stroke');
+      const field = participantsFieldByMode(md);
+      const primary = Array.isArray(data?.[field]) ? data[field] : [];
+      const legacy = Array.isArray(data?.participants) ? data.participants : [];
+      const base = primary.length ? mergeParticipantsById(primary, legacy) : legacy;
+
+      const baseMap = new Map(base.map((p, i) => {
+        const normalized = normalizeParticipantRecord(p, i);
+        return [normId(normalized.id), normalized];
+      }));
+
+      changedIds.forEach((id) => {
+        const nextVal = nextMap.get(id);
+        if (!nextVal) return;
+        baseMap.set(id, sanitizeParticipantForWrite(nextVal));
+      });
+
+      const result = Array.from(baseMap.values()).map((p, i) => sanitizeParticipantForWrite(normalizeParticipantRecord(p, i)));
+
+      tx.set(eref, sanitizeForFirestore({
+        participants: result,
+        [field]: result,
+        participantsUpdatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }), { merge: true });
+
+      return result;
+    });
+
+    const normalizedMerged = (merged || []).map((p, i) => normalizeParticipantRecord(p, i));
+    const withScores = typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(normalizedMerged) : normalizedMerged;
+    setParticipants(withScores);
+    return withScores;
   }
 
   // ─ API (원본 유지) ─
@@ -462,10 +501,14 @@ if (!idCached) {
     const next = participants.map((p) =>
       normId(p.id) === targetId ? { ...p, room: rid } : p
     );
-    const saved = await writeParticipants(next, [targetId]);
-    setParticipants(saved);
+    setParticipants(next);
     if (participant && normId(participant.id) === targetId) {
-      setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid });
+      setParticipant((prev) => prev && { ...prev, room: rid });
+    }
+    const committed = await writeParticipants(next);
+    if (participant && normId(participant.id) === targetId) {
+      const latestMe = (committed || []).find((p) => normId(p?.id) === targetId);
+      if (latestMe) setParticipant(latestMe);
     }
 
     try {
@@ -480,14 +523,18 @@ if (!idCached) {
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
-      if (normId(p.id) === a) return { ...p, room: rid, roomNumber: rid, partner: b };
-      if (normId(p.id) === b) return { ...p, room: rid, roomNumber: rid, partner: a };
+      if (normId(p.id) === a) return { ...p, room: rid, partner: b };
+      if (normId(p.id) === b) return { ...p, room: rid, partner: a };
       return p;
     });
-    const saved = await writeParticipants(next, [a, b]);
-    setParticipants(saved);
-    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: b });
-    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: a });
+    setParticipants(next);
+    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, partner: b });
+    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, partner: a });
+    const committed = await writeParticipants(next);
+    if (participant && (normId(participant.id) === a || normId(participant.id) === b)) {
+      const latestMe = (committed || []).find((p) => normId(p?.id) === normId(participant.id));
+      if (latestMe) setParticipant(latestMe);
+    }
 
     try {
       await ensureAuthReady();
@@ -508,59 +555,57 @@ if (!idCached) {
     await ensureAuthReady();
 
     const pid = normId(participantId || participant?.id);
-    const me = participants.find((p) => normId(p.id) === pid) ||
-               (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
-    if (!me) throw new Error('Participant not found');
-
-    // ✅ 이미 방 배정된 경우: 재배정 금지(특히 iOS/운영자 참가자탭에서 상태가 풀려 보일 때 2회 클릭 방지)
-    if (isValidRoom(me?.room)) {
-      return { roomNumber: Number(me.room), alreadyAssigned: true };
-    }
-
-    let chosenRoom = null;
-    const saved = await runTransaction(db, async (tx) => {
+    const result = await runTransaction(db, async (tx) => {
       const eref = doc(db, 'events', eventId);
       const snap = await tx.get(eref);
       const data = snap.exists() ? (snap.data() || {}) : {};
-      const field = participantsFieldByMode(normalizeMode(mode || 'stroke'));
-      const latestPrimary = Array.isArray(data?.[field]) ? data[field] : [];
-      const latestLegacy = Array.isArray(data?.participants) ? data.participants : [];
-      const latest = latestPrimary.length ? mergeParticipantsById(latestPrimary, latestLegacy) : latestLegacy;
-      const currentMe = latest.find((p, i) => normId(p?.id ?? i) === pid) || me;
+      const md = normalizeMode(data.mode || mode || 'stroke');
+      const field = participantsFieldByMode(md);
+      const primary = Array.isArray(data?.[field]) ? data[field] : [];
+      const legacy = Array.isArray(data?.participants) ? data.participants : [];
+      const base = primary.length ? mergeParticipantsById(primary, legacy) : legacy;
+      const parts = base.map((p, i) => normalizeParticipantRecord(p, i));
 
-      if (isValidRoom(currentMe?.room)) {
-        chosenRoom = Number(currentMe.room);
-        return latest.map((p, i) => sanitizeParticipantForWrite(p, i));
+      const me = parts.find((p) => normId(p.id) === pid) ||
+                 (participant ? parts.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
+      if (!me) throw new Error('Participant not found');
+
+      if (isValidRoom(me?.room)) {
+        return { roomNumber: Number(me.room), alreadyAssigned: true, next: parts };
       }
 
-      let candidates = validRoomsForStroke(latest, roomCount, currentMe);
+      let candidates = validRoomsForStroke(parts, roomCount, me);
       if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
-      chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
+      const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
-      const next = latest.map((p, i) =>
-        normId(p?.id ?? i) === pid ? sanitizeParticipantForWrite({ ...p, room: chosenRoom, roomNumber: chosenRoom }, i) : sanitizeParticipantForWrite(p, i)
+      const next = parts.map((p) =>
+        normId(p.id) === normId(me.id) ? sanitizeParticipantForWrite({ ...p, room: chosenRoom, roomNumber: chosenRoom }) : sanitizeParticipantForWrite(p)
       );
 
-      tx.update(eref, sanitizeForFirestore({
+      tx.set(eref, sanitizeForFirestore({
         participants: next,
         [field]: next,
         participantsUpdatedAt: serverTimestamp(),
-      }));
-      return next;
+        updatedAt: serverTimestamp(),
+      }), { merge: true });
+
+      const rref = doc(db, 'events', eventId, 'rooms', String(chosenRoom));
+      tx.set(rref, { members: arrayUnion(normId(me.id)) }, { merge: true });
+
+      return { roomNumber: chosenRoom, roomLabel: makeLabel(roomNames, chosenRoom), next };
     });
 
-    setParticipants(saved);
-    if (participant && normId(participant.id) === pid) {
-      setParticipant((prev) => prev && { ...prev, room: chosenRoom, roomNumber: chosenRoom });
-    }
+    const normalizedNext = (result?.next || []).map((p, i) => normalizeParticipantRecord(p, i));
+    const withScores = typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(normalizedNext) : normalizedNext;
+    setParticipants(withScores);
+    const latestMe = withScores.find((p) => normId(p?.id) === pid);
+    if (latestMe) setParticipant(latestMe);
 
-    try {
-      await ensureAuthReady();
-      const rref = doc(db, 'events', eventId, 'rooms', String(chosenRoom));
-      await setDoc(rref, { members: arrayUnion(pid) }, { merge: true });
-    } catch (_) {}
-
-    return { roomNumber: chosenRoom, roomLabel: makeLabel(roomNames, chosenRoom) };
+    return {
+      roomNumber: result?.roomNumber ?? null,
+      roomLabel: result?.roomLabel || (result?.roomNumber ? makeLabel(roomNames, result.roomNumber) : ''),
+      alreadyAssigned: !!result?.alreadyAssigned,
+    };
   }
 
   async function assignFourballForOneAndPartner(participantId) {
@@ -698,11 +743,15 @@ if (!idCached) {
       if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
       return p;
     });
+    setParticipants(next);
     if (participant && normId(participant.id) === pid) {
       setParticipant((prev) => prev && { ...prev, room: roomNumber, partner: mateId || null });
     }
-    const saved = await writeParticipants(next, [pid, mateId].filter(Boolean));
-    setParticipants(saved);
+    const committed = await writeParticipants(next);
+    if (participant && normId(participant.id) === pid) {
+      const latestMe = (committed || []).find((p) => normId(p?.id) === pid);
+      if (latestMe) setParticipant(latestMe);
+    }
 
     try {
       await ensureAuthReady();

@@ -15,7 +15,6 @@ import tCss    from './PlayerEventConfirm.module.css';
 
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
-import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -71,6 +70,38 @@ function bonusMapFromParams(params){
 }
 
 
+
+function getEffectiveParticipants(eventData){
+  const safeArr = (v) => (Array.isArray(v) ? v : []);
+  const mode = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+  const field = (mode === 'fourball') ? 'participantsFourball' : 'participantsStroke';
+  const primary = safeArr(eventData?.[field]);
+  const legacy = safeArr(eventData?.participants);
+  if (!primary.length) {
+    return legacy.map((p, i) => {
+      const obj = (p && typeof p === 'object') ? p : {};
+      const room = (obj?.room ?? obj?.roomNumber ?? null);
+      return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+    });
+  }
+  const map = new Map();
+  legacy.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  primary.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  return Array.from(map.values()).map((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const room = (obj?.room ?? obj?.roomNumber ?? null);
+    return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+  });
+}
+
 function foldAccum(obj, aggregator='sum'){
   const vals = Array.isArray(obj?.values) ? obj.values : [];
   return aggregate(vals, aggregator);
@@ -88,7 +119,10 @@ export default function PlayerEventConfirm() {
       loadEvent(urlEventId);
     }
   }, [urlEventId, eventId, loadEvent]);
-  const participantsBase = useMemo(() => getEffectiveParticipantsFromEvent(eventData, [], eventData?.mode), [eventData]);
+  const participantsBase = useMemo(
+    () => getEffectiveParticipants(eventData),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+  );
   const participants = useMemo(
     () => (typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(participantsBase) : participantsBase),
     [participantsBase, overlayScoresToParticipants]

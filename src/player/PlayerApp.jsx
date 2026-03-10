@@ -16,7 +16,21 @@ import { PlayerContext }  from '../contexts/PlayerContext';
 import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 안전망
 import { db } from '../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
-import { getEffectiveParticipantsFromEvent, readPlayerAuthCode, readPlayerParticipant, readPlayerTicket, writePlayerAuthCode, writePlayerParticipant } from './utils/playerState';
+
+
+function getPlayerTabId(){
+  try {
+    if (!window.name || !window.name.startsWith('AGM_PLAYER_TAB_')) {
+      window.name = `AGM_PLAYER_TAB_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+    }
+    return window.name;
+  } catch {
+    return 'AGM_PLAYER_TAB_FALLBACK';
+  }
+}
+function playerStorageKey(eventId, key){
+  return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
+}
 
 export default function PlayerApp() {
   const { eventId } = useParams();
@@ -48,74 +62,35 @@ export default function PlayerApp() {
               setAuthCode?.(codeStr);
               try { sessionStorage.setItem(`auth_${eventId}`, 'true'); } catch {}
               try { sessionStorage.setItem(`authcode_${eventId}`, codeStr); } catch {}
-              try { writePlayerAuthCode(eventId, codeStr); } catch {}
+              try { localStorage.setItem(playerStorageKey(eventId, 'authcode'), codeStr); } catch {}
             }
             if (participantObj) {
               setParticipant?.(participantObj);
               try { sessionStorage.setItem(`participant_${eventId}`, JSON.stringify(participantObj)); } catch {}
-              try { writePlayerParticipant(eventId, participantObj); } catch {}
+              try { localStorage.setItem(playerStorageKey(eventId, 'participant'), JSON.stringify(participantObj)); } catch {}
             }
           } catch {}
         };
 
         // 1) sessionStorage 우선
-        const codeSS = readPlayerAuthCode(eventId, true) || '';
+        const codeSS = sessionStorage.getItem(`authcode_${eventId}`) || '';
         if (codeSS) setAuthCode?.(codeSS);
 
-        const partSS = readPlayerParticipant(eventId, true);
+        const partSS = sessionStorage.getItem(`participant_${eventId}`);
         if (partSS) {
-          try { applyAuthAndParticipant(codeSS, partSS); } catch {}
+          try { applyAuthAndParticipant(codeSS, JSON.parse(partSS)); } catch {}
           return;
         }
 
-        // 2) tab-scoped/local fallback (iOS/PWA에서 sessionStorage가 초기화되는 케이스 대응)
-        const partLS = readPlayerParticipant(eventId, true);
-        const codeLS = readPlayerAuthCode(eventId, true) || '';
+        // 2) localStorage fallback (iOS/PWA에서 sessionStorage가 초기화되는 케이스 대응)
+        const partLS = localStorage.getItem(playerStorageKey(eventId, 'participant'));
+        const codeLS = localStorage.getItem(playerStorageKey(eventId, 'authcode')) || '';
         if (partLS) {
-          try { applyAuthAndParticipant(codeLS, partLS); } catch {}
+          try { applyAuthAndParticipant(codeLS, JSON.parse(partLS)); } catch {}
           return;
         }
 
-        // 3) ticket:${eventId} (코드만 저장되어 있는 경우) → Firestore에서 참가자 재조회
-        let ticketCode = '';
-        try {
-          const t = readPlayerTicket(eventId, true);
-          if (t) {
-            ticketCode = String(t?.code || '').trim();
-          }
-        } catch {}
-
-        if (ticketCode) {
-          const norm = (v) => String(v || '').trim().toUpperCase();
-
-          let found = null;
-          try {
-            const snap = await getDoc(doc(db, 'events', eventId));
-            if (snap.exists()) {
-              const data = snap.data() || {};
-              const arr = getEffectiveParticipantsFromEvent(data, data.participants || [], data.mode);
-              if (Array.isArray(arr)) {
-                found = arr.find(p => norm(p?.authCode ?? p?.code ?? p?.auth_code ?? p?.authcode ?? '') === norm(ticketCode)) || null;
-              }
-            }
-          } catch {}
-
-          if (!found) {
-            try {
-              const qs = await getDocs(collection(db, 'events', eventId, 'participants'));
-              qs.forEach(d => {
-                const v = d.data() || {};
-                const vv = norm(v?.authCode ?? v?.code ?? v?.auth_code ?? v?.authcode ?? '');
-                if (!found && vv === norm(ticketCode)) found = { id: d.id, ...v };
-              });
-            } catch {}
-          }
-
-          if (found) {
-            applyAuthAndParticipant(ticketCode, found);
-            return;
-          }
-        }
+        // 3) 같은 브라우저 다중 참가자 탭 충돌 방지를 위해 전역 ticket/localStorage fallback은 사용하지 않습니다.
       } catch {}
 
       // ✅ 여기까지 왔으면: 로그인/코드 재입력이 필요함 (iOS에서 앱 재실행/탭 리로드로 세션이 사라진 케이스)

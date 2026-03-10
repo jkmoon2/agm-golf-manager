@@ -16,7 +16,6 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { getEffectiveParticipantsFromEvent } from '../player/utils/playerState';
 
 import {
   getAuth,
@@ -76,10 +75,27 @@ function enrichParticipantsDerived(updates) {
 // ✅ 모드별 참가자 리스트(스트로크/포볼) 완전 분리 저장 지원
 // - 문서 필드: participantsStroke / participantsFourball
 // - 기존 호환: participants는 "현재 모드"의 미러로 계속 유지
+function normalizeMode(mode = 'stroke') {
+  const m = String(mode || '').toLowerCase();
+  return (m === 'fourball' || m === 'agm') ? 'fourball' : 'stroke';
+}
 function participantsFieldByMode(mode = 'stroke') {
   // ✅ mode 값이 'agm'으로 들어오는 케이스까지 포볼로 동일 취급
-  const m = String(mode || '').toLowerCase();
-  return (m === 'fourball' || m === 'agm') ? 'participantsFourball' : 'participantsStroke';
+  return normalizeMode(mode) === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
+function mergeParticipantsById(primary = [], legacy = []) {
+  const map = new Map();
+  const push = (arr) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach((p, i) => {
+      if (!p || typeof p !== 'object') return;
+      const id = String(p?.id ?? p?.uid ?? p?.authCode ?? i);
+      map.set(id, { ...(map.get(id) || {}), ...p });
+    });
+  };
+  push(legacy);
+  push(primary);
+  return Array.from(map.values());
 }
 
 // room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
@@ -189,8 +205,6 @@ export function EventProvider({ children }) {
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
-  const [eventInputsLive, setEventInputsLive] = useState({});
-  const eventInputsLiveRef = useRef({});
 
   // ✅ scores 서브컬렉션 SSOT: Admin↔Player 공용 점수 맵(읽기 전용, 루트 문서에 미러링하지 않음)
   const [scoresMap, setScoresMap] = useState({});
@@ -298,8 +312,6 @@ export function EventProvider({ children }) {
   useEffect(() => {
     if (!eventId) {
       setEventData(null);
-      eventInputsLiveRef.current = {};
-      setEventInputsLive({});
       lastEventDataRef.current = null;
       return;
     }
@@ -313,72 +325,19 @@ export function EventProvider({ children }) {
         const withPV = normalizePublicView(data || {});
         const withGate = normalizePlayerGate(withPV);
 
+        // ✅ 모드별 participants 분리: 항상 현재 모드 split 필드를 우선하고, legacy participants는 fallback/보강으로만 사용
         try {
-          withGate.participants = getEffectiveParticipantsFromEvent(withGate, withGate?.participants || [], withGate?.mode);
-          const baseInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
-          const liveInputs = (eventInputsLiveRef.current && typeof eventInputsLiveRef.current === 'object') ? eventInputsLiveRef.current : {};
-          withGate.eventInputs = Object.keys(liveInputs).length ? { ...baseInputs, ...liveInputs } : baseInputs;
-        } catch {}
-
-        // ✅ includeMetadataChanges: true 환경에서 pendingWrites 스냅샷을 무조건 무시하면
-        //   (Player가 방배정/점수 입력 직후) Admin STEP7/STEP8 최초 진입 시
-        //   방배정 반영이 늦고, 홈으로 나갔다가 재진입해야 반영되는 현상이 발생할 수 있음.
-        //   → '데이터가 실제로 동일한 경우'에만 스킵하고, 내용이 바뀌면 즉시 반영.
-        try {
-          const prev = lastEventDataRef.current;
-          if (prev && deepEqual(prev, withGate)) return;
+          const modeNow = normalizeMode(withGate?.mode || 'stroke');
+          const field = participantsFieldByMode(modeNow);
+          const primaryArr = Array.isArray(withGate?.[field]) ? normalizeParticipantsRoomFields(withGate[field]) : [];
+          const legacyArr = Array.isArray(withGate?.participants) ? normalizeParticipantsRoomFields(withGate.participants) : [];
+          const mergedArr = primaryArr.length ? mergeParticipantsById(primaryArr, legacyArr) : legacyArr;
+          withGate[field] = mergedArr;
+          withGate.participants = mergedArr;
         } catch {}
 
         setEventData(withGate);
         lastEventDataRef.current = withGate;
-      });
-    });
-    return () => {
-      cancelled = true;
-      if (unsub) unsub();
-    };
-  }, [eventId]);
-
-
-  // eventInputs 서브컬렉션 실시간 병합(플레이어 입력 SSOT 보강)
-  useEffect(() => {
-    if (!eventId) {
-      setEventInputsLive({});
-      return;
-    }
-    let unsub = null;
-    let cancelled = false;
-    ensureAuthed().then(() => {
-      if (cancelled) return;
-      const colRef = collection(db, 'events', eventId, 'eventInputs');
-      unsub = onSnapshot(colRef, (snap) => {
-        const next = {};
-        snap.forEach((d) => {
-          const v = d.data() || {};
-          const evId = String(v.evId || '').trim();
-          const pid = String(v.pid || '').trim();
-          if (!evId || !pid) return;
-          if (!next[evId]) next[evId] = {};
-          const slot = next[evId];
-          const person = { ...(slot.person || {}) };
-          if (Array.isArray(v.values)) {
-            const obj = { values: v.values.slice() };
-            if (Object.prototype.hasOwnProperty.call(v, 'bonus')) obj.bonus = v.bonus;
-            person[pid] = obj;
-          } else if (Object.prototype.hasOwnProperty.call(v, 'value')) {
-            if (v.value === '' || v.value == null) {
-              delete person[pid];
-            } else {
-              person[pid] = v.value;
-            }
-          }
-          slot.person = person;
-          next[evId] = slot;
-        });
-        if (!deepEqual(eventInputsLiveRef.current || {}, next || {})) {
-          eventInputsLiveRef.current = next;
-          setEventInputsLive(next);
-        }
       });
     });
     return () => {

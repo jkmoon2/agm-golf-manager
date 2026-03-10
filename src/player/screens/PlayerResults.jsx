@@ -11,7 +11,6 @@ import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
@@ -33,6 +32,38 @@ function pickGateByMode(playerGate, mode){
   const isFour = (mode === 'fourball' || mode === 'agm');
   const nested = isFour ? playerGate?.fourball : playerGate?.stroke;
   return normalizeGate(nested || playerGate || {});
+}
+
+
+function getEffectiveParticipants(eventData){
+  const safeArr = (v) => (Array.isArray(v) ? v : []);
+  const mode = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+  const field = (mode === 'fourball') ? 'participantsFourball' : 'participantsStroke';
+  const primary = safeArr(eventData?.[field]);
+  const legacy = safeArr(eventData?.participants);
+  if (!primary.length) {
+    return legacy.map((p, i) => {
+      const obj = (p && typeof p === 'object') ? p : {};
+      const room = (obj?.room ?? obj?.roomNumber ?? null);
+      return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+    });
+  }
+  const map = new Map();
+  legacy.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  primary.forEach((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const id = String(obj?.id ?? i);
+    map.set(id, { ...(map.get(id) || {}), ...obj });
+  });
+  return Array.from(map.values()).map((p, i) => {
+    const obj = (p && typeof p === 'object') ? p : {};
+    const room = (obj?.room ?? obj?.roomNumber ?? null);
+    return { ...obj, id: obj?.id ?? i, room, roomNumber: room };
+  });
 }
 
 const strlen = (s) => Array.from(String(s || '')).length;
@@ -146,7 +177,10 @@ export default function PlayerResults() {
   const mode         = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
   const roomCount    = eventData?.roomCount || 0;
   const roomNames    = eventData?.roomNames || [];
-  const participants = getEffectiveParticipantsFromEvent(eventData, [], eventData?.mode);
+  const participants = useMemo(
+    () => getEffectiveParticipants(eventData),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+  );
 
   const [hiddenRooms, setHiddenRooms] = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
