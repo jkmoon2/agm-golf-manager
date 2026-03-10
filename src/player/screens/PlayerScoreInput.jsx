@@ -204,7 +204,13 @@ export default function PlayerScoreInput() {
   const [baseDraft, setBaseDraft] = useState({});
   const [draft, setDraft] = useState({});
   const bootstrappedRef = useRef(false); // 최초 1회 플래그
+  const draftRef = useRef({});
+  const hasEditedRef = useRef(false);
   const [hasEdited, setHasEdited] = useState(false); // ★ 입력 발생 여부
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   // 기준 스냅샷 생성
   useEffect(() => {
@@ -220,22 +226,23 @@ export default function PlayerScoreInput() {
     setBaseDraft(base);
 
     if (!bootstrappedRef.current) {
+      draftRef.current = base;
       setDraft(base);
       bootstrappedRef.current = true;
       return;
     }
 
     if (savingRef.current) {
-      const mismatch = Object.keys(base).some((k) => String(base[k] ?? '') !== String(draft[k] ?? ''));
+      const mismatch = Object.keys(base).some((k) => String(base[k] ?? '') !== String(draftRef.current[k] ?? ''));
       if (!mismatch) savingRef.current = false;
       return;
     }
 
-    if (!hasEdited) {
+    if (!hasEditedRef.current) {
+      draftRef.current = base;
       setDraft(base);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedRoomPlayers, scoresMap, scoresReady, hasEdited, draft]);
+  }, [orderedRoomPlayers, scoresMap, scoresReady]);
 
   // Dirty 계산
   const isReady = useMemo(
@@ -253,7 +260,12 @@ export default function PlayerScoreInput() {
 
   const onChangeScore = (pid, val) => {
     const clean = String(val ?? '').replace(/[^\d\-+.]/g, '');
-    setDraft((d) => ({ ...d, [String(pid)]: clean }));
+    hasEditedRef.current = true;
+    setDraft((d) => {
+      const next = { ...d, [String(pid)]: clean };
+      draftRef.current = next;
+      return next;
+    });
     setHasEdited(true);
   };
 
@@ -287,6 +299,8 @@ export default function PlayerScoreInput() {
       }
 
       savingRef.current = true;
+      draftRef.current = committedDraft;
+      hasEditedRef.current = false;
       setBaseDraft(committedDraft);
       setDraft(committedDraft);
       setHasEdited(false);
@@ -329,11 +343,13 @@ export default function PlayerScoreInput() {
     if (m.timer) clearTimeout(m.timer);
     m.timer = setTimeout(() => {
       m.fired = true;
+      hasEditedRef.current = true;
       setDraft((d) => {
         const key = String(pid);
         const cur = String(d[key] ?? '');
         if (cur.startsWith('-')) return d;
         const next = { ...d, [key]: cur ? `-${cur}` : '-' };
+        draftRef.current = next;
         requestAnimationFrame(() => {
           const el = inputRefs.current[key];
           if (el && typeof el.setSelectionRange === 'function') {
