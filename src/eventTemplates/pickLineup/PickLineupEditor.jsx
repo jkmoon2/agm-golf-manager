@@ -9,7 +9,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
   const openGroups = normalizeOpenGroups(safe.openGroups);
   const lastPlaceHalf = !!safe.lastPlaceHalf;
 
-  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [openKey, setOpenKey] = useState('');
 
   const groupCounts = useMemo(() => {
     const out = { 1: 0, 2: 0, 3: 0, 4: 0 };
@@ -40,13 +40,18 @@ export default function PickLineupEditor({ participants = [], value, onChange })
     emit({ openGroups: next, lastPlaceHalf: (next.length === 4 ? lastPlaceHalf : false) });
   };
 
+  const summaryCount = `${pickCount}명`;
+  const summaryGroups = openGroups.map((g) => `${g}조`).join(', ') || '1조';
+
   return (
-    <div style={{ marginTop: 10, padding: 12, border: '1px solid #e5e7eb', borderRadius: 12, background: '#fff' }}>
-      <div style={{ fontWeight: 700, marginBottom: 10 }}>개인/조 선택 대결 설정</div>
+    <div style={box}>
+      <div style={titleRow}>
+        <div style={{ fontWeight: 700 }}>개인/조 선택 대결 설정</div>
+      </div>
 
       <div style={{ display: 'grid', gap: 10 }}>
-        <div>
-          <div style={labelStyle}>모드</div>
+        <label style={labelBox}>
+          <span style={fieldLabel}>모드</span>
           <select
             value={mode}
             onChange={(e) => {
@@ -58,43 +63,45 @@ export default function PickLineupEditor({ participants = [], value, onChange })
                 lastPlaceHalf: nextMode === 'jo' && openGroups.length === 4 ? lastPlaceHalf : false,
               });
             }}
-            style={selectStyle}
+            style={select}
           >
             <option value="single">개인 모드</option>
             <option value="jo">조 모드</option>
           </select>
-        </div>
+        </label>
 
         {mode === 'single' && (
-          <div>
-            <div style={labelStyle}>선택 인원 수</div>
-            <select
-              value={pickCount}
-              onChange={(e) => emit({ pickCount: Math.max(1, Math.min(4, Number(e.target.value || 1))) })}
-              style={selectStyle}
-            >
-              <option value={1}>1명</option>
-              <option value={2}>2명</option>
-              <option value={3}>3명</option>
-              <option value={4}>4명</option>
-            </select>
-            <div style={helpStyle}>Player STEP3에서 전체 참가자 중 선택 인원 수만큼 선택합니다.</div>
-          </div>
+          <AccordionBox
+            title="선택 인원 수"
+            summary={summaryCount}
+            open={openKey === 'count'}
+            onToggle={() => setOpenKey((prev) => (prev === 'count' ? '' : 'count'))}
+          >
+            <label style={labelBox}>
+              <span style={fieldLabel}>선택 인원 수</span>
+              <select
+                value={pickCount}
+                onChange={(e) => emit({ pickCount: Math.max(1, Math.min(4, Number(e.target.value || 1))) })}
+                style={select}
+              >
+                <option value={1}>1명</option>
+                <option value={2}>2명</option>
+                <option value={3}>3명</option>
+                <option value={4}>4명</option>
+              </select>
+            </label>
+          </AccordionBox>
         )}
 
         {mode === 'jo' && (
-          <div>
-            <div style={{ ...labelStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>오픈할 조</span>
-              <button type="button" onClick={() => setGroupsOpen((v) => !v)} style={miniBtnStyle}>
-                {groupsOpen ? '접기' : '열기'}
-              </button>
-            </div>
-
-            <div style={summaryBoxStyle}>선택 조: {openGroups.map((g) => `${g}조`).join(', ') || '1조'}</div>
-
-            {groupsOpen && (
-              <div style={pillWrapStyle}>
+          <>
+            <AccordionBox
+              title="오픈할 조"
+              summary={`선택 조: ${summaryGroups}`}
+              open={openKey === 'groups'}
+              onToggle={() => setOpenKey((prev) => (prev === 'groups' ? '' : 'groups'))}
+            >
+              <div style={pillGridStyle}>
                 {[1, 2, 3, 4].map((groupNo) => {
                   const active = openGroups.includes(groupNo);
                   return (
@@ -109,9 +116,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
                   );
                 })}
               </div>
-            )}
-
-            <div style={helpStyle}>Player STEP3에서 오픈된 각 조마다 1명씩 선택합니다.</div>
+            </AccordionBox>
 
             {openGroups.length === 4 && (
               <label style={checkRowStyle}>
@@ -120,30 +125,60 @@ export default function PickLineupEditor({ participants = [], value, onChange })
                   checked={lastPlaceHalf}
                   onChange={(e) => emit({ lastPlaceHalf: !!e.target.checked })}
                 />
-                <span>꼴등반띵 적용 (기본값: 해제)</span>
+                <span>꼴등반띵 적용</span>
               </label>
             )}
-
-            {openGroups.length !== 4 && (
-              <div style={{ ...helpStyle, marginTop: 4 }}>
-                꼴등반띵은 1~4조 모두 오픈했을 때만 사용할 수 있습니다.
-              </div>
-            )}
-          </div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-const labelStyle = {
+function AccordionBox({ title, summary, open, onToggle, children }) {
+  return (
+    <div style={sectionBox}>
+      <button type="button" onClick={onToggle} style={sectionButton}>
+        <div style={{ display: 'grid', gap: 2, textAlign: 'left', minWidth: 0 }}>
+          <span style={sectionTitle}>{title}</span>
+          <span style={sectionSummary}>{summary || '기본값'}</span>
+        </div>
+        <span style={arrow}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && <div style={sectionBody}>{children}</div>}
+    </div>
+  );
+}
+
+const box = {
+  display: 'grid',
+  gap: 10,
+  padding: 12,
+  marginTop: 10,
+  border: '1px solid #e5e7eb',
+  borderRadius: 12,
+  background: '#fff',
+  maxWidth: '100%',
+  overflow: 'hidden',
+  boxSizing: 'border-box',
+};
+const titleRow = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+};
+const labelBox = {
+  display: 'grid',
+  gap: 6,
+  minWidth: 0,
+};
+const fieldLabel = {
   fontSize: 13,
   fontWeight: 700,
   color: '#344054',
-  marginBottom: 6,
 };
-
-const selectStyle = {
+const select = {
   width: '100%',
   height: 42,
   borderRadius: 10,
@@ -151,65 +186,77 @@ const selectStyle = {
   background: '#fff',
   padding: '0 12px',
   fontSize: 14,
+  boxSizing: 'border-box',
 };
-
-const helpStyle = {
-  marginTop: 6,
-  fontSize: 12,
-  color: '#667085',
-  lineHeight: 1.5,
+const sectionBox = {
+  border: '1px solid #e5e7eb',
+  borderRadius: 12,
+  overflow: 'hidden',
+  maxWidth: '100%',
+  boxSizing: 'border-box',
 };
-
-const summaryBoxStyle = {
-  minHeight: 42,
-  border: '1px solid #dfe6ee',
-  borderRadius: 10,
+const sectionButton = {
+  width: '100%',
   display: 'flex',
   alignItems: 'center',
-  padding: '0 12px',
-  fontSize: 14,
-  color: '#111827',
-  background: '#fff',
-};
-
-const pillWrapStyle = {
-  display: 'flex',
-  flexWrap: 'wrap',
+  justifyContent: 'space-between',
   gap: 8,
-  marginTop: 8,
+  padding: '12px 14px',
+  background: '#fff',
+  border: 'none',
+  cursor: 'pointer',
+  boxSizing: 'border-box',
 };
-
+const sectionTitle = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: '#111827',
+};
+const sectionSummary = {
+  fontSize: 12,
+  color: '#667085',
+  lineHeight: 1.45,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+const sectionBody = {
+  padding: '0 14px 14px',
+  background: '#fff',
+  boxSizing: 'border-box',
+};
+const arrow = { fontSize: 12, color: '#667085', flexShrink: 0 };
+const pillGridStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: 8,
+  marginTop: 2,
+};
 const pillStyle = {
+  width: '100%',
   border: '1px solid #cfd8e3',
   background: '#fff',
   color: '#1f2937',
   borderRadius: 999,
-  padding: '8px 12px',
+  padding: '8px 10px',
   fontSize: 13,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  boxSizing: 'border-box',
 };
-
 const pillOnStyle = {
   border: '1px solid #8bb6ff',
   color: '#1d4ed8',
   background: '#eef5ff',
   fontWeight: 700,
 };
-
-const miniBtnStyle = {
-  border: '1px solid #d5dbe4',
-  background: '#fff',
-  borderRadius: 10,
-  padding: '4px 10px',
-  fontSize: 12,
-  cursor: 'pointer',
-};
-
 const checkRowStyle = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-  marginTop: 10,
+  marginTop: 2,
   fontSize: 13,
   color: '#111827',
 };

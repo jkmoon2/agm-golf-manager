@@ -55,23 +55,28 @@ function getRoomLabel(roomNames, roomNo) {
   return Number.isFinite(Number(roomNo)) && Number(roomNo) >= 1 ? `${roomNo}번방` : '-';
 }
 
-function getResultValue(p, { lastPlaceHalf = false, halved = false } = {}) {
+function getResultValue(p, handicapValue, { lastPlaceHalf = false, halved = false } = {}) {
   const score = Number(p?.score ?? 0) || 0;
-  const handicap = Number(p?.handicap ?? 0) || 0;
+  const handicap = Number(handicapValue ?? p?.handicap ?? 0) || 0;
   const usedScore = (lastPlaceHalf && halved) ? Math.floor(score / 2) : score;
   return usedScore - handicap;
 }
 
-function buildMemberRows(members, cfg) {
-  const rows = members.map((p) => ({
+function buildMemberRows(members, cfg, handicapOverrides = {}) {
+  const rows = members.map((p) => {
+    const baseHandicap = Number(p?.handicap ?? 0) || 0;
+    const ov = Number(handicapOverrides[String(p?.id)]);
+    const handicap = Number.isFinite(ov) ? ov : baseHandicap;
+    return ({
     id: String(p?.id ?? ''),
     name: String(p?.nickname || ''),
     room: p?.room ?? null,
-    handicap: Number(p?.handicap ?? 0) || 0,
+    handicap,
     score: Number(p?.score ?? 0) || 0,
     groupNo: getParticipantGroupNo(p),
     halved: false,
-  }));
+  });
+  });
 
   if (cfg.mode === 'jo' && cfg.openGroups.length === 4 && cfg.lastPlaceHalf && rows.length === 4) {
     let maxIdx = -1;
@@ -87,7 +92,7 @@ function buildMemberRows(members, cfg) {
 
   return rows.map((m) => ({
     ...m,
-    value: getResultValue(m, { lastPlaceHalf: cfg.lastPlaceHalf, halved: !!m.halved }),
+    value: getResultValue(m, m.handicap, { lastPlaceHalf: cfg.lastPlaceHalf, halved: !!m.halved }),
   }));
 }
 
@@ -104,6 +109,9 @@ export function computePickLineup(eventDef, participants = [], inputsByEvent = {
   const cfg = getPickLineupConfig(eventDef);
   const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
   const order = eventDef?.rankOrder === 'desc' ? 'desc' : 'asc';
+  const handicapOverrides = (eventDef?.params?.handicapOverrides && typeof eventDef.params.handicapOverrides === 'object')
+    ? eventDef.params.handicapOverrides
+    : {};
   const sign = order === 'desc' ? -1 : 1;
   const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id), p]));
   const personBucket = inputsByEvent?.person || {};
@@ -140,7 +148,7 @@ export function computePickLineup(eventDef, participants = [], inputsByEvent = {
         filteredMembers = membersBase.slice(0, cfg.pickCount);
       }
 
-      const members = buildMemberRows(filteredMembers, cfg);
+      const members = buildMemberRows(filteredMembers, cfg, handicapOverrides);
       if (!validateSelection(cfg, members)) return null;
 
       const total = members.reduce((sum, m) => sum + (Number(m.value) || 0), 0);

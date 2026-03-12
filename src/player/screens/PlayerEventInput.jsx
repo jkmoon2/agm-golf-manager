@@ -45,14 +45,8 @@ function formatDisplayNumber(value){
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 }
 
-function displayPickOption(p, roomNames = []){
-  const nickname = String(p?.nickname || '');
-  const roomNo = Number(p?.room);
-  const roomLabel = Number.isFinite(roomNo) && roomNo >= 1
-    ? (String(roomNames?.[roomNo - 1] || '').trim() || `${roomNo}번방`)
-    : '-';
-  const groupNo = Number(getParticipantGroupNo(p));
-  return `${nickname} (${roomLabel}${Number.isFinite(groupNo) ? ` · ${groupNo}조` : ''})`;
+function displayPickOption(p){
+  return String(p?.nickname || '');
 }
 
 function getEffectiveParticipants(eventData){
@@ -697,6 +691,8 @@ export default function PlayerEventInput(){
             const slotLabels = pickCfg.mode === 'jo'
               ? pickCfg.openGroups.map((groupNo) => `${groupNo}조`)
               : Array.from({ length: requiredCount }, (_, i) => `선택${i + 1}`);
+            const nickColPct = pickCfg.mode === 'jo' && requiredCount === 4 ? 30 : 34;
+            const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -712,6 +708,10 @@ export default function PlayerEventInput(){
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: '100%' }}>
+                    <colgroup>
+                      <col style={{ width: `${nickColPct}%` }} />
+                      {slotLabels.map((_, idx) => <col key={idx} style={{ width: `${pickColPct}%` }} />)}
+                    </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
@@ -727,8 +727,8 @@ export default function PlayerEventInput(){
 
                         return (
                           <tr key={rIdx}>
-                            <td>{p ? p.nickname : ''}</td>
-                            {slotLabels.map((label, idx) => {
+                            <td style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', padding:'0 6px' }}>{p ? p.nickname : ''}</td>
+                            {slotLabels.map((_, idx) => {
                               const options = getPickOptions(ev, idx);
                               return (
                                 <td key={idx} className={tCss.cellEditable}>
@@ -744,7 +744,7 @@ export default function PlayerEventInput(){
                                       const selectedElsewhere = rowIds.includes(value) && rowIds[idx] !== value;
                                       return (
                                         <option key={value} value={value} disabled={selectedElsewhere}>
-                                          {displayPickOption(opt, roomNames)}
+                                          {displayPickOption(opt)}
                                         </option>
                                       );
                                     })}

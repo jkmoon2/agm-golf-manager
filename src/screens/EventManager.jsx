@@ -630,7 +630,7 @@ if (editForm?.template === 'group-battle') {
   const [handicapEditId, setHandicapEditId] = useState(null);
 
   const openHandicapEditor = (ev) => {
-    if (!ev || ev.template !== 'group-battle') return;
+    if (!ev || (ev.template !== 'group-battle' && ev.template !== 'pick-lineup')) return;
     setHandicapEditId(ev.id);
     setOpenMenuId(null);
     setMenuUpId(null);
@@ -788,7 +788,7 @@ if (editForm?.template === 'group-battle') {
                   {TEMPLATE_REGISTRY.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
                 </select>
               </label>
-              {form.template !== 'hole-rank-force' && (
+              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && (
                 <p className={css.help}>{getTemplateHelp(form.template)}</p>
               )}
 
@@ -979,7 +979,7 @@ if (editForm?.template === 'group-battle') {
                         <div className={`${css.menu} ${menuUpId===ev.id ? css.menuUp : ''}`} onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => toggleEnable(ev)}>{ev.enabled ? '숨기기' : '사용'}</button>
                           <button onClick={() => openEdit(ev)}>수정</button>
-                          {ev?.template === 'group-battle' ? (
+                          {ev?.template === 'group-battle' || ev?.template === 'pick-lineup' ? (
                             <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
                           ) : (
                             <>
@@ -1322,8 +1322,8 @@ if (editForm?.template === 'group-battle') {
 
         <div style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 120px)' }} />
 
-        {/* group-battle 전용: 이벤트 결과에만 반영되는 G핸디 수정(다른 페이지와 연동 금지) */}
-        {handicapEditEvent?.template === 'group-battle' && (
+        {/* 이벤트 결과 전용 G핸디 수정(다른 페이지와 연동 금지) */}
+        {(handicapEditEvent?.template === 'group-battle' || handicapEditEvent?.template === 'pick-lineup') && (
           <GroupBattleHandicapEditor
             eventDef={handicapEditEvent}
             participants={participants}
