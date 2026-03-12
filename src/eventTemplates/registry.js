@@ -82,6 +82,25 @@ export const TEMPLATE_REGISTRY = [
     },
   },
   {
+    type: 'hole-rank-force',
+    label: '홀별 강제 순위 점수',
+    defaultParams: {
+      selectedHoles: Array.from({ length: 18 }, (_, i) => i + 1),
+      selectedSlots: [1, 2, 3, 4],
+      forcedRanks: {},
+    },
+    help: '* 각 방 참가자가 1~18홀 점수를 입력하고, 운영자는 사용할 홀/참가자와 홀별 강제 순위를 지정할 수 있습니다.',
+    ui: {
+      inputMode: false,
+      paramsJson: false,
+      factor: false,
+      rangeTable: false,
+      bonusTable: false,
+      supportsEventInputs: true,
+      supportsQuickInput: false,
+    },
+  },
+  {
     type: 'group-battle',
     label: '그룹/개인 대결',
     defaultParams: {},

@@ -508,11 +508,13 @@ export default function PlayerEventInput(){
       <div className={baseCss.content}>
 
         {events.map(ev => {
-          const isAccum  = ev.inputMode === 'accumulate';
-          const attempts = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+          const isHoleRankForce = ev.template === 'hole-rank-force';
+          const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
+          const attempts = isHoleRankForce ? 18 : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
           const NICK_PCT = 35;
-          const ONE_PCT  = 65 / 4;
-          const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT) : 100;
+          const ONE_PCT  = isHoleRankForce ? 8.5 : (65 / 4);
+          const TOTAL_PCT = isHoleRankForce ? 12 : 0;
+          const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT + TOTAL_PCT) : 100;
           const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
 
           return (
@@ -529,14 +531,16 @@ export default function PlayerEventInput(){
                       ? Array.from({ length: attempts }, (_,i) => <col key={i} style={{ width: `${ONE_PCT}%` }} />)
                       : <col style={{ width: '65%' }} />
                     }
+                    {isHoleRankForce && <col style={{ width: `${TOTAL_PCT}%` }} />}
                   </colgroup>
 
                   <thead>
                     <tr>
                       <th>닉네임</th>
                       {isAccum
-                        ? Array.from({length: attempts}, (_,i)=>(<th key={i}>입력{i+1}</th>))
+                        ? Array.from({length: attempts}, (_,i)=>(<th key={i}>{isHoleRankForce ? `${i+1}홀` : `입력${i+1}`}</th>))
                         : <th>입력값</th>}
+                      {isHoleRankForce && <th>합계</th>}
                     </tr>
                   </thead>
 
@@ -544,7 +548,17 @@ export default function PlayerEventInput(){
                     {orderSlotsByPairs(
                       participants.filter(p => Number(p?.room)=== (Number.isFinite(roomIdx)?roomIdx:NaN)),
                       participants
-                    ).map((p, rIdx)=>(
+                    ).map((p, rIdx)=>{
+                      const rowValues = isAccum
+                        ? Array.from({ length: attempts }, (_, i) => {
+                            const raw = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : '';
+                            const n = Number(raw);
+                            return Number.isFinite(n) ? n : 0;
+                          })
+                        : [];
+                      const rowTotal = rowValues.reduce((sum, n) => sum + n, 0);
+                      const rowTotalDisplay = p ? rowTotal : '';
+                      return (
                       <tr key={rIdx}>
                         <td>{p ? p.nickname : ''}</td>
 
@@ -597,8 +611,9 @@ export default function PlayerEventInput(){
                           </td>
                         )}
 
+                        {isHoleRankForce && <td>{rowTotalDisplay}</td>}
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
               </div>

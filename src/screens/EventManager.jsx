@@ -15,6 +15,9 @@ import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } fro
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
 import GroupBattlePreview from '../eventTemplates/groupBattle/GroupBattlePreview';
 import GroupBattleHandicapEditor from '../eventTemplates/groupBattle/GroupBattleHandicapEditor';
+import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEditor';
+import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
+import { computeHoleRankForce } from '../events/holeRankForce';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -186,7 +189,8 @@ if (form.template === 'group-battle') {
   setParamOpen(false);
   alert('이벤트가 생성되었습니다.');
   return;
-}      const parsed = JSON.parse(form.paramsJson || '{}');
+}
+      const parsed = JSON.parse(form.paramsJson || '{}');
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
@@ -194,8 +198,8 @@ if (form.template === 'group-battle') {
         params: parsed,
         target: 'person',
         rankOrder: 'asc',
-        inputMode: form.inputMode,                // refresh | accumulate
-        attempts: Number(form.attempts || 4),     // 누적 칸수
+        inputMode: form.template === 'hole-rank-force' ? 'accumulate' : form.inputMode,                // refresh | accumulate
+        attempts: form.template === 'hole-rank-force' ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
       };
       const list = [...eventsOfSelected, item];
@@ -400,14 +404,15 @@ if (editForm?.template === 'group-battle') {
   setEditParamOpen(false);
   alert('저장되었습니다.');
   return;
-}      const parsed = JSON.parse(editForm.paramsJson || '{}');
+}
+      const parsed = JSON.parse(editForm.paramsJson || '{}');
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: parsed,
-        inputMode: editForm.inputMode,
-        attempts: Number(editForm.attempts || 4),
+        inputMode: editForm.template === 'hole-rank-force' ? 'accumulate' : editForm.inputMode,
+        attempts: editForm.template === 'hole-rank-force' ? 18 : Number(editForm.attempts || 4),
       } : e);
       await updateEventImmediate({ events: next }, false);
       setEditId(null);
@@ -491,15 +496,34 @@ if (editForm?.template === 'group-battle') {
   const perR = inputsAll?.[previewId]?.room   || {};
   const perT = inputsAll?.[previewId]?.team   || {};
 
+  const holeRankForcePreview = useMemo(() => {
+    if (!previewDef || previewDef.template !== 'hole-rank-force') return null;
+    return computeHoleRankForce(previewDef, participants, inputsAll, { roomNames, roomCount });
+  }, [previewDef, participants, inputsAll, roomNames, roomCount]);
+
   const personRows = useMemo(() => {
     if (!previewDef) return [];
+    if (previewDef.template === 'hole-rank-force') {
+      const rows = Array.isArray(holeRankForcePreview?.personRows)
+        ? holeRankForcePreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
     const rows = participants.map(p => ({ id: p.id, name: p.nickname, room: p.room, score: compute(previewDef, perP[p.id]) }));
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, previewDef, sign]);
+  }, [participants, perP, previewDef, sign, holeRankForcePreview]);
 
   const roomRows = useMemo(() => {
     if (!previewDef) return [];
+    if (previewDef.template === 'hole-rank-force') {
+      const arr = Array.isArray(holeRankForcePreview?.roomRows)
+        ? holeRankForcePreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
+        : [];
+      arr.sort((a, b) => sign * (a.score - b.score));
+      return arr;
+    }
     const arr = [];
     for (let r = 1; r <= roomCount; r++) {
       const ppl = participants.filter(p => p.room === r);
@@ -508,11 +532,18 @@ if (editForm?.template === 'group-battle') {
     }
     arr.sort((a, b) => sign * (a.score - b.score));
     return arr;
-  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign]);
+  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview]);
 
   // 팀(포볼) 계산: 1조/2조 기준으로 A/B팀 구성
   const teamRows = useMemo(() => {
     if (!previewDef) return [];
+    if (previewDef.template === 'hole-rank-force') {
+      const rows = Array.isArray(holeRankForcePreview?.teamRows)
+        ? holeRankForcePreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
     const rows = [];
     for (let r = 1; r <= roomCount; r++) {
       const ppl = participants.filter(p => p.room === r);
@@ -533,7 +564,7 @@ if (editForm?.template === 'group-battle') {
     }
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign]);
+  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview]);
 
   /* ── 이벤트 불러오기(다른 대회에서) ───────────────────── */
   const [importFromId, setImportFromId] = useState('');
@@ -565,6 +596,11 @@ if (editForm?.template === 'group-battle') {
       const m = ev?.params?.mode === 'single' ? '개인선택' : '그룹';
       const metric = ev?.params?.metric === 'score' ? '점수' : '결과';
       return `group-battle · ${m} · ${metric}`;
+    }
+    if (ev?.template === 'hole-rank-force') {
+      const holes = Array.isArray(ev?.params?.selectedHoles) && ev.params.selectedHoles.length ? ev.params.selectedHoles.length : 18;
+      const slots = Array.isArray(ev?.params?.selectedSlots) && ev.params.selectedSlots.length ? ev.params.selectedSlots.length : 4;
+      return `hole-rank-force · ${holes}홀 · 참가자${slots}명`;
     }
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
@@ -760,6 +796,14 @@ if (editForm?.template === 'group-battle') {
     }}
   />
 )}
+
+{form.template === 'hole-rank-force' && (
+  <HoleRankForceEditor
+    variant="create"
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
               {uiCreate.factor && (
                 <div className={css.row}>
                   <label className={css.labelGrow}>계수(factor)
@@ -915,8 +959,12 @@ if (editForm?.template === 'group-battle') {
                             <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
                           ) : (
                             <>
-                              <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
-                              <button onClick={() => clearInputs(ev)}>입력 초기화</button>
+                              {templateUi(ev?.template).supportsQuickInput !== false && (
+                                <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
+                              )}
+                              {templateUi(ev?.template).supportsEventInputs !== false && (
+                                <button onClick={() => clearInputs(ev)}>입력 초기화</button>
+                              )}
                             </>
                           )}
                           <button className={css.btnDanger} onClick={() => removeEvent(ev)}>삭제</button>
@@ -1020,6 +1068,14 @@ if (editForm?.template === 'group-battle') {
       if (Array.isArray(next.groups)) setEditGbGroups(next.groups);
       if (Array.isArray(next.memberIds)) setEditGbMemberIds(next.memberIds);
     }}
+  />
+)}
+
+{editForm.template === 'hole-rank-force' && (
+  <HoleRankForceEditor
+    variant="edit"
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
   />
 )}
                       {uiEdit.factor && (
@@ -1167,14 +1223,24 @@ if (editForm?.template === 'group-battle') {
             {!previewDef && <div className={css.empty}>선택된 이벤트가 없습니다.</div>}
 
             {previewDef && viewTab === 'person' && (
-              <ol className={css.previewList}>
-                {personRows.map((r, i) => (
-                  <li key={r.id}>
-                    <span><span className={css.rank}>{i + 1}.</span> {r.name} <small className={css.dim}>({r.room ? roomNames[r.room - 1] : '-'})</small></span>
-                    <b className={css.score}>{fmt2(r.score)}</b>
-                  </li>
-                ))}
-              </ol>
+              previewDef.template === 'hole-rank-force' ? (
+                <HoleRankForcePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                />
+              ) : (
+                <ol className={css.previewList}>
+                  {personRows.map((r, i) => (
+                    <li key={r.id}>
+                      <span><span className={css.rank}>{i + 1}.</span> {r.name} <small className={css.dim}>({r.room ? roomNames[r.room - 1] : '-'})</small></span>
+                      <b className={css.score}>{fmt2(r.score)}</b>
+                    </li>
+                  ))}
+                </ol>
+              )
             )}
 
             {previewDef && viewTab === 'room' && (

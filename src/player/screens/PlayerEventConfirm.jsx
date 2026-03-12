@@ -15,6 +15,7 @@ import tCss    from './PlayerEventConfirm.module.css';
 
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
+import { computeHoleRankForce } from '../../events/holeRankForce';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -146,6 +147,37 @@ const events = useMemo(
     const agg = params?.aggregator || 'sum';
 
 
+
+    // ── hole-rank-force(홀별 강제 순위 점수) ─────────────────────
+    if (template === 'hole-rank-force') {
+      const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames, roomCount });
+      if (target === 'room') {
+        const rows = (data.roomRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.name,
+          value: r.value,
+        }));
+        return { kind: 'room', metricLabel: '합계', rows };
+      }
+      if (target === 'team') {
+        const rows = (data.teamRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.label,
+          value: r.value,
+        }));
+        return { kind: 'team', metricLabel: '합계', rows };
+      }
+      const rows = (data.personRows || []).map((r, i) => ({
+        key: r.key || String(i),
+        rank: i + 1,
+        label: r.name,
+        room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
+        value: r.value,
+      }));
+      return { kind: 'person', metricLabel: '합계', rows };
+    }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────
     // - 입력 이벤트가 아니므로 inputsByEvent를 사용하지 않음
