@@ -8,6 +8,7 @@ import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
+import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 
 
 function getPlayerTabId(){
@@ -44,6 +45,15 @@ function formatDisplayNumber(value){
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 }
 
+function displayPickOption(p, roomNames = []){
+  const nickname = String(p?.nickname || '');
+  const roomNo = Number(p?.room);
+  const roomLabel = Number.isFinite(roomNo) && roomNo >= 1
+    ? (String(roomNames?.[roomNo - 1] || '').trim() || `${roomNo}번방`)
+    : '-';
+  const groupNo = Number(getParticipantGroupNo(p));
+  return `${nickname} (${roomLabel}${Number.isFinite(groupNo) ? ` · ${groupNo}조` : ''})`;
+}
 
 function getEffectiveParticipants(eventData){
   const safeArr = (v) => (Array.isArray(v) ? v : []);
@@ -330,6 +340,18 @@ export default function PlayerEventInput(){
     });
   };
 
+  const padPickIds = (arr, count) => {
+    const need = Math.max(1, Number(count || 1));
+    const base = Array.isArray(arr) ? [...arr] : [];
+    while (base.length < need) base.push('');
+    return base.slice(0, need).map((x) => String(x || ''));
+  };
+
+  const getServerPickIds = (evId, pid, requiredCount) => {
+    const arr = normalizeMemberIds(inputsByEventServer?.[evId]?.person?.[pid]);
+    return padPickIds(arr, requiredCount);
+  };
+
   const patchValue = (evId, pid, value) => {
     const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
@@ -355,6 +377,32 @@ export default function PlayerEventInput(){
     if (prev === next) return;
     obj.values[idx] = next;
     person[pid]=obj; slot.person=person; all[evId]=slot;
+    setDraft(all);
+  };
+
+  const patchPickMember = (evId, pid, idx, value, requiredCount) => {
+    const all  = { ...(draft || {}) };
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    const prevObj = person[pid] && typeof person[pid] === 'object' ? { ...person[pid] } : {};
+    const arr = padPickIds(normalizeMemberIds(prevObj), requiredCount);
+    const next = String(value || '');
+    if (arr[idx] === next) return;
+
+    if (next) {
+      for (let i = 0; i < arr.length; i += 1) {
+        if (i !== idx && arr[i] === next) arr[i] = '';
+      }
+    }
+    arr[idx] = next;
+
+    if (!arr.some(Boolean)) {
+      person[pid] = { memberIds: [] };
+    } else {
+      person[pid] = { ...prevObj, memberIds: arr };
+    }
+
+    slot.person = person; all[evId] = slot;
     setDraft(all);
   };
 
@@ -456,6 +504,27 @@ export default function PlayerEventInput(){
   const closeBonusPopup = () => setBonusPopup({ open:false, x:0, y:0, evId:null, pid:null, idx:0, attempts:0, w:136 });
   useEffect(()=>{ const onDoc=()=>setBonusPopup(p=>(p.open?{...p,open:false}:p)); document.addEventListener('click',onDoc); return()=>document.removeEventListener('click',onDoc); },[]);
 
+  const sortedParticipants = useMemo(() => {
+    const arr = Array.isArray(participants) ? [...participants] : [];
+    arr.sort((a, b) => {
+      const roomDiff = (Number(a?.room ?? 999) - Number(b?.room ?? 999));
+      if (roomDiff) return roomDiff;
+      const groupDiff = (Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999));
+      if (groupDiff) return groupDiff;
+      return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
+    });
+    return arr;
+  }, [participants]);
+
+  const getPickOptions = (ev, slotIdx) => {
+    const cfg = getPickLineupConfig(ev);
+    if (cfg.mode === 'jo') {
+      const groupNo = cfg.openGroups[slotIdx];
+      return sortedParticipants.filter((p) => Number(getParticipantGroupNo(p)) === Number(groupNo));
+    }
+    return sortedParticipants;
+  };
+
   const saveDraft = async () => {
     try{
       await ensureMembership((eventId || ctxId), roomIdx);
@@ -473,7 +542,8 @@ export default function PlayerEventInput(){
 
         Object.entries(sPerson).forEach(([pid, val])=>{
           if (!roomPids.has(String(pid))) return;
-          if (val === '' || val == null || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
+          const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
+          if (val === '' || val == null || isEmptyPick || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
             delete mPerson[pid];
           } else {
             mPerson[pid] = val;
@@ -520,7 +590,15 @@ export default function PlayerEventInput(){
         const sSlot = inputsByEventServer?.[evId]?.person || {};
 
         for (const pid of roomPids) {
-          if (isAccum) {
+          if (ev.template === 'pick-lineup') {
+            const requiredCount = getPickLineupRequiredCount(ev);
+            const baseArr = getServerPickIds(evId, pid, requiredCount);
+            const dArr = padPickIds(normalizeMemberIds(dSlot?.[pid]), requiredCount);
+            if (dArr.length !== baseArr.length) return true;
+            for (let i = 0; i < dArr.length; i += 1) {
+              if (!eq(dArr[i], baseArr[i])) return true;
+            }
+          } else if (isAccum) {
             const baseArr = getServerAccum(evId, pid, attempts);
             const dVals = (() => {
               const v = dSlot?.[pid]?.values;
@@ -567,6 +645,7 @@ export default function PlayerEventInput(){
           const TOTAL_PCT = isHoleRankForce ? 12 : 0;
           const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT + TOTAL_PCT) : 100;
           const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
+          const pickCfg = ev.template === 'pick-lineup' ? getPickLineupConfig(ev) : null;
           const orderedRoomRows = orderSlotsByPairs(
             participants.filter((p) => Number(p?.room) === (Number.isFinite(roomIdx) ? roomIdx : NaN)),
             participants
@@ -612,6 +691,76 @@ export default function PlayerEventInput(){
             : [];
           const forcedGrandTotal = forcedSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
           const forcedGrandHasAny = forcedSubtotal.some((item) => item.hasAny);
+
+          if (pickCfg) {
+            const requiredCount = getPickLineupRequiredCount(ev);
+            const slotLabels = pickCfg.mode === 'jo'
+              ? pickCfg.openGroups.map((groupNo) => `${groupNo}조`)
+              : Array.from({ length: requiredCount }, (_, i) => `선택${i + 1}`);
+
+            return (
+              <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                <div className={baseCss.cardHeader}>
+                  <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
+                </div>
+
+                <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
+                  {pickCfg.mode === 'jo'
+                    ? `오픈 조: ${pickCfg.openGroups.map((g) => `${g}조`).join(', ')}${pickCfg.lastPlaceHalf && pickCfg.openGroups.length === 4 ? ' · 꼴등반띵 적용' : ''}`
+                    : `전체 참가자 중 ${pickCfg.pickCount}명 선택`}
+                </div>
+
+                <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                  <table className={tCss.table} style={{ width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th>닉네임</th>
+                        {slotLabels.map((label, idx) => <th key={idx}>{label}</th>)}
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {roomMembers.map((p, rIdx) => {
+                        const rowIds = p
+                          ? padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount)
+                          : padPickIds([], requiredCount);
+
+                        return (
+                          <tr key={rIdx}>
+                            <td>{p ? p.nickname : ''}</td>
+                            {slotLabels.map((label, idx) => {
+                              const options = getPickOptions(ev, idx);
+                              return (
+                                <td key={idx} className={tCss.cellEditable}>
+                                  <select
+                                    className={tCss.cellSelect}
+                                    value={p ? (rowIds[idx] || '') : ''}
+                                    onChange={(e) => p && patchPickMember(ev.id, p.id, idx, e.target.value, requiredCount)}
+                                    disabled={!p}
+                                  >
+                                    <option value="">선택</option>
+                                    {options.map((opt) => {
+                                      const value = String(opt?.id);
+                                      const selectedElsewhere = rowIds.includes(value) && rowIds[idx] !== value;
+                                      return (
+                                        <option key={value} value={value} disabled={selectedElsewhere}>
+                                          {displayPickOption(opt, roomNames)}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          }
 
           return (
             <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>

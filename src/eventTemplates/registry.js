@@ -101,6 +101,26 @@ export const TEMPLATE_REGISTRY = [
     },
   },
   {
+    type: 'pick-lineup',
+    label: '개인/조 선택 대결',
+    defaultParams: {
+      mode: 'single',
+      pickCount: 1,
+      openGroups: [1],
+      lastPlaceHalf: false,
+    },
+    help: '* 개인 모드는 전체 참가자 중 1~4명 선택, 조 모드는 오픈된 각 조에서 1명씩 선택합니다. 결과는 (점수 - G핸디) 합계로 계산합니다.',
+    ui: {
+      inputMode: false,
+      paramsJson: false,
+      factor: false,
+      rangeTable: false,
+      bonusTable: false,
+      supportsEventInputs: true,
+      supportsQuickInput: false,
+    },
+  },
+  {
     type: 'group-battle',
     label: '그룹/개인 대결',
     defaultParams: {},

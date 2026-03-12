@@ -15,6 +15,7 @@ import tCss    from './PlayerEventConfirm.module.css';
 
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
+import { computePickLineup } from '../../events/pickLineup';
 import { computeHoleRankForce } from '../../events/holeRankForce';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
@@ -170,6 +171,19 @@ const events = useMemo(
         return { kind: 'team', metricLabel: '합계', rows };
       }
       const rows = (data.personRows || []).map((r, i) => ({
+        key: r.key || String(i),
+        rank: i + 1,
+        label: r.name,
+        room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
+        value: r.value,
+      }));
+      return { kind: 'person', metricLabel: '합계', rows };
+    }
+
+    // ── pick-lineup(개인/조 선택 대결) ──────────────────────────
+    if (template === 'pick-lineup') {
+      const data = computePickLineup(ev, participants, inputsByEvent?.[evId] || {}, { roomNames });
+      const rows = (data?.rows || []).map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
         label: r.name,

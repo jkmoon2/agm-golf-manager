@@ -59,6 +59,22 @@
   color:#1e40ff;
 }
 
+.cellSelect{
+  width:100%;
+  max-width:100%;
+  height: calc(var(--row-h) - 6px);
+  margin:0;
+  padding:2px 6px;
+  box-sizing:border-box;
+  background:transparent;
+  border:none;
+  outline:none;
+  display:block;
+  text-align:center;
+  font-size:14px;
+  color:#15356b;
+}
+
 /* 팝업: 고정 min-width 제거, 내용 기준 width (JS에서 width 지정) + 줄바꿈 방지 */
 .bonusPopup{
   white-space: nowrap;

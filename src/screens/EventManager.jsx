@@ -17,6 +17,8 @@ import GroupBattlePreview from '../eventTemplates/groupBattle/GroupBattlePreview
 import GroupBattleHandicapEditor from '../eventTemplates/groupBattle/GroupBattleHandicapEditor';
 import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEditor';
 import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
+import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
+import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import { computeHoleRankForce } from '../events/holeRankForce';
 
 
@@ -602,6 +604,18 @@ if (editForm?.template === 'group-battle') {
       const slots = Array.isArray(ev?.params?.selectedSlots) && ev.params.selectedSlots.length ? ev.params.selectedSlots.length : 4;
       return `hole-rank-force · ${holes}홀 · 참가자${slots}명`;
     }
+    if (ev?.template === 'pick-lineup') {
+      const mode = ev?.params?.mode === 'jo' ? '조' : '개인';
+      if (mode === '개인') {
+        const count = Math.max(1, Math.min(4, Number(ev?.params?.pickCount || 1)));
+        return `pick-lineup · 개인 · ${count}명 선택`;
+      }
+      const openGroups = Array.isArray(ev?.params?.openGroups) && ev.params.openGroups.length
+        ? ev.params.openGroups.map((g) => `${g}조`).join(', ')
+        : '1조';
+      const lastHalf = ev?.params?.lastPlaceHalf ? ' · 꼴등반띵' : '';
+      return `pick-lineup · 조 · ${openGroups}${lastHalf}`;
+    }
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
       : ev.template === 'range-convert-bonus' ? 'range+bonus'
@@ -802,6 +816,14 @@ if (editForm?.template === 'group-battle') {
 {form.template === 'hole-rank-force' && (
   <HoleRankForceEditor
     variant="create"
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'pick-lineup' && (
+  <PickLineupEditor
+    participants={participants}
     value={params}
     onChange={(next) => setParams(next)}
   />
@@ -1080,6 +1102,14 @@ if (editForm?.template === 'group-battle') {
     onChange={(next) => setEditParams(next)}
   />
 )}
+
+{editForm.template === 'pick-lineup' && (
+  <PickLineupEditor
+    participants={participants}
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
                       {uiEdit.factor && (
                         <div className={css.row}>
                           <label className={css.labelGrow}>계수(factor)
@@ -1232,6 +1262,13 @@ if (editForm?.template === 'group-battle') {
                   inputsByEvent={inputsAll}
                   roomNames={roomNames}
                   roomCount={roomCount}
+                />
+              ) : previewDef.template === 'pick-lineup' ? (
+                <PickLineupPreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputs={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
                 />
               ) : (
                 <ol className={css.previewList}>
