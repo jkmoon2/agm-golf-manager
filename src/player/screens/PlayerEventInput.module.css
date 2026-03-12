@@ -64,3 +64,40 @@
   white-space: nowrap;
   border-radius: 8px;
 }
+
+
+.totalCell{
+  color:#d11a2a;
+  font-weight:800;
+}
+
+.subtotalRow td{
+  background:#fbfdff;
+  font-weight:800;
+}
+
+.subtotalLabel{
+  color:#15356b;
+  font-weight:800;
+}
+
+.subtotalBlue{
+  color:#1e40ff;
+  font-weight:800;
+}
+
+.subtotalRed{
+  color:#d11a2a;
+  font-weight:800;
+}
+
+.viewerWrap{
+  margin-top:12px;
+}
+
+.viewerTitle{
+  margin:0 0 8px;
+  font-size:14px;
+  font-weight:800;
+  color:#15356b;
+}

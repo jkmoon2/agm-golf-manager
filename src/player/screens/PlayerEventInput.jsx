@@ -1,13 +1,13 @@
 // /src/player/screens/PlayerEventInput.jsx
 
-import React, { useMemo, useContext, useEffect, useState } from 'react';
+import React, { useMemo, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
-import { normalizeSelectedHoles } from '../../events/holeRankForce';
+import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 
 
 function getPlayerTabId(){
@@ -22,6 +22,16 @@ function getPlayerTabId(){
 }
 function playerStorageKey(eventId, key){
   return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
+}
+
+const LONG_PRESS_MS = 450;
+
+function formatDisplayNumber(value){
+  if (value === '' || value == null) return '';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  const s = n.toFixed(2);
+  return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 }
 
 
@@ -259,6 +269,33 @@ export default function PlayerEventInput(){
 
   const [draft, setDraft] = useState(() => inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
   const [dirty, setDirty] = useState(false);
+  const eventInputRefs = useRef({});
+  const longPressTimersRef = useRef({});
+
+  const focusEventInput = (evId, pid, idx) => {
+    try {
+      const key = `${evId}:${pid}:${idx}`;
+      const el = eventInputRefs.current?.[key];
+      if (el && typeof el.focus === 'function') el.focus();
+    } catch {}
+  };
+
+  const cancelEventLongPress = (key) => {
+    const timer = longPressTimersRef.current?.[key];
+    if (timer) clearTimeout(timer);
+    if (longPressTimersRef.current) delete longPressTimersRef.current[key];
+  };
+
+  const startEventLongMinus = (evId, pid, idx, rawValue, attemptsOverride) => {
+    const key = `${evId}:${pid}:${idx}`;
+    cancelEventLongPress(key);
+    longPressTimersRef.current[key] = setTimeout(() => {
+      const current = String(rawValue ?? '').trim();
+      const next = current === '' ? '-' : (current.startsWith('-') ? current : `-${current}`);
+      patchAccum(evId, pid, idx, next, attemptsOverride);
+      setTimeout(() => focusEventInput(evId, pid, idx), 0);
+    }, LONG_PRESS_MS);
+  };
 
   useEffect(() => {
     if (!dirty) setDraft(inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
@@ -511,6 +548,8 @@ export default function PlayerEventInput(){
         {events.map(ev => {
           const isHoleRankForce = ev.template === 'hole-rank-force';
           const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
+          const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
+          const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
           const attempts = isHoleRankForce ? selectedHoles.length : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
           const NICK_PCT = 35;
@@ -518,6 +557,51 @@ export default function PlayerEventInput(){
           const TOTAL_PCT = isHoleRankForce ? 12 : 0;
           const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT + TOTAL_PCT) : 100;
           const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
+          const orderedRoomRows = orderSlotsByPairs(
+            participants.filter((p) => Number(p?.room) === (Number.isFinite(roomIdx) ? roomIdx : NaN)),
+            participants
+          );
+
+          const rawSubtotal = isHoleRankForce
+            ? selectedHoles.map((holeNo) => {
+                let sum = 0;
+                let hasAny = false;
+                orderedRoomRows.forEach((p) => {
+                  const raw = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
+                  const n = Number(raw);
+                  if (Number.isFinite(n)) {
+                    sum += n;
+                    hasAny = true;
+                  }
+                });
+                return { holeNo, sum, hasAny };
+              })
+            : [];
+          const rawGrandTotal = rawSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
+          const rawGrandHasAny = rawSubtotal.some((item) => item.hasAny);
+
+          const forcedData = hasForcedViewer
+            ? computeHoleRankForce(ev, participants, inputsByEvent, { roomNames })
+            : null;
+          const forcedRoom = hasForcedViewer
+            ? (forcedData?.rooms || []).find((room) => Number(room?.roomNo) === Number(roomIdx))
+            : null;
+          const forcedSubtotal = forcedRoom
+            ? selectedHoles.map((holeNo) => {
+                let sum = 0;
+                let hasAny = false;
+                (forcedRoom?.slots || []).forEach((slot) => {
+                  const n = Number(slot?.effectiveHoleScores?.[holeNo]);
+                  if (Number.isFinite(n)) {
+                    sum += n;
+                    hasAny = true;
+                  }
+                });
+                return { holeNo, sum, hasAny };
+              })
+            : [];
+          const forcedGrandTotal = forcedSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
+          const forcedGrandHasAny = forcedSubtotal.some((item) => item.hasAny);
 
           return (
             <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -549,10 +633,7 @@ export default function PlayerEventInput(){
                   </thead>
 
                   <tbody>
-                    {orderSlotsByPairs(
-                      participants.filter(p => Number(p?.room)=== (Number.isFinite(roomIdx)?roomIdx:NaN)),
-                      participants
-                    ).map((p, rIdx)=>{
+                    {orderedRoomRows.map((p, rIdx) => {
                       const rowRawValues = isHoleRankForce
                         ? selectedHoles.map((holeNo) => (p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''))
                         : (isAccum
@@ -564,66 +645,167 @@ export default function PlayerEventInput(){
                       });
                       const rowHasValue = rowRawValues.some((raw) => String(raw ?? '').trim() !== '');
                       const rowTotal = rowValues.reduce((sum, n) => sum + n, 0);
-                      const rowTotalDisplay = p ? (rowHasValue ? rowTotal : '') : '';
-                      return (
-                      <tr key={rIdx}>
-                        <td>{p ? p.nickname : ''}</td>
+                      const rowTotalDisplay = p ? (rowHasValue ? formatDisplayNumber(rowTotal) : '') : '';
 
-                        {isAccum ? (
-                          (isHoleRankForce ? selectedHoles : Array.from({length: attempts}, (_,i)=>i+1)).map((holeOrIdx, cellIdx)=>(
+                      return (
+                        <tr key={rIdx}>
+                          <td>{p ? p.nickname : ''}</td>
+
+                          {isAccum ? (
+                            (isHoleRankForce ? selectedHoles : Array.from({length: attempts}, (_,i)=>i+1)).map((holeOrIdx, cellIdx) => {
+                              const valueIndex = isHoleRankForce ? (holeOrIdx - 1) : cellIdx;
+                              const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
+                              const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
+                              return (
+                                <td
+                                  key={holeOrIdx}
+                                  className={tCss.cellEditable}
+                                  onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, cellIdx, attempts, e); }}
+                                >
+                                  <input
+                                    ref={(el) => {
+                                      if (el) eventInputRefs.current[inputKey] = el;
+                                      else delete eventInputRefs.current[inputKey];
+                                    }}
+                                    type="text"
+                                    inputMode="decimal"
+                                    pattern={isHoleRankForce ? "[0-9.+\-]*" : "[0-9.]*"}
+                                    autoComplete="off"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
+                                    className={tCss.cellInput}
+                                    value={cellValue}
+                                    onChange={e=> p && patchAccum(ev.id, p.id, valueIndex, e.target.value, isHoleRankForce ? 18 : attempts)}
+                                    onBlur={e=> p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, isHoleRankForce ? 18 : attempts)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                    onPointerDown={(e) => {
+                                      if (isHoleRankForce && p) {
+                                        e.stopPropagation();
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
+                                      }
+                                    }}
+                                    onPointerUp={() => cancelEventLongPress(inputKey)}
+                                    onPointerCancel={() => cancelEventLongPress(inputKey)}
+                                    onPointerLeave={() => cancelEventLongPress(inputKey)}
+                                    onTouchStart={(e) => {
+                                      if (isHoleRankForce && p) {
+                                        e.stopPropagation();
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
+                                      }
+                                    }}
+                                    onTouchEnd={() => cancelEventLongPress(inputKey)}
+                                    onTouchCancel={() => cancelEventLongPress(inputKey)}
+                                    data-focus-evid={ev.id}
+                                    data-focus-pid={p ? p.id : ''}
+                                    data-focus-idx={valueIndex}
+                                  />
+                                </td>
+                              );
+                            })
+                          ) : (
                             <td
-                              key={holeOrIdx}
                               className={tCss.cellEditable}
-                              onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, cellIdx, attempts, e); }}
+                              onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, 0, 1, e); }}
                             >
                               <input
                                 type="text"
-                                inputMode={isHoleRankForce ? 'text' : 'decimal'}
-                                pattern={isHoleRankForce ? '-?[0-9.]*' : '[0-9.]*'}
+                                inputMode="decimal"
+                                pattern="[0-9.]*"
                                 autoComplete="off"
                                 autoCorrect="off"
                                 autoCapitalize="off"
                                 spellCheck={false}
                                 className={tCss.cellInput}
-                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[isHoleRankForce ? (holeOrIdx - 1) : cellIdx] ?? '') : ''}
-                                onChange={e=> p && patchAccum(ev.id, p.id, isHoleRankForce ? (holeOrIdx - 1) : cellIdx, e.target.value, isHoleRankForce ? 18 : attempts)}
-                                onBlur={e=> p && finalizeAccum(ev.id, p.id, isHoleRankForce ? (holeOrIdx - 1) : cellIdx, e.target.value, isHoleRankForce ? 18 : attempts)}
+                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '') : ''}
+                                onChange={(e)=> p && patchValue(ev.id, p.id, e.target.value)}
+                                onBlur={(e)=> p && finalizeValue(ev.id, p.id, e.target.value)}
                                 data-focus-evid={ev.id}
                                 data-focus-pid={p ? p.id : ''}
-                                data-focus-idx={isHoleRankForce ? (holeOrIdx - 1) : cellIdx}
+                                data-focus-idx={0}
                               />
                             </td>
-                          ))
-                        ) : (
-                          <td
-                            className={tCss.cellEditable}
-                            onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, 0, 1, e); }}
-                          >
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              pattern="[0-9.]*"
-                              autoComplete="off"
-                              autoCorrect="off"
-                              autoCapitalize="off"
-                              spellCheck={false}
-                              className={tCss.cellInput}
-                              value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '') : ''}
-                              onChange={(e)=> p && patchValue(ev.id, p.id, e.target.value)}
-                              onBlur={(e)=> p && finalizeValue(ev.id, p.id, e.target.value)}
-                              data-focus-evid={ev.id}
-                              data-focus-pid={p ? p.id : ''}
-                              data-focus-idx={0}
-                            />
-                          </td>
-                        )}
+                          )}
 
-                        {isHoleRankForce && <td>{rowTotalDisplay}</td>}
+                          {isHoleRankForce && <td className={tCss.totalCell}>{rowTotalDisplay}</td>}
+                        </tr>
+                      );
+                    })}
+
+                    {isHoleRankForce && (
+                      <tr className={tCss.subtotalRow}>
+                        <td className={tCss.subtotalLabel}>소계</td>
+                        {rawSubtotal.map((item) => (
+                          <td key={`raw-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
+                            {item.hasAny ? formatDisplayNumber(item.sum) : ''}
+                          </td>
+                        ))}
+                        <td className={tCss.subtotalRed}>
+                          {rawGrandHasAny ? formatDisplayNumber(rawGrandTotal) : ''}
+                        </td>
                       </tr>
-                    );})}
+                    )}
                   </tbody>
                 </table>
               </div>
+
+              {hasForcedViewer && forcedRoom && (
+                <div className={tCss.viewerWrap}>
+                  <div className={tCss.viewerTitle}>강제 적용 보기</div>
+                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                    <table className={tCss.table} style={{ width: `${tableWidthPct}%` }}>
+                      <colgroup>
+                        <col style={{ width: `${NICK_PCT}%` }} />
+                        {Array.from({ length: attempts }, (_,i) => <col key={i} style={{ width: `${ONE_PCT}%` }} />)}
+                        <col style={{ width: `${TOTAL_PCT}%` }} />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>닉네임</th>
+                          {selectedHoles.map((holeNo) => (<th key={`viewer-head-${holeNo}`}>{holeNo}</th>))}
+                          <th>합계</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orderedRoomRows.map((p, rIdx) => {
+                          const forcedSlot = p ? (forcedRoom?.slots || []).find((slot) => String(slot?.participantId ?? '') === String(p.id)) : null;
+                          const viewerRawValues = selectedHoles.map((holeNo) => forcedSlot?.effectiveHoleScores?.[holeNo]);
+                          const viewerHasValue = viewerRawValues.some((value) => Number.isFinite(Number(value)));
+                          const viewerTotal = Number(forcedSlot?.total);
+                          return (
+                            <tr key={`viewer-${rIdx}`}>
+                              <td>{p ? p.nickname : ''}</td>
+                              {selectedHoles.map((holeNo) => {
+                                const value = forcedSlot?.effectiveHoleScores?.[holeNo];
+                                return (
+                                  <td key={`viewer-${rIdx}-${holeNo}`}>
+                                    {formatDisplayNumber(value)}
+                                  </td>
+                                );
+                              })}
+                              <td className={tCss.totalCell}>
+                                {viewerHasValue && Number.isFinite(viewerTotal) ? formatDisplayNumber(viewerTotal) : ''}
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                        <tr className={tCss.subtotalRow}>
+                          <td className={tCss.subtotalLabel}>소계</td>
+                          {forcedSubtotal.map((item) => (
+                            <td key={`forced-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
+                              {item.hasAny ? formatDisplayNumber(item.sum) : ''}
+                            </td>
+                          ))}
+                          <td className={tCss.subtotalRed}>
+                            {forcedGrandHasAny ? formatDisplayNumber(forcedGrandTotal) : ''}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {bonusPopup.open && (()=>{ 
                 const evv = events.find(e=> e.id===bonusPopup.evId);
