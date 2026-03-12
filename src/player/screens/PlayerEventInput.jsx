@@ -751,7 +751,7 @@ export default function PlayerEventInput(){
 
               {hasForcedViewer && forcedRoom && (
                 <div className={tCss.viewerWrap}>
-                  <div className={tCss.viewerTitle}>강제 적용 보기</div>
+                  <div className={tCss.viewerTitle}>환산 적용 미리보기</div>
                   <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                     <table className={tCss.table} style={{ width: `${tableWidthPct}%` }}>
                       <colgroup>

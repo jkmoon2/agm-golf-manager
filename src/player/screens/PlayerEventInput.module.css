@@ -96,8 +96,9 @@
 }
 
 .viewerTitle{
-  margin:0 0 8px;
+  margin:0 12px 8px;
   font-size:14px;
   font-weight:800;
   color:#15356b;
+  text-align:left;
 }

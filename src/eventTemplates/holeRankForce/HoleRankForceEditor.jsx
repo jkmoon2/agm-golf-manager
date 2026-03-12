@@ -45,7 +45,7 @@ export default function HoleRankForceEditor({
   const selectedHoleOptions = useMemo(() => normalizeSelectedHoles(safe.selectedHoles), [safe.selectedHoles]);
   const selectedSlotOptions = useMemo(() => normalizeSelectedSlots(safe.selectedSlots), [safe.selectedSlots]);
 
-  const [openKey, setOpenKey] = useState('holes');
+  const [openKey, setOpenKey] = useState('');
   const [activeHole, setActiveHole] = useState(String(selectedHoleOptions[0] || 1));
   const [activeSlot, setActiveSlot] = useState(String(selectedSlotOptions[0] || 1));
 
