@@ -7,6 +7,7 @@ import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+import { normalizeSelectedHoles } from '../../events/holeRankForce';
 
 
 function getPlayerTabId(){
@@ -509,10 +510,11 @@ export default function PlayerEventInput(){
 
         {events.map(ev => {
           const isHoleRankForce = ev.template === 'hole-rank-force';
+          const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
-          const attempts = isHoleRankForce ? 18 : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+          const attempts = isHoleRankForce ? selectedHoles.length : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
           const NICK_PCT = 35;
-          const ONE_PCT  = isHoleRankForce ? 8.5 : (65 / 4);
+          const ONE_PCT  = isHoleRankForce ? Math.max(10, 53 / Math.max(selectedHoles.length || 1, 1)) : (65 / 4);
           const TOTAL_PCT = isHoleRankForce ? 12 : 0;
           const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT + TOTAL_PCT) : 100;
           const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
@@ -538,7 +540,9 @@ export default function PlayerEventInput(){
                     <tr>
                       <th>닉네임</th>
                       {isAccum
-                        ? Array.from({length: attempts}, (_,i)=>(<th key={i}>{isHoleRankForce ? `${i+1}홀` : `입력${i+1}`}</th>))
+                        ? (isHoleRankForce
+                          ? selectedHoles.map((holeNo) => (<th key={holeNo}>{holeNo}</th>))
+                          : Array.from({length: attempts}, (_,i)=>(<th key={i}>{`입력${i+1}`}</th>)))
                         : <th>입력값</th>}
                       {isHoleRankForce && <th>합계</th>}
                     </tr>
@@ -549,41 +553,44 @@ export default function PlayerEventInput(){
                       participants.filter(p => Number(p?.room)=== (Number.isFinite(roomIdx)?roomIdx:NaN)),
                       participants
                     ).map((p, rIdx)=>{
-                      const rowValues = isAccum
-                        ? Array.from({ length: attempts }, (_, i) => {
-                            const raw = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : '';
-                            const n = Number(raw);
-                            return Number.isFinite(n) ? n : 0;
-                          })
-                        : [];
+                      const rowRawValues = isHoleRankForce
+                        ? selectedHoles.map((holeNo) => (p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''))
+                        : (isAccum
+                          ? Array.from({ length: attempts }, (_, i) => (p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''))
+                          : []);
+                      const rowValues = rowRawValues.map((raw) => {
+                        const n = Number(raw);
+                        return Number.isFinite(n) ? n : 0;
+                      });
+                      const rowHasValue = rowRawValues.some((raw) => String(raw ?? '').trim() !== '');
                       const rowTotal = rowValues.reduce((sum, n) => sum + n, 0);
-                      const rowTotalDisplay = p ? rowTotal : '';
+                      const rowTotalDisplay = p ? (rowHasValue ? rowTotal : '') : '';
                       return (
                       <tr key={rIdx}>
                         <td>{p ? p.nickname : ''}</td>
 
                         {isAccum ? (
-                          Array.from({length: attempts}, (_,i)=>(
+                          (isHoleRankForce ? selectedHoles : Array.from({length: attempts}, (_,i)=>i+1)).map((holeOrIdx, cellIdx)=>(
                             <td
-                              key={i}
+                              key={holeOrIdx}
                               className={tCss.cellEditable}
-                              onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, i, attempts, e); }}
+                              onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, cellIdx, attempts, e); }}
                             >
                               <input
                                 type="text"
-                                inputMode="decimal"
-                                pattern="[0-9.]*"
+                                inputMode={isHoleRankForce ? 'text' : 'decimal'}
+                                pattern={isHoleRankForce ? '-?[0-9.]*' : '[0-9.]*'}
                                 autoComplete="off"
                                 autoCorrect="off"
                                 autoCapitalize="off"
                                 spellCheck={false}
                                 className={tCss.cellInput}
-                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[i] ?? '') : ''}
-                                onChange={e=> p && patchAccum(ev.id, p.id, i, e.target.value, attempts)}
-                                onBlur={e=> p && finalizeAccum(ev.id, p.id, i, e.target.value, attempts)}
+                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[isHoleRankForce ? (holeOrIdx - 1) : cellIdx] ?? '') : ''}
+                                onChange={e=> p && patchAccum(ev.id, p.id, isHoleRankForce ? (holeOrIdx - 1) : cellIdx, e.target.value, isHoleRankForce ? 18 : attempts)}
+                                onBlur={e=> p && finalizeAccum(ev.id, p.id, isHoleRankForce ? (holeOrIdx - 1) : cellIdx, e.target.value, isHoleRankForce ? 18 : attempts)}
                                 data-focus-evid={ev.id}
                                 data-focus-pid={p ? p.id : ''}
-                                data-focus-idx={i}
+                                data-focus-idx={isHoleRankForce ? (holeOrIdx - 1) : cellIdx}
                               />
                             </td>
                           ))
