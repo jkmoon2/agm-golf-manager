@@ -96,9 +96,56 @@
 }
 
 .viewerTitle{
-  margin:12px 12px 0px;
-  font-size:15px;
+  margin:0 12px 8px;
+  font-size:14px;
   font-weight:800;
   color:#15356b;
   text-align:left;
+}
+
+.viewerTableWrap{
+  margin:0 12px 0 !important;
+}
+
+/*
+  환산 적용 미리보기 간격/크기 3안
+  - tight    : 제목과 아래 표를 가장 가깝게
+  - balanced : 현재 톤 유지 + 조금 키우고 조금 아래
+  - roomy    : 여백을 조금 더 둔 버전
+  PlayerEventInput.jsx 상단의 FORCED_PREVIEW_LAYOUT 값만 바꾸면 됨.
+*/
+.viewerPresetTight{
+  margin-top:14px;
+  padding-top:2px;
+}
+.viewerPresetTight .viewerTitle{
+  margin:0 12px 2px;
+  font-size:15px;
+}
+.viewerPresetTight .viewerTableWrap{
+  margin:0 12px 0 !important;
+}
+
+.viewerPresetBalanced{
+  margin-top:18px;
+  padding-top:4px;
+}
+.viewerPresetBalanced .viewerTitle{
+  margin:0 12px 3px;
+  font-size:16px;
+}
+.viewerPresetBalanced .viewerTableWrap{
+  margin:1px 12px 0 !important;
+}
+
+.viewerPresetRoomy{
+  margin-top:22px;
+  padding-top:6px;
+}
+.viewerPresetRoomy .viewerTitle{
+  margin:0 12px 5px;
+  font-size:16px;
+}
+.viewerPresetRoomy .viewerTableWrap{
+  margin:3px 12px 0 !important;
 }

@@ -26,6 +26,16 @@ function playerStorageKey(eventId, key){
 
 const LONG_PRESS_MS = 450;
 
+
+const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
+
+function getForcedPreviewPresetClass(styles){
+  if (FORCED_PREVIEW_LAYOUT === 'tight') return styles.viewerPresetTight;
+  if (FORCED_PREVIEW_LAYOUT === 'roomy') return styles.viewerPresetRoomy;
+  return styles.viewerPresetBalanced;
+}
+
+
 function formatDisplayNumber(value){
   if (value === '' || value == null) return '';
   const n = Number(value);
@@ -750,9 +760,9 @@ export default function PlayerEventInput(){
               </div>
 
               {hasForcedViewer && forcedRoom && (
-                <div className={tCss.viewerWrap}>
+                <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
                   <div className={tCss.viewerTitle}>환산 적용 미리보기</div>
-                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.viewerTableWrap}`}>
                     <table className={tCss.table} style={{ width: `${tableWidthPct}%` }}>
                       <colgroup>
                         <col style={{ width: `${NICK_PCT}%` }} />
