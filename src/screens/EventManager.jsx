@@ -76,7 +76,9 @@ export default function EventManager() {
   const [dragEventId, setDragEventId] = useState('');
   const [monitorId, setMonitorId] = useState(null);
   const listItemRefs = useRef({});
-  const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0 });
+  const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' });
+  const reorderTouchCleanupRef = useRef(null);
+  const reorderMouseCleanupRef = useRef(null);
   const suppressMenuClickRef = useRef(false);
   const dragEventIdRef = useRef('');
   const dragEventsRef = useRef(null);
@@ -276,15 +278,26 @@ if (form.template === 'group-battle') {
     }, 0);
   };
 
+  function detachTouchReorderListeners() {
+    const cleanup = reorderTouchCleanupRef.current;
+    if (typeof cleanup === 'function') cleanup();
+    reorderTouchCleanupRef.current = null;
+  }
+
+  function detachMouseReorderListeners() {
+    const cleanup = reorderMouseCleanupRef.current;
+    if (typeof cleanup === 'function') cleanup();
+    reorderMouseCleanupRef.current = null;
+  }
+
   function clearReorderSession() {
     const state = reorderPressRef.current || {};
     if (state.timer) {
       clearTimeout(state.timer);
     }
-    window.removeEventListener('pointermove', handleReorderMove);
-    window.removeEventListener('pointerup', handleReorderEnd);
-    window.removeEventListener('pointercancel', handleReorderEnd);
-    reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0 };
+    detachTouchReorderListeners();
+    detachMouseReorderListeners();
+    reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' };
     dragEventIdRef.current = '';
     dragEventsRef.current = null;
     dragOverIdRef.current = '';
@@ -295,6 +308,8 @@ if (form.template === 'group-battle') {
       document.body.style.userSelect = '';
       document.body.style.touchAction = '';
       document.body.style.webkitUserSelect = '';
+      document.body.style.overflow = '';
+      document.body.style.overscrollBehavior = '';
     } catch {}
   }
 
@@ -347,100 +362,170 @@ if (form.template === 'group-battle') {
     });
   };
 
-  const handleReorderMove = useCallback((e) => {
-    const state = reorderPressRef.current || {};
-    const point = getClientPoint(e);
-    const dx = Math.abs(Number(point.clientX || 0) - Number(state.startX || 0));
-    const dy = Math.abs(Number(point.clientY || 0) - Number(state.startY || 0));
-
-    if (!state.active) {
-      if (dx > 8 || dy > 8) {
-        if (state.timer) {
-          clearTimeout(state.timer);
-          reorderPressRef.current.timer = null;
-        }
-      }
-      return;
-    }
-
-    if (typeof e?.preventDefault === 'function' && e.cancelable !== false) e.preventDefault();
+  const activateReorder = useCallback((ev) => {
+    suppressMenuClickRef.current = true;
+    reorderPressRef.current = {
+      ...(reorderPressRef.current || {}),
+      timer: null,
+      active: true,
+      eventId: ev.id,
+    };
+    dragEventIdRef.current = String(ev.id || '');
+    dragOverIdRef.current = '';
+    setDragEventId(ev.id);
     setDragLiftOn(true);
-    updateDragOrderByPoint(point.clientY || 0);
+    const seeded = eventsOfSelected.map((item) => ({ ...item }));
+    dragEventsRef.current = seeded;
+    setDragEvents(seeded);
+    try {
+      document.body.style.userSelect = 'none';
+      document.body.style.touchAction = 'none';
+      document.body.style.webkitUserSelect = 'none';
+      document.body.style.overflow = 'hidden';
+      document.body.style.overscrollBehavior = 'contain';
+    } catch {}
   }, [eventsOfSelected]);
 
-  const handleReorderEnd = useCallback(async () => {
-    const state = reorderPressRef.current || {};
-    if (state.timer) {
-      clearTimeout(state.timer);
-      reorderPressRef.current.timer = null;
-    }
-    window.removeEventListener('pointermove', handleReorderMove);
-    window.removeEventListener('pointerup', handleReorderEnd);
-    window.removeEventListener('pointercancel', handleReorderEnd);
-
-    if (state.active) {
-      suppressMenuClickRef.current = true;
-      await finalizeReorder();
-    }
-  }, [finalizeReorder, handleReorderMove]);
-
-  const startReorderPress = useCallback((ev, rawEvent) => {
+  const startTouchReorder = useCallback((ev, rawEvent) => {
     rawEvent.stopPropagation();
-    if (typeof rawEvent.button === 'number' && rawEvent.button !== 0) return;
-    try { rawEvent.currentTarget?.setPointerCapture?.(rawEvent.pointerId); } catch {}
-    if (dragEventIdRef.current || reorderPressRef.current?.active) {
-      clearReorderSession();
-    }
-    const state = reorderPressRef.current || {};
-    if (state.timer) clearTimeout(state.timer);
+    const touch = rawEvent.touches?.[0];
+    if (!touch) return;
+    clearReorderSession();
     suppressMenuClickRef.current = false;
     setOpenMenuId(null);
     setMenuUpId(null);
-    const point = getClientPoint(rawEvent);
+
+    const touchId = touch.identifier;
     reorderPressRef.current = {
-      timer: setTimeout(() => {
-        suppressMenuClickRef.current = true;
-        reorderPressRef.current = {
-          ...(reorderPressRef.current || {}),
-          timer: null,
-          active: true,
-          eventId: ev.id,
-        };
-        dragEventIdRef.current = String(ev.id || '');
-        dragOverIdRef.current = '';
-        setDragEventId(ev.id);
-        setDragLiftOn(true);
-        const seeded = eventsOfSelected.map((item) => ({ ...item }));
-        dragEventsRef.current = seeded;
-        setDragEvents(seeded);
-        try {
-          document.body.style.userSelect = 'none';
-          document.body.style.touchAction = 'none';
-          document.body.style.webkitUserSelect = 'none';
-        } catch {}
-      }, 450),
+      timer: setTimeout(() => activateReorder(ev), 420),
       active: false,
       eventId: ev.id,
-      startX: point.clientX || 0,
-      startY: point.clientY || 0,
+      startX: Number(touch.clientX || 0),
+      startY: Number(touch.clientY || 0),
+      mode: 'touch',
+      touchId,
     };
 
-    window.addEventListener('pointermove', handleReorderMove);
-    window.addEventListener('pointerup', handleReorderEnd);
-    window.addEventListener('pointercancel', handleReorderEnd);
-  }, [eventsOfSelected, handleReorderEnd, handleReorderMove]);
+    const readTouch = (evt) => {
+      const allTouches = [...Array.from(evt.touches || []), ...Array.from(evt.changedTouches || [])];
+      return allTouches.find((item) => item.identifier === touchId) || allTouches[0] || null;
+    };
 
-  const onMorePointerDown = (ev, e) => {
-    startReorderPress(ev, e);
+    const handleTouchMove = (moveEvt) => {
+      const state = reorderPressRef.current || {};
+      const currentTouch = readTouch(moveEvt);
+      if (!currentTouch) return;
+      const dx = Math.abs(Number(currentTouch.clientX || 0) - Number(state.startX || 0));
+      const dy = Math.abs(Number(currentTouch.clientY || 0) - Number(state.startY || 0));
+
+      if (!state.active) {
+        if (dx > 8 || dy > 8) {
+          if (state.timer) {
+            clearTimeout(state.timer);
+            reorderPressRef.current = { ...(state || {}), timer: null };
+          }
+        }
+        return;
+      }
+
+      if (typeof moveEvt.preventDefault === 'function' && moveEvt.cancelable !== false) moveEvt.preventDefault();
+      setDragLiftOn(true);
+      updateDragOrderByPoint(Number(currentTouch.clientY || 0));
+    };
+
+    const handleTouchEnd = async () => {
+      const state = reorderPressRef.current || {};
+      if (state.timer) {
+        clearTimeout(state.timer);
+        reorderPressRef.current = { ...(state || {}), timer: null };
+      }
+      if (state.active) {
+        suppressMenuClickRef.current = true;
+        await finalizeReorder();
+      } else {
+        clearReorderSession();
+      }
+    };
+
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+    reorderTouchCleanupRef.current = () => {
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [activateReorder, finalizeReorder]);
+
+  const startMouseReorder = useCallback((ev, rawEvent) => {
+    rawEvent.stopPropagation();
+    if (typeof rawEvent.button === 'number' && rawEvent.button !== 0) return;
+    clearReorderSession();
+    suppressMenuClickRef.current = false;
+    setOpenMenuId(null);
+    setMenuUpId(null);
+
+    reorderPressRef.current = {
+      timer: setTimeout(() => activateReorder(ev), 320),
+      active: false,
+      eventId: ev.id,
+      startX: Number(rawEvent.clientX || 0),
+      startY: Number(rawEvent.clientY || 0),
+      mode: 'mouse',
+    };
+
+    const handleMouseMove = (moveEvt) => {
+      const state = reorderPressRef.current || {};
+      const dx = Math.abs(Number(moveEvt.clientX || 0) - Number(state.startX || 0));
+      const dy = Math.abs(Number(moveEvt.clientY || 0) - Number(state.startY || 0));
+      if (!state.active) {
+        if (dx > 8 || dy > 8) {
+          if (state.timer) {
+            clearTimeout(state.timer);
+            reorderPressRef.current = { ...(state || {}), timer: null };
+          }
+        }
+        return;
+      }
+      if (typeof moveEvt.preventDefault === 'function') moveEvt.preventDefault();
+      setDragLiftOn(true);
+      updateDragOrderByPoint(Number(moveEvt.clientY || 0));
+    };
+
+    const handleMouseEnd = async () => {
+      const state = reorderPressRef.current || {};
+      if (state.timer) {
+        clearTimeout(state.timer);
+        reorderPressRef.current = { ...(state || {}), timer: null };
+      }
+      if (state.active) {
+        suppressMenuClickRef.current = true;
+        await finalizeReorder();
+      } else {
+        clearReorderSession();
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseEnd);
+    reorderMouseCleanupRef.current = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseEnd);
+    };
+  }, [activateReorder, finalizeReorder]);
+
+  const onMoreTouchStart = (ev, e) => {
+    startTouchReorder(ev, e);
   };
 
-  useEffect(() => {
-    return () => {
-      window.removeEventListener('pointermove', handleReorderMove);
-      window.removeEventListener('pointerup', handleReorderEnd);
-      window.removeEventListener('pointercancel', handleReorderEnd);
-    };
-  }, [handleReorderEnd, handleReorderMove]);
+  const onMoreMouseDown = (ev, e) => {
+    startMouseReorder(ev, e);
+  };
+
+  useEffect(() => () => {
+    clearReorderSession();
+  }, []);
+
 
   const toggleEnable = async (ev) => {
     const next = eventsOfSelected.map(e => e.id === ev.id ? { ...e, enabled: !e.enabled } : e);
@@ -1192,7 +1277,8 @@ if (editForm?.template === 'group-battle') {
                     <div className={css.moreWrap} ref={menuRef}>
                       <button
                         className={`${css.moreBtn} ${dragEventId === ev.id ? css.moreBtnDragging : ''}`}
-                        onPointerDown={(e) => onMorePointerDown(ev, e)}
+                        onTouchStart={(e) => onMoreTouchStart(ev, e)}
+                        onMouseDown={(e) => onMoreMouseDown(ev, e)}
                         onContextMenu={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();

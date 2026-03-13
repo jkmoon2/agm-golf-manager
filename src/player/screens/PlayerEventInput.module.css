@@ -113,8 +113,9 @@
   display:flex;
   align-items:center;
   justify-content:center;
-  color:#15356b;
+  color:#1e40ff;
   font-size:13px;
+  font-weight:600;
   text-align:center;
 }
 
@@ -134,12 +135,14 @@
   overflow:hidden;
   text-overflow:ellipsis;
   text-align:center;
+  color:#1e40ff;
 }
 
 .pickMenuOverlay{
   position:fixed;
   inset:0;
   z-index:1200;
+  overscroll-behavior:contain;
 }
 
 .pickMenu{
@@ -151,7 +154,7 @@
   padding:6px;
   display:grid;
   gap:4px;
-  max-height:min(52vh, 320px);
+  max-height:min(56vh, 360px);
   overflow-y:auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -166,7 +169,7 @@
   border-radius:8px;
   background:#fff;
   color:#183153;
-  font-size:13px;
+  font-size:14px;
   text-align:left;
   white-space:nowrap;
   overflow:hidden;
@@ -282,6 +285,10 @@
   margin-top:12px;
 }
 
+.pickPreviewTableWrap{
+  width:100%;
+}
+
 .pickPreviewTitle{
   margin:0 12px 8px;
   font-size:14px;
@@ -311,38 +318,44 @@
 }
 
 .pickPreviewNick{
-  font-size:16px;
+  font-size:17px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 .pickPreviewNickWide{
-  font-size:15px;
+  font-size:16px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 .pickPreviewTeamMd{
+  font-size:13px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:#1e40ff;
+  font-weight:600;
+}
+
+.pickPreviewTeamSm{
   font-size:12px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
+  color:#1e40ff;
+  font-weight:600;
 }
 
-.pickPreviewTeamSm{
+.pickPreviewTeamXs{
   font-size:11px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
-}
-
-.pickPreviewTeamXs{
-  font-size:10px;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  color:#1e40ff;
+  font-weight:600;
 }
 
 .pickPreviewHandicap{

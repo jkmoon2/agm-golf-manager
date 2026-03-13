@@ -57,7 +57,7 @@ function estimatePickTextUnits(text = ''){
   }, 0);
 }
 
-const PICK_MENU_WIDTH_PX = 132;
+const PICK_MENU_WIDTH_PX = 150;
 
 function getPickMenuWidthPx(){
   return PICK_MENU_WIDTH_PX;
@@ -253,13 +253,23 @@ export default function PlayerEventInput(){
   useEffect(() => {
     if (!pickMenuState) return undefined;
     const closeMenu = () => setPickMenuState(null);
-    document.addEventListener('click', closeMenu);
+    const prevOverflow = document.body.style.overflow;
+    const prevTouchAction = document.body.style.touchAction;
+    const prevOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    document.body.style.overscrollBehavior = 'contain';
     window.addEventListener('resize', closeMenu);
-    window.addEventListener('scroll', closeMenu, true);
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') closeMenu();
+    };
+    document.addEventListener('keydown', onKeyDown);
     return () => {
-      document.removeEventListener('click', closeMenu);
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouchAction;
+      document.body.style.overscrollBehavior = prevOverscroll;
       window.removeEventListener('resize', closeMenu);
-      window.removeEventListener('scroll', closeMenu, true);
+      document.removeEventListener('keydown', onKeyDown);
     };
   }, [pickMenuState]);
 
@@ -760,8 +770,8 @@ export default function PlayerEventInput(){
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
             const nickColPct = isFourJo ? 20 : 32;
             const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
-            const previewNickPct = pickCfg.mode === 'jo' ? 24 : 23;
-            const previewTotalPct = pickCfg.mode === 'jo' ? 8 : 10;
+            const previewNickPct = pickCfg.mode === 'jo' ? 28 : 28;
+            const previewTotalPct = pickCfg.mode === 'jo' ? 7 : 8;
             const previewTeamPct = 100 - previewNickPct - previewTotalPct;
             const locked = !!ev?.params?.selectionLocked;
             const previewRows = roomMembers.map((p) => {
@@ -866,37 +876,35 @@ export default function PlayerEventInput(){
                 {hasPreviewRows && (
                   <div className={tCss.pickPreviewWrap}>
                     <div className={tCss.pickPreviewTitle}>선택 미리보기</div>
-                    <div className={tCss.pickPreviewCard}>
-                      <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                        <table className={tCss.table} style={{ width: '100%' }}>
-                          <colgroup>
-                            <col style={{ width: `${previewNickPct}%` }} />
-                            <col style={{ width: `${previewTeamPct}%` }} />
-                            <col style={{ width: `${previewTotalPct}%` }} />
-                          </colgroup>
-                          <thead>
-                            <tr>
-                              <th>닉네임</th>
-                              <th>선택팀</th>
-                              <th>합계</th>
+                    <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.pickPreviewTableWrap}`}>
+                      <table className={tCss.table} style={{ width: '100%' }}>
+                        <colgroup>
+                          <col style={{ width: `${previewNickPct}%` }} />
+                          <col style={{ width: `${previewTeamPct}%` }} />
+                          <col style={{ width: `${previewTotalPct}%` }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>닉네임</th>
+                            <th>선택팀</th>
+                            <th>합계</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewRows.map((row, idx) => (
+                            <tr key={`pick-preview-${idx}`}>
+                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewStrong} ${pickCfg.mode === 'jo' ? tCss.pickPreviewNickWide : tCss.pickPreviewNick}`}>{row.selectorName}</td>
+                              <td
+                                className={`${tCss.pickPreviewCell} ${getPickPreviewLineClass(tCss, row.teamLine, pickCfg.mode === 'jo')}`}
+                                title={row.teamLine}
+                              >
+                                {row.teamLine}
+                              </td>
+                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{row.handicapSum !== '' ? row.handicapSum : ''}</td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {previewRows.map((row, idx) => (
-                              <tr key={`pick-preview-${idx}`}>
-                                <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewStrong} ${pickCfg.mode === 'jo' ? tCss.pickPreviewNickWide : tCss.pickPreviewNick}`}>{row.selectorName}</td>
-                                <td
-                                  className={`${tCss.pickPreviewCell} ${getPickPreviewLineClass(tCss, row.teamLine, pickCfg.mode === 'jo')}`}
-                                  title={row.teamLine}
-                                >
-                                  {row.teamLine}
-                                </td>
-                                <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{row.handicapSum !== '' ? row.handicapSum : ''}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -1130,11 +1138,15 @@ export default function PlayerEventInput(){
                   setPickMenuState(null);
                 }
               }}
+              onTouchMove={(e) => {
+                e.stopPropagation();
+              }}
             >
               <div
                 className={tCss.pickMenu}
                 style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
