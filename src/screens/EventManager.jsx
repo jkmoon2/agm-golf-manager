@@ -5,7 +5,7 @@
 // - 새 템플릿 range-convert-bonus(보너스) 추가 + 편집/집계 지원
 // - 미리보기 점수 표시는 소수점 '두 자리까지만' 포맷
 
-import React, { useContext, useMemo, useState, useEffect, useRef } from 'react';
+import React, { useContext, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, serverTimestamp, deleteField, collection, getDocs, deleteDoc } from 'firebase/firestore';
@@ -51,6 +51,13 @@ const fmt2 = (x) => {
   const s = n.toFixed(2);
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 };
+
+
+function getClientPoint(evt){
+  const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
+  if (touch) return { clientX: Number(touch.clientX || 0), clientY: Number(touch.clientY || 0) };
+  return { clientX: Number(evt?.clientX || 0), clientY: Number(evt?.clientY || 0) };
+}
 
 export default function EventManager() {
   const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, overlayScoresToParticipants } = useContext(EventContext) || {};
@@ -257,7 +264,7 @@ if (form.template === 'group-battle') {
     }, 0);
   };
 
-  const finalizeReorder = async () => {
+  const finalizeReorder = useCallback(async () => {
     const nextList = Array.isArray(dragEvents) ? dragEvents : null;
     const changed = !!nextList && nextList.length === eventsOfSelected.length
       && nextList.some((item, idx) => String(item?.id) !== String(eventsOfSelected[idx]?.id));
@@ -265,12 +272,16 @@ if (form.template === 'group-battle') {
     setDragEventId('');
     setDragEvents(null);
     reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0 };
-    try { document.body.style.userSelect = ''; } catch {}
+    try {
+      document.body.style.userSelect = '';
+      document.body.style.touchAction = '';
+      document.body.style.webkitUserSelect = '';
+    } catch {}
 
     if (changed) {
       await updateEventImmediate({ events: nextList }, false);
     }
-  };
+  }, [dragEvents, eventsOfSelected, updateEventImmediate]);
 
   const updateDragOrderByPoint = (clientY) => {
     if (!dragEventId) return;
@@ -306,10 +317,11 @@ if (form.template === 'group-battle') {
     });
   };
 
-  const handleReorderMove = (e) => {
+  const handleReorderMove = useCallback((e) => {
     const state = reorderPressRef.current || {};
-    const dx = Math.abs((e.clientX || 0) - Number(state.startX || 0));
-    const dy = Math.abs((e.clientY || 0) - Number(state.startY || 0));
+    const point = getClientPoint(e);
+    const dx = Math.abs(Number(point.clientX || 0) - Number(state.startX || 0));
+    const dy = Math.abs(Number(point.clientY || 0) - Number(state.startY || 0));
 
     if (!state.active) {
       if (dx > 8 || dy > 8) {
@@ -321,11 +333,11 @@ if (form.template === 'group-battle') {
       return;
     }
 
-    e.preventDefault();
-    updateDragOrderByPoint(e.clientY || 0);
-  };
+    if (typeof e?.preventDefault === 'function' && e.cancelable !== false) e.preventDefault();
+    updateDragOrderByPoint(point.clientY || 0);
+  }, [dragEventId, dragEvents, eventsOfSelected]);
 
-  const handleReorderEnd = async () => {
+  const handleReorderEnd = useCallback(async () => {
     const state = reorderPressRef.current || {};
     if (state.timer) {
       clearTimeout(state.timer);
@@ -334,18 +346,23 @@ if (form.template === 'group-battle') {
     window.removeEventListener('pointermove', handleReorderMove);
     window.removeEventListener('pointerup', handleReorderEnd);
     window.removeEventListener('pointercancel', handleReorderEnd);
+    window.removeEventListener('touchmove', handleReorderMove);
+    window.removeEventListener('touchend', handleReorderEnd);
+    window.removeEventListener('touchcancel', handleReorderEnd);
 
     if (state.active) {
       suppressMenuClickRef.current = true;
       await finalizeReorder();
     }
-  };
+  }, [finalizeReorder, handleReorderMove]);
 
-  const onMorePointerDown = (ev, e) => {
-    e.stopPropagation();
+  const startReorderPress = useCallback((ev, rawEvent, source = 'pointer') => {
+    rawEvent.stopPropagation();
+    if (typeof rawEvent.preventDefault === 'function' && source !== 'pointer') rawEvent.preventDefault();
     const state = reorderPressRef.current || {};
     if (state.timer) clearTimeout(state.timer);
     suppressMenuClickRef.current = false;
+    const point = getClientPoint(rawEvent);
     reorderPressRef.current = {
       timer: setTimeout(() => {
         suppressMenuClickRef.current = true;
@@ -357,18 +374,50 @@ if (form.template === 'group-battle') {
         };
         setDragEventId(ev.id);
         setDragEvents(eventsOfSelected.map((item) => ({ ...item })));
-        try { document.body.style.userSelect = 'none'; } catch {}
+        try {
+          document.body.style.userSelect = 'none';
+          document.body.style.touchAction = 'none';
+          document.body.style.webkitUserSelect = 'none';
+        } catch {}
       }, 450),
       active: false,
       eventId: ev.id,
-      startX: e.clientX || 0,
-      startY: e.clientY || 0,
+      startX: point.clientX || 0,
+      startY: point.clientY || 0,
     };
+
+    if (source === 'touch') {
+      window.addEventListener('touchmove', handleReorderMove, { passive: false });
+      window.addEventListener('touchend', handleReorderEnd);
+      window.addEventListener('touchcancel', handleReorderEnd);
+      return;
+    }
 
     window.addEventListener('pointermove', handleReorderMove, { passive: false });
     window.addEventListener('pointerup', handleReorderEnd);
     window.addEventListener('pointercancel', handleReorderEnd);
+  }, [eventsOfSelected, handleReorderEnd, handleReorderMove]);
+
+  const onMorePointerDown = (ev, e) => {
+    if (e.pointerType === 'touch') return;
+    if (typeof e.button === 'number' && e.button !== 0) return;
+    startReorderPress(ev, e, 'pointer');
   };
+
+  const onMoreTouchStart = (ev, e) => {
+    startReorderPress(ev, e, 'touch');
+  };
+
+  useEffect(() => {
+    return () => {
+      window.removeEventListener('pointermove', handleReorderMove);
+      window.removeEventListener('pointerup', handleReorderEnd);
+      window.removeEventListener('pointercancel', handleReorderEnd);
+      window.removeEventListener('touchmove', handleReorderMove);
+      window.removeEventListener('touchend', handleReorderEnd);
+      window.removeEventListener('touchcancel', handleReorderEnd);
+    };
+  }, [handleReorderEnd, handleReorderMove]);
 
   const toggleEnable = async (ev) => {
     const next = eventsOfSelected.map(e => e.id === ev.id ? { ...e, enabled: !e.enabled } : e);
@@ -1119,8 +1168,10 @@ if (editForm?.template === 'group-battle') {
                     <span className={ev.enabled ? css.badgeOn : css.badgeOff}>{ev.enabled ? '사용' : '숨김'}</span>
                     <div className={css.moreWrap} ref={menuRef}>
                       <button
-                        className={css.moreBtn}
+                        className={`${css.moreBtn} ${dragEventId === ev.id ? css.moreBtnDragging : ''}`}
                         onPointerDown={(e) => onMorePointerDown(ev, e)}
+                        onTouchStart={(e) => onMoreTouchStart(ev, e)}
+                        onContextMenu={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (suppressMenuClickRef.current || dragEventId) {

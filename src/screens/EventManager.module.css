@@ -190,6 +190,12 @@
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  cursor: grab;
+}
+.moreBtnDragging {
+  cursor: grabbing;
+  border-color: #8bb6ff;
+  background: #f8fbff;
 }
 .menu {
   position: absolute;

@@ -96,6 +96,89 @@
   display:none;
 }
 
+.pickMenuHolder{
+  position:relative;
+  width:100%;
+}
+
+.pickSelectButton{
+  width:100%;
+  height: calc(var(--row-h) - 6px);
+  margin:0;
+  padding:2px 3px;
+  box-sizing:border-box;
+  background:transparent;
+  border:none;
+  outline:none;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#15356b;
+  font-size:13px;
+  text-align:center;
+}
+
+.pickSelectButtonCompact{
+  font-size:12px;
+  padding:2px 1px;
+}
+
+.pickSelectButton:disabled{
+  color:#98a2b3;
+}
+
+.pickSelectText{
+  display:block;
+  width:100%;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  text-align:center;
+}
+
+.pickMenu{
+  position:absolute;
+  left:50%;
+  top:calc(100% + 4px);
+  transform:translateX(-50%);
+  z-index:40;
+  max-width:min(36vw, 220px);
+  border:1px solid #d6dde8;
+  border-radius:10px;
+  background:#fff;
+  box-shadow:0 12px 28px rgba(15, 23, 42, 0.16);
+  padding:6px;
+  display:grid;
+  gap:4px;
+}
+
+.pickMenuOption{
+  width:100%;
+  min-height:32px;
+  padding:6px 10px;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  background:#fff;
+  color:#183153;
+  font-size:13px;
+  text-align:left;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.pickMenuOptionActive{
+  border-color:#bcd0ff;
+  background:#eef4ff;
+  color:#2457d6;
+  font-weight:700;
+}
+
+.pickMenuOption:disabled{
+  color:#9ca3af;
+  background:#f8fafc;
+}
+
 /* 팝업: 고정 min-width 제거, 내용 기준 width (JS에서 width 지정) + 줄바꿈 방지 */
 .bonusPopup{
   white-space: nowrap;
@@ -193,7 +276,7 @@
 }
 
 .pickPreviewTitle{
-  margin:0 0 8px;
+  margin:0 12px 8px;
   font-size:14px;
   font-weight:800;
   color:#15356b;
@@ -217,6 +300,41 @@
 .pickPreviewStrong{
   font-weight:800;
   color:#15356b;
+}
+
+.pickPreviewNick{
+  font-size:14px;
+  white-space:nowrap;
+  overflow:visible;
+  text-overflow:clip;
+}
+
+.pickPreviewNickWide{
+  font-size:13px;
+  white-space:nowrap;
+  overflow:visible;
+  text-overflow:clip;
+}
+
+.pickPreviewTeamMd{
+  font-size:13px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.pickPreviewTeamSm{
+  font-size:12px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.pickPreviewTeamXs{
+  font-size:11px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .pickPreviewHandicap{

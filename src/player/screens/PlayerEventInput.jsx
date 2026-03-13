@@ -49,6 +49,25 @@ function displayPickOption(p){
   return String(p?.nickname || '');
 }
 
+
+function getPickMenuWidthCh(options = []){
+  const longest = (Array.isArray(options) ? options : []).reduce((maxLen, opt) => {
+    return Math.max(maxLen, String(opt?.nickname || '').trim().length);
+  }, 2);
+  return Math.max(8, Math.min(longest + 2, 14));
+}
+
+function getPickPreviewLineText(cells = []){
+  return (Array.isArray(cells) ? cells : []).map((v) => String(v || '').trim()).filter(Boolean).join(' / ');
+}
+
+function getPickPreviewLineClass(styles, text = '', isJo = false){
+  const len = String(text || '').length;
+  if (len >= (isJo ? 25 : 28)) return styles.pickPreviewTeamXs;
+  if (len >= (isJo ? 18 : 22)) return styles.pickPreviewTeamSm;
+  return styles.pickPreviewTeamMd;
+}
+
 function getEffectiveParticipants(eventData){
   const safeArr = (v) => (Array.isArray(v) ? v : []);
   const mode = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
@@ -198,6 +217,7 @@ export default function PlayerEventInput(){
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
+  const [pickMenuState, setPickMenuState] = useState(null);
   useEffect(() => {
     const id = eventId || ctxId;
     if (!id) return;
@@ -222,6 +242,13 @@ export default function PlayerEventInput(){
   }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
 
   const nextDisabled = useMemo(() => (latestGate?.steps?.[4] !== 'enabled'), [latestGate]);
+
+  useEffect(() => {
+    if (!pickMenuState) return undefined;
+    const closeMenu = () => setPickMenuState(null);
+    document.addEventListener('click', closeMenu);
+    return () => document.removeEventListener('click', closeMenu);
+  }, [pickMenuState]);
 
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
@@ -696,11 +723,14 @@ export default function PlayerEventInput(){
               ? pickCfg.openGroups.map((groupNo) => `${groupNo}조`)
               : Array.from({ length: requiredCount }, (_, i) => `선택${i + 1}`);
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
-            const nickColPct = isFourJo ? 22 : 32;
+            const nickColPct = isFourJo ? 20 : 32;
             const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
+            const previewNickPct = pickCfg.mode === 'jo' ? 32 : 30;
+            const previewTotalPct = pickCfg.mode === 'jo' ? 12 : 14;
+            const previewTeamPct = 100 - previewNickPct - previewTotalPct;
             const locked = !!ev?.params?.selectionLocked;
             const previewRows = roomMembers.map((p) => {
-              if (!p) return { selectorName: '', cells: slotLabels.map(() => ''), handicapSum: '', hasAny: false };
+              if (!p) return { selectorName: '', cells: slotLabels.map(() => ''), teamLine: '', handicapSum: '', hasAny: false };
               const rowIds = padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount);
               const members = rowIds.map((id) => participantById.get(String(id))).filter(Boolean);
               const cells = pickCfg.mode === 'jo'
@@ -713,9 +743,11 @@ export default function PlayerEventInput(){
                 const override = Number(ev?.params?.handicapOverrides?.[String(m?.id)]);
                 return sum + (Number.isFinite(override) ? override : (Number(m?.handicap ?? 0) || 0));
               }, 0);
+              const teamLine = getPickPreviewLineText(cells);
               return {
                 selectorName: String(p?.nickname || ''),
                 cells,
+                teamLine,
                 handicapSum: members.length ? handicapSum : '',
                 hasAny: members.length > 0,
               };
@@ -760,25 +792,70 @@ export default function PlayerEventInput(){
                             <td style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', padding:'0 4px' }}>{p ? p.nickname : ''}</td>
                             {slotLabels.map((_, idx) => {
                               const options = getPickOptions(ev, idx);
+                              const selectedId = p ? (rowIds[idx] || '') : '';
+                              const selectedOpt = options.find((opt) => String(opt?.id) === String(selectedId));
+                              const buttonText = selectedOpt ? displayPickOption(selectedOpt) : '선택';
+                              const menuWidthCh = getPickMenuWidthCh(options);
+                              const menuOpen = !!p && pickMenuState?.evId === ev.id && pickMenuState?.pid === p.id && pickMenuState?.idx === idx;
                               return (
                                 <td key={idx} className={tCss.cellEditable}>
-                                  <select
-                                    className={`${tCss.cellSelect} ${isFourJo ? tCss.cellSelectCompact : ''}`}
-                                    value={p ? (rowIds[idx] || '') : ''}
-                                    onChange={(e) => p && patchPickMember(ev.id, p.id, idx, e.target.value, requiredCount)}
-                                    disabled={!p || locked}
-                                  >
-                                    <option value="">선택</option>
-                                    {options.map((opt) => {
-                                      const value = String(opt?.id);
-                                      const selectedElsewhere = rowIds.includes(value) && rowIds[idx] !== value;
-                                      return (
-                                        <option key={value} value={value} disabled={selectedElsewhere}>
-                                          {displayPickOption(opt)}
-                                        </option>
-                                      );
-                                    })}
-                                  </select>
+                                  <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      className={`${tCss.pickSelectButton} ${isFourJo ? tCss.pickSelectButtonCompact : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!p || locked) return;
+                                        setPickMenuState((prev) => {
+                                          const same = prev?.evId === ev.id && prev?.pid === p.id && prev?.idx === idx;
+                                          return same ? null : { evId: ev.id, pid: p.id, idx };
+                                        });
+                                      }}
+                                      disabled={!p || locked}
+                                      title={buttonText}
+                                    >
+                                      <span className={tCss.pickSelectText}>{buttonText}</span>
+                                    </button>
+
+                                    {menuOpen && (
+                                      <div
+                                        className={tCss.pickMenu}
+                                        style={{ width: `${menuWidthCh}ch` }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <button
+                                          type="button"
+                                          className={`${tCss.pickMenuOption} ${!selectedId ? tCss.pickMenuOptionActive : ''}`}
+                                          onClick={() => {
+                                            patchPickMember(ev.id, p.id, idx, '', requiredCount);
+                                            setPickMenuState(null);
+                                          }}
+                                        >
+                                          선택 해제
+                                        </button>
+                                        {options.map((opt) => {
+                                          const value = String(opt?.id);
+                                          const selectedElsewhere = rowIds.includes(value) && rowIds[idx] !== value;
+                                          const active = String(selectedId) === value;
+                                          return (
+                                            <button
+                                              key={value}
+                                              type="button"
+                                              className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
+                                              onClick={() => {
+                                                if (selectedElsewhere) return;
+                                                patchPickMember(ev.id, p.id, idx, value, requiredCount);
+                                                setPickMenuState(null);
+                                              }}
+                                              disabled={selectedElsewhere}
+                                            >
+                                              {displayPickOption(opt)}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                               );
                             })}
@@ -796,30 +873,27 @@ export default function PlayerEventInput(){
                       <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                         <table className={tCss.table} style={{ width: '100%' }}>
                           <colgroup>
-                            <col style={{ width: `${nickColPct}%` }} />
-                            {pickCfg.mode === 'jo'
-                              ? slotLabels.map((_, idx) => <col key={idx} style={{ width: `${(100 - nickColPct - 16) / Math.max(slotLabels.length, 1)}%` }} />)
-                              : <col style={{ width: `${100 - nickColPct - 16}%` }} />}
-                            <col style={{ width: '16%' }} />
+                            <col style={{ width: `${previewNickPct}%` }} />
+                            <col style={{ width: `${previewTeamPct}%` }} />
+                            <col style={{ width: `${previewTotalPct}%` }} />
                           </colgroup>
                           <thead>
                             <tr>
                               <th>닉네임</th>
-                              {pickCfg.mode === 'jo'
-                                ? slotLabels.map((label, idx) => <th key={`preview-${idx}`}>{label}</th>)
-                                : <th>선택팀</th>}
-                              <th>G합</th>
+                              <th>선택팀</th>
+                              <th>합계</th>
                             </tr>
                           </thead>
                           <tbody>
                             {previewRows.map((row, idx) => (
                               <tr key={`pick-preview-${idx}`}>
-                                <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewStrong}`}>{row.selectorName}</td>
-                                {pickCfg.mode === 'jo'
-                                  ? row.cells.map((name, cellIdx) => (
-                                      <td key={`pick-preview-cell-${idx}-${cellIdx}`} className={tCss.pickPreviewCell}>{name}</td>
-                                    ))
-                                  : <td className={tCss.pickPreviewCell}>{row.cells[0] || ''}</td>}
+                                <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewStrong} ${pickCfg.mode === 'jo' ? tCss.pickPreviewNickWide : tCss.pickPreviewNick}`}>{row.selectorName}</td>
+                                <td
+                                  className={`${tCss.pickPreviewCell} ${getPickPreviewLineClass(tCss, row.teamLine, pickCfg.mode === 'jo')}`}
+                                  title={row.teamLine}
+                                >
+                                  {row.teamLine}
+                                </td>
                                 <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{row.handicapSum !== '' ? row.handicapSum : ''}</td>
                               </tr>
                             ))}
