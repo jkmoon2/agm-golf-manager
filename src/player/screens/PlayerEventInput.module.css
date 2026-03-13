@@ -64,23 +64,36 @@
   max-width:100%;
   height: calc(var(--row-h) - 6px);
   margin:0;
-  padding:2px 8px;
+  padding:2px 3px;
   box-sizing:border-box;
   background:transparent;
   border:none;
   outline:none;
   display:block;
-  text-align:left;
-  text-align-last:left;
+  text-align:center;
+  text-align-last:center;
   font-size:13px;
   color:#15356b;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  background-image:none;
+}
+
+.cellSelectCompact{
+  font-size:12px;
+  padding:2px 1px;
 }
 
 .cellSelect option{
   text-align:left;
+}
+
+.cellSelect::-ms-expand{
+  display:none;
 }
 
 /* 팝업: 고정 min-width 제거, 내용 기준 width (JS에서 width 지정) + 줄바꿈 방지 */
@@ -172,4 +185,48 @@
 }
 .viewerPresetRoomy .viewerTableWrap{
   margin:3px 12px 0 !important;
+}
+
+
+.pickPreviewWrap{
+  margin-top:12px;
+}
+
+.pickPreviewTitle{
+  margin:0 0 8px;
+  font-size:14px;
+  font-weight:800;
+  color:#15356b;
+  text-align:left;
+}
+
+.pickPreviewCard{
+  border:1px solid #e7edf5;
+  border-radius:12px;
+  background:#fbfdff;
+  padding:10px;
+}
+
+.pickPreviewCell{
+  padding:0 6px !important;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.pickPreviewStrong{
+  font-weight:800;
+  color:#15356b;
+}
+
+.pickPreviewHandicap{
+  color:#d11a2a;
+  font-weight:800;
+}
+
+.lockNotice{
+  margin:0 12px 8px;
+  font-size:12px;
+  font-weight:700;
+  color:#dc2626;
 }

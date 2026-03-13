@@ -19,6 +19,7 @@ import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEd
 import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
+import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import { computeHoleRankForce } from '../events/holeRankForce';
 
 
@@ -63,6 +64,14 @@ export default function EventManager() {
 
   /* ── 새 이벤트 만들기 ─────────────────────────────────── */
   const eventsOfSelected = useMemo(() => Array.isArray(eventData?.events) ? eventData.events : [], [eventData]);
+
+  const [dragEvents, setDragEvents] = useState(null);
+  const [dragEventId, setDragEventId] = useState('');
+  const [monitorId, setMonitorId] = useState(null);
+  const listItemRefs = useRef({});
+  const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0 });
+  const suppressMenuClickRef = useRef(false);
+  const orderedEvents = dragEvents || eventsOfSelected;
 
   const [form, setForm] = useState({
     title: '',
@@ -233,20 +242,132 @@ if (form.template === 'group-battle') {
     return () => document.removeEventListener('click', onClick);
   }, []);
 
-  const onOpenMenu = (ev, e) => {
-    e.stopPropagation();
+  const openMenuFromButton = (ev, btnEl) => {
     const id = (openMenuId === ev.id) ? null : ev.id;
     setOpenMenuId(id);
     setTimeout(() => {
       try {
-        const btnRect = e.currentTarget.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - btnRect.bottom;
-        const NEED = 160; // 메뉴 높이 대략치
+        const btnRect = btnEl?.getBoundingClientRect?.();
+        const spaceBelow = window.innerHeight - (btnRect?.bottom || 0);
+        const NEED = 200; // 메뉴 높이 대략치
         setMenuUpId(spaceBelow < NEED ? ev.id : null);
       } catch {
         setMenuUpId(null);
       }
     }, 0);
+  };
+
+  const finalizeReorder = async () => {
+    const nextList = Array.isArray(dragEvents) ? dragEvents : null;
+    const changed = !!nextList && nextList.length === eventsOfSelected.length
+      && nextList.some((item, idx) => String(item?.id) !== String(eventsOfSelected[idx]?.id));
+
+    setDragEventId('');
+    setDragEvents(null);
+    reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0 };
+    try { document.body.style.userSelect = ''; } catch {}
+
+    if (changed) {
+      await updateEventImmediate({ events: nextList }, false);
+    }
+  };
+
+  const updateDragOrderByPoint = (clientY) => {
+    if (!dragEventId) return;
+    const currentList = Array.isArray(dragEvents) ? dragEvents : eventsOfSelected;
+    let targetId = '';
+    let bestDist = Infinity;
+
+    currentList.forEach((row) => {
+      const id = String(row?.id || '');
+      if (!id || id === String(dragEventId)) return;
+      const el = listItemRefs.current?.[id];
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const centerY = rect.top + rect.height / 2;
+      const dist = Math.abs(clientY - centerY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        targetId = id;
+      }
+    });
+
+    if (!targetId) return;
+
+    setDragEvents((prev) => {
+      const base = Array.isArray(prev) ? prev : currentList;
+      const from = base.findIndex((item) => String(item?.id) === String(dragEventId));
+      const to = base.findIndex((item) => String(item?.id) === String(targetId));
+      if (from < 0 || to < 0 || from === to) return base;
+      const next = [...base];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  const handleReorderMove = (e) => {
+    const state = reorderPressRef.current || {};
+    const dx = Math.abs((e.clientX || 0) - Number(state.startX || 0));
+    const dy = Math.abs((e.clientY || 0) - Number(state.startY || 0));
+
+    if (!state.active) {
+      if (dx > 8 || dy > 8) {
+        if (state.timer) {
+          clearTimeout(state.timer);
+          reorderPressRef.current.timer = null;
+        }
+      }
+      return;
+    }
+
+    e.preventDefault();
+    updateDragOrderByPoint(e.clientY || 0);
+  };
+
+  const handleReorderEnd = async () => {
+    const state = reorderPressRef.current || {};
+    if (state.timer) {
+      clearTimeout(state.timer);
+      reorderPressRef.current.timer = null;
+    }
+    window.removeEventListener('pointermove', handleReorderMove);
+    window.removeEventListener('pointerup', handleReorderEnd);
+    window.removeEventListener('pointercancel', handleReorderEnd);
+
+    if (state.active) {
+      suppressMenuClickRef.current = true;
+      await finalizeReorder();
+    }
+  };
+
+  const onMorePointerDown = (ev, e) => {
+    e.stopPropagation();
+    const state = reorderPressRef.current || {};
+    if (state.timer) clearTimeout(state.timer);
+    suppressMenuClickRef.current = false;
+    reorderPressRef.current = {
+      timer: setTimeout(() => {
+        suppressMenuClickRef.current = true;
+        reorderPressRef.current = {
+          ...(reorderPressRef.current || {}),
+          timer: null,
+          active: true,
+          eventId: ev.id,
+        };
+        setDragEventId(ev.id);
+        setDragEvents(eventsOfSelected.map((item) => ({ ...item })));
+        try { document.body.style.userSelect = 'none'; } catch {}
+      }, 450),
+      active: false,
+      eventId: ev.id,
+      startX: e.clientX || 0,
+      startY: e.clientY || 0,
+    };
+
+    window.addEventListener('pointermove', handleReorderMove, { passive: false });
+    window.addEventListener('pointerup', handleReorderEnd);
+    window.addEventListener('pointercancel', handleReorderEnd);
   };
 
   const toggleEnable = async (ev) => {
@@ -645,12 +766,27 @@ if (editForm?.template === 'group-battle') {
     return (eventsOfSelected || []).find(e => e.id === handicapEditId) || null;
   }, [eventsOfSelected, handicapEditId]);
 
+  const pickLineupMonitorEvent = useMemo(() => {
+    if (!monitorId) return null;
+    return (eventsOfSelected || []).find((e) => e.id === monitorId) || null;
+  }, [eventsOfSelected, monitorId]);
+
   const saveHandicapOverrides = async (overridesMap) => {
     if (!handicapEditEvent) return;
     const safe = (overridesMap && typeof overridesMap === 'object') ? overridesMap : {};
     const next = (eventsOfSelected || []).map(e => {
       if (e.id !== handicapEditEvent.id) return e;
       const params = { ...(e.params || {}), handicapOverrides: safe };
+      return { ...e, params };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
+  const togglePickLineupLock = async (locked) => {
+    if (!pickLineupMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== pickLineupMonitorEvent.id) return e;
+      const params = { ...(e.params || {}), selectionLocked: !!locked };
       return { ...e, params };
     });
     await updateEventImmediate({ events: next }, false);
@@ -967,20 +1103,55 @@ if (editForm?.template === 'group-battle') {
 
             {!eventsOfSelected.length && <div className={css.empty}>등록된 이벤트가 없습니다.</div>}
 
-            {eventsOfSelected.map(ev => (
-              <div key={ev.id} className={css.listItem}>
+            {orderedEvents.map((ev) => (
+              <div
+                key={ev.id}
+                className={css.listItem}
+                ref={(el) => {
+                  if (el) listItemRefs.current[ev.id] = el;
+                  else delete listItemRefs.current[ev.id];
+                }}
+                style={dragEventId === ev.id ? { opacity: 0.72, borderColor: '#8bb6ff', background: '#f8fbff' } : undefined}
+              >
                 <div className={css.listHead}>
                   <div className={css.listTitle}><b>{ev.title}</b></div>
                   <div className={css.headRight}>
                     <span className={ev.enabled ? css.badgeOn : css.badgeOff}>{ev.enabled ? '사용' : '숨김'}</span>
                     <div className={css.moreWrap} ref={menuRef}>
-                      <button className={css.moreBtn} onClick={(e) => onOpenMenu(ev, e)}>⋮</button>
+                      <button
+                        className={css.moreBtn}
+                        onPointerDown={(e) => onMorePointerDown(ev, e)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (suppressMenuClickRef.current || dragEventId) {
+                            suppressMenuClickRef.current = false;
+                            return;
+                          }
+                          openMenuFromButton(ev, e.currentTarget);
+                        }}
+                        title="길게 눌러 순서 이동"
+                      >
+                        ⋮
+                      </button>
                       {openMenuId === ev.id && (
                         <div className={`${css.menu} ${menuUpId===ev.id ? css.menuUp : ''}`} onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => toggleEnable(ev)}>{ev.enabled ? '숨기기' : '사용'}</button>
                           <button onClick={() => openEdit(ev)}>수정</button>
                           {ev?.template === 'group-battle' || ev?.template === 'pick-lineup' ? (
-                            <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
+                            <>
+                              <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
+                              {ev?.template === 'pick-lineup' && (
+                                <button
+                                  onClick={() => {
+                                    setMonitorId(ev.id);
+                                    setOpenMenuId(null);
+                                    setMenuUpId(null);
+                                  }}
+                                >
+                                  선택 현황/마감
+                                </button>
+                              )}
+                            </>
                           ) : (
                             <>
                               {templateUi(ev?.template).supportsQuickInput !== false && (
@@ -1228,7 +1399,7 @@ if (editForm?.template === 'group-battle') {
 
             <div className={css.controlsRow}>
               <select className={`${css.selectInline} ${css.selectGrow}`} value={previewId} onChange={e => setPreviewId(e.target.value)}>
-                {eventsOfSelected.map(ev => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+                {orderedEvents.map(ev => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
               </select>
 
               <select
@@ -1332,6 +1503,17 @@ if (editForm?.template === 'group-battle') {
               await saveHandicapOverrides(nextMap);
               closeHandicapEditor();
             }}
+          />
+        )}
+
+        {pickLineupMonitorEvent?.template === 'pick-lineup' && (
+          <PickLineupSelectionMonitor
+            eventDef={pickLineupMonitorEvent}
+            participants={participants}
+            inputsByEvent={(eventData?.eventInputs || {})[pickLineupMonitorEvent.id] || {}}
+            roomNames={roomNames}
+            onClose={() => setMonitorId(null)}
+            onToggleLock={togglePickLineupLock}
           />
         )}
 

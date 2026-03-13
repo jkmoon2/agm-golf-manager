@@ -61,7 +61,7 @@ export default function GroupBattlePreview({
                 <div key={m.id} style={memberRow}>
                   <div style={{ display:'flex', justifyContent:'space-between', gap: 8 }}>
                     <div>
-                      <span style={{ fontWeight: 600 }}>{m.name}</span>{' '}
+                      <span style={{ fontWeight: 400 }}>{m.name}</span>{' '}
                       <span style={{ color:'#999', fontSize: 12 }}>({m.roomLabel || '-'})</span>
                     </div>
                     <div style={{ fontSize: 12, color:'#555' }}>

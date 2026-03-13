@@ -109,7 +109,7 @@ export const TEMPLATE_REGISTRY = [
       openGroups: [1],
       lastPlaceHalf: false,
     },
-    help: '* 개인 모드는 전체 참가자 중 1~4명 선택, 조 모드는 오픈된 각 조에서 1명씩 선택합니다. 결과는 (점수 - G핸디) 합계로 계산합니다.',
+    help: '',
     ui: {
       inputMode: false,
       paramsJson: false,

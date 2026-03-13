@@ -510,6 +510,10 @@ export default function PlayerEventInput(){
     return arr;
   }, [participants]);
 
+  const participantById = useMemo(() => {
+    return new Map(sortedParticipants.map((p) => [String(p?.id), p]));
+  }, [sortedParticipants]);
+
   const getPickOptions = (ev, slotIdx) => {
     const cfg = getPickLineupConfig(ev);
     if (cfg.mode === 'jo') {
@@ -691,8 +695,32 @@ export default function PlayerEventInput(){
             const slotLabels = pickCfg.mode === 'jo'
               ? pickCfg.openGroups.map((groupNo) => `${groupNo}조`)
               : Array.from({ length: requiredCount }, (_, i) => `선택${i + 1}`);
-            const nickColPct = pickCfg.mode === 'jo' && requiredCount === 4 ? 30 : 34;
+            const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
+            const nickColPct = isFourJo ? 22 : 32;
             const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
+            const locked = !!ev?.params?.selectionLocked;
+            const previewRows = roomMembers.map((p) => {
+              if (!p) return { selectorName: '', cells: slotLabels.map(() => ''), handicapSum: '', hasAny: false };
+              const rowIds = padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount);
+              const members = rowIds.map((id) => participantById.get(String(id))).filter(Boolean);
+              const cells = pickCfg.mode === 'jo'
+                ? pickCfg.openGroups.map((groupNo) => {
+                    const found = members.find((m) => Number(getParticipantGroupNo(m)) === Number(groupNo));
+                    return found ? String(found.nickname || '') : '';
+                  })
+                : [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
+              const handicapSum = members.reduce((sum, m) => {
+                const override = Number(ev?.params?.handicapOverrides?.[String(m?.id)]);
+                return sum + (Number.isFinite(override) ? override : (Number(m?.handicap ?? 0) || 0));
+              }, 0);
+              return {
+                selectorName: String(p?.nickname || ''),
+                cells,
+                handicapSum: members.length ? handicapSum : '',
+                hasAny: members.length > 0,
+              };
+            });
+            const hasPreviewRows = previewRows.some((row) => row.hasAny);
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -705,6 +733,8 @@ export default function PlayerEventInput(){
                     ? `오픈 조: ${pickCfg.openGroups.map((g) => `${g}조`).join(', ')}${pickCfg.lastPlaceHalf && pickCfg.openGroups.length === 4 ? ' · 꼴등반띵 적용' : ''}`
                     : `전체 참가자 중 ${pickCfg.pickCount}명 선택`}
                 </div>
+
+                {locked && <div className={tCss.lockNotice}>선택이 마감되어 더 이상 수정할 수 없습니다.</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: '100%' }}>
@@ -727,16 +757,16 @@ export default function PlayerEventInput(){
 
                         return (
                           <tr key={rIdx}>
-                            <td style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', padding:'0 6px' }}>{p ? p.nickname : ''}</td>
+                            <td style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', padding:'0 4px' }}>{p ? p.nickname : ''}</td>
                             {slotLabels.map((_, idx) => {
                               const options = getPickOptions(ev, idx);
                               return (
                                 <td key={idx} className={tCss.cellEditable}>
                                   <select
-                                    className={tCss.cellSelect}
+                                    className={`${tCss.cellSelect} ${isFourJo ? tCss.cellSelectCompact : ''}`}
                                     value={p ? (rowIds[idx] || '') : ''}
                                     onChange={(e) => p && patchPickMember(ev.id, p.id, idx, e.target.value, requiredCount)}
-                                    disabled={!p}
+                                    disabled={!p || locked}
                                   >
                                     <option value="">선택</option>
                                     {options.map((opt) => {
@@ -758,6 +788,47 @@ export default function PlayerEventInput(){
                     </tbody>
                   </table>
                 </div>
+
+                {hasPreviewRows && (
+                  <div className={tCss.pickPreviewWrap}>
+                    <div className={tCss.pickPreviewTitle}>선택 미리보기</div>
+                    <div className={tCss.pickPreviewCard}>
+                      <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                        <table className={tCss.table} style={{ width: '100%' }}>
+                          <colgroup>
+                            <col style={{ width: `${nickColPct}%` }} />
+                            {pickCfg.mode === 'jo'
+                              ? slotLabels.map((_, idx) => <col key={idx} style={{ width: `${(100 - nickColPct - 16) / Math.max(slotLabels.length, 1)}%` }} />)
+                              : <col style={{ width: `${100 - nickColPct - 16}%` }} />}
+                            <col style={{ width: '16%' }} />
+                          </colgroup>
+                          <thead>
+                            <tr>
+                              <th>닉네임</th>
+                              {pickCfg.mode === 'jo'
+                                ? slotLabels.map((label, idx) => <th key={`preview-${idx}`}>{label}</th>)
+                                : <th>선택팀</th>}
+                              <th>G합</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {previewRows.map((row, idx) => (
+                              <tr key={`pick-preview-${idx}`}>
+                                <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewStrong}`}>{row.selectorName}</td>
+                                {pickCfg.mode === 'jo'
+                                  ? row.cells.map((name, cellIdx) => (
+                                      <td key={`pick-preview-cell-${idx}-${cellIdx}`} className={tCss.pickPreviewCell}>{name}</td>
+                                    ))
+                                  : <td className={tCss.pickPreviewCell}>{row.cells[0] || ''}</td>}
+                                <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{row.handicapSum !== '' ? row.handicapSum : ''}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           }
