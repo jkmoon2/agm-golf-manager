@@ -78,6 +78,8 @@ export default function EventManager() {
   const listItemRefs = useRef({});
   const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0 });
   const suppressMenuClickRef = useRef(false);
+  const dragEventIdRef = useRef('');
+  const dragEventsRef = useRef(null);
   const orderedEvents = dragEvents || eventsOfSelected;
 
   const [form, setForm] = useState({
@@ -89,6 +91,14 @@ export default function EventManager() {
   });
   const [paramOpen, setParamOpen] = useState(false);
   const uiCreate = templateUi(form.template);
+
+  useEffect(() => {
+    dragEventIdRef.current = String(dragEventId || '');
+  }, [dragEventId]);
+
+  useEffect(() => {
+    dragEventsRef.current = Array.isArray(dragEvents) ? dragEvents : null;
+  }, [dragEvents]);
 
 
 // ────────────────────────────────────────────────────────────────
@@ -264,34 +274,51 @@ if (form.template === 'group-battle') {
     }, 0);
   };
 
-  const finalizeReorder = useCallback(async () => {
-    const nextList = Array.isArray(dragEvents) ? dragEvents : null;
-    const changed = !!nextList && nextList.length === eventsOfSelected.length
-      && nextList.some((item, idx) => String(item?.id) !== String(eventsOfSelected[idx]?.id));
-
+  function clearReorderSession() {
+    const state = reorderPressRef.current || {};
+    if (state.timer) {
+      clearTimeout(state.timer);
+    }
+    window.removeEventListener('pointermove', handleReorderMove);
+    window.removeEventListener('pointerup', handleReorderEnd);
+    window.removeEventListener('pointercancel', handleReorderEnd);
+    window.removeEventListener('touchmove', handleReorderMove);
+    window.removeEventListener('touchend', handleReorderEnd);
+    window.removeEventListener('touchcancel', handleReorderEnd);
+    reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0 };
+    dragEventIdRef.current = '';
+    dragEventsRef.current = null;
     setDragEventId('');
     setDragEvents(null);
-    reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0 };
     try {
       document.body.style.userSelect = '';
       document.body.style.touchAction = '';
       document.body.style.webkitUserSelect = '';
     } catch {}
+  }
+
+  const finalizeReorder = useCallback(async () => {
+    const nextList = Array.isArray(dragEventsRef.current) ? dragEventsRef.current : null;
+    const changed = !!nextList && nextList.length === eventsOfSelected.length
+      && nextList.some((item, idx) => String(item?.id) !== String(eventsOfSelected[idx]?.id));
+
+    clearReorderSession();
 
     if (changed) {
       await updateEventImmediate({ events: nextList }, false);
     }
-  }, [dragEvents, eventsOfSelected, updateEventImmediate]);
+  }, [eventsOfSelected, updateEventImmediate]);
 
   const updateDragOrderByPoint = (clientY) => {
-    if (!dragEventId) return;
-    const currentList = Array.isArray(dragEvents) ? dragEvents : eventsOfSelected;
+    const activeEventId = String(dragEventIdRef.current || reorderPressRef.current?.eventId || '');
+    if (!activeEventId) return;
+    const currentList = Array.isArray(dragEventsRef.current) ? dragEventsRef.current : eventsOfSelected;
     let targetId = '';
     let bestDist = Infinity;
 
     currentList.forEach((row) => {
       const id = String(row?.id || '');
-      if (!id || id === String(dragEventId)) return;
+      if (!id || id === activeEventId) return;
       const el = listItemRefs.current?.[id];
       if (!el) return;
       const rect = el.getBoundingClientRect();
@@ -307,12 +334,13 @@ if (form.template === 'group-battle') {
 
     setDragEvents((prev) => {
       const base = Array.isArray(prev) ? prev : currentList;
-      const from = base.findIndex((item) => String(item?.id) === String(dragEventId));
+      const from = base.findIndex((item) => String(item?.id) === activeEventId);
       const to = base.findIndex((item) => String(item?.id) === String(targetId));
       if (from < 0 || to < 0 || from === to) return base;
       const next = [...base];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
+      dragEventsRef.current = next;
       return next;
     });
   };
@@ -335,7 +363,7 @@ if (form.template === 'group-battle') {
 
     if (typeof e?.preventDefault === 'function' && e.cancelable !== false) e.preventDefault();
     updateDragOrderByPoint(point.clientY || 0);
-  }, [dragEventId, dragEvents, eventsOfSelected]);
+  }, [eventsOfSelected]);
 
   const handleReorderEnd = useCallback(async () => {
     const state = reorderPressRef.current || {};
@@ -358,7 +386,9 @@ if (form.template === 'group-battle') {
 
   const startReorderPress = useCallback((ev, rawEvent, source = 'pointer') => {
     rawEvent.stopPropagation();
-    if (typeof rawEvent.preventDefault === 'function' && source !== 'pointer') rawEvent.preventDefault();
+    if (dragEventIdRef.current || reorderPressRef.current?.active) {
+      clearReorderSession();
+    }
     const state = reorderPressRef.current || {};
     if (state.timer) clearTimeout(state.timer);
     suppressMenuClickRef.current = false;
@@ -372,8 +402,11 @@ if (form.template === 'group-battle') {
           active: true,
           eventId: ev.id,
         };
+        dragEventIdRef.current = String(ev.id || '');
         setDragEventId(ev.id);
-        setDragEvents(eventsOfSelected.map((item) => ({ ...item })));
+        const seeded = eventsOfSelected.map((item) => ({ ...item }));
+        dragEventsRef.current = seeded;
+        setDragEvents(seeded);
         try {
           document.body.style.userSelect = 'none';
           document.body.style.touchAction = 'none';
@@ -1174,8 +1207,12 @@ if (editForm?.template === 'group-battle') {
                         onContextMenu={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (suppressMenuClickRef.current || dragEventId) {
+                          if (suppressMenuClickRef.current) {
                             suppressMenuClickRef.current = false;
+                            return;
+                          }
+                          if (dragEventIdRef.current) {
+                            clearReorderSession();
                             return;
                           }
                           openMenuFromButton(ev, e.currentTarget);

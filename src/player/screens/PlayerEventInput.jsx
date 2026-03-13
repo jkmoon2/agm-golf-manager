@@ -1,6 +1,7 @@
 // /src/player/screens/PlayerEventInput.jsx
 
 import React, { useMemo, useContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
@@ -50,11 +51,17 @@ function displayPickOption(p){
 }
 
 
-function getPickMenuWidthCh(options = []){
-  const longest = (Array.isArray(options) ? options : []).reduce((maxLen, opt) => {
-    return Math.max(maxLen, String(opt?.nickname || '').trim().length);
-  }, 2);
-  return Math.max(8, Math.min(longest + 2, 14));
+function estimatePickTextUnits(text = ''){
+  return Array.from(String(text || '')).reduce((sum, ch) => {
+    return sum + (/[^\u0000-\u00ff]/.test(ch) ? 1.85 : 1);
+  }, 0);
+}
+
+function getPickMenuWidthPx(options = []){
+  const longestUnits = (Array.isArray(options) ? options : []).reduce((maxLen, opt) => {
+    return Math.max(maxLen, estimatePickTextUnits(String(opt?.nickname || '').trim()));
+  }, 4);
+  return Math.max(104, Math.min(Math.round(longestUnits * 14 + 34), 280));
 }
 
 function getPickPreviewLineText(cells = []){
@@ -218,6 +225,7 @@ export default function PlayerEventInput(){
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
   const [pickMenuState, setPickMenuState] = useState(null);
+  const pickButtonRefs = useRef({});
   useEffect(() => {
     const id = eventId || ctxId;
     if (!id) return;
@@ -247,7 +255,13 @@ export default function PlayerEventInput(){
     if (!pickMenuState) return undefined;
     const closeMenu = () => setPickMenuState(null);
     document.addEventListener('click', closeMenu);
-    return () => document.removeEventListener('click', closeMenu);
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    return () => {
+      document.removeEventListener('click', closeMenu);
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+    };
   }, [pickMenuState]);
 
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
@@ -300,6 +314,20 @@ export default function PlayerEventInput(){
       try { localStorage.setItem(playerStorageKey(eventId, 'currentRoom'), String(roomIdx)); } catch {}
     }
   }, [roomIdx, eventId]);
+
+  const openPickMenuAt = (evId, pid, idx, options = [], buttonEl = null) => {
+    const rect = buttonEl?.getBoundingClientRect?.();
+    const menuWidth = getPickMenuWidthPx(options);
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 360;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 640;
+    const left = rect
+      ? Math.max(8, Math.min(rect.left + (rect.width / 2) - (menuWidth / 2), viewportWidth - menuWidth - 8))
+      : 12;
+    const top = rect
+      ? Math.max(8, Math.min(rect.bottom + 6, viewportHeight - 8 - 220))
+      : 56;
+    setPickMenuState({ evId, pid, idx, left, top, width: menuWidth });
+  };
 
   const roomMembers = useMemo(() => {
     const inRoom = participants.filter(p => Number(p?.room) === roomIdx);
@@ -725,20 +753,15 @@ export default function PlayerEventInput(){
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
             const nickColPct = isFourJo ? 20 : 32;
             const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
-            const previewNickPct = pickCfg.mode === 'jo' ? 32 : 30;
-            const previewTotalPct = pickCfg.mode === 'jo' ? 12 : 14;
+            const previewNickPct = pickCfg.mode === 'jo' ? 28 : 27;
+            const previewTotalPct = pickCfg.mode === 'jo' ? 10 : 12;
             const previewTeamPct = 100 - previewNickPct - previewTotalPct;
             const locked = !!ev?.params?.selectionLocked;
             const previewRows = roomMembers.map((p) => {
               if (!p) return { selectorName: '', cells: slotLabels.map(() => ''), teamLine: '', handicapSum: '', hasAny: false };
               const rowIds = padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount);
               const members = rowIds.map((id) => participantById.get(String(id))).filter(Boolean);
-              const cells = pickCfg.mode === 'jo'
-                ? pickCfg.openGroups.map((groupNo) => {
-                    const found = members.find((m) => Number(getParticipantGroupNo(m)) === Number(groupNo));
-                    return found ? String(found.nickname || '') : '';
-                  })
-                : [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
+              const cells = [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
               const handicapSum = members.reduce((sum, m) => {
                 const override = Number(ev?.params?.handicapOverrides?.[String(m?.id)]);
                 return sum + (Number.isFinite(override) ? override : (Number(m?.handicap ?? 0) || 0));
@@ -795,21 +818,26 @@ export default function PlayerEventInput(){
                               const selectedId = p ? (rowIds[idx] || '') : '';
                               const selectedOpt = options.find((opt) => String(opt?.id) === String(selectedId));
                               const buttonText = selectedOpt ? displayPickOption(selectedOpt) : '선택';
-                              const menuWidthCh = getPickMenuWidthCh(options);
-                              const menuOpen = !!p && pickMenuState?.evId === ev.id && pickMenuState?.pid === p.id && pickMenuState?.idx === idx;
                               return (
                                 <td key={idx} className={tCss.cellEditable}>
                                   <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
                                     <button
                                       type="button"
                                       className={`${tCss.pickSelectButton} ${isFourJo ? tCss.pickSelectButtonCompact : ''}`}
+                                      ref={(el) => {
+                                        const key = `${ev.id}:${p?.id || 'blank'}:${idx}`;
+                                        if (el) pickButtonRefs.current[key] = el;
+                                        else delete pickButtonRefs.current[key];
+                                      }}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (!p || locked) return;
-                                        setPickMenuState((prev) => {
-                                          const same = prev?.evId === ev.id && prev?.pid === p.id && prev?.idx === idx;
-                                          return same ? null : { evId: ev.id, pid: p.id, idx };
-                                        });
+                                        const same = pickMenuState?.evId === ev.id && pickMenuState?.pid === p.id && pickMenuState?.idx === idx;
+                                        if (same) {
+                                          setPickMenuState(null);
+                                          return;
+                                        }
+                                        openPickMenuAt(ev.id, p.id, idx, options, e.currentTarget);
                                       }}
                                       disabled={!p || locked}
                                       title={buttonText}
@@ -817,44 +845,6 @@ export default function PlayerEventInput(){
                                       <span className={tCss.pickSelectText}>{buttonText}</span>
                                     </button>
 
-                                    {menuOpen && (
-                                      <div
-                                        className={tCss.pickMenu}
-                                        style={{ width: `${menuWidthCh}ch` }}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <button
-                                          type="button"
-                                          className={`${tCss.pickMenuOption} ${!selectedId ? tCss.pickMenuOptionActive : ''}`}
-                                          onClick={() => {
-                                            patchPickMember(ev.id, p.id, idx, '', requiredCount);
-                                            setPickMenuState(null);
-                                          }}
-                                        >
-                                          선택 해제
-                                        </button>
-                                        {options.map((opt) => {
-                                          const value = String(opt?.id);
-                                          const selectedElsewhere = rowIds.includes(value) && rowIds[idx] !== value;
-                                          const active = String(selectedId) === value;
-                                          return (
-                                            <button
-                                              key={value}
-                                              type="button"
-                                              className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
-                                              onClick={() => {
-                                                if (selectedElsewhere) return;
-                                                patchPickMember(ev.id, p.id, idx, value, requiredCount);
-                                                setPickMenuState(null);
-                                              }}
-                                              disabled={selectedElsewhere}
-                                            >
-                                              {displayPickOption(opt)}
-                                            </button>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
                                   </div>
                                 </td>
                               );
@@ -1110,6 +1100,69 @@ export default function PlayerEventInput(){
                   </div>
                 </div>
               )}
+
+
+        {pickMenuState && (() => {
+          const activeEvent = events.find((item) => item.id === pickMenuState.evId);
+          const requiredCount = getPickLineupRequiredCount(activeEvent);
+          const selector = roomMembers.find((item) => String(item?.id) === String(pickMenuState.pid));
+          const rowIds = selector
+            ? padPickIds(normalizeMemberIds(inputsByEvent?.[pickMenuState.evId]?.person?.[selector.id]), requiredCount)
+            : padPickIds([], requiredCount);
+          const options = activeEvent ? getPickOptions(activeEvent, pickMenuState.idx) : [];
+          const selectedId = selector ? (rowIds[pickMenuState.idx] || '') : '';
+          const portalNode = typeof document !== 'undefined' ? document.body : null;
+          if (!portalNode || !activeEvent || !selector) return null;
+
+          return createPortal(
+            <div
+              className={tCss.pickMenuOverlay}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPickMenuState(null);
+              }}
+            >
+              <div
+                className={tCss.pickMenu}
+                style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className={`${tCss.pickMenuOption} ${!selectedId ? tCss.pickMenuOptionActive : ''}`}
+                  onClick={() => {
+                    patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, '', requiredCount);
+                    setPickMenuState(null);
+                  }}
+                >
+                  선택 해제
+                </button>
+                {options.map((opt) => {
+                  const value = String(opt?.id || '');
+                  const selectedElsewhere = rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
+                  const active = String(selectedId) === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
+                      onClick={() => {
+                        if (selectedElsewhere) return;
+                        patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, value, requiredCount);
+                        setPickMenuState(null);
+                      }}
+                      disabled={selectedElsewhere}
+                      title={displayPickOption(opt)}
+                    >
+                      {displayPickOption(opt)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>,
+            portalNode
+          );
+        })()}
 
               {bonusPopup.open && (()=>{ 
                 const evv = events.find(e=> e.id===bonusPopup.evId);
