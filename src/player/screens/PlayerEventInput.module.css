@@ -153,6 +153,9 @@
   gap:4px;
   max-height:min(52vh, 320px);
   overflow-y:auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .pickMenuOption{
@@ -166,6 +169,9 @@
   font-size:13px;
   text-align:left;
   white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  touch-action: manipulation;
 }
 
 .pickMenuOptionActive{
@@ -289,6 +295,7 @@
   border-radius:0;
   background:transparent;
   padding:0;
+  width:100%;
 }
 
 .pickPreviewCell{
@@ -304,17 +311,17 @@
 }
 
 .pickPreviewNick{
-  font-size:15px;
+  font-size:16px;
   white-space:nowrap;
-  overflow:visible;
-  text-overflow:clip;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .pickPreviewNickWide{
-  font-size:14px;
+  font-size:15px;
   white-space:nowrap;
-  overflow:visible;
-  text-overflow:clip;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .pickPreviewTeamMd{

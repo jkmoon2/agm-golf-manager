@@ -80,6 +80,8 @@ export default function EventManager() {
   const suppressMenuClickRef = useRef(false);
   const dragEventIdRef = useRef('');
   const dragEventsRef = useRef(null);
+  const dragOverIdRef = useRef('');
+  const [dragLiftOn, setDragLiftOn] = useState(false);
   const orderedEvents = dragEvents || eventsOfSelected;
 
   const [form, setForm] = useState({
@@ -282,14 +284,13 @@ if (form.template === 'group-battle') {
     window.removeEventListener('pointermove', handleReorderMove);
     window.removeEventListener('pointerup', handleReorderEnd);
     window.removeEventListener('pointercancel', handleReorderEnd);
-    window.removeEventListener('touchmove', handleReorderMove);
-    window.removeEventListener('touchend', handleReorderEnd);
-    window.removeEventListener('touchcancel', handleReorderEnd);
     reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0 };
     dragEventIdRef.current = '';
     dragEventsRef.current = null;
+    dragOverIdRef.current = '';
     setDragEventId('');
     setDragEvents(null);
+    setDragLiftOn(false);
     try {
       document.body.style.userSelect = '';
       document.body.style.touchAction = '';
@@ -330,7 +331,7 @@ if (form.template === 'group-battle') {
       }
     });
 
-    if (!targetId) return;
+    if (!targetId || dragOverIdRef.current === targetId) return;
 
     setDragEvents((prev) => {
       const base = Array.isArray(prev) ? prev : currentList;
@@ -341,6 +342,7 @@ if (form.template === 'group-battle') {
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
       dragEventsRef.current = next;
+      dragOverIdRef.current = targetId;
       return next;
     });
   };
@@ -362,6 +364,7 @@ if (form.template === 'group-battle') {
     }
 
     if (typeof e?.preventDefault === 'function' && e.cancelable !== false) e.preventDefault();
+    setDragLiftOn(true);
     updateDragOrderByPoint(point.clientY || 0);
   }, [eventsOfSelected]);
 
@@ -374,9 +377,6 @@ if (form.template === 'group-battle') {
     window.removeEventListener('pointermove', handleReorderMove);
     window.removeEventListener('pointerup', handleReorderEnd);
     window.removeEventListener('pointercancel', handleReorderEnd);
-    window.removeEventListener('touchmove', handleReorderMove);
-    window.removeEventListener('touchend', handleReorderEnd);
-    window.removeEventListener('touchcancel', handleReorderEnd);
 
     if (state.active) {
       suppressMenuClickRef.current = true;
@@ -384,14 +384,18 @@ if (form.template === 'group-battle') {
     }
   }, [finalizeReorder, handleReorderMove]);
 
-  const startReorderPress = useCallback((ev, rawEvent, source = 'pointer') => {
+  const startReorderPress = useCallback((ev, rawEvent) => {
     rawEvent.stopPropagation();
+    if (typeof rawEvent.button === 'number' && rawEvent.button !== 0) return;
+    try { rawEvent.currentTarget?.setPointerCapture?.(rawEvent.pointerId); } catch {}
     if (dragEventIdRef.current || reorderPressRef.current?.active) {
       clearReorderSession();
     }
     const state = reorderPressRef.current || {};
     if (state.timer) clearTimeout(state.timer);
     suppressMenuClickRef.current = false;
+    setOpenMenuId(null);
+    setMenuUpId(null);
     const point = getClientPoint(rawEvent);
     reorderPressRef.current = {
       timer: setTimeout(() => {
@@ -403,7 +407,9 @@ if (form.template === 'group-battle') {
           eventId: ev.id,
         };
         dragEventIdRef.current = String(ev.id || '');
+        dragOverIdRef.current = '';
         setDragEventId(ev.id);
+        setDragLiftOn(true);
         const seeded = eventsOfSelected.map((item) => ({ ...item }));
         dragEventsRef.current = seeded;
         setDragEvents(seeded);
@@ -419,26 +425,13 @@ if (form.template === 'group-battle') {
       startY: point.clientY || 0,
     };
 
-    if (source === 'touch') {
-      window.addEventListener('touchmove', handleReorderMove, { passive: false });
-      window.addEventListener('touchend', handleReorderEnd);
-      window.addEventListener('touchcancel', handleReorderEnd);
-      return;
-    }
-
-    window.addEventListener('pointermove', handleReorderMove, { passive: false });
+    window.addEventListener('pointermove', handleReorderMove);
     window.addEventListener('pointerup', handleReorderEnd);
     window.addEventListener('pointercancel', handleReorderEnd);
   }, [eventsOfSelected, handleReorderEnd, handleReorderMove]);
 
   const onMorePointerDown = (ev, e) => {
-    if (e.pointerType === 'touch') return;
-    if (typeof e.button === 'number' && e.button !== 0) return;
-    startReorderPress(ev, e, 'pointer');
-  };
-
-  const onMoreTouchStart = (ev, e) => {
-    startReorderPress(ev, e, 'touch');
+    startReorderPress(ev, e);
   };
 
   useEffect(() => {
@@ -446,9 +439,6 @@ if (form.template === 'group-battle') {
       window.removeEventListener('pointermove', handleReorderMove);
       window.removeEventListener('pointerup', handleReorderEnd);
       window.removeEventListener('pointercancel', handleReorderEnd);
-      window.removeEventListener('touchmove', handleReorderMove);
-      window.removeEventListener('touchend', handleReorderEnd);
-      window.removeEventListener('touchcancel', handleReorderEnd);
     };
   }, [handleReorderEnd, handleReorderMove]);
 
@@ -1193,7 +1183,7 @@ if (editForm?.template === 'group-battle') {
                   if (el) listItemRefs.current[ev.id] = el;
                   else delete listItemRefs.current[ev.id];
                 }}
-                style={dragEventId === ev.id ? { opacity: 0.72, borderColor: '#8bb6ff', background: '#f8fbff' } : undefined}
+                style={dragEventId === ev.id ? { opacity: 0.96, borderColor: '#8bb6ff', background: '#f8fbff', transform: dragLiftOn ? 'scale(1.018) translateY(-2px)' : 'none', boxShadow: dragLiftOn ? '0 10px 24px rgba(37,99,235,.18)' : undefined, zIndex: dragLiftOn ? 6 : undefined, position: dragLiftOn ? 'relative' : undefined } : undefined}
               >
                 <div className={css.listHead}>
                   <div className={css.listTitle}><b>{ev.title}</b></div>
@@ -1203,7 +1193,6 @@ if (editForm?.template === 'group-battle') {
                       <button
                         className={`${css.moreBtn} ${dragEventId === ev.id ? css.moreBtnDragging : ''}`}
                         onPointerDown={(e) => onMorePointerDown(ev, e)}
-                        onTouchStart={(e) => onMoreTouchStart(ev, e)}
                         onContextMenu={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1213,7 +1202,6 @@ if (editForm?.template === 'group-battle') {
                           }
                           if (dragEventIdRef.current) {
                             clearReorderSession();
-                            return;
                           }
                           openMenuFromButton(ev, e.currentTarget);
                         }}

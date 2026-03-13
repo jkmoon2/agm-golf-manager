@@ -57,11 +57,10 @@ function estimatePickTextUnits(text = ''){
   }, 0);
 }
 
-function getPickMenuWidthPx(options = []){
-  const longestUnits = (Array.isArray(options) ? options : []).reduce((maxLen, opt) => {
-    return Math.max(maxLen, estimatePickTextUnits(String(opt?.nickname || '').trim()));
-  }, 4);
-  return Math.max(104, Math.min(Math.round(longestUnits * 14 + 34), 280));
+const PICK_MENU_WIDTH_PX = 132;
+
+function getPickMenuWidthPx(){
+  return PICK_MENU_WIDTH_PX;
 }
 
 function getPickPreviewLineText(cells = []){
@@ -320,12 +319,20 @@ export default function PlayerEventInput(){
     const menuWidth = getPickMenuWidthPx(options);
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 360;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 640;
+    const estimatedHeight = Math.min(Math.max((Array.isArray(options) ? options.length : 0) + 1, 4) * 40 + 16, Math.min(viewportHeight * 0.52, 320));
     const left = rect
       ? Math.max(8, Math.min(rect.left + (rect.width / 2) - (menuWidth / 2), viewportWidth - menuWidth - 8))
       : 12;
-    const top = rect
-      ? Math.max(8, Math.min(rect.bottom + 6, viewportHeight - 8 - 220))
-      : 56;
+    let top = 56;
+    if (rect) {
+      const belowTop = rect.bottom + 6;
+      const belowSpace = viewportHeight - belowTop - 8;
+      if (belowSpace >= Math.min(estimatedHeight, 180)) {
+        top = belowTop;
+      } else {
+        top = Math.max(8, rect.top - estimatedHeight - 6);
+      }
+    }
     setPickMenuState({ evId, pid, idx, left, top, width: menuWidth });
   };
 
@@ -753,8 +760,8 @@ export default function PlayerEventInput(){
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
             const nickColPct = isFourJo ? 20 : 32;
             const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
-            const previewNickPct = pickCfg.mode === 'jo' ? 28 : 27;
-            const previewTotalPct = pickCfg.mode === 'jo' ? 10 : 12;
+            const previewNickPct = pickCfg.mode === 'jo' ? 24 : 23;
+            const previewTotalPct = pickCfg.mode === 'jo' ? 8 : 10;
             const previewTeamPct = 100 - previewNickPct - previewTotalPct;
             const locked = !!ev?.params?.selectionLocked;
             const previewRows = roomMembers.map((p) => {
@@ -1117,19 +1124,23 @@ export default function PlayerEventInput(){
           return createPortal(
             <div
               className={tCss.pickMenuOverlay}
-              onClick={(e) => {
-                e.stopPropagation();
-                setPickMenuState(null);
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) {
+                  e.stopPropagation();
+                  setPickMenuState(null);
+                }
               }}
             >
               <div
                 className={tCss.pickMenu}
                 style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
                   type="button"
                   className={`${tCss.pickMenuOption} ${!selectedId ? tCss.pickMenuOptionActive : ''}`}
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => {
                     patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, '', requiredCount);
                     setPickMenuState(null);
@@ -1146,6 +1157,7 @@ export default function PlayerEventInput(){
                       key={value}
                       type="button"
                       className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => {
                         if (selectedElsewhere) return;
                         patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, value, requiredCount);

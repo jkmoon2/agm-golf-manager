@@ -159,6 +159,7 @@
   margin-bottom: 8px;
   background: #fff;
   overflow: visible; /* 메뉴가 카드 밖으로 나가도 보이도록 */
+  transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease, background-color .14s ease;
 }
 .listHead {
   display: flex;
@@ -190,6 +191,7 @@
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
   cursor: grab;
 }
 .moreBtnDragging {
