@@ -83,7 +83,10 @@ export default function EventManager() {
   const dragEventIdRef = useRef('');
   const dragEventsRef = useRef(null);
   const dragOverIdRef = useRef('');
+  const dragStartYRef = useRef(0);
+  const dragTranslateRafRef = useRef(null);
   const [dragLiftOn, setDragLiftOn] = useState(false);
+  const [dragTranslateY, setDragTranslateY] = useState(0);
   const orderedEvents = dragEvents || eventsOfSelected;
 
   const [form, setForm] = useState({
@@ -301,15 +304,22 @@ if (form.template === 'group-battle') {
     dragEventIdRef.current = '';
     dragEventsRef.current = null;
     dragOverIdRef.current = '';
+    if (dragTranslateRafRef.current) {
+      cancelAnimationFrame(dragTranslateRafRef.current);
+      dragTranslateRafRef.current = null;
+    }
     setDragEventId('');
     setDragEvents(null);
     setDragLiftOn(false);
+    setDragTranslateY(0);
     try {
       document.body.style.userSelect = '';
       document.body.style.touchAction = '';
       document.body.style.webkitUserSelect = '';
       document.body.style.overflow = '';
       document.body.style.overscrollBehavior = '';
+      document.documentElement.style.overflow = '';
+      document.documentElement.style.overscrollBehavior = '';
     } catch {}
   }
 
@@ -330,21 +340,33 @@ if (form.template === 'group-battle') {
     if (!activeEventId) return;
     const currentList = Array.isArray(dragEventsRef.current) ? dragEventsRef.current : eventsOfSelected;
     let targetId = '';
-    let bestDist = Infinity;
 
-    currentList.forEach((row) => {
-      const id = String(row?.id || '');
-      if (!id || id === activeEventId) return;
-      const el = listItemRefs.current?.[id];
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const centerY = rect.top + rect.height / 2;
-      const dist = Math.abs(clientY - centerY);
-      if (dist < bestDist) {
-        bestDist = dist;
-        targetId = id;
+    try {
+      const probeX = Math.max(12, Math.min(window.innerWidth / 2, window.innerWidth - 12));
+      const hit = document.elementFromPoint(probeX, Number(clientY || 0));
+      const card = hit?.closest?.('[data-event-id]');
+      const hitId = String(card?.getAttribute?.('data-event-id') || '');
+      if (hitId && hitId !== activeEventId) {
+        targetId = hitId;
       }
-    });
+    } catch {}
+
+    if (!targetId) {
+      let bestDist = Infinity;
+      currentList.forEach((row) => {
+        const id = String(row?.id || '');
+        if (!id || id === activeEventId) return;
+        const el = listItemRefs.current?.[id];
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const centerY = rect.top + rect.height / 2;
+        const dist = Math.abs(clientY - centerY);
+        if (dist < bestDist) {
+          bestDist = dist;
+          targetId = id;
+        }
+      });
+    }
 
     if (!targetId || dragOverIdRef.current === targetId) return;
 
@@ -362,10 +384,21 @@ if (form.template === 'group-battle') {
     });
   };
 
+  const applyDragTranslate = (clientY) => {
+    const nextY = Number(clientY || 0) - Number(dragStartYRef.current || 0);
+    if (dragTranslateRafRef.current) cancelAnimationFrame(dragTranslateRafRef.current);
+    dragTranslateRafRef.current = requestAnimationFrame(() => {
+      setDragTranslateY(nextY);
+      dragTranslateRafRef.current = null;
+    });
+  };
+
   const activateReorder = useCallback((ev) => {
     suppressMenuClickRef.current = true;
+    const currentState = reorderPressRef.current || {};
+    dragStartYRef.current = Number(currentState.startY || 0);
     reorderPressRef.current = {
-      ...(reorderPressRef.current || {}),
+      ...(currentState || {}),
       timer: null,
       active: true,
       eventId: ev.id,
@@ -374,7 +407,8 @@ if (form.template === 'group-battle') {
     dragOverIdRef.current = '';
     setDragEventId(ev.id);
     setDragLiftOn(true);
-    const seeded = eventsOfSelected.map((item) => ({ ...item }));
+    setDragTranslateY(0);
+    const seeded = eventsOfSelected.slice();
     dragEventsRef.current = seeded;
     setDragEvents(seeded);
     try {
@@ -383,11 +417,14 @@ if (form.template === 'group-battle') {
       document.body.style.webkitUserSelect = 'none';
       document.body.style.overflow = 'hidden';
       document.body.style.overscrollBehavior = 'contain';
+      document.documentElement.style.overflow = 'hidden';
+      document.documentElement.style.overscrollBehavior = 'contain';
     } catch {}
   }, [eventsOfSelected]);
 
   const startTouchReorder = useCallback((ev, rawEvent) => {
     rawEvent.stopPropagation();
+    if (typeof rawEvent.preventDefault === 'function' && rawEvent.cancelable !== false) rawEvent.preventDefault();
     const touch = rawEvent.touches?.[0];
     if (!touch) return;
     clearReorderSession();
@@ -419,7 +456,7 @@ if (form.template === 'group-battle') {
       const dy = Math.abs(Number(currentTouch.clientY || 0) - Number(state.startY || 0));
 
       if (!state.active) {
-        if (dx > 8 || dy > 8) {
+        if (dx > 12 || dy > 12) {
           if (state.timer) {
             clearTimeout(state.timer);
             reorderPressRef.current = { ...(state || {}), timer: null };
@@ -430,6 +467,7 @@ if (form.template === 'group-battle') {
 
       if (typeof moveEvt.preventDefault === 'function' && moveEvt.cancelable !== false) moveEvt.preventDefault();
       setDragLiftOn(true);
+      applyDragTranslate(Number(currentTouch.clientY || 0));
       updateDragOrderByPoint(Number(currentTouch.clientY || 0));
     };
 
@@ -455,7 +493,7 @@ if (form.template === 'group-battle') {
       window.removeEventListener('touchend', handleTouchEnd);
       window.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [activateReorder, finalizeReorder]);
+  }, [activateReorder, applyDragTranslate, finalizeReorder]);
 
   const startMouseReorder = useCallback((ev, rawEvent) => {
     rawEvent.stopPropagation();
@@ -479,7 +517,7 @@ if (form.template === 'group-battle') {
       const dx = Math.abs(Number(moveEvt.clientX || 0) - Number(state.startX || 0));
       const dy = Math.abs(Number(moveEvt.clientY || 0) - Number(state.startY || 0));
       if (!state.active) {
-        if (dx > 8 || dy > 8) {
+        if (dx > 12 || dy > 12) {
           if (state.timer) {
             clearTimeout(state.timer);
             reorderPressRef.current = { ...(state || {}), timer: null };
@@ -489,6 +527,7 @@ if (form.template === 'group-battle') {
       }
       if (typeof moveEvt.preventDefault === 'function') moveEvt.preventDefault();
       setDragLiftOn(true);
+      applyDragTranslate(Number(moveEvt.clientY || 0));
       updateDragOrderByPoint(Number(moveEvt.clientY || 0));
     };
 
@@ -512,7 +551,7 @@ if (form.template === 'group-battle') {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseEnd);
     };
-  }, [activateReorder, finalizeReorder]);
+  }, [activateReorder, applyDragTranslate, finalizeReorder]);
 
   const onMoreTouchStart = (ev, e) => {
     startTouchReorder(ev, e);
@@ -1263,12 +1302,13 @@ if (editForm?.template === 'group-battle') {
             {orderedEvents.map((ev) => (
               <div
                 key={ev.id}
+                data-event-id={ev.id}
                 className={css.listItem}
                 ref={(el) => {
                   if (el) listItemRefs.current[ev.id] = el;
                   else delete listItemRefs.current[ev.id];
                 }}
-                style={dragEventId === ev.id ? { opacity: 0.96, borderColor: '#8bb6ff', background: '#f8fbff', transform: dragLiftOn ? 'scale(1.018) translateY(-2px)' : 'none', boxShadow: dragLiftOn ? '0 10px 24px rgba(37,99,235,.18)' : undefined, zIndex: dragLiftOn ? 6 : undefined, position: dragLiftOn ? 'relative' : undefined } : undefined}
+                style={dragEventId === ev.id ? { opacity: 0.98, borderColor: '#8bb6ff', background: '#f8fbff', transform: dragLiftOn ? `translateY(${dragTranslateY}px) scale(1.018)` : 'none', boxShadow: dragLiftOn ? '0 14px 30px rgba(37,99,235,.22)' : undefined, zIndex: dragLiftOn ? 40 : undefined, position: dragLiftOn ? 'relative' : undefined, pointerEvents: dragLiftOn ? 'none' : undefined, transition: dragLiftOn ? 'none' : undefined } : undefined}
               >
                 <div className={css.listHead}>
                   <div className={css.listTitle}><b>{ev.title}</b></div>

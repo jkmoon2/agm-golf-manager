@@ -26,6 +26,8 @@
 .table thead th { 
   background:#fafafa; 
   font-weight:700;
+  white-space:nowrap;
+  word-break:keep-all;
 }
 .table th,
 .table td{
@@ -306,7 +308,7 @@
 }
 
 .pickPreviewCell{
-  padding:0 4px !important;
+  padding:0 6px !important;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -318,14 +320,14 @@
 }
 
 .pickPreviewNick{
-  font-size:17px;
+  font-size:18px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 .pickPreviewNickWide{
-  font-size:16px;
+  font-size:18px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -361,6 +363,7 @@
 .pickPreviewHandicap{
   color:#d11a2a;
   font-weight:800;
+  white-space:nowrap;
 }
 
 .lockNotice{

@@ -225,6 +225,7 @@ export default function PlayerEventInput(){
   const [fallbackAt, setFallbackAt] = useState(0);
   const [pickMenuState, setPickMenuState] = useState(null);
   const pickButtonRefs = useRef({});
+  const pickMenuGestureRef = useRef({ dragging:false });
   useEffect(() => {
     const id = eventId || ctxId;
     if (!id) return;
@@ -770,8 +771,8 @@ export default function PlayerEventInput(){
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
             const nickColPct = isFourJo ? 20 : 32;
             const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
-            const previewNickPct = pickCfg.mode === 'jo' ? 28 : 28;
-            const previewTotalPct = pickCfg.mode === 'jo' ? 7 : 8;
+            const previewNickPct = pickCfg.mode === 'jo' ? 31 : 31;
+            const previewTotalPct = 12;
             const previewTeamPct = 100 - previewNickPct - previewTotalPct;
             const locked = !!ev?.params?.selectionLocked;
             const previewRows = roomMembers.map((p) => {
@@ -1146,6 +1147,14 @@ export default function PlayerEventInput(){
                 className={tCss.pickMenu}
                 style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStartCapture={() => { pickMenuGestureRef.current = { dragging:false }; }}
+                onTouchMoveCapture={(e) => {
+                  pickMenuGestureRef.current = { dragging:true };
+                  e.stopPropagation();
+                }}
+                onTouchEndCapture={() => {
+                  setTimeout(() => { pickMenuGestureRef.current = { dragging:false }; }, 0);
+                }}
                 onTouchMove={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -1154,6 +1163,7 @@ export default function PlayerEventInput(){
                   className={`${tCss.pickMenuOption} ${!selectedId ? tCss.pickMenuOptionActive : ''}`}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => {
+                    if (pickMenuGestureRef.current?.dragging) return;
                     patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, '', requiredCount);
                     setPickMenuState(null);
                   }}
@@ -1171,6 +1181,7 @@ export default function PlayerEventInput(){
                       className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => {
+                        if (pickMenuGestureRef.current?.dragging) return;
                         if (selectedElsewhere) return;
                         patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, value, requiredCount);
                         setPickMenuState(null);
