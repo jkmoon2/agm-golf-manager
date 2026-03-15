@@ -57,7 +57,7 @@ function estimatePickTextUnits(text = ''){
   }, 0);
 }
 
-const PICK_MENU_WIDTH_PX = 150;
+const PICK_MENU_WIDTH_PX = 136;
 
 function getPickMenuWidthPx(){
   return PICK_MENU_WIDTH_PX;
@@ -225,7 +225,36 @@ export default function PlayerEventInput(){
   const [fallbackAt, setFallbackAt] = useState(0);
   const [pickMenuState, setPickMenuState] = useState(null);
   const pickButtonRefs = useRef({});
-  const pickMenuGestureRef = useRef({ dragging:false });
+  const pickMenuGestureRef = useRef({ dragging:false, startY:0, lastMoveAt:0 });
+
+  const beginPickMenuGesture = (evt) => {
+    const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
+    const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
+    pickMenuGestureRef.current = { dragging:false, startY:y, lastMoveAt:0 };
+  };
+  const movePickMenuGesture = (evt) => {
+    const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
+    const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
+    const state = pickMenuGestureRef.current || {};
+    if (Math.abs(y - Number(state.startY || 0)) > 4) {
+      pickMenuGestureRef.current = { ...state, dragging:true, lastMoveAt: Date.now() };
+    }
+  };
+  const finishPickMenuGesture = () => {
+    const stamp = Date.now();
+    const state = pickMenuGestureRef.current || {};
+    pickMenuGestureRef.current = { ...state, lastMoveAt: stamp };
+    window.setTimeout(() => {
+      const latest = pickMenuGestureRef.current || {};
+      if ((Date.now() - Number(latest.lastMoveAt || 0)) >= 150) {
+        pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0 };
+      }
+    }, 170);
+  };
+  const shouldIgnorePickMenuClick = () => {
+    const state = pickMenuGestureRef.current || {};
+    return !!state.dragging || ((Date.now() - Number(state.lastMoveAt || 0)) < 180);
+  };
   useEffect(() => {
     const id = eventId || ctxId;
     if (!id) return;
@@ -769,11 +798,9 @@ export default function PlayerEventInput(){
               ? pickCfg.openGroups.map((groupNo) => `${groupNo}조`)
               : Array.from({ length: requiredCount }, (_, i) => `선택${i + 1}`);
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
-            const nickColPct = isFourJo ? 20 : 32;
-            const pickColPct = (100 - nickColPct) / Math.max(requiredCount, 1);
-            const previewNickPct = pickCfg.mode === 'jo' ? 31 : 31;
-            const previewTotalPct = 12;
-            const previewTeamPct = 100 - previewNickPct - previewTotalPct;
+            const pickNickColPx = 108;
+            const pickPreviewNickPx = 108;
+            const pickPreviewTotalPx = 48;
             const locked = !!ev?.params?.selectionLocked;
             const previewRows = roomMembers.map((p) => {
               if (!p) return { selectorName: '', cells: slotLabels.map(() => ''), teamLine: '', handicapSum: '', hasAny: false };
@@ -812,8 +839,8 @@ export default function PlayerEventInput(){
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: '100%' }}>
                     <colgroup>
-                      <col style={{ width: `${nickColPct}%` }} />
-                      {slotLabels.map((_, idx) => <col key={idx} style={{ width: `${pickColPct}%` }} />)}
+                      <col style={{ width: `${pickNickColPx}px` }} />
+                      {slotLabels.map((_, idx) => <col key={idx} style={{ width: `calc((100% - ${pickNickColPx}px) / ${Math.max(requiredCount, 1)})` }} />)}
                     </colgroup>
                     <thead>
                       <tr>
@@ -830,7 +857,7 @@ export default function PlayerEventInput(){
 
                         return (
                           <tr key={rIdx}>
-                            <td style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', padding:'0 4px' }}>{p ? p.nickname : ''}</td>
+                            <td className={tCss.pickInputNick}>{p ? p.nickname : ''}</td>
                             {slotLabels.map((_, idx) => {
                               const options = getPickOptions(ev, idx);
                               const selectedId = p ? (rowIds[idx] || '') : '';
@@ -880,9 +907,9 @@ export default function PlayerEventInput(){
                     <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.pickPreviewTableWrap}`}>
                       <table className={tCss.table} style={{ width: '100%' }}>
                         <colgroup>
-                          <col style={{ width: `${previewNickPct}%` }} />
-                          <col style={{ width: `${previewTeamPct}%` }} />
-                          <col style={{ width: `${previewTotalPct}%` }} />
+                          <col style={{ width: `${pickPreviewNickPx}px` }} />
+                          <col />
+                          <col style={{ width: `${pickPreviewTotalPx}px` }} />
                         </colgroup>
                         <thead>
                           <tr>
@@ -1147,14 +1174,11 @@ export default function PlayerEventInput(){
                 className={tCss.pickMenu}
                 style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
                 onPointerDown={(e) => e.stopPropagation()}
-                onTouchStartCapture={() => { pickMenuGestureRef.current = { dragging:false }; }}
-                onTouchMoveCapture={(e) => {
-                  pickMenuGestureRef.current = { dragging:true };
-                  e.stopPropagation();
-                }}
-                onTouchEndCapture={() => {
-                  setTimeout(() => { pickMenuGestureRef.current = { dragging:false }; }, 0);
-                }}
+                onPointerMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
+                onTouchStartCapture={(e) => { beginPickMenuGesture(e); }}
+                onTouchMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
+                onTouchEndCapture={() => { finishPickMenuGesture(); }}
+                onScrollCapture={() => { pickMenuGestureRef.current = { ...(pickMenuGestureRef.current || {}), dragging:true, lastMoveAt: Date.now() }; }}
                 onTouchMove={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -1163,7 +1187,7 @@ export default function PlayerEventInput(){
                   className={`${tCss.pickMenuOption} ${!selectedId ? tCss.pickMenuOptionActive : ''}`}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => {
-                    if (pickMenuGestureRef.current?.dragging) return;
+                    if (shouldIgnorePickMenuClick()) return;
                     patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, '', requiredCount);
                     setPickMenuState(null);
                   }}
@@ -1181,7 +1205,7 @@ export default function PlayerEventInput(){
                       className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => {
-                        if (pickMenuGestureRef.current?.dragging) return;
+                        if (shouldIgnorePickMenuClick()) return;
                         if (selectedElsewhere) return;
                         patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, value, requiredCount);
                         setPickMenuState(null);

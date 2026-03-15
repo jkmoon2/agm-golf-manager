@@ -59,6 +59,12 @@ function getClientPoint(evt){
   return { clientX: Number(evt?.clientX || 0), clientY: Number(evt?.clientY || 0) };
 }
 
+const TOUCH_LONG_PRESS_MS = 420;
+const MOUSE_LONG_PRESS_MS = 280;
+const TOUCH_CANCEL_PX = 24;
+const MOUSE_CANCEL_PX = 12;
+
+
 export default function EventManager() {
   const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, overlayScoresToParticipants } = useContext(EventContext) || {};
 
@@ -85,6 +91,7 @@ export default function EventManager() {
   const dragOverIdRef = useRef('');
   const dragStartYRef = useRef(0);
   const dragTranslateRafRef = useRef(null);
+  const dragIndexRef = useRef(-1);
   const [dragLiftOn, setDragLiftOn] = useState(false);
   const [dragTranslateY, setDragTranslateY] = useState(0);
   const orderedEvents = dragEvents || eventsOfSelected;
@@ -304,6 +311,7 @@ if (form.template === 'group-battle') {
     dragEventIdRef.current = '';
     dragEventsRef.current = null;
     dragOverIdRef.current = '';
+    dragIndexRef.current = -1;
     if (dragTranslateRafRef.current) {
       cancelAnimationFrame(dragTranslateRafRef.current);
       dragTranslateRafRef.current = null;
@@ -339,49 +347,39 @@ if (form.template === 'group-battle') {
     const activeEventId = String(dragEventIdRef.current || reorderPressRef.current?.eventId || '');
     if (!activeEventId) return;
     const currentList = Array.isArray(dragEventsRef.current) ? dragEventsRef.current : eventsOfSelected;
-    let targetId = '';
+    const activeItem = currentList.find((item) => String(item?.id) === activeEventId);
+    if (!activeItem) return;
 
-    try {
-      const probeX = Math.max(12, Math.min(window.innerWidth / 2, window.innerWidth - 12));
-      const hit = document.elementFromPoint(probeX, Number(clientY || 0));
-      const card = hit?.closest?.('[data-event-id]');
-      const hitId = String(card?.getAttribute?.('data-event-id') || '');
-      if (hitId && hitId !== activeEventId) {
-        targetId = hitId;
+    const passiveList = currentList.filter((item) => String(item?.id) !== activeEventId);
+    let nextIndex = passiveList.length;
+
+    for (let i = 0; i < passiveList.length; i += 1) {
+      const passiveId = String(passiveList[i]?.id || '');
+      const el = listItemRefs.current?.[passiveId];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      const pivotY = rect.top + (rect.height / 2);
+      if (Number(clientY || 0) < pivotY) {
+        nextIndex = i;
+        break;
       }
-    } catch {}
-
-    if (!targetId) {
-      let bestDist = Infinity;
-      currentList.forEach((row) => {
-        const id = String(row?.id || '');
-        if (!id || id === activeEventId) return;
-        const el = listItemRefs.current?.[id];
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        const centerY = rect.top + rect.height / 2;
-        const dist = Math.abs(clientY - centerY);
-        if (dist < bestDist) {
-          bestDist = dist;
-          targetId = id;
-        }
-      });
     }
 
-    if (!targetId || dragOverIdRef.current === targetId) return;
+    if (dragIndexRef.current === nextIndex) return;
 
-    setDragEvents((prev) => {
-      const base = Array.isArray(prev) ? prev : currentList;
-      const from = base.findIndex((item) => String(item?.id) === activeEventId);
-      const to = base.findIndex((item) => String(item?.id) === String(targetId));
-      if (from < 0 || to < 0 || from === to) return base;
-      const next = [...base];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      dragEventsRef.current = next;
-      dragOverIdRef.current = targetId;
-      return next;
-    });
+    const next = [...passiveList];
+    next.splice(nextIndex, 0, activeItem);
+    const changed = next.length === currentList.length
+      && next.some((item, idx) => String(item?.id) !== String(currentList[idx]?.id));
+    if (!changed) {
+      dragIndexRef.current = nextIndex;
+      return;
+    }
+
+    dragIndexRef.current = nextIndex;
+    dragOverIdRef.current = String(passiveList[nextIndex]?.id || passiveList[nextIndex - 1]?.id || '');
+    dragEventsRef.current = next;
+    setDragEvents(next);
   };
 
   const applyDragTranslate = (clientY) => {
@@ -409,6 +407,7 @@ if (form.template === 'group-battle') {
     setDragLiftOn(true);
     setDragTranslateY(0);
     const seeded = eventsOfSelected.slice();
+    dragIndexRef.current = seeded.findIndex((item) => String(item?.id) === String(ev.id));
     dragEventsRef.current = seeded;
     setDragEvents(seeded);
     try {
@@ -434,7 +433,7 @@ if (form.template === 'group-battle') {
 
     const touchId = touch.identifier;
     reorderPressRef.current = {
-      timer: setTimeout(() => activateReorder(ev), 420),
+      timer: setTimeout(() => activateReorder(ev), TOUCH_LONG_PRESS_MS),
       active: false,
       eventId: ev.id,
       startX: Number(touch.clientX || 0),
@@ -456,7 +455,7 @@ if (form.template === 'group-battle') {
       const dy = Math.abs(Number(currentTouch.clientY || 0) - Number(state.startY || 0));
 
       if (!state.active) {
-        if (dx > 12 || dy > 12) {
+        if (dx > TOUCH_CANCEL_PX || dy > TOUCH_CANCEL_PX) {
           if (state.timer) {
             clearTimeout(state.timer);
             reorderPressRef.current = { ...(state || {}), timer: null };
@@ -485,9 +484,9 @@ if (form.template === 'group-battle') {
       }
     };
 
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd, { passive: false });
-    window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+    window.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
+    window.addEventListener('touchcancel', handleTouchEnd, { passive: false, capture: true });
     reorderTouchCleanupRef.current = () => {
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
@@ -504,7 +503,7 @@ if (form.template === 'group-battle') {
     setMenuUpId(null);
 
     reorderPressRef.current = {
-      timer: setTimeout(() => activateReorder(ev), 320),
+      timer: setTimeout(() => activateReorder(ev), MOUSE_LONG_PRESS_MS),
       active: false,
       eventId: ev.id,
       startX: Number(rawEvent.clientX || 0),
@@ -517,7 +516,7 @@ if (form.template === 'group-battle') {
       const dx = Math.abs(Number(moveEvt.clientX || 0) - Number(state.startX || 0));
       const dy = Math.abs(Number(moveEvt.clientY || 0) - Number(state.startY || 0));
       if (!state.active) {
-        if (dx > 12 || dy > 12) {
+        if (dx > MOUSE_CANCEL_PX || dy > MOUSE_CANCEL_PX) {
           if (state.timer) {
             clearTimeout(state.timer);
             reorderPressRef.current = { ...(state || {}), timer: null };
@@ -1308,7 +1307,7 @@ if (editForm?.template === 'group-battle') {
                   if (el) listItemRefs.current[ev.id] = el;
                   else delete listItemRefs.current[ev.id];
                 }}
-                style={dragEventId === ev.id ? { opacity: 0.98, borderColor: '#8bb6ff', background: '#f8fbff', transform: dragLiftOn ? `translateY(${dragTranslateY}px) scale(1.018)` : 'none', boxShadow: dragLiftOn ? '0 14px 30px rgba(37,99,235,.22)' : undefined, zIndex: dragLiftOn ? 40 : undefined, position: dragLiftOn ? 'relative' : undefined, pointerEvents: dragLiftOn ? 'none' : undefined, transition: dragLiftOn ? 'none' : undefined } : undefined}
+                style={dragEventId === ev.id ? { opacity: 0.99, borderColor: '#8bb6ff', background: '#f8fbff', transform: dragLiftOn ? `translateY(${dragTranslateY}px) scale(1.012)` : 'none', boxShadow: dragLiftOn ? '0 16px 34px rgba(37,99,235,.18)' : undefined, zIndex: dragLiftOn ? 40 : undefined, position: dragLiftOn ? 'relative' : undefined, transition: dragLiftOn ? 'none' : undefined, willChange: dragLiftOn ? 'transform' : undefined } : undefined}
               >
                 <div className={css.listHead}>
                   <div className={css.listTitle}><b>{ev.title}</b></div>

@@ -140,6 +140,16 @@
   color:#1e40ff;
 }
 
+.pickInputNick{
+  padding:0 6px !important;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  font-size:15px;
+  font-weight:500;
+  color:#15356b;
+}
+
 .pickMenuOverlay{
   position:fixed;
   inset:0;
@@ -161,6 +171,7 @@
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-y;
+  overscroll-behavior-y: contain;
 }
 
 .pickMenuOption{
@@ -308,7 +319,7 @@
 }
 
 .pickPreviewCell{
-  padding:0 6px !important;
+  padding:0 4px !important;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -320,14 +331,14 @@
 }
 
 .pickPreviewNick{
-  font-size:18px;
+  font-size:15px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 .pickPreviewNickWide{
-  font-size:18px;
+  font-size:15px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -364,6 +375,8 @@
   color:#d11a2a;
   font-weight:800;
   white-space:nowrap;
+  font-size:14px;
+  padding:0 2px !important;
 }
 
 .lockNotice{

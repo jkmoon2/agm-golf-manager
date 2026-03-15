@@ -221,7 +221,7 @@ export default function PlayerScoreInput() {
       const baseScore = scoresReady
         ? (Object.prototype.hasOwnProperty.call(scoresMap, key) ? scoresMap[key] : null)
         : p.score;
-      base[key] = (baseScore == null || baseScore === 0) ? '' : String(baseScore);
+      base[key] = (baseScore == null) ? '' : String(baseScore);
     });
     setBaseDraft(base);
 
