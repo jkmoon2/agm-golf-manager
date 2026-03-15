@@ -9,7 +9,7 @@ import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 
 
@@ -28,7 +28,9 @@ function playerStorageKey(eventId, key){
 }
 
 const LONG_PRESS_MS = 450;
-
+const BINGO_MODE_BUTTON_FONT_SIZE = 16;
+const BINGO_COUNT_NUMBER_FONT_SIZE = 24;
+const BINGO_COUNT_LABEL_FONT_SIZE = 14;
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -76,28 +78,48 @@ function getBingoBoardNextState(board, selectedHoles, cellIndex, moveIndex) {
   return next;
 }
 
-function BingoPreviewCell({ holeNo, markType, muted = false }) {
-  const color = muted ? '#94a3b8' : '#2457d6';
+function isBingoSpecialZone(index1, specialZones = []) {
+  return normalizeBingoSpecialZones(specialZones).includes(Number(index1));
+}
+
+function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false }) {
+  const color = '#2457d6';
   return (
-    <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', borderRadius: 10, border: '1px solid #d6dde8', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        aspectRatio: '1 / 1',
+        borderRadius: 10,
+        border: '1px solid #d6dde8',
+        background: specialZone ? '#fff3a6' : '#fff',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
       {markType === 'circle' && (
-        <div style={{ position: 'absolute', inset: 7, border: `2.5px solid ${color}`, borderRadius: '50%' }} />
+        <div style={{ position: 'absolute', inset: 4, border: `3px solid ${color}`, borderRadius: '50%' }} />
       )}
       {markType === 'heart' && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontSize: 32, lineHeight: 1, transform: 'translateY(-1px)' }}>♡</div>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontSize: 42, lineHeight: 1, transform: 'translateY(-1px)' }}>♡</div>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: 12, fontWeight: 800, color: '#16376c' }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
 
-function BingoPreviewCard({ name, bingoCount, board, holeValues }) {
+function BingoPreviewCard({ name, bingoCount, board, holeValues, specialZones = [] }) {
   const cells = Array.isArray(board) ? board : makeEmptyBingoBoard();
   return (
-    <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
+    <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12, width: '100%', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>{name || ''}</div>
-        <div style={{ fontSize: 22, fontWeight: 900, color: '#d11a2a', lineHeight: 1 }}>{Number(bingoCount || 0)}빙고</div>
+        <div style={{ fontSize: 18, fontWeight: 900, color: '#16376c' }}>{name || ''}</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, color: '#d11a2a', lineHeight: 1 }}>
+          <span style={{ fontSize: BINGO_COUNT_NUMBER_FONT_SIZE, fontWeight: 900 }}>{Number(bingoCount || 0)}</span>
+          <span style={{ fontSize: BINGO_COUNT_LABEL_FONT_SIZE, fontWeight: 400 }}>빙고</span>
+        </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
         {cells.map((holeNo, idx) => (
@@ -106,6 +128,7 @@ function BingoPreviewCard({ name, bingoCount, board, holeValues }) {
             holeNo={holeNo}
             markType={holeNo ? getBingoMarkType(holeValues?.[holeNo]) : ''}
             muted={!holeNo}
+            specialZone={isBingoSpecialZone(idx + 1, specialZones)}
           />
         ))}
       </div>
@@ -575,6 +598,13 @@ export default function PlayerEventInput(){
     clearBingoMoveIndex(evId);
   };
 
+  const clearBingoBoard = (evId, selectedHoles) => {
+    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const sharedMode = getBingoRoomShared(evId);
+    patchBingoBoard(evId, selectedHoles, basePid, makeEmptyBingoBoard(), sharedMode);
+    clearBingoMoveIndex(evId);
+  };
+
   const applyBingoBoardCell = (evId, selectedHoles, cellIndex) => {
     const basePid = getBingoEditorPid(evId, selectedHoles);
     const sharedMode = getBingoRoomShared(evId);
@@ -1028,6 +1058,8 @@ export default function PlayerEventInput(){
             const bingoUi = getBingoUiForEvent(ev.id);
             const bingoEditorState = getBingoPersonState(ev.id, bingoEditorPid, bingoSelectedHoles);
             const bingoEditorBoard = normalizeBingoBoard(bingoEditorState.board, bingoSelectedHoles);
+            const bingoSpecialZones = normalizeBingoSpecialZones(ev?.params?.specialZones);
+            const bingoLocked = !!ev?.params?.inputLocked;
             const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
@@ -1062,6 +1094,8 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
+                {bingoLocked && <div className={tCss.lockNotice}>입력이 마감되어 더 이상 수정할 수 없습니다.</div>}
+
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
                     <colgroup>
@@ -1073,7 +1107,7 @@ export default function PlayerEventInput(){
                       <tr>
                         <th>닉네임</th>
                         {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
-                        <th>합계</th>
+                        <th>합</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1109,11 +1143,12 @@ export default function PlayerEventInput(){
                                     spellCheck={false}
                                     className={tCss.cellInput}
                                     value={cellValue}
-                                    onChange={e => p && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
-                                    onBlur={e => p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    disabled={!p || bingoLocked}
+                                    onChange={e => p && !bingoLocked && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    onBlur={e => p && !bingoLocked && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
-                                      if (p) {
+                                      if (p && !bingoLocked) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -1122,7 +1157,7 @@ export default function PlayerEventInput(){
                                     onPointerCancel={() => cancelEventLongPress(inputKey)}
                                     onPointerLeave={() => cancelEventLongPress(inputKey)}
                                     onTouchStart={(e) => {
-                                      if (p) {
+                                      if (p && !bingoLocked) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -1157,27 +1192,40 @@ export default function PlayerEventInput(){
                   <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
                       <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>빙고판 배치</div>
-                      <button
-                        type="button"
-                        onClick={() => resetBingoBoard(ev.id, bingoSelectedHoles)}
-                        style={{ border: '1px solid #cbd8ea', background: '#f8fbff', color: '#213a6b', fontWeight: 700, borderRadius: 10, padding: '8px 12px' }}
-                      >
-                        기본배치
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          type="button"
+                          disabled={bingoLocked}
+                          onClick={() => resetBingoBoard(ev.id, bingoSelectedHoles)}
+                          style={{ border: '1px solid #cbd8ea', background: '#f8fbff', color: '#213a6b', fontWeight: 700, borderRadius: 10, padding: '8px 12px', opacity: bingoLocked ? 0.55 : 1 }}
+                        >
+                          기본배치
+                        </button>
+                        <button
+                          type="button"
+                          disabled={bingoLocked}
+                          onClick={() => clearBingoBoard(ev.id, bingoSelectedHoles)}
+                          style={{ border: '1px solid #cbd8ea', background: '#fff', color: '#213a6b', fontWeight: 700, borderRadius: 10, padding: '8px 12px', opacity: bingoLocked ? 0.55 : 1 }}
+                        >
+                          초기화
+                        </button>
+                      </div>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
                       <button
                         type="button"
+                        disabled={bingoLocked}
                         onClick={() => setBingoRoomShared(ev.id, bingoSelectedHoles, false)}
-                        style={{ minHeight: 44, borderRadius: 12, fontWeight: 800, border: bingoSharedMode ? '1px solid #d5dbe7' : '1.5px solid #58b273', background: bingoSharedMode ? '#f8fafc' : '#e8f7ee', color: bingoSharedMode ? '#697487' : '#177a45' }}
+                        style={{ minHeight: 46, borderRadius: 12, fontWeight: 800, fontSize: BINGO_MODE_BUTTON_FONT_SIZE, border: bingoSharedMode ? '1px solid #d5dbe7' : '1.5px solid #58b273', background: bingoSharedMode ? '#f8fafc' : '#e8f7ee', color: bingoSharedMode ? '#697487' : '#177a45', opacity: bingoLocked ? 0.55 : 1 }}
                       >
                         각자 입력
                       </button>
                       <button
                         type="button"
+                        disabled={bingoLocked}
                         onClick={() => setBingoRoomShared(ev.id, bingoSelectedHoles, true)}
-                        style={{ minHeight: 44, borderRadius: 12, fontWeight: 800, border: bingoSharedMode ? '1.5px solid #58b273' : '1px solid #d5dbe7', background: bingoSharedMode ? '#e8f7ee' : '#f8fafc', color: bingoSharedMode ? '#177a45' : '#697487' }}
+                        style={{ minHeight: 46, borderRadius: 12, fontWeight: 800, fontSize: BINGO_MODE_BUTTON_FONT_SIZE, border: bingoSharedMode ? '1.5px solid #58b273' : '1px solid #d5dbe7', background: bingoSharedMode ? '#e8f7ee' : '#f8fafc', color: bingoSharedMode ? '#177a45' : '#697487', opacity: bingoLocked ? 0.55 : 1 }}
                       >
                         공통입력
                       </button>
@@ -1205,22 +1253,26 @@ export default function PlayerEventInput(){
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 8 }}>
                       {bingoEditorBoard.map((holeNo, idx) => {
                         const isMove = Number(bingoUi?.moveIndex) === idx;
+                        const isSpecial = bingoSpecialZones.includes(idx + 1);
                         return (
                           <button
                             key={`bingo-editor-${idx}`}
                             type="button"
+                            tabIndex={-1}
+                            onMouseDown={(e) => e.preventDefault()}
                             onClick={() => {
                               if (consumeBingoLongPress(ev.id, idx)) return;
+                              if (bingoLocked) return;
                               applyBingoBoardCell(ev.id, bingoSelectedHoles, idx);
                             }}
-                            onPointerDown={() => startBingoLongPress(ev.id, idx, !!holeNo)}
+                            onPointerDown={() => !bingoLocked && startBingoLongPress(ev.id, idx, !!holeNo)}
                             onPointerUp={() => cancelBingoLongPress(ev.id, idx)}
                             onPointerCancel={() => cancelBingoLongPress(ev.id, idx)}
                             onPointerLeave={() => cancelBingoLongPress(ev.id, idx)}
-                            onTouchStart={() => startBingoLongPress(ev.id, idx, !!holeNo)}
+                            onTouchStart={() => !bingoLocked && startBingoLongPress(ev.id, idx, !!holeNo)}
                             onTouchEnd={() => cancelBingoLongPress(ev.id, idx)}
                             onTouchCancel={() => cancelBingoLongPress(ev.id, idx)}
-                            style={{ aspectRatio: '1 / 1', borderRadius: 12, border: isMove ? '2px solid #5d8df6' : '1px solid #222', background: isMove ? '#edf4ff' : '#fff', fontSize: 30, fontWeight: 900, color: holeNo ? '#111' : '#b0b8c5' }}
+                            style={{ aspectRatio: '1 / 1', borderRadius: 12, border: isMove ? '2px solid #5d8df6' : '1px solid #222', background: isMove ? '#edf4ff' : (isSpecial ? '#fff3a6' : '#fff'), fontSize: 30, fontWeight: 900, color: holeNo ? '#111' : '#b0b8c5', outline: 'none', WebkitTapHighlightColor: 'transparent', opacity: bingoLocked ? 0.72 : 1 }}
                           >
                             <span style={{ fontSize: holeNo ? 33 : 18, lineHeight: 1 }}>{holeNo || ''}</span>
                           </button>
@@ -1235,15 +1287,17 @@ export default function PlayerEventInput(){
 
                   <div style={{ marginTop: 12, border: '1px solid #dde6f2', borderRadius: 16, background: '#f8fbff', padding: 12 }}>
                     <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c', marginBottom: 10 }}>실시간 빙고판 미리보기</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div style={{ display: 'flex', gap: 10, overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', paddingBottom: 2 }}>
                       {bingoPreviewRows.map((row) => (
-                        <BingoPreviewCard
-                          key={`bingo-preview-${row.pid}`}
-                          name={row.name}
-                          bingoCount={row.bingoCount}
-                          board={row.board}
-                          holeValues={row.holeValues}
-                        />
+                        <div key={`bingo-preview-${row.pid}`} style={{ flex: '0 0 100%', minWidth: '100%', scrollSnapAlign: 'start' }}>
+                          <BingoPreviewCard
+                            name={row.name}
+                            bingoCount={row.bingoCount}
+                            board={row.board}
+                            holeValues={row.holeValues}
+                            specialZones={bingoSpecialZones}
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>

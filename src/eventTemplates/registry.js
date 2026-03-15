@@ -104,10 +104,11 @@ export const TEMPLATE_REGISTRY = [
     type: 'bingo',
     label: '빙고',
     defaultParams: {
-      selectedHoles: Array.from({ length: 16 }, (_, i) => i + 1),
-      sharedBoardInRoom: false,
+      selectedHoles: Array.from({ length: 18 }, (_, i) => i + 1),
+      specialZones: [],
+      inputLocked: false,
     },
-    help: '* 운영자가 선택한 16개 홀로 4×4 빙고판을 만들고, -1/-2=하트, 0=원으로 빙고를 계산합니다.',
+    help: '',
     ui: {
       inputMode: false,
       paramsJson: false,

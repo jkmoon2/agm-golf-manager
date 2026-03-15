@@ -17,6 +17,7 @@ export const BINGO_LINES = [
 ];
 
 const ALL_HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
+const ALL_POSITIONS = Array.from({ length: 16 }, (_, i) => i + 1);
 const EMPTY_BOARD = Array.from({ length: 16 }, () => '');
 
 function asNum(v) {
@@ -28,6 +29,8 @@ function asNum(v) {
 export function defaultBingoParams() {
   return {
     selectedHoles: [...ALL_HOLES],
+    specialZones: [],
+    inputLocked: false,
   };
 }
 
@@ -36,6 +39,17 @@ export function normalizeBingoSelectedHoles(raw) {
   const uniq = Array.from(new Set(arr.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 18)));
   uniq.sort((a, b) => a - b);
   return uniq.length ? uniq : defaultBingoParams().selectedHoles;
+}
+
+export function isValidBingoSelectedHoles(raw) {
+  return normalizeBingoSelectedHoles(raw).length === 16;
+}
+
+export function normalizeBingoSpecialZones(raw) {
+  const arr = Array.isArray(raw) ? raw : [];
+  const uniq = Array.from(new Set(arr.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 16)));
+  uniq.sort((a, b) => a - b);
+  return uniq;
 }
 
 export function normalizeBingoBoard(rawBoard, allowedHoles) {
@@ -184,8 +198,11 @@ export function computeBingo(eventDef, participants = [], inputsByEvent = {}, op
 
   return {
     selectedHoles,
+    specialZones: normalizeBingoSpecialZones(params.specialZones),
     personRows,
     roomRows,
     teamRows,
   };
 }
+
+export { ALL_HOLES, ALL_POSITIONS, EMPTY_BOARD };

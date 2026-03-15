@@ -18,6 +18,7 @@ import GroupBattleHandicapEditor from '../eventTemplates/groupBattle/GroupBattle
 import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEditor';
 import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
 import BingoEditor from '../eventTemplates/bingo/BingoEditor';
+import BingoSelectionMonitor from '../eventTemplates/bingo/BingoSelectionMonitor';
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
@@ -59,7 +60,9 @@ function isValidBingoParams(params) {
 }
 
 function getBingoCountText(params) {
-  return `${normalizeBingoSelectedHoles(params?.selectedHoles).length}홀`;
+  const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
+  const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
+  return zoneCount ? `${holeCount}홀 · SZ ${zoneCount}` : `${holeCount}홀`;
 }
 
 function getClientPoint(evt){
@@ -90,6 +93,7 @@ export default function EventManager() {
   const [dragEvents, setDragEvents] = useState(null);
   const [dragEventId, setDragEventId] = useState('');
   const [monitorId, setMonitorId] = useState(null);
+  const [bingoMonitorId, setBingoMonitorId] = useState(null);
   const listItemRefs = useRef({});
   const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' });
   const reorderTouchCleanupRef = useRef(null);
@@ -742,11 +746,14 @@ if (editForm?.template === 'group-battle') {
         alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
       }
+      const isBingoEdit = editForm.template === 'bingo';
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: parsed,
+        target: isBingoEdit ? 'room' : e.target,
+        rankOrder: isBingoEdit ? 'desc' : e.rankOrder,
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -977,7 +984,7 @@ if (editForm?.template === 'group-battle') {
       return `pick-lineup · 조 · ${openGroups}${lastHalf}`;
     }
     if (ev?.template === 'bingo') {
-      return `bingo · ${getBingoCountText(ev?.params)} · 빙고`;
+      return `bingo · ${getBingoCountText(ev?.params)}`;
     }
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
@@ -1013,6 +1020,11 @@ if (editForm?.template === 'group-battle') {
     return (eventsOfSelected || []).find((e) => e.id === monitorId) || null;
   }, [eventsOfSelected, monitorId]);
 
+  const bingoMonitorEvent = useMemo(() => {
+    if (!bingoMonitorId) return null;
+    return (eventsOfSelected || []).find((e) => e.id === bingoMonitorId) || null;
+  }, [eventsOfSelected, bingoMonitorId]);
+
   const saveHandicapOverrides = async (overridesMap) => {
     if (!handicapEditEvent) return;
     const safe = (overridesMap && typeof overridesMap === 'object') ? overridesMap : {};
@@ -1029,6 +1041,16 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== pickLineupMonitorEvent.id) return e;
       const params = { ...(e.params || {}), selectionLocked: !!locked };
+      return { ...e, params };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
+  const toggleBingoInputLock = async (locked) => {
+    if (!bingoMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== bingoMonitorEvent.id) return e;
+      const params = { ...(e.params || {}), inputLocked: !!locked };
       return { ...e, params };
     });
     await updateEventImmediate({ events: next }, false);
@@ -1410,6 +1432,17 @@ if (editForm?.template === 'group-battle') {
                             </>
                           ) : (
                             <>
+                              {ev?.template === 'bingo' && (
+                                <button
+                                  onClick={() => {
+                                    setBingoMonitorId(ev.id);
+                                    setOpenMenuId(null);
+                                    setMenuUpId(null);
+                                  }}
+                                >
+                                  입력 현황/마감
+                                </button>
+                              )}
                               {templateUi(ev?.template).supportsQuickInput !== false && (
                                 <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
                               )}
@@ -1778,6 +1811,17 @@ if (editForm?.template === 'group-battle') {
             roomNames={roomNames}
             onClose={() => setMonitorId(null)}
             onToggleLock={togglePickLineupLock}
+          />
+        )}
+
+        {bingoMonitorEvent?.template === 'bingo' && (
+          <BingoSelectionMonitor
+            eventDef={bingoMonitorEvent}
+            participants={participants}
+            inputsByEvent={(eventData?.eventInputs || {})[bingoMonitorEvent.id] || {}}
+            roomNames={roomNames}
+            onClose={() => setBingoMonitorId(null)}
+            onToggleLock={toggleBingoInputLock}
           />
         )}
 
