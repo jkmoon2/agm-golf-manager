@@ -300,9 +300,11 @@
 
 
 .pickPreviewTable{
-  width:calc(100% - 8px) !important;
-  margin-right:8px;
+  width:calc(100% - 18px) !important;
+  max-width:calc(100% - 18px);
+  margin-right:18px;
   table-layout:fixed;
+  box-sizing:border-box;
 }
 
 .pickPreviewTable th:last-child,
