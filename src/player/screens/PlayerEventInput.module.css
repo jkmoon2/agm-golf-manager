@@ -298,6 +298,23 @@
   margin-top:12px;
 }
 
+
+.pickPreviewTable{
+  width:calc(100% - 8px) !important;
+  margin-right:8px;
+  table-layout:fixed;
+}
+
+.pickPreviewTable th:last-child,
+.pickPreviewTable td:last-child{
+  width:42px;
+  min-width:42px;
+  max-width:42px;
+  padding:0 1px !important;
+  white-space:nowrap;
+}
+
+
 .pickPreviewTableWrap{
   width:100%;
 }

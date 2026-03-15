@@ -799,8 +799,8 @@ export default function PlayerEventInput(){
               : Array.from({ length: requiredCount }, (_, i) => `선택${i + 1}`);
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
             const pickNickColPx = 108;
-            const pickPreviewNickPx = 108;
-            const pickPreviewTotalPx = 48;
+            const pickPreviewNickPx = pickCfg.mode === 'jo' ? 102 : 100;
+            const pickPreviewTotalPx = 42;
             const locked = !!ev?.params?.selectionLocked;
             const previewRows = roomMembers.map((p) => {
               if (!p) return { selectorName: '', cells: slotLabels.map(() => ''), teamLine: '', handicapSum: '', hasAny: false };
@@ -905,7 +905,7 @@ export default function PlayerEventInput(){
                   <div className={tCss.pickPreviewWrap}>
                     <div className={tCss.pickPreviewTitle}>선택 미리보기</div>
                     <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.pickPreviewTableWrap}`}>
-                      <table className={tCss.table} style={{ width: '100%' }}>
+                      <table className={`${tCss.table} ${tCss.pickPreviewTable}`}>
                         <colgroup>
                           <col style={{ width: `${pickPreviewNickPx}px` }} />
                           <col />
