@@ -9,7 +9,9 @@ import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
+import { normalizeBingoBoard, normalizeBingoSelectedHoles } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
+import BingoEventCard from '../components/BingoEventCard';
 
 
 function getPlayerTabId(){
@@ -448,6 +450,40 @@ export default function PlayerEventInput(){
     return padPickIds(arr, requiredCount);
   };
 
+  const getServerBingoBoard = (ev, pid) => {
+    const selected = normalizeBingoSelectedHoles(ev?.params?.selectedHoles);
+    return normalizeBingoBoard(inputsByEventServer?.[ev?.id]?.person?.[pid]?.board, selected);
+  };
+
+  const getDraftBingoBoard = (ev, pid, personDraft) => {
+    const selected = normalizeBingoSelectedHoles(ev?.params?.selectedHoles);
+    return normalizeBingoBoard(personDraft?.[pid]?.board, selected);
+  };
+
+  const patchBingoBoard = (evId, pid, nextBoard, options = {}) => {
+    const ev = events.find((item) => item.id === evId);
+    const selected = normalizeBingoSelectedHoles(options?.selectedHoles || ev?.params?.selectedHoles);
+    const board = normalizeBingoBoard(nextBoard, selected);
+    const roomMemberIds = Array.isArray(options?.roomMemberIds) ? options.roomMemberIds.map(String) : [];
+    const sharedBoardInRoom = !!options?.sharedBoardInRoom;
+
+    const all = { ...(draft || {}) };
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    const targetIds = sharedBoardInRoom ? roomMemberIds : [String(pid || '')];
+
+    targetIds.filter(Boolean).forEach((targetPid) => {
+      const prevObj = person[targetPid] && typeof person[targetPid] === 'object'
+        ? { ...person[targetPid] }
+        : {};
+      person[targetPid] = { ...prevObj, board };
+    });
+
+    slot.person = person;
+    all[evId] = slot;
+    setDraft(all);
+  };
+
   const patchValue = (evId, pid, value) => {
     const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
@@ -698,6 +734,28 @@ export default function PlayerEventInput(){
             for (let i = 0; i < dArr.length; i += 1) {
               if (!eq(dArr[i], baseArr[i])) return true;
             }
+          } else if (ev.template === 'bingo') {
+            const baseArr = getServerAccum(evId, pid, 18);
+            const dVals = (() => {
+              const v = dSlot?.[pid]?.values;
+              const arr = Array.isArray(v) ? [...v] : [];
+              while (arr.length < 18) arr.push('');
+              return arr.map((x) => {
+                if (x === '' || x == null) return '';
+                const n = Number(x);
+                return Number.isFinite(n) ? String(n) : '';
+              });
+            })();
+            if (dVals.length !== baseArr.length) return true;
+            for (let i = 0; i < dVals.length; i += 1) {
+              if (!eq(dVals[i], baseArr[i])) return true;
+            }
+            const baseBoard = getServerBingoBoard(ev, pid);
+            const draftBoard = getDraftBingoBoard(ev, pid, dSlot || {});
+            if (baseBoard.length !== draftBoard.length) return true;
+            for (let i = 0; i < baseBoard.length; i += 1) {
+              if (!eq(String(baseBoard[i]), String(draftBoard[i]))) return true;
+            }
           } else if (isAccum) {
             const baseArr = getServerAccum(evId, pid, attempts);
             const dVals = (() => {
@@ -745,6 +803,7 @@ export default function PlayerEventInput(){
           const TOTAL_PCT = isHoleRankForce ? 12 : 0;
           const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT + TOTAL_PCT) : 100;
           const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
+          const isBingo = ev.template === 'bingo';
           const pickCfg = ev.template === 'pick-lineup' ? getPickLineupConfig(ev) : null;
           const orderedRoomRows = orderSlotsByPairs(
             participants.filter((p) => Number(p?.room) === (Number.isFinite(roomIdx) ? roomIdx : NaN)),
@@ -791,6 +850,26 @@ export default function PlayerEventInput(){
             : [];
           const forcedGrandTotal = forcedSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
           const forcedGrandHasAny = forcedSubtotal.some((item) => item.hasAny);
+
+          if (isBingo) {
+            return (
+              <BingoEventCard
+                key={ev.id}
+                eventDef={ev}
+                participants={participants}
+                roomMembers={roomMembers}
+                roomIdx={roomIdx}
+                roomNames={roomNames}
+                inputsByEvent={inputsByEvent}
+                patchAccum={patchAccum}
+                finalizeAccum={finalizeAccum}
+                onBoardChange={patchBingoBoard}
+                eventInputRefs={eventInputRefs}
+                startEventLongMinus={startEventLongMinus}
+                cancelEventLongPress={cancelEventLongPress}
+              />
+            );
+          }
 
           if (pickCfg) {
             const requiredCount = getPickLineupRequiredCount(ev);

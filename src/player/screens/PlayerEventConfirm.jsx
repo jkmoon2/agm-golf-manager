@@ -16,6 +16,7 @@ import tCss    from './PlayerEventConfirm.module.css';
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
 import { computePickLineup } from '../../events/pickLineup';
+import { computeBingo } from '../../events/bingo';
 import { computeHoleRankForce } from '../../events/holeRankForce';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
@@ -191,6 +192,41 @@ const events = useMemo(
         value: r.value,
       }));
       return { kind: 'person', metricLabel: '합계', rows };
+    }
+
+    // ── bingo(빙고) ──────────────────────────────────────────────
+    if (template === 'bingo') {
+      const data = computeBingo(ev, participants, inputsByEvent, { roomNames, roomCount });
+      const metricLabel = '빙고';
+
+      if (target === 'person') {
+        const rows = (data?.personRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.name,
+          room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
+          value: r.value,
+        }));
+        return { kind: 'person', metricLabel, rows };
+      }
+
+      if (target === 'team') {
+        const rows = (data?.teamRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.label,
+          value: r.value,
+        }));
+        return { kind: 'team', metricLabel, rows };
+      }
+
+      const rows = (data?.roomRows || []).map((r, i) => ({
+        key: r.key || String(i),
+        rank: i + 1,
+        label: r.name,
+        value: r.value,
+      }));
+      return { kind: 'room', metricLabel, rows };
     }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────

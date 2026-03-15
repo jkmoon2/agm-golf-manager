@@ -15,11 +15,13 @@ import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } fro
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
 import GroupBattlePreview from '../eventTemplates/groupBattle/GroupBattlePreview';
 import GroupBattleHandicapEditor from '../eventTemplates/groupBattle/GroupBattleHandicapEditor';
+import BingoEditor from '../eventTemplates/bingo/BingoEditor';
 import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEditor';
 import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
+import { computeBingo } from '../events/bingo';
 import { computeHoleRankForce } from '../events/holeRankForce';
 
 
@@ -190,6 +192,40 @@ if (t === 'group-battle') {
   const addEvent = async () => {
     try {
 
+// ── bingo 전용 생성(고정 18칸 입력 + 기본 방합산/내림차순) ─────
+if (form.template === 'bingo') {
+  const params = {
+    ...((getTemplateByType('bingo')?.defaultParams) || {}),
+    ...(getParams() || {}),
+  };
+
+  const item = {
+    id: uid(),
+    title: form.title.trim() || '빙고',
+    template: 'bingo',
+    params,
+    enabled: true,
+    target: 'room',
+    rankOrder: 'desc',
+    inputMode: 'accumulate',
+    attempts: 18,
+  };
+
+  const list = [...eventsOfSelected, item];
+  await updateEventImmediate({ events: list }, false);
+
+  setForm({
+    title: '',
+    template: 'raw-number',
+    inputMode: 'refresh',
+    attempts: 4,
+    paramsJson: JSON.stringify(getTemplateByType('raw-number').defaultParams, null, 2),
+  });
+  setParamOpen(false);
+  alert('이벤트가 생성되었습니다.');
+  return;
+}
+
 // ── group-battle 전용 생성(전용 폼 상태 → params) ───────────
 if (form.template === 'group-battle') {
   const params = {
@@ -240,8 +276,8 @@ if (form.template === 'group-battle') {
         params: parsed,
         target: 'person',
         rankOrder: 'asc',
-        inputMode: form.template === 'hole-rank-force' ? 'accumulate' : form.inputMode,                // refresh | accumulate
-        attempts: form.template === 'hole-rank-force' ? 18 : Number(form.attempts || 4),     // 누적 칸수
+        inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
+        attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
       };
       const list = [...eventsOfSelected, item];
@@ -698,6 +734,27 @@ const resetEditGroupBattle = (params) => {
   const applyEdit = async () => {
     try {
 
+// ── bingo 전용 저장(고정 18칸 입력 + 기본 방합산/내림차순) ─────
+if (editForm?.template === 'bingo') {
+  const parsed = JSON.parse(editForm.paramsJson || '{}');
+  const next = eventsOfSelected.map(e => e.id === editId ? {
+    ...e,
+    title: editForm.title.trim() || e.title,
+    template: 'bingo',
+    params: parsed,
+    target: e?.target || 'room',
+    rankOrder: e?.rankOrder || 'desc',
+    inputMode: 'accumulate',
+    attempts: 18,
+  } : e);
+  await updateEventImmediate({ events: next }, false);
+  setEditId(null);
+  setEditForm(null);
+  setEditParamOpen(false);
+  alert('저장되었습니다.');
+  return;
+}
+
 // ── group-battle 전용 저장(전용 폼 상태 → params) ───────────
 if (editForm?.template === 'group-battle') {
   const params = {
@@ -729,8 +786,8 @@ if (editForm?.template === 'group-battle') {
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: parsed,
-        inputMode: editForm.template === 'hole-rank-force' ? 'accumulate' : editForm.inputMode,
-        attempts: editForm.template === 'hole-rank-force' ? 18 : Number(editForm.attempts || 4),
+        inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
+        attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
       await updateEventImmediate({ events: next }, false);
       setEditId(null);
@@ -819,6 +876,11 @@ if (editForm?.template === 'group-battle') {
     return computeHoleRankForce(previewDef, participants, inputsAll, { roomNames, roomCount });
   }, [previewDef, participants, inputsAll, roomNames, roomCount]);
 
+  const bingoPreview = useMemo(() => {
+    if (!previewDef || previewDef.template !== 'bingo') return null;
+    return computeBingo(previewDef, participants, inputsAll, { roomNames, roomCount });
+  }, [previewDef, participants, inputsAll, roomNames, roomCount]);
+
   const personRows = useMemo(() => {
     if (!previewDef) return [];
     if (previewDef.template === 'hole-rank-force') {
@@ -828,16 +890,30 @@ if (editForm?.template === 'group-battle') {
       rows.sort((a, b) => sign * (a.score - b.score));
       return rows;
     }
+    if (previewDef.template === 'bingo') {
+      const rows = Array.isArray(bingoPreview?.personRows)
+        ? bingoPreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
     const rows = participants.map(p => ({ id: p.id, name: p.nickname, room: p.room, score: compute(previewDef, perP[p.id]) }));
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, previewDef, sign, holeRankForcePreview]);
+  }, [participants, perP, previewDef, sign, holeRankForcePreview, bingoPreview]);
 
   const roomRows = useMemo(() => {
     if (!previewDef) return [];
     if (previewDef.template === 'hole-rank-force') {
       const arr = Array.isArray(holeRankForcePreview?.roomRows)
         ? holeRankForcePreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
+        : [];
+      arr.sort((a, b) => sign * (a.score - b.score));
+      return arr;
+    }
+    if (previewDef.template === 'bingo') {
+      const arr = Array.isArray(bingoPreview?.roomRows)
+        ? bingoPreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
         : [];
       arr.sort((a, b) => sign * (a.score - b.score));
       return arr;
@@ -850,7 +926,7 @@ if (editForm?.template === 'group-battle') {
     }
     arr.sort((a, b) => sign * (a.score - b.score));
     return arr;
-  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview]);
+  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview]);
 
   // 팀(포볼) 계산: 1조/2조 기준으로 A/B팀 구성
   const teamRows = useMemo(() => {
@@ -858,6 +934,13 @@ if (editForm?.template === 'group-battle') {
     if (previewDef.template === 'hole-rank-force') {
       const rows = Array.isArray(holeRankForcePreview?.teamRows)
         ? holeRankForcePreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
+    if (previewDef.template === 'bingo') {
+      const rows = Array.isArray(bingoPreview?.teamRows)
+        ? bingoPreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
         : [];
       rows.sort((a, b) => sign * (a.score - b.score));
       return rows;
@@ -882,7 +965,7 @@ if (editForm?.template === 'group-battle') {
     }
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview]);
+  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview]);
 
   /* ── 이벤트 불러오기(다른 대회에서) ───────────────────── */
   const [importFromId, setImportFromId] = useState('');
@@ -931,6 +1014,11 @@ if (editForm?.template === 'group-battle') {
         : '1조';
       const lastHalf = ev?.params?.lastPlaceHalf ? ' · 꼴등반띵' : '';
       return `pick-lineup · 조 · ${openGroups}${lastHalf}`;
+    }
+    if (ev?.template === 'bingo') {
+      const holes = Array.isArray(ev?.params?.selectedHoles) ? ev.params.selectedHoles.length : 16;
+      const mode = ev?.params?.sharedBoardInRoom ? '방공통' : '개별';
+      return `bingo · ${holes}홀 · ${mode}`;
     }
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
@@ -1119,10 +1207,18 @@ if (editForm?.template === 'group-battle') {
                   {TEMPLATE_REGISTRY.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
                 </select>
               </label>
-              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && (
+              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && form.template !== 'bingo' && (
                 <p className={css.help}>{getTemplateHelp(form.template)}</p>
               )}
 
+
+{form.template === 'bingo' && (
+  <BingoEditor
+    variant="create"
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
 
 {form.template === 'group-battle' && (
   <GroupBattleEditor
@@ -1446,6 +1542,14 @@ if (editForm?.template === 'group-battle') {
                         </select>
                       </label>
 
+
+{editForm.template === 'bingo' && (
+  <BingoEditor
+    variant="edit"
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
 
 {editForm.template === 'group-battle' && (
   <GroupBattleEditor
