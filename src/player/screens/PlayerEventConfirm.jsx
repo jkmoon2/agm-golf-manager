@@ -16,8 +16,8 @@ import tCss    from './PlayerEventConfirm.module.css';
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
 import { computePickLineup } from '../../events/pickLineup';
-import { computeBingo } from '../../events/bingo';
 import { computeHoleRankForce } from '../../events/holeRankForce';
+import { computeBingo } from '../../events/bingo';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -194,39 +194,35 @@ const events = useMemo(
       return { kind: 'person', metricLabel: '합계', rows };
     }
 
-    // ── bingo(빙고) ──────────────────────────────────────────────
+    // ── bingo(빙고) ───────────────────────────────────────────────
     if (template === 'bingo') {
       const data = computeBingo(ev, participants, inputsByEvent, { roomNames, roomCount });
-      const metricLabel = '빙고';
-
+      if (target === 'team') {
+        const rows = (data.teamRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.label,
+          value: r.value,
+        }));
+        return { kind: 'team', metricLabel: '빙고', rows };
+      }
       if (target === 'person') {
-        const rows = (data?.personRows || []).map((r, i) => ({
+        const rows = (data.personRows || []).map((r, i) => ({
           key: r.key || String(i),
           rank: i + 1,
           label: r.name,
           room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
           value: r.value,
         }));
-        return { kind: 'person', metricLabel, rows };
+        return { kind: 'person', metricLabel: '빙고', rows };
       }
-
-      if (target === 'team') {
-        const rows = (data?.teamRows || []).map((r, i) => ({
-          key: r.key || String(i),
-          rank: i + 1,
-          label: r.label,
-          value: r.value,
-        }));
-        return { kind: 'team', metricLabel, rows };
-      }
-
-      const rows = (data?.roomRows || []).map((r, i) => ({
+      const rows = (data.roomRows || []).map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
         label: r.name,
         value: r.value,
       }));
-      return { kind: 'room', metricLabel, rows };
+      return { kind: 'room', metricLabel: '빙고', rows };
     }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────

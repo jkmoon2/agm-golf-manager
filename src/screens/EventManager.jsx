@@ -15,14 +15,14 @@ import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } fro
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
 import GroupBattlePreview from '../eventTemplates/groupBattle/GroupBattlePreview';
 import GroupBattleHandicapEditor from '../eventTemplates/groupBattle/GroupBattleHandicapEditor';
-import BingoEditor from '../eventTemplates/bingo/BingoEditor';
 import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEditor';
 import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
+import BingoEditor from '../eventTemplates/bingo/BingoEditor';
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
-import { computeBingo } from '../events/bingo';
 import { computeHoleRankForce } from '../events/holeRankForce';
+import { computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -54,6 +54,13 @@ const fmt2 = (x) => {
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 };
 
+function isValidBingoParams(params) {
+  return normalizeBingoSelectedHoles(params?.selectedHoles).length === 16;
+}
+
+function getBingoCountText(params) {
+  return `${normalizeBingoSelectedHoles(params?.selectedHoles).length}홀`;
+}
 
 function getClientPoint(evt){
   const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
@@ -192,40 +199,6 @@ if (t === 'group-battle') {
   const addEvent = async () => {
     try {
 
-// ── bingo 전용 생성(고정 18칸 입력 + 기본 방합산/내림차순) ─────
-if (form.template === 'bingo') {
-  const params = {
-    ...((getTemplateByType('bingo')?.defaultParams) || {}),
-    ...(getParams() || {}),
-  };
-
-  const item = {
-    id: uid(),
-    title: form.title.trim() || '빙고',
-    template: 'bingo',
-    params,
-    enabled: true,
-    target: 'room',
-    rankOrder: 'desc',
-    inputMode: 'accumulate',
-    attempts: 18,
-  };
-
-  const list = [...eventsOfSelected, item];
-  await updateEventImmediate({ events: list }, false);
-
-  setForm({
-    title: '',
-    template: 'raw-number',
-    inputMode: 'refresh',
-    attempts: 4,
-    paramsJson: JSON.stringify(getTemplateByType('raw-number').defaultParams, null, 2),
-  });
-  setParamOpen(false);
-  alert('이벤트가 생성되었습니다.');
-  return;
-}
-
 // ── group-battle 전용 생성(전용 폼 상태 → params) ───────────
 if (form.template === 'group-battle') {
   const params = {
@@ -269,13 +242,18 @@ if (form.template === 'group-battle') {
   return;
 }
       const parsed = JSON.parse(form.paramsJson || '{}');
+      if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
+        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        return;
+      }
+      const isBingo = form.template === 'bingo';
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
         params: parsed,
-        target: 'person',
-        rankOrder: 'asc',
+        target: isBingo ? 'room' : 'person',
+        rankOrder: isBingo ? 'desc' : 'asc',
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -734,27 +712,6 @@ const resetEditGroupBattle = (params) => {
   const applyEdit = async () => {
     try {
 
-// ── bingo 전용 저장(고정 18칸 입력 + 기본 방합산/내림차순) ─────
-if (editForm?.template === 'bingo') {
-  const parsed = JSON.parse(editForm.paramsJson || '{}');
-  const next = eventsOfSelected.map(e => e.id === editId ? {
-    ...e,
-    title: editForm.title.trim() || e.title,
-    template: 'bingo',
-    params: parsed,
-    target: e?.target || 'room',
-    rankOrder: e?.rankOrder || 'desc',
-    inputMode: 'accumulate',
-    attempts: 18,
-  } : e);
-  await updateEventImmediate({ events: next }, false);
-  setEditId(null);
-  setEditForm(null);
-  setEditParamOpen(false);
-  alert('저장되었습니다.');
-  return;
-}
-
 // ── group-battle 전용 저장(전용 폼 상태 → params) ───────────
 if (editForm?.template === 'group-battle') {
   const params = {
@@ -781,6 +738,10 @@ if (editForm?.template === 'group-battle') {
   return;
 }
       const parsed = JSON.parse(editForm.paramsJson || '{}');
+      if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
+        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        return;
+      }
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
@@ -1016,9 +977,7 @@ if (editForm?.template === 'group-battle') {
       return `pick-lineup · 조 · ${openGroups}${lastHalf}`;
     }
     if (ev?.template === 'bingo') {
-      const holes = Array.isArray(ev?.params?.selectedHoles) ? ev.params.selectedHoles.length : 16;
-      const mode = ev?.params?.sharedBoardInRoom ? '방공통' : '개별';
-      return `bingo · ${holes}홀 · ${mode}`;
+      return `bingo · ${getBingoCountText(ev?.params)} · 빙고`;
     }
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
@@ -1212,14 +1171,6 @@ if (editForm?.template === 'group-battle') {
               )}
 
 
-{form.template === 'bingo' && (
-  <BingoEditor
-    variant="create"
-    value={params}
-    onChange={(next) => setParams(next)}
-  />
-)}
-
 {form.template === 'group-battle' && (
   <GroupBattleEditor
     variant="create"
@@ -1242,6 +1193,14 @@ if (editForm?.template === 'group-battle') {
 
 {form.template === 'hole-rank-force' && (
   <HoleRankForceEditor
+    variant="create"
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'bingo' && (
+  <BingoEditor
     variant="create"
     value={params}
     onChange={(next) => setParams(next)}
@@ -1543,14 +1502,6 @@ if (editForm?.template === 'group-battle') {
                       </label>
 
 
-{editForm.template === 'bingo' && (
-  <BingoEditor
-    variant="edit"
-    value={editParams}
-    onChange={(next) => setEditParams(next)}
-  />
-)}
-
 {editForm.template === 'group-battle' && (
   <GroupBattleEditor
     variant="edit"
@@ -1573,6 +1524,14 @@ if (editForm?.template === 'group-battle') {
 
 {editForm.template === 'hole-rank-force' && (
   <HoleRankForceEditor
+    variant="edit"
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
+
+{editForm.template === 'bingo' && (
+  <BingoEditor
     variant="edit"
     value={editParams}
     onChange={(next) => setEditParams(next)}

@@ -9,9 +9,8 @@ import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { normalizeBingoBoard, normalizeBingoSelectedHoles } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
-import BingoEventCard from '../components/BingoEventCard';
 
 
 function getPlayerTabId(){
@@ -46,6 +45,72 @@ function formatDisplayNumber(value){
   if (!Number.isFinite(n)) return '';
   const s = n.toFixed(2);
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
+}
+
+function makeEmptyBingoBoard(){
+  return Array.from({ length: 16 }, () => '');
+}
+
+function getBingoBoardNextState(board, selectedHoles, cellIndex, moveIndex) {
+  const safeBoard = normalizeBingoBoard(board, selectedHoles);
+  if (Number.isInteger(moveIndex) && moveIndex >= 0 && moveIndex < safeBoard.length) {
+    if (moveIndex === cellIndex) return safeBoard;
+    const next = [...safeBoard];
+    const fromVal = next[moveIndex];
+    const toVal = next[cellIndex];
+    if (fromVal === '' || fromVal == null) return next;
+    if (toVal === '' || toVal == null) {
+      next[cellIndex] = fromVal;
+      next[moveIndex] = '';
+    } else {
+      next[cellIndex] = fromVal;
+      next[moveIndex] = toVal;
+    }
+    return next;
+  }
+  if (safeBoard[cellIndex]) return safeBoard;
+  const nextHole = getNextBingoHole(safeBoard, selectedHoles);
+  if (!nextHole) return safeBoard;
+  const next = [...safeBoard];
+  next[cellIndex] = nextHole;
+  return next;
+}
+
+function BingoPreviewCell({ holeNo, markType, muted = false }) {
+  const color = muted ? '#94a3b8' : '#2457d6';
+  return (
+    <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', borderRadius: 10, border: '1px solid #d6dde8', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      {markType === 'circle' && (
+        <div style={{ position: 'absolute', inset: 7, border: `2.5px solid ${color}`, borderRadius: '50%' }} />
+      )}
+      {markType === 'heart' && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontSize: 32, lineHeight: 1, transform: 'translateY(-1px)' }}>♡</div>
+      )}
+      <span style={{ position: 'relative', zIndex: 2, fontSize: 12, fontWeight: 800, color: '#16376c' }}>{holeNo || ''}</span>
+    </div>
+  );
+}
+
+function BingoPreviewCard({ name, bingoCount, board, holeValues }) {
+  const cells = Array.isArray(board) ? board : makeEmptyBingoBoard();
+  return (
+    <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>{name || ''}</div>
+        <div style={{ fontSize: 22, fontWeight: 900, color: '#d11a2a', lineHeight: 1 }}>{Number(bingoCount || 0)}빙고</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+        {cells.map((holeNo, idx) => (
+          <BingoPreviewCell
+            key={`${name || 'preview'}-${idx}`}
+            holeNo={holeNo}
+            markType={holeNo ? getBingoMarkType(holeValues?.[holeNo]) : ''}
+            muted={!holeNo}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function displayPickOption(p){
@@ -389,6 +454,9 @@ export default function PlayerEventInput(){
   const [dirty, setDirty] = useState(false);
   const eventInputRefs = useRef({});
   const longPressTimersRef = useRef({});
+  const [bingoUiState, setBingoUiState] = useState({});
+  const bingoLongPressTimersRef = useRef({});
+  const bingoLongPressDoneRef = useRef({});
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -421,6 +489,131 @@ export default function PlayerEventInput(){
 
   const inputsByEvent = draft || {};
 
+  const getBingoRoomMemberIds = () => roomMembers.filter(Boolean).map((p) => String(p.id));
+
+  const getBingoUiForEvent = (evId) => (bingoUiState?.[evId] && typeof bingoUiState[evId] === 'object' ? bingoUiState[evId] : {});
+
+  const setBingoActiveParticipant = (evId, pid) => {
+    setBingoUiState((prev) => ({
+      ...prev,
+      [evId]: { ...(prev?.[evId] || {}), pid: String(pid || ''), moveIndex: null },
+    }));
+  };
+
+  const clearBingoMoveIndex = (evId) => {
+    setBingoUiState((prev) => ({
+      ...prev,
+      [evId]: { ...(prev?.[evId] || {}), moveIndex: null },
+    }));
+  };
+
+  const getBingoRoomShared = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEvent?.[evId]?.person?.[pid]?.roomShared);
+
+  const getBingoPersonState = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles);
+
+  const getBingoEditorPid = (evId, selectedHoles) => {
+    const roomIds = getBingoRoomMemberIds();
+    const ui = getBingoUiForEvent(evId);
+    if (roomIds.includes(String(ui?.pid || ''))) return String(ui.pid);
+    const withBoard = roomIds.find((pid) => getBingoPersonState(evId, pid, selectedHoles).board.some(Boolean));
+    return withBoard || roomIds[0] || '';
+  };
+
+  const patchBingoBoard = (evId, selectedHoles, basePid, nextBoard, sharedMode) => {
+    const roomIds = getBingoRoomMemberIds();
+    const targetIds = sharedMode ? roomIds : [String(basePid || '')].filter(Boolean);
+    if (!targetIds.length) return;
+    const normalizedBoard = normalizeBingoBoard(nextBoard, selectedHoles);
+    const all = { ...(draft || {}) };
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    targetIds.forEach((pid) => {
+      const prevState = extractBingoPersonInput(person?.[pid], selectedHoles);
+      person[pid] = {
+        ...prevState,
+        values: [...prevState.values],
+        board: [...normalizedBoard],
+        roomShared: !!sharedMode,
+      };
+    });
+    slot.person = person;
+    all[evId] = slot;
+    setDraft(all);
+  };
+
+  const setBingoRoomShared = (evId, selectedHoles, sharedMode) => {
+    const roomIds = getBingoRoomMemberIds();
+    if (!roomIds.length) return;
+    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const baseState = getBingoPersonState(evId, basePid || roomIds[0], selectedHoles);
+    const sourceBoard = normalizeBingoBoard(baseState.board, selectedHoles);
+    const all = { ...(draft || {}) };
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    roomIds.forEach((pid) => {
+      const prevState = extractBingoPersonInput(person?.[pid], selectedHoles);
+      person[pid] = {
+        ...prevState,
+        values: [...prevState.values],
+        board: [...(sharedMode ? sourceBoard : prevState.board)],
+        roomShared: !!sharedMode,
+      };
+    });
+    slot.person = person;
+    all[evId] = slot;
+    setDraft(all);
+    setBingoUiState((prev) => ({
+      ...prev,
+      [evId]: { ...(prev?.[evId] || {}), pid: String(basePid || roomIds[0] || ''), moveIndex: null },
+    }));
+  };
+
+  const resetBingoBoard = (evId, selectedHoles) => {
+    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const sharedMode = getBingoRoomShared(evId);
+    patchBingoBoard(evId, selectedHoles, basePid, selectedHoles.slice(0, 16), sharedMode);
+    clearBingoMoveIndex(evId);
+  };
+
+  const applyBingoBoardCell = (evId, selectedHoles, cellIndex) => {
+    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const sharedMode = getBingoRoomShared(evId);
+    const ui = getBingoUiForEvent(evId);
+    const current = getBingoPersonState(evId, basePid, selectedHoles);
+    const nextBoard = getBingoBoardNextState(current.board, selectedHoles, cellIndex, ui?.moveIndex);
+    patchBingoBoard(evId, selectedHoles, basePid, nextBoard, sharedMode);
+    clearBingoMoveIndex(evId);
+  };
+
+  const startBingoLongPress = (evId, cellIndex, hasValue) => {
+    if (!hasValue) return;
+    const key = `${evId}:${cellIndex}`;
+    const timer = bingoLongPressTimersRef.current?.[key];
+    if (timer) clearTimeout(timer);
+    if (bingoLongPressDoneRef.current) delete bingoLongPressDoneRef.current[key];
+    bingoLongPressTimersRef.current[key] = setTimeout(() => {
+      bingoLongPressDoneRef.current[key] = true;
+      setBingoUiState((prev) => ({
+        ...prev,
+        [evId]: { ...(prev?.[evId] || {}), moveIndex: cellIndex },
+      }));
+    }, LONG_PRESS_MS);
+  };
+
+  const cancelBingoLongPress = (evId, cellIndex) => {
+    const key = `${evId}:${cellIndex}`;
+    const timer = bingoLongPressTimersRef.current?.[key];
+    if (timer) clearTimeout(timer);
+    if (bingoLongPressTimersRef.current) delete bingoLongPressTimersRef.current[key];
+  };
+
+  const consumeBingoLongPress = (evId, cellIndex) => {
+    const key = `${evId}:${cellIndex}`;
+    const on = !!bingoLongPressDoneRef.current?.[key];
+    if (bingoLongPressDoneRef.current) delete bingoLongPressDoneRef.current[key];
+    return on;
+  };
+
   const getServerSingle = (evId, pid) => {
     const v = inputsByEventServer?.[evId]?.person?.[pid];
     if (v === '' || v == null) return null;
@@ -448,40 +641,6 @@ export default function PlayerEventInput(){
   const getServerPickIds = (evId, pid, requiredCount) => {
     const arr = normalizeMemberIds(inputsByEventServer?.[evId]?.person?.[pid]);
     return padPickIds(arr, requiredCount);
-  };
-
-  const getServerBingoBoard = (ev, pid) => {
-    const selected = normalizeBingoSelectedHoles(ev?.params?.selectedHoles);
-    return normalizeBingoBoard(inputsByEventServer?.[ev?.id]?.person?.[pid]?.board, selected);
-  };
-
-  const getDraftBingoBoard = (ev, pid, personDraft) => {
-    const selected = normalizeBingoSelectedHoles(ev?.params?.selectedHoles);
-    return normalizeBingoBoard(personDraft?.[pid]?.board, selected);
-  };
-
-  const patchBingoBoard = (evId, pid, nextBoard, options = {}) => {
-    const ev = events.find((item) => item.id === evId);
-    const selected = normalizeBingoSelectedHoles(options?.selectedHoles || ev?.params?.selectedHoles);
-    const board = normalizeBingoBoard(nextBoard, selected);
-    const roomMemberIds = Array.isArray(options?.roomMemberIds) ? options.roomMemberIds.map(String) : [];
-    const sharedBoardInRoom = !!options?.sharedBoardInRoom;
-
-    const all = { ...(draft || {}) };
-    const slot = { ...(all[evId] || {}) };
-    const person = { ...(slot.person || {}) };
-    const targetIds = sharedBoardInRoom ? roomMemberIds : [String(pid || '')];
-
-    targetIds.filter(Boolean).forEach((targetPid) => {
-      const prevObj = person[targetPid] && typeof person[targetPid] === 'object'
-        ? { ...person[targetPid] }
-        : {};
-      person[targetPid] = { ...prevObj, board };
-    });
-
-    slot.person = person;
-    all[evId] = slot;
-    setDraft(all);
   };
 
   const patchValue = (evId, pid, value) => {
@@ -679,7 +838,11 @@ export default function PlayerEventInput(){
         Object.entries(sPerson).forEach(([pid, val])=>{
           if (!roomPids.has(String(pid))) return;
           const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
-          if (val === '' || val == null || isEmptyPick || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
+          const isEmptyBingo = typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)
+            && !val.values.some((x) => String(x ?? '').trim() !== '')
+            && !val.board.some((x) => String(x ?? '').trim() !== '')
+            && !val.roomShared;
+          if (val === '' || val == null || isEmptyPick || isEmptyBingo || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
             delete mPerson[pid];
           } else {
             mPerson[pid] = val;
@@ -735,27 +898,30 @@ export default function PlayerEventInput(){
               if (!eq(dArr[i], baseArr[i])) return true;
             }
           } else if (ev.template === 'bingo') {
-            const baseArr = getServerAccum(evId, pid, 18);
-            const dVals = (() => {
-              const v = dSlot?.[pid]?.values;
-              const arr = Array.isArray(v) ? [...v] : [];
-              while (arr.length < 18) arr.push('');
-              return arr.map((x) => {
-                if (x === '' || x == null) return '';
-                const n = Number(x);
-                return Number.isFinite(n) ? String(n) : '';
-              });
-            })();
-            if (dVals.length !== baseArr.length) return true;
-            for (let i = 0; i < dVals.length; i += 1) {
-              if (!eq(dVals[i], baseArr[i])) return true;
+            const selectedHoles = normalizeBingoSelectedHoles(ev?.params?.selectedHoles);
+            const baseState = extractBingoPersonInput(sSlot?.[pid], selectedHoles);
+            const draftState = extractBingoPersonInput(dSlot?.[pid], selectedHoles);
+            const baseVals = baseState.values.map((x) => {
+              if (x === '' || x == null) return '';
+              const n = Number(x);
+              return Number.isFinite(n) ? String(n) : '';
+            });
+            const draftVals = draftState.values.map((x) => {
+              if (x === '' || x == null) return '';
+              const n = Number(x);
+              return Number.isFinite(n) ? String(n) : '';
+            });
+            if (baseVals.length !== draftVals.length) return true;
+            for (let i = 0; i < draftVals.length; i += 1) {
+              if (!eq(draftVals[i], baseVals[i])) return true;
             }
-            const baseBoard = getServerBingoBoard(ev, pid);
-            const draftBoard = getDraftBingoBoard(ev, pid, dSlot || {});
+            const baseBoard = normalizeBingoBoard(baseState.board, selectedHoles).map((x) => String(x || ''));
+            const draftBoard = normalizeBingoBoard(draftState.board, selectedHoles).map((x) => String(x || ''));
             if (baseBoard.length !== draftBoard.length) return true;
-            for (let i = 0; i < baseBoard.length; i += 1) {
-              if (!eq(String(baseBoard[i]), String(draftBoard[i]))) return true;
+            for (let i = 0; i < draftBoard.length; i += 1) {
+              if (!eq(draftBoard[i], baseBoard[i])) return true;
             }
+            if (!!draftState.roomShared !== !!baseState.roomShared) return true;
           } else if (isAccum) {
             const baseArr = getServerAccum(evId, pid, attempts);
             const dVals = (() => {
@@ -793,7 +959,9 @@ export default function PlayerEventInput(){
 
         {events.map(ev => {
           const isHoleRankForce = ev.template === 'hole-rank-force';
+          const isBingo = ev.template === 'bingo';
           const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
+          const bingoSelectedHoles = isBingo ? normalizeBingoSelectedHoles(ev?.params?.selectedHoles) : [];
           const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
           const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
@@ -803,7 +971,6 @@ export default function PlayerEventInput(){
           const TOTAL_PCT = isHoleRankForce ? 12 : 0;
           const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT + TOTAL_PCT) : 100;
           const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
-          const isBingo = ev.template === 'bingo';
           const pickCfg = ev.template === 'pick-lineup' ? getPickLineupConfig(ev) : null;
           const orderedRoomRows = orderSlotsByPairs(
             participants.filter((p) => Number(p?.room) === (Number.isFinite(roomIdx) ? roomIdx : NaN)),
@@ -852,22 +1019,236 @@ export default function PlayerEventInput(){
           const forcedGrandHasAny = forcedSubtotal.some((item) => item.hasAny);
 
           if (isBingo) {
+            const bingoNickPct = 34;
+            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
+            const bingoTotalPct = 12;
+            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoSharedMode = getBingoRoomShared(ev.id);
+            const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
+            const bingoUi = getBingoUiForEvent(ev.id);
+            const bingoEditorState = getBingoPersonState(ev.id, bingoEditorPid, bingoSelectedHoles);
+            const bingoEditorBoard = normalizeBingoBoard(bingoEditorState.board, bingoSelectedHoles);
+            const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
+              let sum = 0;
+              let hasAny = false;
+              orderedRoomRows.forEach((p) => {
+                const raw = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
+                const n = Number(raw);
+                if (Number.isFinite(n)) {
+                  sum += n;
+                  hasAny = true;
+                }
+              });
+              return { holeNo, sum, hasAny };
+            });
+            const bingoRawGrandTotal = bingoRawSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
+            const bingoRawGrandHasAny = bingoRawSubtotal.some((item) => item.hasAny);
+            const bingoPreviewRows = roomMembers.filter(Boolean).map((p) => {
+              const rowState = getBingoPersonState(ev.id, p.id, bingoSelectedHoles);
+              const board = bingoSharedMode ? bingoEditorBoard : normalizeBingoBoard(rowState.board, bingoSelectedHoles);
+              const holeValues = getBingoHoleValues(rowState.values, bingoSelectedHoles);
+              return {
+                pid: String(p.id),
+                name: String(p.nickname || ''),
+                board,
+                holeValues,
+                bingoCount: computeBingoCount(board, holeValues),
+              };
+            });
+
             return (
-              <BingoEventCard
-                key={ev.id}
-                eventDef={ev}
-                participants={participants}
-                roomMembers={roomMembers}
-                roomIdx={roomIdx}
-                roomNames={roomNames}
-                inputsByEvent={inputsByEvent}
-                patchAccum={patchAccum}
-                finalizeAccum={finalizeAccum}
-                onBoardChange={patchBingoBoard}
-                eventInputRefs={eventInputRefs}
-                startEventLongMinus={startEventLongMinus}
-                cancelEventLongPress={cancelEventLongPress}
-              />
+              <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                <div className={baseCss.cardHeader}>
+                  <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
+                </div>
+
+                <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                  <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
+                    <colgroup>
+                      <col style={{ width: `${bingoNickPct}%` }} />
+                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
+                      <col style={{ width: `${bingoTotalPct}%` }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>닉네임</th>
+                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        <th>합계</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orderedRoomRows.map((p, rIdx) => {
+                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowValues = rowRawValues.map((raw) => {
+                          const n = Number(raw);
+                          return Number.isFinite(n) ? n : 0;
+                        });
+                        const rowHasValue = rowRawValues.some((raw) => String(raw ?? '').trim() !== '');
+                        const rowTotal = rowValues.reduce((sum, n) => sum + n, 0);
+                        const rowTotalDisplay = p ? (rowHasValue ? formatDisplayNumber(rowTotal) : '') : '';
+                        return (
+                          <tr key={`bingo-row-${rIdx}`}>
+                            <td>{p ? p.nickname : ''}</td>
+                            {bingoSelectedHoles.map((holeNo) => {
+                              const valueIndex = holeNo - 1;
+                              const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
+                              const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
+                              return (
+                                <td key={`bingo-cell-${rIdx}-${holeNo}`} className={tCss.cellEditable}>
+                                  <input
+                                    ref={(el) => {
+                                      if (el) eventInputRefs.current[inputKey] = el;
+                                      else delete eventInputRefs.current[inputKey];
+                                    }}
+                                    type="text"
+                                    inputMode="decimal"
+                                    pattern="[0-9.+\-]*"
+                                    autoComplete="off"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
+                                    className={tCss.cellInput}
+                                    value={cellValue}
+                                    onChange={e => p && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    onBlur={e => p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                    onPointerDown={(e) => {
+                                      if (p) {
+                                        e.stopPropagation();
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
+                                      }
+                                    }}
+                                    onPointerUp={() => cancelEventLongPress(inputKey)}
+                                    onPointerCancel={() => cancelEventLongPress(inputKey)}
+                                    onPointerLeave={() => cancelEventLongPress(inputKey)}
+                                    onTouchStart={(e) => {
+                                      if (p) {
+                                        e.stopPropagation();
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
+                                      }
+                                    }}
+                                    onTouchEnd={() => cancelEventLongPress(inputKey)}
+                                    onTouchCancel={() => cancelEventLongPress(inputKey)}
+                                    data-focus-evid={ev.id}
+                                    data-focus-pid={p ? p.id : ''}
+                                    data-focus-idx={valueIndex}
+                                  />
+                                </td>
+                              );
+                            })}
+                            <td className={tCss.totalCell}>{rowTotalDisplay}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr className={tCss.subtotalRow}>
+                        <td className={tCss.subtotalLabel}>합계</td>
+                        {bingoRawSubtotal.map((item) => (
+                          <td key={`bingo-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
+                            {item.hasAny ? formatDisplayNumber(item.sum) : ''}
+                          </td>
+                        ))}
+                        <td className={tCss.subtotalRed}>{bingoRawGrandHasAny ? formatDisplayNumber(bingoRawGrandTotal) : ''}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ padding: '12px' }}>
+                  <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+                      <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>빙고판 배치</div>
+                      <button
+                        type="button"
+                        onClick={() => resetBingoBoard(ev.id, bingoSelectedHoles)}
+                        style={{ border: '1px solid #cbd8ea', background: '#f8fbff', color: '#213a6b', fontWeight: 700, borderRadius: 10, padding: '8px 12px' }}
+                      >
+                        기본배치
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                      <button
+                        type="button"
+                        onClick={() => setBingoRoomShared(ev.id, bingoSelectedHoles, false)}
+                        style={{ minHeight: 44, borderRadius: 12, fontWeight: 800, border: bingoSharedMode ? '1px solid #d5dbe7' : '1.5px solid #58b273', background: bingoSharedMode ? '#f8fafc' : '#e8f7ee', color: bingoSharedMode ? '#697487' : '#177a45' }}
+                      >
+                        각자 입력
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBingoRoomShared(ev.id, bingoSelectedHoles, true)}
+                        style={{ minHeight: 44, borderRadius: 12, fontWeight: 800, border: bingoSharedMode ? '1.5px solid #58b273' : '1px solid #d5dbe7', background: bingoSharedMode ? '#e8f7ee' : '#f8fafc', color: bingoSharedMode ? '#177a45' : '#697487' }}
+                      >
+                        공통입력
+                      </button>
+                    </div>
+
+                    {!bingoSharedMode && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
+                        {roomMembers.filter(Boolean).map((p) => {
+                          const active = String(bingoEditorPid) === String(p.id);
+                          return (
+                            <button
+                              key={`bingo-tab-${p.id}`}
+                              type="button"
+                              onClick={() => setBingoActiveParticipant(ev.id, p.id)}
+                              style={{ minHeight: 40, borderRadius: 999, border: active ? '1.5px solid #5d8df6' : '1px solid #222', background: active ? '#edf4ff' : '#fff', color: '#222', fontWeight: 800, padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                              title={p.nickname}
+                            >
+                              {p.nickname}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 8 }}>
+                      {bingoEditorBoard.map((holeNo, idx) => {
+                        const isMove = Number(bingoUi?.moveIndex) === idx;
+                        return (
+                          <button
+                            key={`bingo-editor-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              if (consumeBingoLongPress(ev.id, idx)) return;
+                              applyBingoBoardCell(ev.id, bingoSelectedHoles, idx);
+                            }}
+                            onPointerDown={() => startBingoLongPress(ev.id, idx, !!holeNo)}
+                            onPointerUp={() => cancelBingoLongPress(ev.id, idx)}
+                            onPointerCancel={() => cancelBingoLongPress(ev.id, idx)}
+                            onPointerLeave={() => cancelBingoLongPress(ev.id, idx)}
+                            onTouchStart={() => startBingoLongPress(ev.id, idx, !!holeNo)}
+                            onTouchEnd={() => cancelBingoLongPress(ev.id, idx)}
+                            onTouchCancel={() => cancelBingoLongPress(ev.id, idx)}
+                            style={{ aspectRatio: '1 / 1', borderRadius: 12, border: isMove ? '2px solid #5d8df6' : '1px solid #222', background: isMove ? '#edf4ff' : '#fff', fontSize: 30, fontWeight: 900, color: holeNo ? '#111' : '#b0b8c5' }}
+                          >
+                            <span style={{ fontSize: holeNo ? 33 : 18, lineHeight: 1 }}>{holeNo || ''}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>
+                      빈칸을 누르면 선택된 홀 번호가 순서대로 들어갑니다. 수정할 때는 번호가 있는 칸을 길게 누른 뒤 이동할 칸을 터치해 주세요.
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 12, border: '1px solid #dde6f2', borderRadius: 16, background: '#f8fbff', padding: 12 }}>
+                    <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c', marginBottom: 10 }}>실시간 빙고판 미리보기</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      {bingoPreviewRows.map((row) => (
+                        <BingoPreviewCard
+                          key={`bingo-preview-${row.pid}`}
+                          name={row.name}
+                          bingoCount={row.bingoCount}
+                          board={row.board}
+                          holeValues={row.holeValues}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             );
           }
 
