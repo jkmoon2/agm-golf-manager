@@ -328,12 +328,34 @@ export default function PlayerEventInput(){
   const pickButtonRefs = useRef({});
   const pickMenuGestureRef = useRef({ dragging:false, startY:0, lastMoveAt:0 });
 
+  const clearPickMenuGestureReset = () => {
+    const timer = pickMenuGestureRef.current?.resetTimer;
+    if (timer) window.clearTimeout(timer);
+  };
+  const schedulePickMenuGestureReset = (stamp = Date.now()) => {
+    clearPickMenuGestureReset();
+    const state = pickMenuGestureRef.current || {};
+    const resetTimer = window.setTimeout(() => {
+      const latest = pickMenuGestureRef.current || {};
+      if ((Date.now() - Number(latest.lastMoveAt || 0)) >= 150) {
+        pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0, resetTimer:null };
+      }
+    }, 170);
+    pickMenuGestureRef.current = { ...state, lastMoveAt:stamp, resetTimer };
+  };
+  const isTouchLikePickMenuGesture = (evt) => {
+    if (evt?.touches || evt?.changedTouches) return true;
+    return evt?.pointerType === 'touch';
+  };
   const beginPickMenuGesture = (evt) => {
+    if (!isTouchLikePickMenuGesture(evt)) return;
+    clearPickMenuGestureReset();
     const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
     const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
-    pickMenuGestureRef.current = { dragging:false, startY:y, lastMoveAt:0 };
+    pickMenuGestureRef.current = { dragging:false, startY:y, lastMoveAt:0, resetTimer:null };
   };
   const movePickMenuGesture = (evt) => {
+    if (!isTouchLikePickMenuGesture(evt)) return;
     const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
     const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
     const state = pickMenuGestureRef.current || {};
@@ -341,16 +363,14 @@ export default function PlayerEventInput(){
       pickMenuGestureRef.current = { ...state, dragging:true, lastMoveAt: Date.now() };
     }
   };
-  const finishPickMenuGesture = () => {
-    const stamp = Date.now();
+  const finishPickMenuGesture = (evt) => {
+    if (evt && !isTouchLikePickMenuGesture(evt)) return;
+    schedulePickMenuGestureReset();
+  };
+  const markPickMenuGestureScrolled = () => {
     const state = pickMenuGestureRef.current || {};
-    pickMenuGestureRef.current = { ...state, lastMoveAt: stamp };
-    window.setTimeout(() => {
-      const latest = pickMenuGestureRef.current || {};
-      if ((Date.now() - Number(latest.lastMoveAt || 0)) >= 150) {
-        pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0 };
-      }
-    }, 170);
+    pickMenuGestureRef.current = { ...state, dragging:true };
+    schedulePickMenuGestureReset();
   };
   const shouldIgnorePickMenuClick = () => {
     const state = pickMenuGestureRef.current || {};
@@ -396,6 +416,7 @@ export default function PlayerEventInput(){
     };
     document.addEventListener('keydown', onKeyDown);
     return () => {
+      clearPickMenuGestureReset();
       document.body.style.overflow = prevOverflow;
       document.body.style.touchAction = prevTouchAction;
       document.body.style.overscrollBehavior = prevOverscroll;
@@ -1700,11 +1721,14 @@ export default function PlayerEventInput(){
                 className={tCss.pickMenu}
                 style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
                 onPointerDown={(e) => e.stopPropagation()}
-                onPointerMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
+                onPointerMoveCapture={(e) => {
+                  if (isTouchLikePickMenuGesture(e)) movePickMenuGesture(e);
+                  e.stopPropagation();
+                }}
                 onTouchStartCapture={(e) => { beginPickMenuGesture(e); }}
                 onTouchMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
-                onTouchEndCapture={() => { finishPickMenuGesture(); }}
-                onScrollCapture={() => { pickMenuGestureRef.current = { ...(pickMenuGestureRef.current || {}), dragging:true, lastMoveAt: Date.now() }; }}
+                onTouchEndCapture={(e) => { finishPickMenuGesture(e); }}
+                onScrollCapture={() => { markPickMenuGestureScrolled(); }}
                 onTouchMove={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
