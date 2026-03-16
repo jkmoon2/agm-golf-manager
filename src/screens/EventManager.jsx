@@ -23,7 +23,7 @@ import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import { computeHoleRankForce } from '../events/holeRankForce';
-import { computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
+import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -94,6 +94,7 @@ export default function EventManager() {
   const [dragEventId, setDragEventId] = useState('');
   const [monitorId, setMonitorId] = useState(null);
   const [bingoMonitorId, setBingoMonitorId] = useState(null);
+  const [bingoMonitorMode, setBingoMonitorMode] = useState('status');
   const listItemRefs = useRef({});
   const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' });
   const reorderTouchCleanupRef = useRef(null);
@@ -880,9 +881,11 @@ if (editForm?.template === 'group-battle') {
       return arr;
     }
     if (previewDef.template === 'bingo') {
-      const arr = Array.isArray(bingoPreview?.roomRows)
-        ? bingoPreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
+      const baseRows = Array.isArray(bingoPreview?.personRows)
+        ? bingoPreview.personRows.map((r) => ({ id: r.id, room: r.room, value: r.value, name: r.name }))
         : [];
+      const arr = buildBingoRoomRowsFromPersonRows(baseRows, roomCount, roomNames)
+        .map((r) => ({ room: r.room, name: r.name, score: r.value }));
       arr.sort((a, b) => sign * (a.score - b.score));
       return arr;
     }
@@ -1433,15 +1436,28 @@ if (editForm?.template === 'group-battle') {
                           ) : (
                             <>
                               {ev?.template === 'bingo' && (
-                                <button
-                                  onClick={() => {
-                                    setBingoMonitorId(ev.id);
-                                    setOpenMenuId(null);
-                                    setMenuUpId(null);
-                                  }}
-                                >
-                                  입력 현황/마감
-                                </button>
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setBingoMonitorId(ev.id);
+                                      setBingoMonitorMode('status');
+                                      setOpenMenuId(null);
+                                      setMenuUpId(null);
+                                    }}
+                                  >
+                                    입력 현황/마감
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setBingoMonitorId(ev.id);
+                                      setBingoMonitorMode('special');
+                                      setOpenMenuId(null);
+                                      setMenuUpId(null);
+                                    }}
+                                  >
+                                    Special Zone 현황
+                                  </button>
+                                </>
                               )}
                               {templateUi(ev?.template).supportsQuickInput !== false && (
                                 <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
@@ -1822,6 +1838,7 @@ if (editForm?.template === 'group-battle') {
             roomNames={roomNames}
             onClose={() => setBingoMonitorId(null)}
             onToggleLock={toggleBingoInputLock}
+            initialMode={bingoMonitorMode}
           />
         )}
 

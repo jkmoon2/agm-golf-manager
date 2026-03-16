@@ -100,10 +100,21 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
       }}
     >
       {markType === 'circle' && (
-        <div style={{ position: 'absolute', inset: 4, border: `3px solid ${color}`, borderRadius: '50%' }} />
+        <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 4, width: 'calc(100% - 8px)', height: 'calc(100% - 8px)' }} aria-hidden="true">
+          <circle cx="50" cy="50" r="40" fill="none" stroke={color} strokeWidth="7" />
+        </svg>
       )}
       {markType === 'heart' && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color, fontSize: 42, lineHeight: 1, transform: 'translateY(-1px)' }}>♡</div>
+        <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 4, width: 'calc(100% - 8px)', height: 'calc(100% - 8px)' }} aria-hidden="true">
+          <path
+            d="M50 84C50 84 21 66 11 47C2 31 6 13 23 10C33 8 43 12 50 22C57 12 67 8 77 10C94 13 98 31 89 47C79 66 50 84 50 84Z"
+            fill="none"
+            stroke={color}
+            strokeWidth="7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       )}
       <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>

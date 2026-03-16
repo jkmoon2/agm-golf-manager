@@ -26,6 +26,17 @@ function asNum(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function sortRowsByRankOrder(rows = [], rankOrder = 'desc', labelKey = 'name') {
+  const sign = rankOrder === 'asc' ? 1 : -1;
+  const safe = Array.isArray(rows) ? [...rows] : [];
+  safe.sort((a, b) => {
+    const diff = sign * ((Number(a?.value) || 0) - (Number(b?.value) || 0));
+    if (diff) return diff;
+    return String(a?.[labelKey] || a?.label || '').localeCompare(String(b?.[labelKey] || b?.label || ''), 'ko');
+  });
+  return safe;
+}
+
 export function defaultBingoParams() {
   return {
     selectedHoles: [...ALL_HOLES],
@@ -129,9 +140,51 @@ export function extractBingoPersonInput(slot, selectedHoles) {
 }
 
 function getRoomLabel(roomNo, roomNames = []) {
-  const name = Array.isArray(roomNames) ? roomNames[roomNo - 1] : '';
+  const idx = Number(roomNo) - 1;
+  const name = Array.isArray(roomNames) ? roomNames[idx] : '';
   if (String(name || '').trim()) return String(name).trim();
-  return `${roomNo}번방`;
+  return Number.isFinite(Number(roomNo)) && Number(roomNo) >= 1 ? `${roomNo}번방` : '-';
+}
+
+export function buildBingoRoomRowsFromPersonRows(personRows = [], roomCount = 0, roomNames = []) {
+  const safeRows = Array.isArray(personRows) ? personRows : [];
+  const maxRoom = Math.max(
+    Number(roomCount || 0) || 0,
+    ...safeRows.map((row) => Number(row?.room || 0) || 0),
+  );
+  return Array.from({ length: Math.max(0, maxRoom) }, (_, idx) => {
+    const roomNo = idx + 1;
+    const members = safeRows.filter((row) => Number(row?.room || 0) === roomNo);
+    const total = members.reduce((sum, row) => sum + (Number(row?.value) || 0), 0);
+    return {
+      key: String(roomNo),
+      room: roomNo,
+      name: getRoomLabel(roomNo, roomNames),
+      value: total,
+      memberCount: members.length,
+    };
+  });
+}
+
+export function buildBingoTeamRowsFromPersonRows(personRows = [], participants = [], roomCount = 0, roomNames = []) {
+  const safeRows = Array.isArray(personRows) ? personRows : [];
+  const valueMap = new Map(safeRows.map((row) => [String(row?.id ?? ''), Number(row?.value) || 0]));
+  try {
+    const built = buildTeamsByRoom(participants, Number(roomCount || 0));
+    const teams = Array.isArray(built?.teamsByRoom) ? built.teamsByRoom.flat() : [];
+    return teams.map((team) => {
+      const members = Array.isArray(team?.members) ? team.members : [];
+      const roomNo = Number(team?.roomIdx) + 1;
+      const teamName = String(team?.key || '').includes('-') ? String(team.key).split('-')[1] : 'A';
+      return {
+        key: String(team?.key || `${roomNo}-${teamName}`),
+        label: `${getRoomLabel(roomNo, roomNames)} ${teamName}팀`,
+        value: members.reduce((sum, member) => sum + (valueMap.get(String(member?.id ?? '')) || 0), 0),
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 
 export function computeBingo(eventDef, participants = [], inputsByEvent = {}, options = {}) {
@@ -139,62 +192,31 @@ export function computeBingo(eventDef, participants = [], inputsByEvent = {}, op
   const roomNames = Array.isArray(options?.roomNames) ? options.roomNames : [];
   const roomCount = Number(options?.roomCount || 0) || Math.max(0, ...participants.map((p) => Number(p?.room || 0)));
   const rankOrder = eventDef?.rankOrder === 'asc' ? 'asc' : 'desc';
-  const sign = rankOrder === 'asc' ? 1 : -1;
   const selectedHoles = normalizeBingoSelectedHoles(params.selectedHoles);
   const byEventPerson = inputsByEvent?.[eventDef?.id]?.person || {};
 
-  const personRows = (Array.isArray(participants) ? participants : []).map((p) => {
+  const personRowsBase = (Array.isArray(participants) ? participants : []).map((p) => {
     const pid = String(p?.id ?? '');
     const personInput = extractBingoPersonInput(byEventPerson?.[pid], selectedHoles);
     const holeValues = getBingoHoleValues(personInput.values, selectedHoles);
     const bingoCount = computeBingoCount(personInput.board, holeValues);
+    const roomNo = Number(p?.room || 0);
     return {
       key: pid || String(Math.random()),
       id: pid,
       name: String(p?.nickname || ''),
-      room: Number(p?.room || 0),
-      roomLabel: getRoomLabel(Number(p?.room || 0), roomNames),
+      room: roomNo,
+      roomLabel: getRoomLabel(roomNo, roomNames),
       value: bingoCount,
       board: personInput.board,
       holeValues,
-      roomShared: personInput.roomShared,
+      roomShared: !!personInput.roomShared,
     };
   }).filter((row) => row.id !== '');
 
-  personRows.sort((a, b) => sign * (a.value - b.value) || String(a.name).localeCompare(String(b.name), 'ko'));
-
-  const roomRows = Array.from({ length: roomCount }, (_, idx) => {
-    const roomNo = idx + 1;
-    const rows = personRows.filter((row) => Number(row.room) === roomNo);
-    return {
-      key: String(roomNo),
-      room: roomNo,
-      name: getRoomLabel(roomNo, roomNames),
-      value: rows.reduce((sum, row) => sum + (Number(row.value) || 0), 0),
-    };
-  });
-  roomRows.sort((a, b) => sign * (a.value - b.value) || String(a.name).localeCompare(String(b.name), 'ko'));
-
-  let teamRows = [];
-  try {
-    const built = buildTeamsByRoom(participants, roomCount || 0);
-    teamRows = (Array.isArray(built?.teamsByRoom) ? built.teamsByRoom : []).flat().map((team) => {
-      const members = Array.isArray(team?.members) ? team.members : [];
-      const roomNo = Number(team?.roomIdx) + 1;
-      const teamName = String(team?.key || '').includes('-') ? String(team.key).split('-')[1] : 'A';
-      return {
-        key: String(team?.key || `${roomNo}-${teamName}`),
-        label: `${getRoomLabel(roomNo, roomNames)} ${teamName}팀`,
-        value: members.reduce((sum, member) => {
-          const row = personRows.find((item) => String(item.id) === String(member?.id ?? ''));
-          return sum + (Number(row?.value) || 0);
-        }, 0),
-      };
-    });
-    teamRows.sort((a, b) => sign * (a.value - b.value) || String(a.label).localeCompare(String(b.label), 'ko'));
-  } catch {
-    teamRows = [];
-  }
+  const personRows = sortRowsByRankOrder(personRowsBase, rankOrder, 'name');
+  const roomRows = sortRowsByRankOrder(buildBingoRoomRowsFromPersonRows(personRowsBase, roomCount, roomNames), rankOrder, 'name');
+  const teamRows = sortRowsByRankOrder(buildBingoTeamRowsFromPersonRows(personRowsBase, participants, roomCount, roomNames), rankOrder, 'label');
 
   return {
     selectedHoles,

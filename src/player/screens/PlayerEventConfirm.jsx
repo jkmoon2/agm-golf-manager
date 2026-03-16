@@ -17,7 +17,7 @@ import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
 import { computePickLineup } from '../../events/pickLineup';
 import { computeHoleRankForce } from '../../events/holeRankForce';
-import { computeBingo } from '../../events/bingo';
+import { buildBingoRoomRowsFromPersonRows, computeBingo } from '../../events/bingo';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -216,7 +216,8 @@ const events = useMemo(
         }));
         return { kind: 'person', metricLabel: '빙고', rows };
       }
-      const rows = (data.roomRows || []).map((r, i) => ({
+      const roomRows = buildBingoRoomRowsFromPersonRows(data.personRows || [], roomCount, roomNames);
+      const rows = roomRows.map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
         label: r.name,
