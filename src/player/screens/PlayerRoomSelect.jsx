@@ -514,11 +514,13 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
 
   const fixedBar = {
     position: 'fixed',
-    left: 16,
-    right: 16,
-    bottom: 'calc(env(safe-area-inset-bottom) + 64px + 12px)',
-    zIndex: 20,
-    background: 'transparent',
+    left: 0,
+    right: 0,
+    bottom: 'calc(env(safe-area-inset-bottom) + 56px)',
+    zIndex: 30,
+    background: '#fff',
+    padding: '10px 16px',
+    boxSizing: 'border-box',
   };
 
   const guard = { WebkitUserModify:'read-only', userSelect:'none' };

@@ -1263,7 +1263,8 @@ export default function PlayerEventInput(){
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 8 }}>
                       {bingoEditorBoard.map((holeNo, idx) => {
-                        const isMove = Number(bingoUi?.moveIndex) === idx;
+                        const moveIndex = Number.isInteger(bingoUi?.moveIndex) ? bingoUi.moveIndex : -1;
+                        const isMove = moveIndex === idx;
                         const isSpecial = bingoSpecialZones.includes(idx + 1);
                         return (
                           <button
