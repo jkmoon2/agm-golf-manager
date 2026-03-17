@@ -139,6 +139,32 @@ export const TEMPLATE_REGISTRY = [
       supportsQuickInput: false,
     },
   },
+
+  {
+    type: 'group-room-hole-battle',
+    label: '그룹/방 홀별 지목전',
+    defaultParams: {
+      selectedHoles: Array.from({ length: 18 }, (_, i) => i + 1),
+      mode: 'group',
+      groups: [
+        { name: '그룹1', memberIds: [] },
+        { name: '그룹2', memberIds: [] },
+      ],
+      pickCount: 1,
+      maxPerParticipant: 4,
+      selectionLocked: false,
+    },
+    help: '* 선택한 홀마다 그룹/방에서 닉네임을 지목해 합계를 비교합니다. 현재 버전은 선택된 닉네임의 결과(점수-G핸디)를 합산합니다.',
+    ui: {
+      inputMode: false,
+      paramsJson: false,
+      factor: false,
+      rangeTable: false,
+      bonusTable: false,
+      supportsEventInputs: true,
+      supportsQuickInput: false,
+    },
+  },
   {
     type: 'group-battle',
     label: '그룹/개인 대결',

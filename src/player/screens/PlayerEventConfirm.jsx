@@ -17,6 +17,7 @@ import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
 import { computePickLineup } from '../../events/pickLineup';
 import { computeHoleRankForce } from '../../events/holeRankForce';
+import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
 import { buildBingoRoomRowsFromPersonRows, computeBingo } from '../../events/bingo';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));

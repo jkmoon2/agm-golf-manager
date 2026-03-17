@@ -11,6 +11,7 @@ import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
+import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomHoleBattleRows, getGroupRoomHoleBattleMetricValue, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
 
 function getPlayerTabId(){
@@ -175,6 +176,16 @@ function getPickPreviewLineClass(styles, text = '', isJo = false){
   return styles.pickPreviewTeamMd;
 }
 
+
+function getGroupRoomCellText(ids = [], byId = new Map()){
+  const names = (Array.isArray(ids) ? ids : []).map((id) => byId.get(String(id))?.nickname || '').filter(Boolean);
+  return names.length ? names.join(' / ') : '선택';
+}
+
+function getGroupRoomMenuWidthPx(){
+  return 224;
+}
+
 function getEffectiveParticipants(eventData){
   const safeArr = (v) => (Array.isArray(v) ? v : []);
   const mode = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
@@ -325,47 +336,31 @@ export default function PlayerEventInput(){
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
   const [pickMenuState, setPickMenuState] = useState(null);
+  const [battleMenuState, setBattleMenuState] = useState(null);
   const pickButtonRefs = useRef({});
-  const pickMenuGestureRef = useRef({ dragging:false, startY:0, lastMoveAt:0, tracking:false });
+  const pickMenuGestureRef = useRef({ dragging:false, startY:0, lastMoveAt:0 });
 
   const beginPickMenuGesture = (evt) => {
-    const pointerType = String(evt?.pointerType || '').toLowerCase();
-    const isTouchEvent = !!(evt?.touches || evt?.changedTouches) || pointerType === 'touch';
-    if (!isTouchEvent) {
-      pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0, tracking:false };
-      return;
-    }
     const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
     const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
-    pickMenuGestureRef.current = { dragging:false, startY:y, lastMoveAt:0, tracking:true };
+    pickMenuGestureRef.current = { dragging:false, startY:y, lastMoveAt:0 };
   };
   const movePickMenuGesture = (evt) => {
-    const pointerType = String(evt?.pointerType || '').toLowerCase();
-    const isTouchEvent = !!(evt?.touches || evt?.changedTouches) || pointerType === 'touch';
-    const state = pickMenuGestureRef.current || {};
-    if (!isTouchEvent || !state.tracking) return;
     const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
     const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
+    const state = pickMenuGestureRef.current || {};
     if (Math.abs(y - Number(state.startY || 0)) > 4) {
       pickMenuGestureRef.current = { ...state, dragging:true, lastMoveAt: Date.now() };
     }
   };
   const finishPickMenuGesture = () => {
-    const state = pickMenuGestureRef.current || {};
-    if (!state.tracking) {
-      pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0, tracking:false };
-      return;
-    }
-    if (!state.dragging) {
-      pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0, tracking:false };
-      return;
-    }
     const stamp = Date.now();
-    pickMenuGestureRef.current = { ...state, lastMoveAt: stamp, tracking:false };
+    const state = pickMenuGestureRef.current || {};
+    pickMenuGestureRef.current = { ...state, lastMoveAt: stamp };
     window.setTimeout(() => {
       const latest = pickMenuGestureRef.current || {};
       if ((Date.now() - Number(latest.lastMoveAt || 0)) >= 150) {
-        pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0, tracking:false };
+        pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0 };
       }
     }, 170);
   };
@@ -399,8 +394,8 @@ export default function PlayerEventInput(){
   const nextDisabled = useMemo(() => (latestGate?.steps?.[4] !== 'enabled'), [latestGate]);
 
   useEffect(() => {
-    if (!pickMenuState) return undefined;
-    const closeMenu = () => setPickMenuState(null);
+    if (!pickMenuState && !battleMenuState) return undefined;
+    const closeMenu = () => { setPickMenuState(null); setBattleMenuState(null); };
     const prevOverflow = document.body.style.overflow;
     const prevTouchAction = document.body.style.touchAction;
     const prevOverscroll = document.body.style.overscrollBehavior;
@@ -419,7 +414,7 @@ export default function PlayerEventInput(){
       window.removeEventListener('resize', closeMenu);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [pickMenuState]);
+  }, [pickMenuState, battleMenuState]);
 
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
@@ -492,6 +487,29 @@ export default function PlayerEventInput(){
       }
     }
     setPickMenuState({ evId, pid, idx, left, top, width: menuWidth });
+  };
+
+
+  const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null) => {
+    const rect = buttonEl?.getBoundingClientRect?.();
+    const menuWidth = getGroupRoomMenuWidthPx();
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 360;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 640;
+    const estimatedHeight = Math.min(Math.max((Array.isArray(options) ? options.length : 0) + 2, 5) * 40 + 16, Math.min(viewportHeight * 0.56, 360));
+    const left = rect
+      ? Math.max(8, Math.min(rect.left + (rect.width / 2) - (menuWidth / 2), viewportWidth - menuWidth - 8))
+      : 12;
+    let top = 56;
+    if (rect) {
+      const belowTop = rect.bottom + 6;
+      const belowSpace = viewportHeight - belowTop - 8;
+      if (belowSpace >= Math.min(estimatedHeight, 180)) {
+        top = belowTop;
+      } else {
+        top = Math.max(8, rect.top - estimatedHeight - 6);
+      }
+    }
+    setBattleMenuState({ evId, rowKey, holeNo, left, top, width: menuWidth });
   };
 
   const roomMembers = useMemo(() => {
@@ -878,6 +896,49 @@ export default function PlayerEventInput(){
     return sortedParticipants;
   };
 
+  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+
+  const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
+    const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
+    return getBattleCellIds(shared, rowKey, holeNo, allowedIds);
+  };
+
+  const patchGroupRoomBattleCell = (ev, row, holeNo, memberId) => {
+    const cfg = normalizeGroupRoomHoleBattleParams(ev?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+    const all = { ...(draft || {}) };
+    const slot = { ...(all[ev.id] || {}) };
+    const shared = getBattleSharedInputs(slot);
+    const rows = { ...(shared.rows || {}) };
+    const rowEntry = { ...(rows[row.key] || {}) };
+    const holes = { ...(rowEntry.holes || {}) };
+    const currentIds = getBattleCellIds(shared, row.key, holeNo, row.memberIds);
+    const usage = countParticipantUsageForRow(shared, row.key);
+    const nextId = String(memberId || '');
+
+    let nextIds = [...currentIds];
+    if (!nextId) {
+      nextIds = [];
+    } else if (nextIds.includes(nextId)) {
+      nextIds = nextIds.filter((id) => id !== nextId);
+    } else {
+      const currentCountForMember = Number(usage[nextId] || 0) - (currentIds.includes(nextId) ? 1 : 0);
+      if (currentCountForMember >= cfg.maxPerParticipant) {
+        return;
+      }
+      if (nextIds.length >= cfg.pickCount) {
+        return;
+      }
+      nextIds = [...nextIds, nextId];
+    }
+
+    holes[String(holeNo)] = nextIds;
+    rowEntry.holes = holes;
+    rows[row.key] = rowEntry;
+    slot.shared = { ...shared, rows };
+    all[ev.id] = slot;
+    setDraft(all);
+  };
+
   const saveDraft = async () => {
     try{
       await ensureMembership((eventId || ctxId), roomIdx);
@@ -908,6 +969,9 @@ export default function PlayerEventInput(){
         });
 
         mSlot.person = mPerson;
+        if (slot?.shared && typeof slot.shared === 'object') {
+          mSlot.shared = JSON.parse(JSON.stringify(slot.shared));
+        }
         merged[evId] = mSlot;
       });
 
@@ -945,6 +1009,13 @@ export default function PlayerEventInput(){
 
         const dSlot = draft?.[evId]?.person || {};
         const sSlot = inputsByEventServer?.[evId]?.person || {};
+
+        if (ev.template === 'group-room-hole-battle') {
+          const dShared = JSON.stringify(getBattleSharedInputs(draft?.[evId] || {}));
+          const sShared = JSON.stringify(getBattleSharedInputs(inputsByEventServer?.[evId] || {}));
+          if (!eq(dShared, sShared)) return true;
+          continue;
+        }
 
         for (const pid of roomPids) {
           if (ev.template === 'pick-lineup') {
@@ -1717,14 +1788,11 @@ export default function PlayerEventInput(){
                 className={tCss.pickMenu}
                 style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
                 onPointerDown={(e) => e.stopPropagation()}
+                onPointerMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
                 onTouchStartCapture={(e) => { beginPickMenuGesture(e); }}
                 onTouchMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
                 onTouchEndCapture={() => { finishPickMenuGesture(); }}
-                onTouchCancelCapture={() => { finishPickMenuGesture(); }}
-                onScrollCapture={() => {
-                  const state = pickMenuGestureRef.current || {};
-                  pickMenuGestureRef.current = { ...state, dragging:true, lastMoveAt: Date.now(), tracking:false };
-                }}
+                onScrollCapture={() => { pickMenuGestureRef.current = { ...(pickMenuGestureRef.current || {}), dragging:true, lastMoveAt: Date.now() }; }}
                 onTouchMove={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -1760,6 +1828,74 @@ export default function PlayerEventInput(){
                       title={displayPickOption(opt)}
                     >
                       {displayPickOption(opt)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>,
+            portalNode
+          );
+        })()}
+
+        {battleMenuState && (() => {
+          const activeEvent = events.find((item) => item.id === battleMenuState.evId);
+          const portalNode = typeof document !== 'undefined' ? document.body : null;
+          if (!portalNode || !activeEvent) return null;
+          const rows = getGroupRoomBattleRows(activeEvent);
+          const row = rows.find((item) => String(item.key) === String(battleMenuState.rowKey));
+          if (!row) return null;
+          const cfg = normalizeGroupRoomHoleBattleParams(activeEvent?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+          const shared = getBattleSharedInputs(inputsByEvent?.[battleMenuState.evId] || {});
+          const currentIds = getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
+          const usage = countParticipantUsageForRow(shared, row.key);
+          return createPortal(
+            <div
+              className={tCss.pickMenuOverlay}
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) {
+                  e.stopPropagation();
+                  setBattleMenuState(null);
+                }
+              }}
+            >
+              <div
+                className={tCss.pickMenu}
+                style={{ left: battleMenuState.left, top: battleMenuState.top, width: battleMenuState.width, position:'fixed' }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ padding: '6px 10px 8px', fontSize: 12, color: '#667085', borderBottom: '1px solid #eef2f7' }}>
+                  {row.name} · {battleMenuState.holeNo}홀 · {currentIds.length}/{cfg.pickCount}명
+                </div>
+                <button
+                  type="button"
+                  className={`${tCss.pickMenuOption} ${!currentIds.length ? tCss.pickMenuOptionActive : ''}`}
+                  onClick={() => {
+                    patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, '');
+                    setBattleMenuState(null);
+                  }}
+                >
+                  선택 해제
+                </button>
+                {row.members.map((member) => {
+                  const value = String(member?.id || '');
+                  const active = currentIds.includes(value);
+                  const used = Number(usage[value] || 0);
+                  const disabled = !active && (currentIds.length >= cfg.pickCount || used >= cfg.maxPerParticipant);
+                  return (
+                    <button
+                      key={`battle-menu-${value}`}
+                      type="button"
+                      className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
+                      onClick={() => {
+                        if (disabled) return;
+                        patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, value);
+                      }}
+                      disabled={disabled}
+                      title={displayPickOption(member)}
+                    >
+                      <span>{displayPickOption(member)}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 12, color: active ? '#1d4ed8' : '#98a2b3' }}>{used}/{cfg.maxPerParticipant}</span>
                     </button>
                   );
                 })}

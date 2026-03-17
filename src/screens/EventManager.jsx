@@ -19,11 +19,15 @@ import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEd
 import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
 import BingoEditor from '../eventTemplates/bingo/BingoEditor';
 import BingoSelectionMonitor from '../eventTemplates/bingo/BingoSelectionMonitor';
+import GroupRoomHoleBattleEditor from '../eventTemplates/groupRoomHoleBattle/GroupRoomHoleBattleEditor';
+import GroupRoomHoleBattlePreview from '../eventTemplates/groupRoomHoleBattle/GroupRoomHoleBattlePreview';
+import GroupRoomHoleBattleMonitor from '../eventTemplates/groupRoomHoleBattle/GroupRoomHoleBattleMonitor';
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import { computeHoleRankForce } from '../events/holeRankForce';
 import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
+import { normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -65,6 +69,25 @@ function getBingoCountText(params) {
   return zoneCount ? `${holeCount}홀 · SZ ${zoneCount}` : `${holeCount}홀`;
 }
 
+
+function isValidGroupRoomHoleBattleParams(params) {
+  const safe = normalizeGroupRoomHoleBattleParams(params);
+  if (!Array.isArray(safe.selectedHoles) || safe.selectedHoles.length < 1) return false;
+  if (safe.mode === 'group') {
+    return Array.isArray(safe.groups) && safe.groups.some((g) => Array.isArray(g.memberIds) && g.memberIds.length > 0);
+  }
+  return true;
+}
+
+function getGroupRoomHoleBattleMetaText(params) {
+  const safe = normalizeGroupRoomHoleBattleParams(params);
+  const holeCount = Array.isArray(safe.selectedHoles) ? safe.selectedHoles.length : 0;
+  const pickCount = Number(safe.pickCount || 1);
+  const maxCount = Number(safe.maxPerParticipant || 1);
+  const modeText = safe.mode === 'room' ? '방' : '그룹';
+  return `${modeText} · ${holeCount}홀 · ${pickCount}명 · 최대 ${maxCount}회`;
+}
+
 function getClientPoint(evt){
   const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
   if (touch) return { clientX: Number(touch.clientX || 0), clientY: Number(touch.clientY || 0) };
@@ -94,6 +117,7 @@ export default function EventManager() {
   const [dragEventId, setDragEventId] = useState('');
   const [monitorId, setMonitorId] = useState(null);
   const [bingoMonitorId, setBingoMonitorId] = useState(null);
+  const [groupRoomHoleMonitorId, setGroupRoomHoleMonitorId] = useState(null);
   const [bingoMonitorMode, setBingoMonitorMode] = useState('status');
   const listItemRefs = useRef({});
   const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' });
@@ -251,14 +275,20 @@ if (form.template === 'group-battle') {
         alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
       }
+      if (form.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
+        alert('그룹/방 홀별 지목전은 사용 홀을 1개 이상 선택하고, 그룹 모드일 때는 그룹 멤버를 1명 이상 선택해야 합니다.');
+        return;
+      }
       const isBingo = form.template === 'bingo';
+      const isGroupRoomHoleBattle = form.template === 'group-room-hole-battle';
+      const battleMode = isGroupRoomHoleBattle ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
         params: parsed,
-        target: isBingo ? 'room' : 'person',
-        rankOrder: isBingo ? 'desc' : 'asc',
+        target: isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : 'group') : 'person'),
+        rankOrder: (isBingo || isGroupRoomHoleBattle) ? 'desc' : 'asc',
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -747,14 +777,20 @@ if (editForm?.template === 'group-battle') {
         alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
       }
+      if (editForm.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
+        alert('그룹/방 홀별 지목전은 사용 홀을 1개 이상 선택하고, 그룹 모드일 때는 그룹 멤버를 1명 이상 선택해야 합니다.');
+        return;
+      }
       const isBingoEdit = editForm.template === 'bingo';
+      const isGroupRoomHoleBattleEdit = editForm.template === 'group-room-hole-battle';
+      const battleModeEdit = isGroupRoomHoleBattleEdit ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: parsed,
-        target: isBingoEdit ? 'room' : e.target,
-        rankOrder: isBingoEdit ? 'desc' : e.rankOrder,
+        target: isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : 'group') : e.target),
+        rankOrder: (isBingoEdit || isGroupRoomHoleBattleEdit) ? 'desc' : e.rankOrder,
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -989,6 +1025,9 @@ if (editForm?.template === 'group-battle') {
     if (ev?.template === 'bingo') {
       return `bingo · ${getBingoCountText(ev?.params)}`;
     }
+    if (ev?.template === 'group-room-hole-battle') {
+      return `group-room-hole-battle · ${getGroupRoomHoleBattleMetaText(ev?.params)}`;
+    }
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
       : ev.template === 'range-convert-bonus' ? 'range+bonus'
@@ -1028,6 +1067,11 @@ if (editForm?.template === 'group-battle') {
     return (eventsOfSelected || []).find((e) => e.id === bingoMonitorId) || null;
   }, [eventsOfSelected, bingoMonitorId]);
 
+  const groupRoomHoleMonitorEvent = useMemo(() => {
+    if (!groupRoomHoleMonitorId) return null;
+    return (eventsOfSelected || []).find((e) => e.id === groupRoomHoleMonitorId) || null;
+  }, [eventsOfSelected, groupRoomHoleMonitorId]);
+
   const saveHandicapOverrides = async (overridesMap) => {
     if (!handicapEditEvent) return;
     const safe = (overridesMap && typeof overridesMap === 'object') ? overridesMap : {};
@@ -1054,6 +1098,16 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== bingoMonitorEvent.id) return e;
       const params = { ...(e.params || {}), inputLocked: !!locked };
+      return { ...e, params };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
+  const toggleGroupRoomHoleLock = async (locked) => {
+    if (!groupRoomHoleMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== groupRoomHoleMonitorEvent.id) return e;
+      const params = { ...(e.params || {}), selectionLocked: !!locked };
       return { ...e, params };
     });
     await updateEventImmediate({ events: next }, false);
@@ -1227,6 +1281,16 @@ if (editForm?.template === 'group-battle') {
 {form.template === 'bingo' && (
   <BingoEditor
     variant="create"
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'group-room-hole-battle' && (
+  <GroupRoomHoleBattleEditor
+    participants={participants}
+    roomNames={roomNames}
+    roomCount={roomCount}
     value={params}
     onChange={(next) => setParams(next)}
   />
@@ -1459,6 +1523,17 @@ if (editForm?.template === 'group-battle') {
                                   </button>
                                 </>
                               )}
+                              {ev?.template === 'group-room-hole-battle' && (
+                                <button
+                                  onClick={() => {
+                                    setGroupRoomHoleMonitorId(ev.id);
+                                    setOpenMenuId(null);
+                                    setMenuUpId(null);
+                                  }}
+                                >
+                                  입력 현황/마감
+                                </button>
+                              )}
                               {templateUi(ev?.template).supportsQuickInput !== false && (
                                 <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
                               )}
@@ -1582,6 +1657,16 @@ if (editForm?.template === 'group-battle') {
 {editForm.template === 'bingo' && (
   <BingoEditor
     variant="edit"
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
+
+{editForm.template === 'group-room-hole-battle' && (
+  <GroupRoomHoleBattleEditor
+    participants={participants}
+    roomNames={roomNames}
+    roomCount={roomCount}
     value={editParams}
     onChange={(next) => setEditParams(next)}
   />
@@ -1767,14 +1852,25 @@ if (editForm?.template === 'group-battle') {
             )}
 
             {previewDef && viewTab === 'room' && (
-              <ol className={css.previewList}>
-                {roomRows.map((r, i) => (
-                  <li key={r.room}>
-                    <span><span className={css.rank}>{i + 1}.</span> {r.name}</span>
-                    <b className={css.score}>{fmt2(r.score)}</b>
-                  </li>
-                ))}
-              </ol>
+              previewDef.template === 'group-room-hole-battle' ? (
+                <GroupRoomHoleBattlePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : (
+                <ol className={css.previewList}>
+                  {roomRows.map((r, i) => (
+                    <li key={r.room}>
+                      <span><span className={css.rank}>{i + 1}.</span> {r.name}</span>
+                      <b className={css.score}>{fmt2(r.score)}</b>
+                    </li>
+                  ))}
+                </ol>
+              )
             )}
 
             {previewDef && viewTab === 'team' && (
@@ -1790,15 +1886,24 @@ if (editForm?.template === 'group-battle') {
 
             {previewDef && viewTab === 'group' && (
               <div style={{ marginTop: 8 }}>
-                {previewDef.template !== 'group-battle' ? (
-                  <div className={css.empty}>그룹/개인 대결 이벤트가 아닙니다.</div>
-                ) : (
+                {previewDef.template === 'group-battle' ? (
                   <GroupBattlePreview
                     eventDef={previewDef}
                     participants={participants}
                     roomNames={roomNames}
                     order={viewOrder}
                   />
+                ) : previewDef.template === 'group-room-hole-battle' ? (
+                  <GroupRoomHoleBattlePreview
+                    eventDef={previewDef}
+                    participants={participants}
+                    inputsByEvent={inputsAll?.[previewId] || {}}
+                    roomNames={roomNames}
+                    roomCount={roomCount}
+                    viewTab={viewTab}
+                  />
+                ) : (
+                  <div className={css.empty}>그룹 미리보기를 지원하는 이벤트가 아닙니다.</div>
                 )}
               </div>
             )}
@@ -1839,6 +1944,19 @@ if (editForm?.template === 'group-battle') {
             onClose={() => setBingoMonitorId(null)}
             onToggleLock={toggleBingoInputLock}
             initialMode={bingoMonitorMode}
+          />
+        )}
+
+
+        {groupRoomHoleMonitorEvent?.template === 'group-room-hole-battle' && (
+          <GroupRoomHoleBattleMonitor
+            eventDef={groupRoomHoleMonitorEvent}
+            participants={participants}
+            inputsByEvent={(eventData?.eventInputs || {})[groupRoomHoleMonitorEvent.id] || {}}
+            roomNames={roomNames}
+            roomCount={roomCount}
+            onClose={() => setGroupRoomHoleMonitorId(null)}
+            onToggleLock={toggleGroupRoomHoleLock}
           />
         )}
 
