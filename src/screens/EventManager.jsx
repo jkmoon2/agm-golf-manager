@@ -70,23 +70,37 @@ function getBingoCountText(params) {
 }
 
 
+
 function isValidGroupRoomHoleBattleParams(params) {
   const safe = normalizeGroupRoomHoleBattleParams(params);
   if (!Array.isArray(safe.selectedHoles) || safe.selectedHoles.length < 1) return false;
+  if (!Number.isFinite(Number(safe.pickCount)) || Number(safe.pickCount) < 1) return false;
+  if (!Number.isFinite(Number(safe.maxPerParticipant)) || Number(safe.maxPerParticipant) < 1) return false;
   if (safe.mode === 'group') {
     return Array.isArray(safe.groups) && safe.groups.some((g) => Array.isArray(g.memberIds) && g.memberIds.length > 0);
+  }
+  if (safe.mode === 'person') {
+    return Array.isArray(safe.personIds) && safe.personIds.length > 0;
   }
   return true;
 }
 
+
+
 function getGroupRoomHoleBattleMetaText(params) {
   const safe = normalizeGroupRoomHoleBattleParams(params);
   const holeCount = Array.isArray(safe.selectedHoles) ? safe.selectedHoles.length : 0;
-  const pickCount = Number(safe.pickCount || 1);
-  const maxCount = Number(safe.maxPerParticipant || 1);
-  const modeText = safe.mode === 'room' ? '방' : '그룹';
-  return `${modeText} · ${holeCount}홀 · ${pickCount}명 · 최대 ${maxCount}회`;
+  const pickCount = Number.isFinite(Number(safe.pickCount)) ? `${Number(safe.pickCount)}명` : '미설정';
+  const maxCount = Number.isFinite(Number(safe.maxPerParticipant)) ? `최대 ${Number(safe.maxPerParticipant)}회` : '미설정';
+  const modeText = safe.mode === 'room' ? '방' : safe.mode === 'person' ? '개인' : '그룹';
+  const extra = safe.mode === 'person'
+    ? ` · ${Array.isArray(safe.personIds) ? safe.personIds.length : 0}명`
+    : safe.mode === 'group'
+      ? ` · ${Array.isArray(safe.groups) ? safe.groups.length : 0}개 그룹`
+      : '';
+  return `${modeText}${extra} · ${holeCount}홀 · ${pickCount} · ${maxCount}`;
 }
+
 
 function getClientPoint(evt){
   const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
@@ -276,7 +290,7 @@ if (form.template === 'group-battle') {
         return;
       }
       if (form.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
-        alert('그룹/방 홀별 지목전은 사용 홀을 1개 이상 선택하고, 그룹 모드일 때는 그룹 멤버를 1명 이상 선택해야 합니다.');
+        alert('그룹/방/개인 홀별 지목전은 사용 홀, 참가자 조건을 모두 설정하고, 그룹 모드는 그룹 멤버, 개인 모드는 참가자를 1명 이상 선택해야 합니다.');
         return;
       }
       const isBingo = form.template === 'bingo';
@@ -287,8 +301,8 @@ if (form.template === 'group-battle') {
         title: form.title.trim() || '이벤트',
         template: form.template,
         params: parsed,
-        target: isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : 'group') : 'person'),
-        rankOrder: (isBingo || isGroupRoomHoleBattle) ? 'desc' : 'asc',
+        target: isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'),
+        rankOrder: isBingo ? 'desc' : (isGroupRoomHoleBattle ? 'asc' : 'asc'),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -778,7 +792,7 @@ if (editForm?.template === 'group-battle') {
         return;
       }
       if (editForm.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
-        alert('그룹/방 홀별 지목전은 사용 홀을 1개 이상 선택하고, 그룹 모드일 때는 그룹 멤버를 1명 이상 선택해야 합니다.');
+        alert('그룹/방/개인 홀별 지목전은 사용 홀, 참가자 조건을 모두 설정하고, 그룹 모드는 그룹 멤버, 개인 모드는 참가자를 1명 이상 선택해야 합니다.');
         return;
       }
       const isBingoEdit = editForm.template === 'bingo';
@@ -789,8 +803,8 @@ if (editForm?.template === 'group-battle') {
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: parsed,
-        target: isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : 'group') : e.target),
-        rankOrder: (isBingoEdit || isGroupRoomHoleBattleEdit) ? 'desc' : e.rankOrder,
+        target: isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target),
+        rankOrder: isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -1838,6 +1852,15 @@ if (editForm?.template === 'group-battle') {
                   participants={participants}
                   inputs={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
+                />
+              ) : previewDef.template === 'group-room-hole-battle' ? (
+                <GroupRoomHoleBattlePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
                 />
               ) : (
                 <ol className={css.previewList}>

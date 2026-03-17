@@ -231,22 +231,13 @@ const events = useMemo(
     if (template === 'group-room-hole-battle') {
       const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
       const metricLabel = '합계';
-      if (data?.kind === 'group') {
-        const rows = (data.rows || []).map((row, i) => ({
-          key: row.key || String(i),
-          rank: i + 1,
-          label: row.name,
-          value: row.value,
-        }));
-        return { kind: 'group', metricLabel, rows };
-      }
       const rows = (data.rows || []).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
         label: row.name,
         value: row.value,
       }));
-      return { kind: 'room', metricLabel, rows };
+      return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
     }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────

@@ -5,8 +5,10 @@ import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
 export default function GroupRoomHoleBattleMonitor({ eventDef, participants = [], inputsByEvent = {}, roomNames = [], roomCount = 0, onClose, onToggleLock }) {
   const data = computeGroupRoomHoleBattle(eventDef, participants, inputsByEvent, { roomNames, roomCount });
   const locked = !!eventDef?.params?.selectionLocked;
-  const doneCount = data.rows.filter((row) => row.complete).length;
+  const inputRows = Array.isArray(data.inputRows) && data.inputRows.length ? data.inputRows : (Array.isArray(data.rows) ? data.rows : []);
+  const doneCount = inputRows.filter((row) => row.complete).length;
   const scoreDoneCount = data.participantRows.filter((row) => row.complete).length;
+  const modeLabel = data.kind === 'group' ? '그룹 모드' : data.kind === 'person' ? '개인 모드' : '방 모드';
 
   return (
     <div style={backdrop} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>
@@ -14,13 +16,13 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
         <div style={headerRow}>
           <div style={{ minWidth: 0 }}>
             <div style={title}>입력 현황 / 마감</div>
-            <div style={subTitle}>{eventDef?.title || '그룹/방 홀별 지목전'} · {data.kind === 'group' ? '그룹 모드' : '방 모드'}</div>
+            <div style={subTitle}>{eventDef?.title || '그룹/방/개인 홀별 지목전'} · {modeLabel}</div>
           </div>
           <button type="button" style={btn} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>닫기</button>
         </div>
 
         <div style={summaryBox}>
-          <div style={summaryItem}><b>{doneCount}</b> / {data.rows.length} 지목 완료</div>
+          <div style={summaryItem}><b>{doneCount}</b> / {inputRows.length} 지목 완료</div>
           <div style={summaryItem}><b>{scoreDoneCount}</b> / {data.participantRows.length} 점수 완료</div>
           <div style={summaryItem}>상태: <b style={{ color: locked ? '#dc2626' : '#2563eb' }}>{locked ? '마감' : '진행중'}</b></div>
           <button type="button" style={locked ? btnSub : btnPrimary} onClick={() => (typeof onToggleLock === 'function' ? onToggleLock(!locked) : null)}>
@@ -30,14 +32,14 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
 
         <div style={{ marginTop: 12, fontWeight: 800, color: '#183153' }}>지목 입력 현황</div>
         <div style={listWrap}>
-          {data.rows.map((row) => {
-            const filled = row.holes.filter((hole) => hole.ids.length === data.config.pickCount).length;
+          {inputRows.map((row) => {
+            const filled = row.holes.filter((hole) => hole.ids.length === Math.max(1, Number(data.config.pickCount || 1))).length;
             return (
               <div key={row.key} style={rowBox}>
                 <div style={rowHead}>
                   <div style={{ minWidth: 0 }}>
                     <span style={rowName}>{row.name}</span>
-                    <span style={rowMeta}> ({data.kind === 'group' ? '그룹' : '방'})</span>
+                    <span style={rowMeta}> ({data.kind === 'group' ? '그룹' : data.kind === 'person' ? '개인선택자' : '방'})</span>
                   </div>
                   <span style={row.complete ? badgeDone : badgeWait}>{row.complete ? '완료' : '대기'}</span>
                 </div>

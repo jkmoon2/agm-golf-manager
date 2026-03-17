@@ -11,7 +11,7 @@ import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
-import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
+import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
 
 function getPlayerTabId(){
@@ -183,7 +183,7 @@ function getGroupRoomCellText(ids = [], byId = new Map()){
 }
 
 function getGroupRoomMenuWidthPx(){
-  return 224;
+  return getPickMenuWidthPx();
 }
 
 function getEffectiveParticipants(eventData){
@@ -896,7 +896,7 @@ export default function PlayerEventInput(){
     return sortedParticipants;
   };
 
-  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleInputRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx });
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});

@@ -4,15 +4,15 @@ import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
 
 export default function GroupRoomHoleBattlePreview({ eventDef, participants = [], inputsByEvent = {}, roomNames = [], roomCount = 0, viewTab = 'room' }) {
   const data = computeGroupRoomHoleBattle(eventDef, participants, inputsByEvent, { roomNames, roomCount });
-  const expectTab = data.kind === 'group' ? 'group' : 'room';
+  const expectTab = data.kind === 'group' ? 'group' : data.kind === 'person' ? 'person' : 'room';
 
   if (viewTab !== expectTab) {
-    return <div style={empty}>현재 이벤트는 {data.kind === 'group' ? '그룹' : '방'} 모드입니다.</div>;
+    return <div style={empty}>현재 이벤트는 {data.kind === 'group' ? '그룹' : data.kind === 'person' ? '개인' : '방'} 모드입니다.</div>;
   }
 
   return (
     <ol style={list}>
-      {data.rows.map((row, idx) => (
+      {(data.rows || []).map((row, idx) => (
         <li key={row.key} style={item}>
           <span>
             <span style={rank}>{idx + 1}.</span> {row.name}
