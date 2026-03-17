@@ -1245,7 +1245,7 @@ if (editForm?.template === 'group-battle') {
                   {TEMPLATE_REGISTRY.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
                 </select>
               </label>
-              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && form.template !== 'bingo' && (
+              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && form.template !== 'bingo' && form.template !== 'group-room-hole-battle' && (
                 <p className={css.help}>{getTemplateHelp(form.template)}</p>
               )}
 

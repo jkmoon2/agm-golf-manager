@@ -227,6 +227,28 @@ const events = useMemo(
       return { kind: 'room', metricLabel: '빙고', rows };
     }
 
+    // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
+    if (template === 'group-room-hole-battle') {
+      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
+      const metricLabel = '합계';
+      if (data?.kind === 'group') {
+        const rows = (data.rows || []).map((row, i) => ({
+          key: row.key || String(i),
+          rank: i + 1,
+          label: row.name,
+          value: row.value,
+        }));
+        return { kind: 'group', metricLabel, rows };
+      }
+      const rows = (data.rows || []).map((row, i) => ({
+        key: row.key || String(i),
+        rank: i + 1,
+        label: row.name,
+        value: row.value,
+      }));
+      return { kind: 'room', metricLabel, rows };
+    }
+
     // ── group-battle(그룹/개인 대결) ───────────────────────────────
     // - 입력 이벤트가 아니므로 inputsByEvent를 사용하지 않음
     // - metric=result 인 경우: (점수 - (이벤트 전용 오버라이드 G핸디)) 합산

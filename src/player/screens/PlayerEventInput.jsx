@@ -11,7 +11,7 @@ import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
-import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomHoleBattleRows, getGroupRoomHoleBattleMetricValue, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
+import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
 
 function getPlayerTabId(){
@@ -950,18 +950,24 @@ export default function PlayerEventInput(){
 
       Object.entries(src).forEach(([evId, slot])=>{
         const sPerson = slot?.person || {};
+        const evDef = events.find((item) => String(item?.id) === String(evId));
+        const allowedPids = evDef?.template === 'group-room-hole-battle'
+          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx }).map((p) => String(p?.id || '')).filter(Boolean))
+          : roomPids;
         if (!merged[evId]) merged[evId] = {};
         const mSlot = { ...(merged[evId]||{}) };
         const mPerson = { ...(mSlot.person||{}) };
 
         Object.entries(sPerson).forEach(([pid, val])=>{
-          if (!roomPids.has(String(pid))) return;
+          if (!allowedPids.has(String(pid))) return;
           const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
           const isEmptyBingo = typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)
             && !val.values.some((x) => String(x ?? '').trim() !== '')
             && !val.board.some((x) => String(x ?? '').trim() !== '')
             && !val.roomShared;
-          if (val === '' || val == null || isEmptyPick || isEmptyBingo || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
+          const isEmptyBattleScore = evDef?.template === 'group-room-hole-battle' && typeof val === 'object' && val && Array.isArray(val.values)
+            && !val.values.some((x) => String(x ?? '').trim() !== '');
+          if (val === '' || val == null || isEmptyPick || isEmptyBingo || isEmptyBattleScore || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
             delete mPerson[pid];
           } else {
             mPerson[pid] = val;
@@ -1014,6 +1020,27 @@ export default function PlayerEventInput(){
           const dShared = JSON.stringify(getBattleSharedInputs(draft?.[evId] || {}));
           const sShared = JSON.stringify(getBattleSharedInputs(inputsByEventServer?.[evId] || {}));
           if (!eq(dShared, sShared)) return true;
+          const relevant = getGroupRoomBattleScoreParticipants(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx });
+          const holes = Array.isArray(ev?.params?.selectedHoles) ? ev.params.selectedHoles : [];
+          for (const p of relevant) {
+            const pid = String(p?.id || '');
+            const baseArr = holes.map((holeNo) => {
+              const raw = inputsByEventServer?.[evId]?.person?.[pid]?.values?.[Number(holeNo) - 1];
+              if (raw === '' || raw == null) return '';
+              const n = Number(raw);
+              return Number.isFinite(n) ? String(n) : '';
+            });
+            const draftArr = holes.map((holeNo) => {
+              const raw = draft?.[evId]?.person?.[pid]?.values?.[Number(holeNo) - 1];
+              if (raw === '' || raw == null) return '';
+              const n = Number(raw);
+              return Number.isFinite(n) ? String(n) : '';
+            });
+            if (baseArr.length !== draftArr.length) return true;
+            for (let i = 0; i < draftArr.length; i += 1) {
+              if (!eq(baseArr[i], draftArr[i])) return true;
+            }
+          }
           continue;
         }
 
@@ -1146,6 +1173,240 @@ export default function PlayerEventInput(){
             : [];
           const forcedGrandTotal = forcedSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
           const forcedGrandHasAny = forcedSubtotal.some((item) => item.hasAny);
+
+
+          if (ev.template === 'group-room-hole-battle') {
+            const battleCfg = normalizeGroupRoomHoleBattleParams(ev?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+            const battleRows = getGroupRoomBattleRows(ev);
+            const battleSelectedHoles = Array.isArray(battleCfg.selectedHoles) ? battleCfg.selectedHoles : [];
+            const battleLocked = !!ev?.params?.selectionLocked;
+            const battleScoreParticipants = getGroupRoomBattleScoreParticipants(ev, participants, {
+              roomNames,
+              roomCount: allRoomNos.length || roomNames.length || 0,
+              currentRoomNo: roomIdx,
+            });
+            const battleData = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[ev.id] || {}, {
+              roomNames,
+              roomCount: allRoomNos.length || roomNames.length || 0,
+              currentRoomNo: roomIdx,
+            });
+            const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
+            const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
+            const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
+            const battleScoreSubtotal = battleSelectedHoles.map((holeNo) => {
+              let sum = 0;
+              let hasAny = false;
+              battleScoreParticipants.forEach((member) => {
+                const raw = inputsByEvent?.[ev.id]?.person?.[member?.id]?.values?.[holeNo - 1] ?? '';
+                const n = Number(raw);
+                if (Number.isFinite(n)) {
+                  sum += n;
+                  hasAny = true;
+                }
+              });
+              return { holeNo, sum, hasAny };
+            });
+            const battleScoreGrandTotal = battleScoreSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
+            const battleScoreGrandHasAny = battleScoreSubtotal.some((item) => item.hasAny);
+            const battlePreviewSubtotal = battleSelectedHoles.map((holeNo) => {
+              let sum = 0;
+              let hasAny = false;
+              battleData.rows.forEach((row) => {
+                const item = row.holes.find((hole) => Number(hole?.holeNo) === Number(holeNo));
+                const n = Number(item?.value);
+                if (Number.isFinite(n)) {
+                  sum += n;
+                  hasAny = true;
+                }
+              });
+              return { holeNo, sum, hasAny };
+            });
+            const battlePreviewGrandTotal = battlePreviewSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
+            const battlePreviewGrandHasAny = battlePreviewSubtotal.some((item) => item.hasAny);
+
+            return (
+              <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                <div className={baseCss.cardHeader}>
+                  <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
+                </div>
+
+                {battleLocked && <div className={tCss.lockNotice}>입력이 마감되어 더 이상 수정할 수 없습니다.</div>}
+
+                <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                  <table className={tCss.table} style={{ width: `${battleSelectionWidth}px` }}>
+                    <colgroup>
+                      <col style={{ width: '110px' }} />
+                      {battleSelectedHoles.map((holeNo) => <col key={`battle-head-${holeNo}`} style={{ width: '72px' }} />)}
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>닉네임</th>
+                        {battleSelectedHoles.map((holeNo) => <th key={`battle-head-cell-${holeNo}`}>{holeNo}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {battleRows.map((row) => (
+                        <tr key={`battle-row-${row.key}`}>
+                          <td className={tCss.pickInputNick}>{row.name}</td>
+                          {battleSelectedHoles.map((holeNo) => {
+                            const ids = getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
+                            const buttonText = getGroupRoomCellText(ids, participantById);
+                            return (
+                              <td key={`battle-cell-${row.key}-${holeNo}`} className={tCss.cellEditable}>
+                                <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    className={tCss.pickSelectButton}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (battleLocked) return;
+                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo);
+                                      if (same) {
+                                        setBattleMenuState(null);
+                                        return;
+                                      }
+                                      openBattleMenuAt(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                    }}
+                                    disabled={battleLocked}
+                                    title={buttonText}
+                                  >
+                                    <span className={tCss.pickSelectText}>{buttonText}</span>
+                                  </button>
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`} style={{ marginTop: 12 }}>
+                  <table className={tCss.table} style={{ width: `${battleScoreWidth}px` }}>
+                    <colgroup>
+                      <col style={{ width: '110px' }} />
+                      {battleSelectedHoles.map((holeNo) => <col key={`battle-score-col-${holeNo}`} style={{ width: '62px' }} />)}
+                      <col style={{ width: '54px' }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>닉네임</th>
+                        {battleSelectedHoles.map((holeNo) => <th key={`battle-score-head-${holeNo}`}>{holeNo}</th>)}
+                        <th>합</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {battleScoreParticipants.map((member) => {
+                        const rowRawValues = battleSelectedHoles.map((holeNo) => inputsByEvent?.[ev.id]?.person?.[member?.id]?.values?.[holeNo - 1] ?? '');
+                        const rowValues = rowRawValues.map((raw) => {
+                          const n = Number(raw);
+                          return Number.isFinite(n) ? n : 0;
+                        });
+                        const rowHasValue = rowRawValues.some((raw) => String(raw ?? '').trim() !== '');
+                        const rowTotal = rowValues.reduce((sum, n) => sum + n, 0);
+                        const rowTotalDisplay = rowHasValue ? formatDisplayNumber(rowTotal) : '';
+                        return (
+                          <tr key={`battle-score-row-${member?.id}`}>
+                            <td>{member?.nickname || ''}</td>
+                            {battleSelectedHoles.map((holeNo) => {
+                              const valueIndex = holeNo - 1;
+                              const cellValue = inputsByEvent?.[ev.id]?.person?.[member?.id]?.values?.[valueIndex] ?? '';
+                              const inputKey = `${ev.id}:${member?.id}:${valueIndex}`;
+                              return (
+                                <td key={`battle-score-cell-${member?.id}-${holeNo}`} className={tCss.cellEditable}>
+                                  <input
+                                    ref={(el) => {
+                                      if (el) eventInputRefs.current[inputKey] = el;
+                                      else delete eventInputRefs.current[inputKey];
+                                    }}
+                                    type="text"
+                                    inputMode="decimal"
+                                    pattern="[0-9.+\-]*"
+                                    autoComplete="off"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
+                                    className={tCss.cellInput}
+                                    value={cellValue}
+                                    disabled={battleLocked}
+                                    onChange={(e) => !battleLocked && patchAccum(ev.id, member.id, valueIndex, e.target.value, 18)}
+                                    onBlur={(e) => !battleLocked && finalizeAccum(ev.id, member.id, valueIndex, e.target.value, 18)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                    onPointerDown={(e) => {
+                                      if (!battleLocked) {
+                                        e.stopPropagation();
+                                        startEventLongMinus(ev.id, member.id, valueIndex, cellValue, 18);
+                                      }
+                                    }}
+                                    onPointerUp={() => cancelEventLongPress(inputKey)}
+                                    onPointerCancel={() => cancelEventLongPress(inputKey)}
+                                    onPointerLeave={() => cancelEventLongPress(inputKey)}
+                                    onTouchStart={(e) => {
+                                      if (!battleLocked) {
+                                        e.stopPropagation();
+                                        startEventLongMinus(ev.id, member.id, valueIndex, cellValue, 18);
+                                      }
+                                    }}
+                                    onTouchEnd={() => cancelEventLongPress(inputKey)}
+                                    onTouchCancel={() => cancelEventLongPress(inputKey)}
+                                  />
+                                </td>
+                              );
+                            })}
+                            <td className={tCss.totalCell}>{rowTotalDisplay}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr className={tCss.subtotalRow}>
+                        <td className={tCss.subtotalLabel}>소계</td>
+                        {battleScoreSubtotal.map((item) => <td key={`battle-score-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
+                        <td className={tCss.subtotalRed}>{battleScoreGrandHasAny ? formatDisplayNumber(battleScoreGrandTotal) : ''}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
+                  <div className={tCss.viewerTitle}>선택 미리보기</div>
+                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.viewerTableWrap}`}>
+                    <table className={tCss.table} style={{ width: `${battlePreviewWidth}px` }}>
+                      <colgroup>
+                        <col style={{ width: '110px' }} />
+                        {battleSelectedHoles.map((holeNo) => <col key={`battle-preview-col-${holeNo}`} style={{ width: '62px' }} />)}
+                        <col style={{ width: '54px' }} />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>닉네임</th>
+                          {battleSelectedHoles.map((holeNo) => <th key={`battle-preview-head-${holeNo}`}>{holeNo}</th>)}
+                          <th>합</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {battleData.rows.map((row) => (
+                          <tr key={`battle-preview-row-${row.key}`}>
+                            <td>{row.name}</td>
+                            {battleSelectedHoles.map((holeNo) => {
+                              const hole = row.holes.find((item) => Number(item?.holeNo) === Number(holeNo));
+                              const value = Number(hole?.value);
+                              return <td key={`battle-preview-cell-${row.key}-${holeNo}`}>{Number.isFinite(value) ? formatDisplayNumber(value) : ''}</td>;
+                            })}
+                            <td className={tCss.totalCell}>{formatDisplayNumber(row.value)}</td>
+                          </tr>
+                        ))}
+                        <tr className={tCss.subtotalRow}>
+                          <td className={tCss.subtotalLabel}>소계</td>
+                          {battlePreviewSubtotal.map((item) => <td key={`battle-preview-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
+                          <td className={tCss.subtotalRed}>{battlePreviewGrandHasAny ? formatDisplayNumber(battlePreviewGrandTotal) : ''}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          }
 
           if (isBingo) {
             const bingoNickPct = 34;

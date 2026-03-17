@@ -1,19 +1,24 @@
 // /src/eventTemplates/groupRoomHoleBattle/GroupRoomHoleBattleEditor.jsx
 import React, { useMemo, useState } from 'react';
-import { defaultGroupRoomHoleBattleParams, getRoomLabel, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
+import { defaultGroupRoomHoleBattleParams, getGroupRoomDisplayName, getRoomLabel, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
 const HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
-const PICKS = [1, 2, 3, 4];
-const MAX_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 function summaryHoles(selectedHoles) {
-  if (selectedHoles.length === 18) return '기본값';
-  return selectedHoles.map((holeNo) => `${holeNo}홀`).join(', ');
+  if (Array.isArray(selectedHoles) && selectedHoles.length === 18) return '기본값';
+  return (Array.isArray(selectedHoles) ? selectedHoles : []).map((holeNo) => `${holeNo}홀`).join(', ');
 }
 
 export default function GroupRoomHoleBattleEditor({ participants = [], roomNames = [], roomCount = 0, value, onChange }) {
-  const safe = useMemo(() => normalizeGroupRoomHoleBattleParams(value || defaultGroupRoomHoleBattleParams(), { participants, roomNames, roomCount }), [value, participants, roomNames, roomCount]);
+  const safe = useMemo(
+    () => normalizeGroupRoomHoleBattleParams(value || defaultGroupRoomHoleBattleParams(), { participants, roomNames, roomCount }),
+    [value, participants, roomNames, roomCount]
+  );
   const [openKey, setOpenKey] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerGroupIdx, setPickerGroupIdx] = useState(0);
+
+  const participantsSafe = Array.isArray(participants) ? participants : [];
 
   const emit = (patch) => {
     if (typeof onChange !== 'function') return;
@@ -26,29 +31,17 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
   const toggleHole = (holeNo) => {
     const has = safe.selectedHoles.includes(holeNo);
     const next = has ? safe.selectedHoles.filter((n) => n !== holeNo) : [...safe.selectedHoles, holeNo];
-    emit({ selectedHoles: next.sort((a, b) => a - b) });
+    emit({ selectedHoles: [...next].sort((a, b) => a - b) });
   };
+
+  const resetHoles = () => emit({ selectedHoles: defaultGroupRoomHoleBattleParams().selectedHoles });
 
   const setMode = (mode) => {
-    emit({ mode });
+    emit({ mode: mode === 'room' ? 'room' : 'group' });
   };
 
-  const updateGroupName = (idx, name) => {
-    const next = safe.groups.map((group, groupIdx) => groupIdx === idx ? { ...group, name } : group);
-    emit({ groups: next });
-  };
-
-  const toggleGroupMember = (idx, memberId) => {
-    const next = safe.groups.map((group, groupIdx) => {
-      if (groupIdx !== idx) return group;
-      const has = group.memberIds.includes(String(memberId));
-      return {
-        ...group,
-        memberIds: has
-          ? group.memberIds.filter((id) => String(id) !== String(memberId))
-          : [...group.memberIds, String(memberId)],
-      };
-    });
+  const setGroupName = (gi, name) => {
+    const next = safe.groups.map((group, idx) => idx === gi ? { ...group, name } : group);
     emit({ groups: next });
   };
 
@@ -56,33 +49,58 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     emit({ groups: [...safe.groups, { key: `group-${safe.groups.length + 1}`, name: `그룹${safe.groups.length + 1}`, memberIds: [] }] });
   };
 
-  const removeGroup = (idx) => {
-    const next = safe.groups.filter((_, groupIdx) => groupIdx !== idx);
-    emit({ groups: next.length ? next : [{ key: 'group-1', name: '그룹1', memberIds: [] }] });
+  const removeGroup = (gi) => {
+    const next = safe.groups.filter((_, idx) => idx !== gi);
+    emit({ groups: next.length ? next : [{ key: 'group-1', name: '', memberIds: [] }] });
+  };
+
+  const openPicker = (gi) => {
+    setPickerGroupIdx(gi);
+    setPickerOpen(true);
+  };
+  const closePicker = () => setPickerOpen(false);
+
+  const toggleMemberInGroup = (gi, pid) => {
+    const id = String(pid);
+    const nextGroups = safe.groups.map((group) => ({
+      ...group,
+      memberIds: Array.isArray(group.memberIds) ? [...group.memberIds].map(String) : [],
+    }));
+    const current = nextGroups[gi];
+    if (!current) return;
+    const has = current.memberIds.includes(id);
+    if (has) {
+      current.memberIds = current.memberIds.filter((item) => item !== id);
+      emit({ groups: nextGroups });
+      return;
+    }
+    nextGroups.forEach((group, idx) => {
+      if (idx !== gi) group.memberIds = group.memberIds.filter((item) => item !== id);
+    });
+    current.memberIds.push(id);
+    emit({ groups: nextGroups });
   };
 
   const participantsByRoom = useMemo(() => {
     const out = Array.from({ length: Math.max(0, Number(roomCount || 0)) }, (_, idx) => ({ roomNo: idx + 1, members: [] }));
-    (Array.isArray(participants) ? participants : []).forEach((p) => {
+    participantsSafe.forEach((p) => {
       const roomNo = Number(p?.room || 0);
       if (roomNo >= 1 && roomNo <= out.length) out[roomNo - 1].members.push(p);
     });
     return out;
-  }, [participants, roomCount]);
+  }, [participantsSafe, roomCount]);
 
   return (
     <div style={box}>
-      <div style={titleRow}>
-        <div style={{ fontWeight: 700 }}>그룹/방 홀별 지목전 설정</div>
-        <div style={badge}>생성</div>
-      </div>
-
       <AccordionBox
         title="사용 홀 선택"
         summary={summaryHoles(safe.selectedHoles)}
         open={openKey === 'holes'}
         onToggle={() => setOpenKey((prev) => (prev === 'holes' ? '' : 'holes'))}
       >
+        <div style={actionRow}>
+          <button type="button" onClick={resetHoles} style={resetBtn}>기본값</button>
+        </div>
         <div style={chipWrap}>
           {HOLES.map((holeNo) => {
             const active = safe.selectedHoles.includes(holeNo);
@@ -108,29 +126,26 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
 
         {safe.mode === 'group' ? (
           <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-            {safe.groups.map((group, idx) => (
-              <div key={group.key || idx} style={groupBox}>
-                <div style={groupHead}>
-                  <input style={input} value={group.name} onChange={(e) => updateGroupName(idx, e.target.value)} placeholder={`그룹${idx + 1}`} />
-                  <button type="button" style={removeBtn} onClick={() => removeGroup(idx)}>삭제</button>
+            {safe.groups.map((group, idx) => {
+              const count = Array.isArray(group?.memberIds) ? group.memberIds.length : 0;
+              return (
+                <div key={group.key || idx} style={groupBox}>
+                  <div style={groupHead}>
+                    <input
+                      value={typeof group?.name === 'string' ? group.name : ''}
+                      onChange={(e) => setGroupName(idx, e.target.value)}
+                      placeholder={`그룹${idx + 1}`}
+                      style={inputStyle}
+                    />
+                    <button type="button" onClick={() => removeGroup(idx)} style={btnDangerStyle}>삭제</button>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <button type="button" onClick={() => openPicker(idx)} style={btnStyle}>멤버 선택</button>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#444' }}>선택 {count}명</div>
+                  </div>
                 </div>
-                <div style={memberChipWrap}>
-                  {(Array.isArray(participants) ? participants : []).map((p) => {
-                    const active = group.memberIds.includes(String(p?.id));
-                    return (
-                      <button
-                        key={`${group.key}-${p?.id}`}
-                        type="button"
-                        onClick={() => toggleGroupMember(idx, p?.id)}
-                        style={{ ...memberChip, ...(active ? memberChipOn : null) }}
-                      >
-                        {p?.nickname || ''}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+              );
+            })}
             <button type="button" style={addBtn} onClick={addGroup}>+ 그룹 추가</button>
           </div>
         ) : (
@@ -151,23 +166,59 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
         open={openKey === 'rules'}
         onToggle={() => setOpenKey((prev) => (prev === 'rules' ? '' : 'rules'))}
       >
-        <div style={fieldLabel}>홀마다 선택할 참가자 수</div>
-        <div style={pillGridStyle}>
-          {PICKS.map((count) => (
-            <button key={`pick-${count}`} type="button" onClick={() => emit({ pickCount: count })} style={{ ...pillStyle, ...(safe.pickCount === count ? pillOnStyle : null) }}>
-              {count}명
-            </button>
-          ))}
-        </div>
-        <div style={{ ...fieldLabel, marginTop: 12 }}>참가자별 최대 선택 횟수</div>
-        <div style={pillGridStyle}>
-          {MAX_COUNTS.map((count) => (
-            <button key={`max-${count}`} type="button" onClick={() => emit({ maxPerParticipant: count })} style={{ ...pillStyle, ...(safe.maxPerParticipant === count ? pillOnStyle : null) }}>
-              {count}회
-            </button>
-          ))}
+        <div style={{ display: 'grid', gap: 10 }}>
+          <label style={labelBox}>
+            <span style={fieldLabel}>홀마다 선택할 참가자 수</span>
+            <select value={safe.pickCount} onChange={(e) => emit({ pickCount: Math.max(1, Math.min(4, Number(e.target.value || 1))) })} style={select}>
+              <option value={1}>1명</option>
+              <option value={2}>2명</option>
+              <option value={3}>3명</option>
+              <option value={4}>4명</option>
+            </select>
+          </label>
+          <label style={labelBox}>
+            <span style={fieldLabel}>참가자별 최대 선택 횟수</span>
+            <select value={safe.maxPerParticipant} onChange={(e) => emit({ maxPerParticipant: Math.max(1, Math.min(8, Number(e.target.value || 1))) })} style={select}>
+              {Array.from({ length: 8 }, (_, i) => i + 1).map((count) => <option key={`max-${count}`} value={count}>{count}회</option>)}
+            </select>
+          </label>
         </div>
       </AccordionBox>
+
+      {pickerOpen && (
+        <div style={modalBackdrop} onClick={closePicker}>
+          <div style={modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div style={{ fontWeight: 700 }}>멤버 선택 - {getGroupRoomDisplayName(safe.groups[pickerGroupIdx]?.name, pickerGroupIdx, '그룹')}</div>
+              <button type="button" onClick={closePicker} style={btnStyle}>닫기</button>
+            </div>
+
+            <div style={{ marginTop: 10, maxHeight: 340, overflow:'auto', border: '1px solid #eef2f7', borderRadius: 10, padding: 8 }}>
+              {participantsSafe.map((p) => {
+                const pid = String(p.id);
+                const checked = Array.isArray(safe.groups[pickerGroupIdx]?.memberIds)
+                  ? safe.groups[pickerGroupIdx].memberIds.map(String).includes(pid)
+                  : false;
+                return (
+                  <label key={pid} style={{ display:'flex', alignItems:'center', gap: 8, padding: '6px 4px' }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleMemberInGroup(pickerGroupIdx, pid)} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14 }}>{p.nickname}</div>
+                      <div style={{ fontSize: 12, color:'#777' }}>
+                        {p.room ? `${p.room}번방` : '미배정'} · {p.group}조 · G{p.handicap ?? 0}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div style={{ marginTop: 8, fontSize: 12, color:'#777' }}>
+              * 한 참가자는 여러 그룹에 중복 포함될 수 없습니다. (선택 시 다른 그룹은 자동 해제)
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -188,29 +239,31 @@ function AccordionBox({ title, summary, open, onToggle, children }) {
 }
 
 const box = { display: 'grid', gap: 10, padding: 12, marginTop: 10, border: '1px solid #e5e7eb', borderRadius: 12, background: '#fff', maxWidth: '100%', overflow: 'hidden', boxSizing: 'border-box' };
-const titleRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 };
-const badge = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 46, height: 28, padding: '0 10px', borderRadius: 999, background: '#e9f4ff', color: '#2563eb', fontSize: 12, fontWeight: 700 };
 const sectionBox = { border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', maxWidth: '100%', boxSizing: 'border-box' };
 const sectionButton = { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '12px 14px', background: '#fff', border: 'none', cursor: 'pointer', boxSizing: 'border-box' };
 const sectionTitle = { fontSize: 14, fontWeight: 700, color: '#111827' };
 const sectionSummary = { fontSize: 12, color: '#667085', lineHeight: 1.45, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const sectionBody = { padding: '0 14px 14px', background: '#fff', boxSizing: 'border-box' };
 const arrow = { fontSize: 12, color: '#667085', flexShrink: 0 };
+const actionRow = { display: 'flex', justifyContent: 'flex-end', marginBottom: 10 };
+const resetBtn = { border: '1px solid #d0d7de', background: '#fff', color: '#344054', borderRadius: 10, padding: '8px 12px', fontSize: 13, cursor: 'pointer', fontWeight: 700 };
 const chipWrap = { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 };
 const chip = { width: '100%', border: '1px solid #d5deea', background: '#fff', color: '#1f2937', borderRadius: 10, padding: '10px 8px', fontSize: 13, cursor: 'pointer', fontWeight: 700 };
 const chipActive = { borderColor: '#8bb6ff', background: '#edf5ff', color: '#1d4ed8' };
 const pillGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 8 };
 const pillStyle = { width: '100%', border: '1px solid #cfd8e3', background: '#fff', color: '#1f2937', borderRadius: 999, padding: '10px 12px', fontSize: 13, cursor: 'pointer', fontWeight: 700 };
 const pillOnStyle = { borderColor: '#8bb6ff', color: '#1d4ed8', background: '#eef5ff' };
+const labelBox = { display: 'grid', gap: 6, minWidth: 0 };
 const fieldLabel = { fontSize: 13, fontWeight: 700, color: '#344054' };
+const select = { width: '100%', height: 42, borderRadius: 10, border: '1px solid #d0d7de', background: '#fff', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
 const groupBox = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, background: '#fff' };
 const groupHead = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 };
-const input = { flex: 1, height: 40, borderRadius: 10, border: '1px solid #d0d7de', background: '#fff', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
-const removeBtn = { border: '1px solid #fecaca', background: '#fff1f2', color: '#b42318', borderRadius: 10, padding: '8px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
-const addBtn = { border: '1px dashed #93c5fd', background: '#eff6ff', color: '#1d4ed8', borderRadius: 12, padding: '10px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
-const memberChipWrap = { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 };
-const memberChip = { width: '100%', border: '1px solid #d5deea', background: '#fff', color: '#334155', borderRadius: 10, padding: '8px 10px', fontSize: 13, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-const memberChipOn = { borderColor: '#8bb6ff', background: '#eef5ff', color: '#1d4ed8', fontWeight: 700 };
+const inputStyle = { flex: 1, height: 40, borderRadius: 10, border: '1px solid #d0d7de', background: '#fff', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
+const btnStyle = { border: '1px solid #cbd5e1', background: '#fff', borderRadius: 10, padding: '6px 10px', fontSize: 12, cursor: 'pointer' };
+const btnDangerStyle = { ...btnStyle, border: '1px solid #fecaca', color: '#b91c1c' };
+const addBtn = { width: '100%', border: '1px dashed #98a2b3', background: '#f8fafc', color: '#344054', borderRadius: 12, padding: '10px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
 const roomRow = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, background: '#fff' };
-const roomTitle = { fontSize: 13, fontWeight: 800, color: '#183153', marginBottom: 4 };
-const roomMembersText = { fontSize: 12, color: '#667085', lineHeight: 1.5, wordBreak: 'keep-all' };
+const roomTitle = { fontSize: 13, fontWeight: 800, color: '#183153' };
+const roomMembersText = { marginTop: 4, fontSize: 12, color: '#667085', lineHeight: 1.5 };
+const modalBackdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 9999 };
+const modalCard = { width: '100%', maxWidth: 520, background: '#fff', borderRadius: 14, padding: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.2)' };

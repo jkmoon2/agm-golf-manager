@@ -154,7 +154,7 @@ export const TEMPLATE_REGISTRY = [
       maxPerParticipant: 4,
       selectionLocked: false,
     },
-    help: '* 선택한 홀마다 그룹/방에서 닉네임을 지목해 합계를 비교합니다. 현재 버전은 선택된 닉네임의 결과(점수-G핸디)를 합산합니다.',
+    help: '',
     ui: {
       inputMode: false,
       paramsJson: false,

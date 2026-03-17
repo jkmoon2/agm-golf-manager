@@ -1,10 +1,5 @@
 // /src/events/groupRoomHoleBattle.js
 // 그룹/방 홀별 지목전 계산/정규화 유틸
-// - mode: group | room
-// - metric: 결과(score - G핸디) 고정
-// - Player STEP3에서는 선택된 홀마다 닉네임을 지목합니다.
-// - 각 칸은 pickCount(1~4)명까지 선택 가능
-// - 각 참가자는 자기 소속 row(그룹/방) 안에서 maxPerParticipant 횟수까지 선택 가능
 
 import { normalizeSelectedHoles } from './holeRankForce';
 
@@ -26,12 +21,20 @@ export function normalizeGroupRoomMode(mode) {
   return mode === 'room' ? 'room' : 'group';
 }
 
+export function getGroupRoomDisplayName(name, idx, prefix = '그룹') {
+  const raw = String(name ?? '').trim();
+  return raw || `${prefix}${idx + 1}`;
+}
+
 export function normalizeGroupRows(groups) {
   const src = Array.isArray(groups) ? groups : [];
   return src.map((g, idx) => ({
     key: String(g?.key || `group-${idx + 1}`),
-    name: String(g?.name || `그룹${idx + 1}`).trim() || `그룹${idx + 1}`,
-    memberIds: Array.isArray(g?.memberIds) ? Array.from(new Set(g.memberIds.map((id) => String(id || '').trim()).filter(Boolean))) : [],
+    // 빈 문자열도 유지해서 입력 중 삭제 가능하도록 함
+    name: (typeof g?.name === 'string') ? g.name : `그룹${idx + 1}`,
+    memberIds: Array.isArray(g?.memberIds)
+      ? Array.from(new Set(g.memberIds.map((id) => String(id || '').trim()).filter(Boolean)))
+      : [],
   }));
 }
 
@@ -47,7 +50,7 @@ export function normalizeGroupRoomHoleBattleParams(params, opt = {}) {
   const participants = Array.isArray(opt?.participants) ? opt.participants : [];
 
   const groups = normalizeGroupRows(src.groups && src.groups.length ? src.groups : base.groups)
-    .filter((g) => mode !== 'group' || g.memberIds.length > 0 || g.name);
+    .filter((g) => mode !== 'group' || g.memberIds.length > 0 || typeof g.name === 'string');
 
   return {
     selectedHoles: selectedHoles.length ? selectedHoles : base.selectedHoles,
@@ -60,12 +63,6 @@ export function normalizeGroupRoomHoleBattleParams(params, opt = {}) {
     roomNames,
     participants,
   };
-}
-
-export function getGroupRoomHoleBattleMetricValue(participant) {
-  const score = Number(participant?.score ?? 0) || 0;
-  const handicap = Number(participant?.handicap ?? 0) || 0;
-  return score - handicap;
 }
 
 export function getRoomLabel(roomNo, roomNames = []) {
@@ -85,15 +82,16 @@ export function getGroupRoomHoleBattleRows(eventDef, participants = [], opt = {}
   const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id), p]));
 
   if (cfg.mode === 'room') {
-    const roomCount = cfg.roomCount || Math.max(0, ...participants.map((p) => Number(p?.room || 0)).filter((n) => Number.isFinite(n)));
-    return Array.from({ length: roomCount }, (_, idx) => {
+    const maxRoom = cfg.roomCount || Math.max(0, ...participants.map((p) => Number(p?.room || 0)).filter((n) => Number.isFinite(n)));
+    return Array.from({ length: maxRoom }, (_, idx) => {
       const roomNo = idx + 1;
-      const members = participants.filter((p) => Number(p?.room) === roomNo);
+      const members = (Array.isArray(participants) ? participants : []).filter((p) => Number(p?.room) === roomNo);
       return {
         key: `room-${roomNo}`,
         type: 'room',
         roomNo,
         name: getRoomLabel(roomNo, cfg.roomNames),
+        displayName: getRoomLabel(roomNo, cfg.roomNames),
         memberIds: members.map((p) => String(p?.id ?? '')).filter(Boolean),
         members,
       };
@@ -103,10 +101,32 @@ export function getGroupRoomHoleBattleRows(eventDef, participants = [], opt = {}
   return cfg.groups.map((group, idx) => ({
     key: String(group?.key || `group-${idx + 1}`),
     type: 'group',
-    name: String(group?.name || `그룹${idx + 1}`),
+    name: group?.name ?? '',
+    displayName: getGroupRoomDisplayName(group?.name, idx, '그룹'),
     memberIds: Array.isArray(group?.memberIds) ? group.memberIds.map(String) : [],
     members: (Array.isArray(group?.memberIds) ? group.memberIds : []).map((id) => byId.get(String(id))).filter(Boolean),
   }));
+}
+
+export function getGroupRoomBattleScoreParticipants(eventDef, participants = [], opt = {}) {
+  const rows = getGroupRoomHoleBattleRows(eventDef, participants, opt);
+  const mode = normalizeGroupRoomMode(eventDef?.params?.mode);
+  const currentRoomNo = Number(opt?.currentRoomNo || 0);
+  if (mode === 'room' && currentRoomNo >= 1) {
+    const row = rows.find((item) => Number(item?.roomNo) === currentRoomNo);
+    return Array.isArray(row?.members) ? row.members : [];
+  }
+  const seen = new Set();
+  const out = [];
+  rows.forEach((row) => {
+    (Array.isArray(row?.members) ? row.members : []).forEach((member) => {
+      const id = String(member?.id || '');
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      out.push(member);
+    });
+  });
+  return out;
 }
 
 export function normalizeBattleCellIds(value, allowedIds = []) {
@@ -148,12 +168,25 @@ export function countParticipantUsageForRow(shared, rowKey) {
   return out;
 }
 
-export function isBattleRowComplete(row, shared, eventDef) {
+export function getBattleScoreValue(inputsByEvent = {}, pid, holeNo) {
+  const raw = inputsByEvent?.person?.[String(pid)]?.values?.[Number(holeNo) - 1];
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function isBattleRowSelectionComplete(row, shared, eventDef) {
   const cfg = normalizeGroupRoomHoleBattleParams(eventDef?.params);
   const requiredCount = Math.max(1, Number(cfg.pickCount || 1));
   return cfg.selectedHoles.every((holeNo) => {
     const ids = getBattleCellIds(shared, row.key, holeNo, row.memberIds);
     return ids.length === requiredCount;
+  });
+}
+
+export function isBattleParticipantScoreComplete(inputsByEvent = {}, participantId, selectedHoles = []) {
+  return (Array.isArray(selectedHoles) ? selectedHoles : []).every((holeNo) => {
+    const n = getBattleScoreValue(inputsByEvent, participantId, holeNo);
+    return Number.isFinite(n);
   });
 }
 
@@ -168,50 +201,65 @@ export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsBy
   const shared = getBattleSharedInputs(inputsByEvent);
   const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id), p]));
 
+  const scoreParticipants = getGroupRoomBattleScoreParticipants(eventDef, participants, {
+    roomNames: opt?.roomNames,
+    roomCount: opt?.roomCount,
+    currentRoomNo: opt?.currentRoomNo,
+  });
+
   const outRows = rows.map((row) => {
     const usage = countParticipantUsageForRow(shared, row.key);
     const holes = cfg.selectedHoles.map((holeNo) => {
       const ids = getBattleCellIds(shared, row.key, holeNo, row.memberIds);
       const members = ids.map((id) => byId.get(String(id))).filter(Boolean);
-      const value = members.reduce((sum, p) => sum + getGroupRoomHoleBattleMetricValue(p), 0);
-      const handicapSum = members.reduce((sum, p) => sum + (Number(p?.handicap ?? 0) || 0), 0);
+      const value = members.reduce((sum, p) => {
+        const n = getBattleScoreValue(inputsByEvent, p?.id, holeNo);
+        return sum + (Number.isFinite(n) ? n : 0);
+      }, 0);
       return {
         holeNo,
         ids,
         members,
         value,
-        handicapSum,
         label: members.map((p) => String(p?.nickname || '')).join(' / '),
       };
     });
     const value = holes.reduce((sum, hole) => sum + (Number(hole.value) || 0), 0);
-    const handicapSum = holes.reduce((sum, hole) => sum + (Number(hole.handicapSum) || 0), 0);
     return {
       key: row.key,
-      name: row.name,
+      name: row.displayName || row.name,
+      rawName: row.name,
       type: row.type,
       roomNo: row.roomNo ?? null,
       members: row.members,
       memberIds: row.memberIds,
       value,
-      handicapSum,
       holes,
       usage,
-      complete: isBattleRowComplete(row, shared, eventDef),
+      complete: isBattleRowSelectionComplete(row, shared, eventDef),
     };
   });
 
   outRows.sort((a, b) => {
     return sign * (a.value - b.value)
-      || (a.handicapSum - b.handicapSum)
       || String(a.name || '').localeCompare(String(b.name || ''), 'ko');
   });
 
+  const participantRows = scoreParticipants.map((p) => ({
+    id: String(p?.id || ''),
+    name: String(p?.nickname || ''),
+    roomNo: Number(p?.room || 0) || 0,
+    values: cfg.selectedHoles.map((holeNo) => getBattleScoreValue(inputsByEvent, p?.id, holeNo)),
+    complete: isBattleParticipantScoreComplete(inputsByEvent, p?.id, cfg.selectedHoles),
+  }));
+
   return {
     kind: cfg.mode === 'room' ? 'room' : 'group',
-    metric: 'result',
+    metric: 'score',
     rows: outRows,
     config: cfg,
     shared,
+    participantRows,
+    scoreParticipants,
   };
 }

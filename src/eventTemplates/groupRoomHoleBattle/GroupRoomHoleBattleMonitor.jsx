@@ -6,6 +6,7 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
   const data = computeGroupRoomHoleBattle(eventDef, participants, inputsByEvent, { roomNames, roomCount });
   const locked = !!eventDef?.params?.selectionLocked;
   const doneCount = data.rows.filter((row) => row.complete).length;
+  const scoreDoneCount = data.participantRows.filter((row) => row.complete).length;
 
   return (
     <div style={backdrop} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>
@@ -19,16 +20,18 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
         </div>
 
         <div style={summaryBox}>
-          <div style={summaryItem}><b>{doneCount}</b> / {data.rows.length} 완료</div>
+          <div style={summaryItem}><b>{doneCount}</b> / {data.rows.length} 지목 완료</div>
+          <div style={summaryItem}><b>{scoreDoneCount}</b> / {data.participantRows.length} 점수 완료</div>
           <div style={summaryItem}>상태: <b style={{ color: locked ? '#dc2626' : '#2563eb' }}>{locked ? '마감' : '진행중'}</b></div>
           <button type="button" style={locked ? btnSub : btnPrimary} onClick={() => (typeof onToggleLock === 'function' ? onToggleLock(!locked) : null)}>
             {locked ? '재오픈' : '마감'}
           </button>
         </div>
 
+        <div style={{ marginTop: 12, fontWeight: 800, color: '#183153' }}>지목 입력 현황</div>
         <div style={listWrap}>
           {data.rows.map((row) => {
-            const filled = row.holes.filter((hole) => hole.ids.length > 0).length;
+            const filled = row.holes.filter((hole) => hole.ids.length === data.config.pickCount).length;
             return (
               <div key={row.key} style={rowBox}>
                 <div style={rowHead}>
@@ -46,6 +49,23 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
             );
           })}
         </div>
+
+        <div style={{ marginTop: 14, fontWeight: 800, color: '#183153' }}>홀별 점수 입력 현황</div>
+        <div style={listWrap}>
+          {data.participantRows.map((row) => (
+            <div key={`score-${row.id}`} style={rowBox}>
+              <div style={rowHead}>
+                <div style={{ minWidth: 0 }}>
+                  <span style={rowName}>{row.name}</span>
+                </div>
+                <span style={row.complete ? badgeDone : badgeWait}>{row.complete ? '완료' : '대기'}</span>
+              </div>
+              <div style={rowBody}>
+                <div style={summaryText}>{row.values.map((value, idx) => `${data.config.selectedHoles[idx]}홀:${Number.isFinite(value) ? value : '-'}`).join(' / ')}</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -58,7 +78,7 @@ const title = { fontWeight: 800, fontSize: 16, color: '#183153' };
 const subTitle = { marginTop: 4, fontSize: 12, color: '#667085', lineHeight: 1.45 };
 const summaryBox = { marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' };
 const summaryItem = { padding: '8px 10px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: 13, color: '#334155' };
-const listWrap = { marginTop: 12, display: 'grid', gap: 8 };
+const listWrap = { marginTop: 10, display: 'grid', gap: 8 };
 const rowBox = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, background: '#fff' };
 const rowHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 };
 const rowName = { fontWeight: 700, color: '#183153' };
