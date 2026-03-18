@@ -317,6 +317,37 @@ function inferRoomFromSelf(participants = [], eventData = {}) {
   return NaN;
 }
 
+
+function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN) {
+  const ids = [
+    eventData?.auth?.uid, eventData?.player?.uid, eventData?.me?.uid,
+    eventData?.auth?.id, eventData?.player?.id, eventData?.me?.id,
+  ].filter(Boolean).map((v) => String(v));
+
+  const inSameRoom = (participant) => {
+    const room = Number(participant?.room);
+    return !Number.isFinite(Number(roomNo)) || !Number.isFinite(room) || room < 1 || room === Number(roomNo);
+  };
+
+  for (const participant of Array.isArray(participants) ? participants : []) {
+    const pid = String(participant?.id ?? '');
+    const puid = String(participant?.uid ?? '');
+    if ((pid && ids.includes(pid)) || (puid && ids.includes(puid))) {
+      if (inSameRoom(participant)) return participant;
+    }
+  }
+
+  const myNick = String(eventData?.auth?.nickname || eventData?.player?.nickname || eventData?.me?.nickname || '').trim().toLowerCase();
+  if (myNick) {
+    for (const participant of Array.isArray(participants) ? participants : []) {
+      const nick = String(participant?.nickname || '').trim().toLowerCase();
+      if (nick && nick === myNick && inSameRoom(participant)) return participant;
+    }
+  }
+
+  return null;
+}
+
 async function ensureMembership(eventId, myRoom) {
   try {
     const uid = auth?.currentUser?.uid || null;
@@ -342,20 +373,29 @@ export default function PlayerEventInput(){
 
   const beginPickMenuGesture = (evt) => {
     const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
-    const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
+    if (!touch) {
+      pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0 };
+      return;
+    }
+    const y = Number(touch?.clientY ?? 0);
     pickMenuGestureRef.current = { dragging:false, startY:y, lastMoveAt:0 };
   };
   const movePickMenuGesture = (evt) => {
     const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
-    const y = Number(touch?.clientY ?? evt?.clientY ?? 0);
+    if (!touch) return;
+    const y = Number(touch?.clientY ?? 0);
     const state = pickMenuGestureRef.current || {};
     if (Math.abs(y - Number(state.startY || 0)) > 4) {
       pickMenuGestureRef.current = { ...state, dragging:true, lastMoveAt: Date.now() };
     }
   };
   const finishPickMenuGesture = () => {
-    const stamp = Date.now();
     const state = pickMenuGestureRef.current || {};
+    if (!state.dragging) {
+      pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0 };
+      return;
+    }
+    const stamp = Date.now();
     pickMenuGestureRef.current = { ...state, lastMoveAt: stamp };
     window.setTimeout(() => {
       const latest = pickMenuGestureRef.current || {};
@@ -366,7 +406,8 @@ export default function PlayerEventInput(){
   };
   const shouldIgnorePickMenuClick = () => {
     const state = pickMenuGestureRef.current || {};
-    return !!state.dragging || ((Date.now() - Number(state.lastMoveAt || 0)) < 180);
+    const recentMove = Number(state.lastMoveAt || 0);
+    return !!state.dragging || (recentMove > 0 && (Date.now() - recentMove) < 180);
   };
   useEffect(() => {
     const id = eventId || ctxId;
@@ -466,6 +507,12 @@ export default function PlayerEventInput(){
       try { localStorage.setItem(playerStorageKey(eventId, 'currentRoom'), String(roomIdx)); } catch {}
     }
   }, [roomIdx, eventId]);
+
+  const selfParticipant = useMemo(
+    () => inferSelfParticipant(participants, eventData, roomIdx),
+    [participants, eventData, roomIdx]
+  );
+  const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
 
   const openPickMenuAt = (evId, pid, idx, options = [], buttonEl = null) => {
     const rect = buttonEl?.getBoundingClientRect?.();
@@ -896,7 +943,7 @@ export default function PlayerEventInput(){
     return sortedParticipants;
   };
 
-  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleInputRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx });
+  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleInputRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId });
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
@@ -952,7 +999,7 @@ export default function PlayerEventInput(){
         const sPerson = slot?.person || {};
         const evDef = events.find((item) => String(item?.id) === String(evId));
         const allowedPids = evDef?.template === 'group-room-hole-battle'
-          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx }).map((p) => String(p?.id || '')).filter(Boolean))
+          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId }).map((p) => String(p?.id || '')).filter(Boolean))
           : roomPids;
         if (!merged[evId]) merged[evId] = {};
         const mSlot = { ...(merged[evId]||{}) };
@@ -1020,7 +1067,7 @@ export default function PlayerEventInput(){
           const dShared = JSON.stringify(getBattleSharedInputs(draft?.[evId] || {}));
           const sShared = JSON.stringify(getBattleSharedInputs(inputsByEventServer?.[evId] || {}));
           if (!eq(dShared, sShared)) return true;
-          const relevant = getGroupRoomBattleScoreParticipants(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx });
+          const relevant = getGroupRoomBattleScoreParticipants(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId });
           const holes = Array.isArray(ev?.params?.selectedHoles) ? ev.params.selectedHoles : [];
           for (const p of relevant) {
             const pid = String(p?.id || '');
@@ -1184,11 +1231,13 @@ export default function PlayerEventInput(){
               roomNames,
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
+              currentParticipantId: selfParticipantId,
             });
             const battleData = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[ev.id] || {}, {
               roomNames,
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
+              currentParticipantId: selfParticipantId,
             });
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
@@ -1293,7 +1342,7 @@ export default function PlayerEventInput(){
                       <tr>
                         <th>닉네임</th>
                         {battleSelectedHoles.map((holeNo) => <th key={`battle-score-head-${holeNo}`}>{holeNo}</th>)}
-                        <th>합</th>
+                        <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1380,21 +1429,23 @@ export default function PlayerEventInput(){
                         <tr>
                           <th>닉네임</th>
                           {battleSelectedHoles.map((holeNo) => <th key={`battle-preview-head-${holeNo}`}>{holeNo}</th>)}
-                          <th>합</th>
+                          <th>합계</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {battleData.rows.map((row) => (
+                        {battleRows.map((rowBase) => {
+                          const row = battleData.rows.find((item) => String(item?.key) === String(rowBase?.key)) || rowBase;
+                          return (
                           <tr key={`battle-preview-row-${row.key}`}>
                             <td>{row.name}</td>
                             {battleSelectedHoles.map((holeNo) => {
-                              const hole = row.holes.find((item) => Number(item?.holeNo) === Number(holeNo));
+                              const hole = Array.isArray(row?.holes) ? row.holes.find((item) => Number(item?.holeNo) === Number(holeNo)) : null;
                               const value = Number(hole?.value);
                               return <td key={`battle-preview-cell-${row.key}-${holeNo}`}>{Number.isFinite(value) ? formatDisplayNumber(value) : ''}</td>;
                             })}
                             <td className={tCss.totalCell}>{formatDisplayNumber(row.value)}</td>
                           </tr>
-                        ))}
+                        );})}
                         <tr className={tCss.subtotalRow}>
                           <td className={tCss.subtotalLabel}>소계</td>
                           {battlePreviewSubtotal.map((item) => <td key={`battle-preview-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
@@ -1467,7 +1518,7 @@ export default function PlayerEventInput(){
                       <tr>
                         <th>닉네임</th>
                         {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
-                        <th>합</th>
+                        <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2049,11 +2100,14 @@ export default function PlayerEventInput(){
                 className={tCss.pickMenu}
                 style={{ left: pickMenuState.left, top: pickMenuState.top, width: pickMenuState.width, position:'fixed' }}
                 onPointerDown={(e) => e.stopPropagation()}
-                onPointerMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
                 onTouchStartCapture={(e) => { beginPickMenuGesture(e); }}
                 onTouchMoveCapture={(e) => { movePickMenuGesture(e); e.stopPropagation(); }}
                 onTouchEndCapture={() => { finishPickMenuGesture(); }}
-                onScrollCapture={() => { pickMenuGestureRef.current = { ...(pickMenuGestureRef.current || {}), dragging:true, lastMoveAt: Date.now() }; }}
+                onTouchCancelCapture={() => { finishPickMenuGesture(); }}
+                onScrollCapture={() => {
+                  const state = pickMenuGestureRef.current || {};
+                  if (state.dragging) pickMenuGestureRef.current = { ...state, lastMoveAt: Date.now() };
+                }}
                 onTouchMove={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -2151,6 +2205,7 @@ export default function PlayerEventInput(){
                       onClick={() => {
                         if (disabled) return;
                         patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, value);
+                        setBattleMenuState(null);
                       }}
                       disabled={disabled}
                       title={displayPickOption(member)}
