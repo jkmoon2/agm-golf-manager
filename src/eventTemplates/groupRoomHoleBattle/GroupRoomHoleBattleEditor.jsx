@@ -45,17 +45,38 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     emit({ groups: next });
   };
 
+  const toggleLeaderInGroup = (gi, pid) => {
+    const id = String(pid);
+    const nextGroups = safe.groups.map((group) => ({
+      ...group,
+      memberIds: Array.isArray(group.memberIds) ? [...group.memberIds].map(String) : [],
+      leaderIds: Array.isArray(group.leaderIds) ? [...group.leaderIds].map(String) : [],
+    }));
+    const current = nextGroups[gi];
+    if (!current) return;
+    if (!current.memberIds.includes(id)) return;
+    const has = current.leaderIds.includes(id);
+    current.leaderIds = has ? current.leaderIds.filter((item) => item !== id) : [...current.leaderIds, id];
+    emit({ groups: nextGroups });
+  };
+
   const addGroup = () => {
-    emit({ groups: [...safe.groups, { key: `group-${safe.groups.length + 1}`, name: `그룹${safe.groups.length + 1}`, memberIds: [] }] });
+    emit({ groups: [...safe.groups, { key: `group-${safe.groups.length + 1}`, name: `그룹${safe.groups.length + 1}`, memberIds: [], leaderIds: [] }] });
   };
 
   const removeGroup = (gi) => {
     const next = safe.groups.filter((_, idx) => idx !== gi);
-    emit({ groups: next.length ? next : [{ key: 'group-1', name: '', memberIds: [] }] });
+    emit({ groups: next.length ? next : [{ key: 'group-1', name: '', memberIds: [], leaderIds: [] }] });
   };
 
   const openGroupPicker = (gi) => {
     setPickerType('group');
+    setPickerGroupIdx(gi);
+    setPickerOpen(true);
+  };
+
+  const openLeaderPicker = (gi) => {
+    setPickerType('leader');
     setPickerGroupIdx(gi);
     setPickerOpen(true);
   };
@@ -79,11 +100,13 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     const has = current.memberIds.includes(id);
     if (has) {
       current.memberIds = current.memberIds.filter((item) => item !== id);
+      current.leaderIds = current.leaderIds.filter((item) => item !== id);
       emit({ groups: nextGroups });
       return;
     }
     nextGroups.forEach((group, idx) => {
       if (idx !== gi) group.memberIds = group.memberIds.filter((item) => item !== id);
+      group.leaderIds = group.leaderIds.filter((item) => item !== id);
     });
     current.memberIds.push(id);
     emit({ groups: nextGroups });
@@ -113,6 +136,11 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     const shown = names.slice(0, 6);
     const more = names.length > shown.length ? ` 외 ${names.length - shown.length}명` : '';
     return `${getGroupRoomDisplayName(group?.name, idx, '그룹')} · ${shown.join(', ')}${more}`;
+  };
+
+  const leaderSummary = (group) => {
+    const names = (Array.isArray(group?.leaderIds) ? group.leaderIds : []).map((id) => byId.get(String(id))?.nickname).filter(Boolean);
+    return names.length ? `리더: ${names.join(', ')}` : '리더 미지정';
   };
 
   const selectedPersonNames = (Array.isArray(safe.personIds) ? safe.personIds : []).map((id) => byId.get(String(id))?.nickname).filter(Boolean);
@@ -150,7 +178,7 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
       </AccordionBox>
 
       <AccordionBox
-        title="그룹 / 방 모드"
+        title="그룹 / 방 / 개인 모드"
         summary={summaryMode}
         open={openKey === 'mode'}
         onToggle={() => setOpenKey((prev) => (prev === 'mode' ? '' : 'mode'))}
@@ -177,11 +205,13 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
                   </div>
                   <button type="button" onClick={() => removeGroup(idx)} style={btnDangerStyle}>삭제</button>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => openGroupPicker(idx)} style={btnStyle}>멤버 선택</button>
+                  <button type="button" onClick={() => openLeaderPicker(idx)} style={btnStyle}>리더 선택</button>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#444' }}>선택 {Array.isArray(group?.memberIds) ? group.memberIds.length : 0}명</div>
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12, color: '#555', lineHeight: 1.45 }}>{groupSummary(group, idx)}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>{leaderSummary(group)}</div>
               </div>
             ))}
             <button type="button" style={addBtn} onClick={addGroup}>+ 그룹 추가</button>
@@ -240,17 +270,22 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div style={{ fontWeight: 700 }}>
-                {pickerType === 'person' ? '참가자 선택' : `멤버 선택 - ${getGroupRoomDisplayName(safe.groups[pickerGroupIdx]?.name, pickerGroupIdx, '그룹')}`}
+                {pickerType === 'person' ? '참가자 선택' : pickerType === 'leader' ? `리더 선택 - ${getGroupRoomDisplayName(safe.groups[pickerGroupIdx]?.name, pickerGroupIdx, '그룹')}` : `멤버 선택 - ${getGroupRoomDisplayName(safe.groups[pickerGroupIdx]?.name, pickerGroupIdx, '그룹')}`}
               </div>
               <button type="button" onClick={closePicker} style={btnStyle}>닫기</button>
             </div>
 
             <div style={{ marginTop: 10, maxHeight: 340, overflow:'auto', border: '1px solid #eef2f7', borderRadius: 10, padding: 8 }}>
-              {participantsSafe.map((p) => {
+              {(pickerType === 'leader'
+                ? participantsSafe.filter((p) => Array.isArray(safe.groups[pickerGroupIdx]?.memberIds) && safe.groups[pickerGroupIdx].memberIds.map(String).includes(String(p?.id || '')))
+                : participantsSafe
+              ).map((p) => {
                 const pid = String(p.id);
                 const checked = pickerType === 'person'
                   ? (Array.isArray(safe.personIds) ? safe.personIds.map(String).includes(pid) : false)
-                  : (Array.isArray(safe.groups[pickerGroupIdx]?.memberIds) ? safe.groups[pickerGroupIdx].memberIds.map(String).includes(pid) : false);
+                  : pickerType === 'leader'
+                    ? (Array.isArray(safe.groups[pickerGroupIdx]?.leaderIds) ? safe.groups[pickerGroupIdx].leaderIds.map(String).includes(pid) : false)
+                    : (Array.isArray(safe.groups[pickerGroupIdx]?.memberIds) ? safe.groups[pickerGroupIdx].memberIds.map(String).includes(pid) : false);
                 return (
                   <label key={pid} style={{ display:'flex', alignItems:'center', gap: 8, padding: '6px 4px' }}>
                     <input
@@ -258,6 +293,7 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
                       checked={checked}
                       onChange={() => {
                         if (pickerType === 'person') togglePerson(pid);
+                        else if (pickerType === 'leader') toggleLeaderInGroup(pickerGroupIdx, pid);
                         else toggleMemberInGroup(pickerGroupIdx, pid);
                       }}
                     />
@@ -272,7 +308,7 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
               })}
             </div>
 
-            {pickerType !== 'person' && (
+            {pickerType === 'group' && (
               <div style={{ marginTop: 8, fontSize: 12, color:'#777' }}>
                 * 한 참가자는 여러 그룹에 중복 포함될 수 없습니다. (선택 시 다른 그룹은 자동 해제)
               </div>

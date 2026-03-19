@@ -142,13 +142,13 @@ export const TEMPLATE_REGISTRY = [
 
   {
     type: 'group-room-hole-battle',
-    label: '그룹/방 홀별 지목전',
+    label: '그룹/방/개인 홀별 지목전',
     defaultParams: {
       selectedHoles: Array.from({ length: 18 }, (_, i) => i + 1),
       mode: 'group',
       groups: [
-        { name: '그룹1', memberIds: [] },
-        { name: '그룹2', memberIds: [] },
+        { name: '그룹1', memberIds: [], leaderIds: [] },
+        { name: '그룹2', memberIds: [], leaderIds: [] },
       ],
       personIds: [],
       pickCount: null,

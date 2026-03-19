@@ -11,7 +11,7 @@ import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
-import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
+import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
 
 function getPlayerTabId(){
@@ -317,7 +317,6 @@ function inferRoomFromSelf(participants = [], eventData = {}) {
   return NaN;
 }
 
-
 function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN) {
   const ids = [
     eventData?.auth?.uid, eventData?.player?.uid, eventData?.me?.uid,
@@ -399,10 +398,10 @@ export default function PlayerEventInput(){
     pickMenuGestureRef.current = { ...state, lastMoveAt: stamp };
     window.setTimeout(() => {
       const latest = pickMenuGestureRef.current || {};
-      if ((Date.now() - Number(latest.lastMoveAt || 0)) >= 150) {
+      if (Number(latest.lastMoveAt || 0) === stamp) {
         pickMenuGestureRef.current = { dragging:false, startY:0, lastMoveAt:0 };
       }
-    }, 170);
+    }, 180);
   };
   const shouldIgnorePickMenuClick = () => {
     const state = pickMenuGestureRef.current || {};
@@ -1242,6 +1241,16 @@ export default function PlayerEventInput(){
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
             const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
+            const battlePreviewRowsBase = battleCfg.mode === 'person'
+              ? (battleData.rows || [])
+              : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+            const canEditBattleSelection = (row) => {
+              if (battleLocked) return false;
+              if (battleCfg.mode !== 'group') return true;
+              const leaders = Array.isArray(row?.leaderIds) ? row.leaderIds.map(String).filter(Boolean) : [];
+              if (!leaders.length) return true;
+              return !!selfParticipantId && leaders.includes(selfParticipantId);
+            };
             const battleScoreSubtotal = battleSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
@@ -1279,7 +1288,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {battleLocked && <div className={tCss.lockNotice}>입력이 마감되어 더 이상 수정할 수 없습니다.</div>}
+                {battleLocked && <div className={tCss.lockNotice}>지목 입력이 마감되어 닉네임 선택만 잠깁니다. 점수 입력은 계속 가능합니다.</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${battleSelectionWidth}px` }}>
@@ -1308,7 +1317,7 @@ export default function PlayerEventInput(){
                                     className={tCss.pickSelectButton}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (battleLocked) return;
+                                      if (!canEditBattleSelection(row)) return;
                                       const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo);
                                       if (same) {
                                         setBattleMenuState(null);
@@ -1316,7 +1325,7 @@ export default function PlayerEventInput(){
                                       }
                                       openBattleMenuAt(ev.id, row.key, holeNo, row.members, e.currentTarget);
                                     }}
-                                    disabled={battleLocked}
+                                    disabled={!canEditBattleSelection(row)}
                                     title={buttonText}
                                   >
                                     <span className={tCss.pickSelectText}>{buttonText}</span>
@@ -1378,24 +1387,19 @@ export default function PlayerEventInput(){
                                     spellCheck={false}
                                     className={tCss.cellInput}
                                     value={cellValue}
-                                    disabled={battleLocked}
-                                    onChange={(e) => !battleLocked && patchAccum(ev.id, member.id, valueIndex, e.target.value, 18)}
-                                    onBlur={(e) => !battleLocked && finalizeAccum(ev.id, member.id, valueIndex, e.target.value, 18)}
+                                    onChange={(e) => patchAccum(ev.id, member.id, valueIndex, e.target.value, 18)}
+                                    onBlur={(e) => finalizeAccum(ev.id, member.id, valueIndex, e.target.value, 18)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
-                                      if (!battleLocked) {
-                                        e.stopPropagation();
-                                        startEventLongMinus(ev.id, member.id, valueIndex, cellValue, 18);
-                                      }
+                                      e.stopPropagation();
+                                      startEventLongMinus(ev.id, member.id, valueIndex, cellValue, 18);
                                     }}
                                     onPointerUp={() => cancelEventLongPress(inputKey)}
                                     onPointerCancel={() => cancelEventLongPress(inputKey)}
                                     onPointerLeave={() => cancelEventLongPress(inputKey)}
                                     onTouchStart={(e) => {
-                                      if (!battleLocked) {
-                                        e.stopPropagation();
-                                        startEventLongMinus(ev.id, member.id, valueIndex, cellValue, 18);
-                                      }
+                                      e.stopPropagation();
+                                      startEventLongMinus(ev.id, member.id, valueIndex, cellValue, 18);
                                     }}
                                     onTouchEnd={() => cancelEventLongPress(inputKey)}
                                     onTouchCancel={() => cancelEventLongPress(inputKey)}
@@ -1433,8 +1437,8 @@ export default function PlayerEventInput(){
                         </tr>
                       </thead>
                       <tbody>
-                        {battleRows.map((rowBase) => {
-                          const row = battleData.rows.find((item) => String(item?.key) === String(rowBase?.key)) || rowBase;
+                        {battlePreviewRowsBase.map((rowBase) => {
+                          const row = (battleData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase;
                           return (
                           <tr key={`battle-preview-row-${row.key}`}>
                             <td>{row.name}</td>
@@ -2118,7 +2122,6 @@ export default function PlayerEventInput(){
                   onClick={() => {
                     if (shouldIgnorePickMenuClick()) return;
                     patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, '', requiredCount);
-                    setPickMenuState(null);
                   }}
                 >
                   선택 해제
@@ -2127,6 +2130,7 @@ export default function PlayerEventInput(){
                   const value = String(opt?.id || '');
                   const selectedElsewhere = rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
                   const active = String(selectedId) === value;
+                  const disabled = !!selectedId || selectedElsewhere;
                   return (
                     <button
                       key={value}
@@ -2135,11 +2139,11 @@ export default function PlayerEventInput(){
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => {
                         if (shouldIgnorePickMenuClick()) return;
-                        if (selectedElsewhere) return;
+                        if (disabled) return;
                         patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, value, requiredCount);
                         setPickMenuState(null);
                       }}
-                      disabled={selectedElsewhere}
+                      disabled={disabled}
                       title={displayPickOption(opt)}
                     >
                       {displayPickOption(opt)}
