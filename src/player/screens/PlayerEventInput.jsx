@@ -47,7 +47,9 @@ function formatDisplayNumber(value){
   const n = Number(value);
   if (!Number.isFinite(n)) return '';
   const s = n.toFixed(2);
-  return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
+  if (s.endsWith('.00')) return s.slice(0, -3);
+  if (s.endsWith('0')) return s.slice(0, -1);
+  return s;
 }
 
 function makeEmptyBingoBoard(){
@@ -152,13 +154,6 @@ function displayPickOption(p){
   return String(p?.nickname || '');
 }
 
-
-function estimatePickTextUnits(text = ''){
-  return Array.from(String(text || '')).reduce((sum, ch) => {
-    const code = String(ch || '').codePointAt(0) || 0;
-    return sum + (code > 0xff ? 1.85 : 1);
-  }, 0);
-}
 
 const PICK_MENU_WIDTH_PX = 136;
 
@@ -1266,7 +1261,6 @@ export default function PlayerEventInput(){
 
           if (ev.template === 'group-room-hole-battle') {
             const battleCfg = normalizeGroupRoomHoleBattleParams(ev?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
-            const battleRows = getGroupRoomBattleRows(ev);
             const battleSelectedHoles = Array.isArray(battleCfg.selectedHoles) ? battleCfg.selectedHoles : [];
             const battleLocked = !!ev?.params?.selectionLocked;
             const battleScoreParticipants = getGroupRoomBattleScoreParticipants(ev, participants, {
@@ -1283,6 +1277,9 @@ export default function PlayerEventInput(){
               currentParticipantId: selfParticipantId,
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
+            const battleSelectionRows = battleCfg.mode === 'group'
+              ? getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 })
+              : (battleData.inputRows || []);
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
             const battlePreviewShowRank = battleCfg.mode === 'person';
@@ -1368,7 +1365,7 @@ export default function PlayerEventInput(){
                       </tr>
                     </thead>
                     <tbody>
-                      {battleRows.map((row) => (
+                      {battleSelectionRows.map((row) => (
                         <tr key={`battle-row-${row.key}`}>
                           <td className={tCss.pickInputNick}>{row.name}</td>
                           {battleSelectedHoles.map((holeNo) => {
@@ -2238,10 +2235,12 @@ export default function PlayerEventInput(){
           const activeEvent = events.find((item) => item.id === battleMenuState.evId);
           const portalNode = typeof document !== 'undefined' ? document.body : null;
           if (!portalNode || !activeEvent) return null;
-          const rows = getGroupRoomBattleRows(activeEvent);
+          const cfg = normalizeGroupRoomHoleBattleParams(activeEvent?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+          const rows = cfg.mode === 'group'
+            ? getGroupRoomHoleBattleRows(activeEvent, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 })
+            : getGroupRoomHoleBattleInputRows(activeEvent, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
           const row = rows.find((item) => String(item.key) === String(battleMenuState.rowKey));
           if (!row) return null;
-          const cfg = normalizeGroupRoomHoleBattleParams(activeEvent?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
           const shared = getBattleSharedInputs(inputsByEvent?.[battleMenuState.evId] || {});
           const currentIds = getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
           const usage = countParticipantUsageForRow(shared, row.key);
