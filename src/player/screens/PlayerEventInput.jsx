@@ -367,6 +367,7 @@ export default function PlayerEventInput(){
   const [fallbackAt, setFallbackAt] = useState(0);
   const [pickMenuState, setPickMenuState] = useState(null);
   const [battleMenuState, setBattleMenuState] = useState(null);
+  const [battlePreviewExpandedMap, setBattlePreviewExpandedMap] = useState({});
   const pickButtonRefs = useRef({});
   const pickMenuGestureRef = useRef({ dragging:false, startY:0, lastMoveAt:0 });
 
@@ -1240,10 +1241,20 @@ export default function PlayerEventInput(){
             });
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
-            const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
-            const battlePreviewRowsBase = battleCfg.mode === 'person'
+            const battlePreviewShowRank = battleCfg.mode === 'person';
+            const battlePreviewAllRowsBase = battleCfg.mode === 'person'
               ? (battleData.rows || [])
               : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+            const battlePreviewExpanded = !!battlePreviewExpandedMap?.[ev.id];
+            const battlePreviewRowsBase = (() => {
+              if (battleCfg.mode !== 'room' || battlePreviewExpanded) return battlePreviewAllRowsBase;
+              const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
+              if (mine) return [mine];
+              return battlePreviewAllRowsBase.slice(0, 1);
+            })();
+            const battlePreviewRowsResolved = battlePreviewRowsBase.map((rowBase) => (battleData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase);
+            const battlePreviewRankByKey = new Map((battleData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
+            const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54 + (battlePreviewShowRank ? 54 : 0));
             const canEditBattleSelection = (row) => {
               if (battleLocked) return false;
               if (battleCfg.mode !== 'group') return true;
@@ -1269,8 +1280,8 @@ export default function PlayerEventInput(){
             const battlePreviewSubtotal = battleSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
-              battleData.rows.forEach((row) => {
-                const item = row.holes.find((hole) => Number(hole?.holeNo) === Number(holeNo));
+              battlePreviewRowsResolved.forEach((row) => {
+                const item = Array.isArray(row?.holes) ? row.holes.find((hole) => Number(hole?.holeNo) === Number(holeNo)) : null;
                 const n = Number(item?.value);
                 if (Number.isFinite(n)) {
                   sum += n;
@@ -1421,25 +1432,36 @@ export default function PlayerEventInput(){
                 </div>
 
                 <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
-                  <div className={tCss.viewerTitle}>선택 미리보기</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
+                    <div className={tCss.viewerTitle} style={{ margin: 0 }}>선택 미리보기</div>
+                    {battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setBattlePreviewExpandedMap((prev) => ({ ...prev, [ev.id]: !battlePreviewExpanded }))}
+                        style={{ border: '1px solid #cbd8ea', background: '#fff', color: '#21457f', borderRadius: 10, padding: '6px 10px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}
+                      >
+                        {battlePreviewExpanded ? '접기' : '펼쳐보기'}
+                      </button>
+                    )}
+                  </div>
                   <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.viewerTableWrap}`}>
                     <table className={tCss.table} style={{ width: `${battlePreviewWidth}px` }}>
                       <colgroup>
                         <col style={{ width: '110px' }} />
                         {battleSelectedHoles.map((holeNo) => <col key={`battle-preview-col-${holeNo}`} style={{ width: '62px' }} />)}
                         <col style={{ width: '54px' }} />
+                        {battlePreviewShowRank && <col style={{ width: '54px' }} />}
                       </colgroup>
                       <thead>
                         <tr>
                           <th>닉네임</th>
                           {battleSelectedHoles.map((holeNo) => <th key={`battle-preview-head-${holeNo}`}>{holeNo}</th>)}
                           <th>합계</th>
+                          {battlePreviewShowRank && <th>순위</th>}
                         </tr>
                       </thead>
                       <tbody>
-                        {battlePreviewRowsBase.map((rowBase) => {
-                          const row = (battleData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase;
-                          return (
+                        {battlePreviewRowsResolved.map((row) => (
                           <tr key={`battle-preview-row-${row.key}`}>
                             <td>{row.name}</td>
                             {battleSelectedHoles.map((holeNo) => {
@@ -1448,12 +1470,14 @@ export default function PlayerEventInput(){
                               return <td key={`battle-preview-cell-${row.key}-${holeNo}`}>{Number.isFinite(value) ? formatDisplayNumber(value) : ''}</td>;
                             })}
                             <td className={tCss.totalCell}>{formatDisplayNumber(row.value)}</td>
+                            {battlePreviewShowRank && <td className={tCss.subtotalBlue}>{battlePreviewRankByKey.get(String(row?.key || '')) || ''}</td>}
                           </tr>
-                        );})}
+                        ))}
                         <tr className={tCss.subtotalRow}>
                           <td className={tCss.subtotalLabel}>소계</td>
                           {battlePreviewSubtotal.map((item) => <td key={`battle-preview-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
                           <td className={tCss.subtotalRed}>{battlePreviewGrandHasAny ? formatDisplayNumber(battlePreviewGrandTotal) : ''}</td>
+                          {battlePreviewShowRank && <td className={tCss.subtotalBlue}></td>}
                         </tr>
                       </tbody>
                     </table>
