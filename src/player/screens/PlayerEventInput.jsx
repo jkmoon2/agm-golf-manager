@@ -47,7 +47,9 @@ function formatDisplayNumber(value){
   const n = Number(value);
   if (!Number.isFinite(n)) return '';
   const s = n.toFixed(2);
-  return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
+  if (s.endsWith('.00')) return s.slice(0, -3);
+  if (s.endsWith('0')) return s.slice(0, -1);
+  return s;
 }
 
 function makeEmptyBingoBoard(){
@@ -152,12 +154,6 @@ function displayPickOption(p){
   return String(p?.nickname || '');
 }
 
-
-function estimatePickTextUnits(text = ''){
-  return Array.from(String(text || '')).reduce((sum, ch) => {
-    return sum + (/[^\u0000-\u00ff]/.test(ch) ? 1.85 : 1);
-  }, 0);
-}
 
 const PICK_MENU_WIDTH_PX = 136;
 
@@ -317,10 +313,49 @@ function inferRoomFromSelf(participants = [], eventData = {}) {
   return NaN;
 }
 
-function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN) {
+function readStoredPlayerHints(eventId) {
+  const ids = new Set();
+  const nicks = new Set();
+  const pushId = (v) => {
+    const s = String(v || '').trim();
+    if (s) ids.add(s);
+  };
+  const pushNick = (v) => {
+    const s = String(v || '').trim().toLowerCase();
+    if (s) nicks.add(s);
+  };
+  const readJson = (raw) => {
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+  };
+  const readParticipant = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    pushId(obj.id);
+    pushId(obj.uid);
+    pushNick(obj.nickname);
+  };
+  try {
+    if (eventId) {
+      readParticipant(readJson(sessionStorage.getItem(`participant_${eventId}`)));
+      readParticipant(readJson(localStorage.getItem(playerStorageKey(eventId, 'participant'))));
+      readParticipant(readJson(localStorage.getItem(`participant:${eventId}`)));
+      pushId(localStorage.getItem(playerStorageKey(eventId, 'myId')));
+      pushNick(localStorage.getItem(playerStorageKey(eventId, 'nickname')));
+    }
+  } catch {}
+  try {
+    pushId(auth?.currentUser?.uid);
+    pushNick(auth?.currentUser?.displayName);
+  } catch {}
+  return { ids: Array.from(ids), nicks: Array.from(nicks) };
+}
+
+function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN, eventId = '') {
+  const storedHints = readStoredPlayerHints(eventId);
   const ids = [
     eventData?.auth?.uid, eventData?.player?.uid, eventData?.me?.uid,
     eventData?.auth?.id, eventData?.player?.id, eventData?.me?.id,
+    ...storedHints.ids,
   ].filter(Boolean).map((v) => String(v));
 
   const inSameRoom = (participant) => {
@@ -336,7 +371,8 @@ function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN) {
     }
   }
 
-  const myNick = String(eventData?.auth?.nickname || eventData?.player?.nickname || eventData?.me?.nickname || '').trim().toLowerCase();
+  const myNickCandidates = [eventData?.auth?.nickname, eventData?.player?.nickname, eventData?.me?.nickname, ...storedHints.nicks].filter(Boolean);
+  const myNick = String(myNickCandidates[0] || '').trim().toLowerCase();
   if (myNick) {
     for (const participant of Array.isArray(participants) ? participants : []) {
       const nick = String(participant?.nickname || '').trim().toLowerCase();
@@ -509,10 +545,11 @@ export default function PlayerEventInput(){
   }, [roomIdx, eventId]);
 
   const selfParticipant = useMemo(
-    () => inferSelfParticipant(participants, eventData, roomIdx),
-    [participants, eventData, roomIdx]
+    () => inferSelfParticipant(participants, eventData, roomIdx, eventId || ctxId),
+    [participants, eventData, roomIdx, eventId, ctxId]
   );
   const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
+  const selfParticipantNickname = useMemo(() => String(selfParticipant?.nickname || '').trim().toLowerCase(), [selfParticipant]);
 
   const openPickMenuAt = (evId, pid, idx, options = [], buttonEl = null) => {
     const rect = buttonEl?.getBoundingClientRect?.();
@@ -943,7 +980,7 @@ export default function PlayerEventInput(){
     return sortedParticipants;
   };
 
-  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleInputRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId });
+  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
@@ -999,7 +1036,7 @@ export default function PlayerEventInput(){
         const sPerson = slot?.person || {};
         const evDef = events.find((item) => String(item?.id) === String(evId));
         const allowedPids = evDef?.template === 'group-room-hole-battle'
-          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId }).map((p) => String(p?.id || '')).filter(Boolean))
+          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') }).map((p) => String(p?.id || '')).filter(Boolean))
           : roomPids;
         if (!merged[evId]) merged[evId] = {};
         const mSlot = { ...(merged[evId]||{}) };
@@ -1067,7 +1104,7 @@ export default function PlayerEventInput(){
           const dShared = JSON.stringify(getBattleSharedInputs(draft?.[evId] || {}));
           const sShared = JSON.stringify(getBattleSharedInputs(inputsByEventServer?.[evId] || {}));
           if (!eq(dShared, sShared)) return true;
-          const relevant = getGroupRoomBattleScoreParticipants(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId });
+          const relevant = getGroupRoomBattleScoreParticipants(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
           const holes = Array.isArray(ev?.params?.selectedHoles) ? ev.params.selectedHoles : [];
           for (const p of relevant) {
             const pid = String(p?.id || '');
@@ -1224,7 +1261,6 @@ export default function PlayerEventInput(){
 
           if (ev.template === 'group-room-hole-battle') {
             const battleCfg = normalizeGroupRoomHoleBattleParams(ev?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
-            const battleRows = getGroupRoomBattleRows(ev);
             const battleSelectedHoles = Array.isArray(battleCfg.selectedHoles) ? battleCfg.selectedHoles : [];
             const battleLocked = !!ev?.params?.selectionLocked;
             const battleScoreParticipants = getGroupRoomBattleScoreParticipants(ev, participants, {
@@ -1232,13 +1268,18 @@ export default function PlayerEventInput(){
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
               currentParticipantId: selfParticipantId,
+              currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
             const battleData = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[ev.id] || {}, {
               roomNames,
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
               currentParticipantId: selfParticipantId,
+              currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
+            const battleSelectionRows = battleCfg.mode === 'group'
+              ? getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 })
+              : (battleData.inputRows || []);
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
             const battlePreviewShowRank = battleCfg.mode === 'person';
@@ -1258,9 +1299,19 @@ export default function PlayerEventInput(){
             const canEditBattleSelection = (row) => {
               if (battleLocked) return false;
               if (battleCfg.mode !== 'group') return true;
+
+              const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [];
+              const memberNames = (Array.isArray(row?.members) ? row.members : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
+              const isMine = (selfParticipantId && memberIds.includes(selfParticipantId))
+                || (selfParticipantNickname && memberNames.includes(selfParticipantNickname));
+              if (!isMine) return false;
+
               const leaders = Array.isArray(row?.leaderIds) ? row.leaderIds.map(String).filter(Boolean) : [];
               if (!leaders.length) return true;
-              return !!selfParticipantId && leaders.includes(selfParticipantId);
+
+              const leaderNames = (Array.isArray(row?.leaders) ? row.leaders : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
+              return (selfParticipantId && leaders.includes(selfParticipantId))
+                || (selfParticipantNickname && leaderNames.includes(selfParticipantNickname));
             };
             const battleScoreSubtotal = battleSelectedHoles.map((holeNo) => {
               let sum = 0;
@@ -1314,7 +1365,7 @@ export default function PlayerEventInput(){
                       </tr>
                     </thead>
                     <tbody>
-                      {battleRows.map((row) => (
+                      {battleSelectionRows.map((row) => (
                         <tr key={`battle-row-${row.key}`}>
                           <td className={tCss.pickInputNick}>{row.name}</td>
                           {battleSelectedHoles.map((holeNo) => {
@@ -1391,7 +1442,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+\-]*"
+                                    pattern="[0-9.+-]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -1575,7 +1626,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+\-]*"
+                                    pattern="[0-9.+-]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -1960,7 +2011,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern={isHoleRankForce ? "[0-9.+\-]*" : "[0-9.]*"}
+                                    pattern={isHoleRankForce ? "[0-9.+-]*" : "[0-9.]*"}
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -2184,10 +2235,12 @@ export default function PlayerEventInput(){
           const activeEvent = events.find((item) => item.id === battleMenuState.evId);
           const portalNode = typeof document !== 'undefined' ? document.body : null;
           if (!portalNode || !activeEvent) return null;
-          const rows = getGroupRoomBattleRows(activeEvent);
+          const cfg = normalizeGroupRoomHoleBattleParams(activeEvent?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+          const rows = cfg.mode === 'group'
+            ? getGroupRoomHoleBattleRows(activeEvent, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 })
+            : getGroupRoomHoleBattleInputRows(activeEvent, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
           const row = rows.find((item) => String(item.key) === String(battleMenuState.rowKey));
           if (!row) return null;
-          const cfg = normalizeGroupRoomHoleBattleParams(activeEvent?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
           const shared = getBattleSharedInputs(inputsByEvent?.[battleMenuState.evId] || {});
           const currentIds = getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
           const usage = countParticipantUsageForRow(shared, row.key);
