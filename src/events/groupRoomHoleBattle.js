@@ -165,6 +165,7 @@ export function getGroupRoomHoleBattleInputRows(eventDef, participants = [], opt
   });
   const currentRoomNo = Number(opt?.currentRoomNo || 0);
   const currentParticipantId = String(opt?.currentParticipantId || '').trim();
+  const currentParticipantNickname = String(opt?.currentParticipantNickname || '').trim().toLowerCase();
 
   if (cfg.mode === 'room') {
     const rows = getRoomRows(cfg, participants);
@@ -194,7 +195,11 @@ export function getGroupRoomHoleBattleInputRows(eventDef, participants = [], opt
 
   const rows = getGroupRows(cfg, participants);
   if (currentParticipantId) {
-    const mine = rows.filter((row) => row.memberIds.some((id) => String(id) == currentParticipantId));
+    const mine = rows.filter((row) => row.memberIds.some((id) => String(id) === currentParticipantId));
+    if (mine.length) return mine;
+  }
+  if (currentParticipantNickname) {
+    const mine = rows.filter((row) => (Array.isArray(row?.members) ? row.members : []).some((member) => String(member?.nickname || '').trim().toLowerCase() === currentParticipantNickname));
     if (mine.length) return mine;
   }
   if (currentRoomNo < 1) return rows;

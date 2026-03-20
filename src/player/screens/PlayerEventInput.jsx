@@ -317,10 +317,49 @@ function inferRoomFromSelf(participants = [], eventData = {}) {
   return NaN;
 }
 
-function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN) {
+function readStoredPlayerHints(eventId) {
+  const ids = new Set();
+  const nicks = new Set();
+  const pushId = (v) => {
+    const s = String(v || '').trim();
+    if (s) ids.add(s);
+  };
+  const pushNick = (v) => {
+    const s = String(v || '').trim().toLowerCase();
+    if (s) nicks.add(s);
+  };
+  const readJson = (raw) => {
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+  };
+  const readParticipant = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    pushId(obj.id);
+    pushId(obj.uid);
+    pushNick(obj.nickname);
+  };
+  try {
+    if (eventId) {
+      readParticipant(readJson(sessionStorage.getItem(`participant_${eventId}`)));
+      readParticipant(readJson(localStorage.getItem(playerStorageKey(eventId, 'participant'))));
+      readParticipant(readJson(localStorage.getItem(`participant:${eventId}`)));
+      pushId(localStorage.getItem(playerStorageKey(eventId, 'myId')));
+      pushNick(localStorage.getItem(playerStorageKey(eventId, 'nickname')));
+    }
+  } catch {}
+  try {
+    pushId(auth?.currentUser?.uid);
+    pushNick(auth?.currentUser?.displayName);
+  } catch {}
+  return { ids: Array.from(ids), nicks: Array.from(nicks) };
+}
+
+function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN, eventId = '') {
+  const storedHints = readStoredPlayerHints(eventId);
   const ids = [
     eventData?.auth?.uid, eventData?.player?.uid, eventData?.me?.uid,
     eventData?.auth?.id, eventData?.player?.id, eventData?.me?.id,
+    ...storedHints.ids,
   ].filter(Boolean).map((v) => String(v));
 
   const inSameRoom = (participant) => {
@@ -336,7 +375,8 @@ function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN) {
     }
   }
 
-  const myNick = String(eventData?.auth?.nickname || eventData?.player?.nickname || eventData?.me?.nickname || '').trim().toLowerCase();
+  const myNickCandidates = [eventData?.auth?.nickname, eventData?.player?.nickname, eventData?.me?.nickname, ...storedHints.nicks].filter(Boolean);
+  const myNick = String(myNickCandidates[0] || '').trim().toLowerCase();
   if (myNick) {
     for (const participant of Array.isArray(participants) ? participants : []) {
       const nick = String(participant?.nickname || '').trim().toLowerCase();
@@ -509,8 +549,8 @@ export default function PlayerEventInput(){
   }, [roomIdx, eventId]);
 
   const selfParticipant = useMemo(
-    () => inferSelfParticipant(participants, eventData, roomIdx),
-    [participants, eventData, roomIdx]
+    () => inferSelfParticipant(participants, eventData, roomIdx, eventId || ctxId),
+    [participants, eventData, roomIdx, eventId, ctxId]
   );
   const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
 
@@ -943,7 +983,7 @@ export default function PlayerEventInput(){
     return sortedParticipants;
   };
 
-  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleInputRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId });
+  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleInputRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
@@ -999,7 +1039,7 @@ export default function PlayerEventInput(){
         const sPerson = slot?.person || {};
         const evDef = events.find((item) => String(item?.id) === String(evId));
         const allowedPids = evDef?.template === 'group-room-hole-battle'
-          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId }).map((p) => String(p?.id || '')).filter(Boolean))
+          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') }).map((p) => String(p?.id || '')).filter(Boolean))
           : roomPids;
         if (!merged[evId]) merged[evId] = {};
         const mSlot = { ...(merged[evId]||{}) };
@@ -1067,7 +1107,7 @@ export default function PlayerEventInput(){
           const dShared = JSON.stringify(getBattleSharedInputs(draft?.[evId] || {}));
           const sShared = JSON.stringify(getBattleSharedInputs(inputsByEventServer?.[evId] || {}));
           if (!eq(dShared, sShared)) return true;
-          const relevant = getGroupRoomBattleScoreParticipants(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId });
+          const relevant = getGroupRoomBattleScoreParticipants(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
           const holes = Array.isArray(ev?.params?.selectedHoles) ? ev.params.selectedHoles : [];
           for (const p of relevant) {
             const pid = String(p?.id || '');
@@ -1232,12 +1272,14 @@ export default function PlayerEventInput(){
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
               currentParticipantId: selfParticipantId,
+              currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
             const battleData = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[ev.id] || {}, {
               roomNames,
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
               currentParticipantId: selfParticipantId,
+              currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
@@ -1258,9 +1300,11 @@ export default function PlayerEventInput(){
             const canEditBattleSelection = (row) => {
               if (battleLocked) return false;
               if (battleCfg.mode !== 'group') return true;
+              const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [];
+              if (!selfParticipantId || !memberIds.includes(selfParticipantId)) return false;
               const leaders = Array.isArray(row?.leaderIds) ? row.leaderIds.map(String).filter(Boolean) : [];
               if (!leaders.length) return true;
-              return !!selfParticipantId && leaders.includes(selfParticipantId);
+              return leaders.includes(selfParticipantId);
             };
             const battleScoreSubtotal = battleSelectedHoles.map((holeNo) => {
               let sum = 0;
