@@ -155,7 +155,8 @@ function displayPickOption(p){
 
 function estimatePickTextUnits(text = ''){
   return Array.from(String(text || '')).reduce((sum, ch) => {
-    return sum + (/[^\u0000-\u00ff]/.test(ch) ? 1.85 : 1);
+    const code = String(ch || '').codePointAt(0) || 0;
+    return sum + (code > 0xff ? 1.85 : 1);
   }, 0);
 }
 
@@ -553,6 +554,7 @@ export default function PlayerEventInput(){
     [participants, eventData, roomIdx, eventId, ctxId]
   );
   const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
+  const selfParticipantNickname = useMemo(() => String(selfParticipant?.nickname || '').trim().toLowerCase(), [selfParticipant]);
 
   const openPickMenuAt = (evId, pid, idx, options = [], buttonEl = null) => {
     const rect = buttonEl?.getBoundingClientRect?.();
@@ -983,7 +985,7 @@ export default function PlayerEventInput(){
     return sortedParticipants;
   };
 
-  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleInputRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
+  const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
@@ -1300,11 +1302,19 @@ export default function PlayerEventInput(){
             const canEditBattleSelection = (row) => {
               if (battleLocked) return false;
               if (battleCfg.mode !== 'group') return true;
+
               const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [];
-              if (!selfParticipantId || !memberIds.includes(selfParticipantId)) return false;
+              const memberNames = (Array.isArray(row?.members) ? row.members : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
+              const isMine = (selfParticipantId && memberIds.includes(selfParticipantId))
+                || (selfParticipantNickname && memberNames.includes(selfParticipantNickname));
+              if (!isMine) return false;
+
               const leaders = Array.isArray(row?.leaderIds) ? row.leaderIds.map(String).filter(Boolean) : [];
               if (!leaders.length) return true;
-              return leaders.includes(selfParticipantId);
+
+              const leaderNames = (Array.isArray(row?.leaders) ? row.leaders : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
+              return (selfParticipantId && leaders.includes(selfParticipantId))
+                || (selfParticipantNickname && leaderNames.includes(selfParticipantNickname));
             };
             const battleScoreSubtotal = battleSelectedHoles.map((holeNo) => {
               let sum = 0;
@@ -1435,7 +1445,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+\-]*"
+                                    pattern="[0-9.+-]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -1619,7 +1629,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+\-]*"
+                                    pattern="[0-9.+-]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -2004,7 +2014,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern={isHoleRankForce ? "[0-9.+\-]*" : "[0-9.]*"}
+                                    pattern={isHoleRankForce ? "[0-9.+-]*" : "[0-9.]*"}
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
