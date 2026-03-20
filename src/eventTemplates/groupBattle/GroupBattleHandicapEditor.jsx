@@ -1,5 +1,6 @@
 // /src/eventTemplates/groupBattle/GroupBattleHandicapEditor.jsx
-// group-battle 전용: 이벤트 결과에만 반영되는 G핸디 오버라이드 편집기
+// /src/eventTemplates/groupBattle/GroupBattleHandicapEditor.jsx
+// 이벤트 결과 전용 G핸디 오버라이드 편집기
 // - 참가자 원본 데이터(다른 STEP)와 절대 연동하지 않음
 // - 저장 위치: eventDef.params.handicapOverrides { [participantId]: number }
 
@@ -33,7 +34,10 @@ export default function GroupBattleHandicapEditor({
   }, [open, baseOverrides]);
 
   const title = eventDef?.title || '이벤트';
-  const metric = eventDef?.params?.metric === 'score' ? '점수' : '결과';
+  const template = String(eventDef?.template || '');
+  const metric = template === 'pick-lineup'
+    ? '결과'
+    : (eventDef?.params?.metric === 'score' ? '점수' : '결과');
 
   const roomLabel = (p) => {
     const r = Number(p?.room);

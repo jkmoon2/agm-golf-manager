@@ -26,6 +26,8 @@
 .table thead th { 
   background:#fafafa; 
   font-weight:700;
+  white-space:nowrap;
+  word-break:keep-all;
 }
 .table th,
 .table td{
@@ -38,6 +40,29 @@
   vertical-align: middle;
   min-width:0;
 }
+
+
+.table thead th:first-child{
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background:#fafafa;
+  box-shadow: 2px 0 0 #e5e7eb;
+}
+
+.table tbody td:first-child{
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background:#fff;
+  box-shadow: 2px 0 0 #e5e7eb;
+}
+
+.subtotalRow td:first-child{
+  z-index: 3;
+  background:#fbfdff;
+}
+
 .cellEditable { position: relative; }
 .cellEditable:focus-within{
   box-shadow: inset 0 0 0 2px rgba(59,130,246,.45);
@@ -59,8 +84,346 @@
   color:#1e40ff;
 }
 
+.cellSelect{
+  width:100%;
+  max-width:100%;
+  height: calc(var(--row-h) - 6px);
+  margin:0;
+  padding:2px 3px;
+  box-sizing:border-box;
+  background:transparent;
+  border:none;
+  outline:none;
+  display:block;
+  text-align:center;
+  text-align-last:center;
+  font-size:13px;
+  color:#15356b;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  background-image:none;
+}
+
+.cellSelectCompact{
+  font-size:12px;
+  padding:2px 1px;
+}
+
+.cellSelect option{
+  text-align:left;
+}
+
+.cellSelect::-ms-expand{
+  display:none;
+}
+
+.pickMenuHolder{
+  position:relative;
+  width:100%;
+}
+
+.pickSelectButton{
+  width:100%;
+  height: calc(var(--row-h) - 6px);
+  margin:0;
+  padding:2px 3px;
+  box-sizing:border-box;
+  background:transparent;
+  border:none;
+  outline:none;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#1e40ff;
+  font-size:13px;
+  font-weight:600;
+  text-align:center;
+}
+
+.pickSelectButtonCompact{
+  font-size:12px;
+  padding:2px 1px;
+}
+
+.pickSelectButton:disabled{
+  color:#98a2b3;
+}
+
+.pickSelectText{
+  display:block;
+  width:100%;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  text-align:center;
+  color:#1e40ff;
+}
+
+.pickInputNick{
+  padding:0 6px !important;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  font-size:15px;
+  font-weight:500;
+  color:#15356b;
+}
+
+.pickMenuOverlay{
+  position:fixed;
+  inset:0;
+  z-index:1200;
+  overscroll-behavior:contain;
+}
+
+.pickMenu{
+  z-index:1210;
+  border:1px solid #d6dde8;
+  border-radius:10px;
+  background:#fff;
+  box-shadow:0 12px 28px rgba(15, 23, 42, 0.16);
+  padding:6px;
+  display:grid;
+  gap:4px;
+  max-height:min(56vh, 360px);
+  overflow-y:auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+}
+
+.pickMenuOption{
+  width:100%;
+  min-height:32px;
+  padding:6px 10px;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  background:#fff;
+  color:#183153;
+  font-size:14px;
+  text-align:left;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  touch-action: manipulation;
+}
+
+.pickMenuOptionActive{
+  border-color:#bcd0ff;
+  background:#eef4ff;
+  color:#2457d6;
+  font-weight:700;
+}
+
+.pickMenuOption:disabled{
+  color:#9ca3af;
+  background:#f8fafc;
+}
+
 /* 팝업: 고정 min-width 제거, 내용 기준 width (JS에서 width 지정) + 줄바꿈 방지 */
 .bonusPopup{
   white-space: nowrap;
   border-radius: 8px;
+}
+
+
+.totalCell{
+  color:#d11a2a;
+  font-weight:800;
+}
+
+.subtotalRow td{
+  background:#fbfdff;
+  font-weight:800;
+}
+
+.subtotalLabel{
+  color:#15356b;
+  font-weight:800;
+}
+
+.subtotalBlue{
+  color:#1e40ff;
+  font-weight:800;
+}
+
+.subtotalRed{
+  color:#d11a2a;
+  font-weight:800;
+}
+
+.viewerWrap{
+  margin-top:12px;
+}
+
+.viewerTitle{
+  margin:0 12px 8px;
+  font-size:14px;
+  font-weight:800;
+  color:#15356b;
+  text-align:left;
+}
+
+.viewerTableWrap{
+  margin:0 12px 0 !important;
+}
+
+/*
+  환산 적용 미리보기 간격/크기 3안
+  - tight    : 제목과 아래 표를 가장 가깝게
+  - balanced : 현재 톤 유지 + 조금 키우고 조금 아래
+  - roomy    : 여백을 조금 더 둔 버전
+  PlayerEventInput.jsx 상단의 FORCED_PREVIEW_LAYOUT 값만 바꾸면 됨.
+*/
+.viewerPresetTight{
+  margin-top:14px;
+  padding-top:2px;
+}
+.viewerPresetTight .viewerTitle{
+  margin:0 12px 2px;
+  font-size:15px;
+}
+.viewerPresetTight .viewerTableWrap{
+  margin:0 12px 0 !important;
+}
+
+.viewerPresetBalanced{
+  margin-top:18px;
+  padding-top:4px;
+}
+.viewerPresetBalanced .viewerTitle{
+  margin:0 12px 3px;
+  font-size:16px;
+}
+.viewerPresetBalanced .viewerTableWrap{
+  margin:1px 12px 0 !important;
+}
+
+.viewerPresetRoomy{
+  margin-top:22px;
+  padding-top:6px;
+}
+.viewerPresetRoomy .viewerTitle{
+  margin:0 12px 5px;
+  font-size:16px;
+}
+.viewerPresetRoomy .viewerTableWrap{
+  margin:3px 12px 0 !important;
+}
+
+
+.pickPreviewWrap{
+  margin-top:12px;
+}
+
+
+.pickPreviewTable{
+  width:calc(100% - 24px) !important;
+  max-width:calc(100% - 24px);
+  margin-right:24px;
+  table-layout:fixed;
+  box-sizing:border-box;
+}
+
+.pickPreviewTable th:last-child,
+.pickPreviewTable td:last-child{
+  width:42px;
+  min-width:42px;
+  max-width:42px;
+  padding:0 1px !important;
+  white-space:nowrap;
+}
+
+
+.pickPreviewTableWrap{
+  width:100%;
+}
+
+.pickPreviewTitle{
+  margin:0 12px 8px;
+  font-size:14px;
+  font-weight:800;
+  color:#15356b;
+  text-align:left;
+}
+
+.pickPreviewCard{
+  border:none;
+  border-radius:0;
+  background:transparent;
+  padding:0;
+  width:100%;
+}
+
+.pickPreviewCell{
+  padding:0 4px !important;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.pickPreviewStrong{
+  font-weight:800;
+  color:#15356b;
+}
+
+.pickPreviewNick{
+  font-size:15px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.pickPreviewNickWide{
+  font-size:15px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.pickPreviewTeamMd{
+  font-size:13px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:#1e40ff;
+  font-weight:600;
+}
+
+.pickPreviewTeamSm{
+  font-size:12px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:#1e40ff;
+  font-weight:600;
+}
+
+.pickPreviewTeamXs{
+  font-size:11px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:#1e40ff;
+  font-weight:600;
+}
+
+.pickPreviewHandicap{
+  color:#d11a2a;
+  font-weight:800;
+  white-space:nowrap;
+  font-size:14px;
+  padding:0 2px !important;
+}
+
+.lockNotice{
+  margin:0 12px 8px;
+  font-size:12px;
+  font-weight:700;
+  color:#dc2626;
 }

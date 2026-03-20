@@ -13,6 +13,8 @@
    ****************************************************************** */
 
 .page{
+  --player-tabbar-h: 56px;
+
   /* ===== 셀/테이블 공통 ===== */
   --row-h: 32px;           /* ▷ 칸 높이(줄 두께). 28~38px 사이에서 미세 조정 */
   --nick-ch: 10;           /* ▷ 최장 닉네임 문자수(ch). JS가 자동 주입; 타이트하면 수동으로 ↑ */
@@ -43,7 +45,7 @@
 }
 
 /* 페이지 내부 여백 (하단 네비 영역 확보) */
-.content{ padding:12px; padding-bottom:148px; }
+.content{ padding:12px; padding-bottom:calc(148px + env(safe-area-inset-bottom)); }
 
 /* 카드 레이아웃 */
 .card{ background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
@@ -118,9 +120,10 @@
 /* ===== 하단 고정 네비(이전/다음) — STEP3 동일 ===== */
 .footerNav{
   position:fixed; left:0; right:0;
-  bottom: calc(env(safe-area-inset-bottom) + 64px); /* ▷ 아이콘 탭 위로 띄우기 */
+  bottom: calc(env(safe-area-inset-bottom) + var(--player-tabbar-h));
+  z-index: 30;
   display:flex; gap:12px; justify-content:space-between; align-items:center;
-  padding:10px 16px; background:#fff;
+  padding:10px 16px; background:#fff; box-shadow: 0 -1px 0 rgba(15,23,42,.04);
 }
 .navBtn{
   flex:1; min-width:0;

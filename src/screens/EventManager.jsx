@@ -5,7 +5,7 @@
 // - 새 템플릿 range-convert-bonus(보너스) 추가 + 편집/집계 지원
 // - 미리보기 점수 표시는 소수점 '두 자리까지만' 포맷
 
-import React, { useContext, useMemo, useState, useEffect, useRef } from 'react';
+import React, { useContext, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, serverTimestamp, deleteField, collection, getDocs, deleteDoc } from 'firebase/firestore';
@@ -15,6 +15,19 @@ import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } fro
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
 import GroupBattlePreview from '../eventTemplates/groupBattle/GroupBattlePreview';
 import GroupBattleHandicapEditor from '../eventTemplates/groupBattle/GroupBattleHandicapEditor';
+import HoleRankForceEditor from '../eventTemplates/holeRankForce/HoleRankForceEditor';
+import HoleRankForcePreview from '../eventTemplates/holeRankForce/HoleRankForcePreview';
+import BingoEditor from '../eventTemplates/bingo/BingoEditor';
+import BingoSelectionMonitor from '../eventTemplates/bingo/BingoSelectionMonitor';
+import GroupRoomHoleBattleEditor from '../eventTemplates/groupRoomHoleBattle/GroupRoomHoleBattleEditor';
+import GroupRoomHoleBattlePreview from '../eventTemplates/groupRoomHoleBattle/GroupRoomHoleBattlePreview';
+import GroupRoomHoleBattleMonitor from '../eventTemplates/groupRoomHoleBattle/GroupRoomHoleBattleMonitor';
+import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
+import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
+import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
+import { computeHoleRankForce } from '../events/holeRankForce';
+import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
+import { normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -46,6 +59,61 @@ const fmt2 = (x) => {
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 };
 
+function isValidBingoParams(params) {
+  return normalizeBingoSelectedHoles(params?.selectedHoles).length === 16;
+}
+
+function getBingoCountText(params) {
+  const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
+  const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
+  return zoneCount ? `${holeCount}홀 · SZ ${zoneCount}` : `${holeCount}홀`;
+}
+
+
+
+function isValidGroupRoomHoleBattleParams(params) {
+  const safe = normalizeGroupRoomHoleBattleParams(params);
+  if (!Array.isArray(safe.selectedHoles) || safe.selectedHoles.length < 1) return false;
+  if (!Number.isFinite(Number(safe.pickCount)) || Number(safe.pickCount) < 1) return false;
+  if (!Number.isFinite(Number(safe.maxPerParticipant)) || Number(safe.maxPerParticipant) < 1) return false;
+  if (safe.mode === 'group') {
+    return Array.isArray(safe.groups) && safe.groups.some((g) => Array.isArray(g.memberIds) && g.memberIds.length > 0);
+  }
+  if (safe.mode === 'person') {
+    return Array.isArray(safe.personIds) && safe.personIds.length > 0;
+  }
+  return true;
+}
+
+
+
+function getGroupRoomHoleBattleMetaText(params) {
+  const safe = normalizeGroupRoomHoleBattleParams(params);
+  const holeCount = Array.isArray(safe.selectedHoles) ? safe.selectedHoles.length : 0;
+  const pickCount = Number.isFinite(Number(safe.pickCount)) ? `${Number(safe.pickCount)}명` : '미설정';
+  const maxCount = Number.isFinite(Number(safe.maxPerParticipant)) ? `최대 ${Number(safe.maxPerParticipant)}회` : '미설정';
+  const modeText = safe.mode === 'room' ? '방' : safe.mode === 'person' ? '개인' : '그룹';
+  const extra = safe.mode === 'person'
+    ? ` · ${Array.isArray(safe.personIds) ? safe.personIds.length : 0}명`
+    : safe.mode === 'group'
+      ? ` · ${Array.isArray(safe.groups) ? safe.groups.length : 0}개 그룹`
+      : '';
+  return `${modeText}${extra} · ${holeCount}홀 · ${pickCount} · ${maxCount}`;
+}
+
+
+function getClientPoint(evt){
+  const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
+  if (touch) return { clientX: Number(touch.clientX || 0), clientY: Number(touch.clientY || 0) };
+  return { clientX: Number(evt?.clientX || 0), clientY: Number(evt?.clientY || 0) };
+}
+
+const TOUCH_LONG_PRESS_MS = 420;
+const MOUSE_LONG_PRESS_MS = 280;
+const TOUCH_CANCEL_PX = 24;
+const MOUSE_CANCEL_PX = 12;
+
+
 export default function EventManager() {
   const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, overlayScoresToParticipants } = useContext(EventContext) || {};
 
@@ -59,6 +127,27 @@ export default function EventManager() {
   /* ── 새 이벤트 만들기 ─────────────────────────────────── */
   const eventsOfSelected = useMemo(() => Array.isArray(eventData?.events) ? eventData.events : [], [eventData]);
 
+  const [dragEvents, setDragEvents] = useState(null);
+  const [dragEventId, setDragEventId] = useState('');
+  const [monitorId, setMonitorId] = useState(null);
+  const [bingoMonitorId, setBingoMonitorId] = useState(null);
+  const [groupRoomHoleMonitorId, setGroupRoomHoleMonitorId] = useState(null);
+  const [bingoMonitorMode, setBingoMonitorMode] = useState('status');
+  const listItemRefs = useRef({});
+  const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' });
+  const reorderTouchCleanupRef = useRef(null);
+  const reorderMouseCleanupRef = useRef(null);
+  const suppressMenuClickRef = useRef(false);
+  const dragEventIdRef = useRef('');
+  const dragEventsRef = useRef(null);
+  const dragOverIdRef = useRef('');
+  const dragStartYRef = useRef(0);
+  const dragTranslateRafRef = useRef(null);
+  const dragIndexRef = useRef(-1);
+  const [dragLiftOn, setDragLiftOn] = useState(false);
+  const [dragTranslateY, setDragTranslateY] = useState(0);
+  const orderedEvents = dragEvents || eventsOfSelected;
+
   const [form, setForm] = useState({
     title: '',
     template: 'raw-number',
@@ -68,6 +157,14 @@ export default function EventManager() {
   });
   const [paramOpen, setParamOpen] = useState(false);
   const uiCreate = templateUi(form.template);
+
+  useEffect(() => {
+    dragEventIdRef.current = String(dragEventId || '');
+  }, [dragEventId]);
+
+  useEffect(() => {
+    dragEventsRef.current = Array.isArray(dragEvents) ? dragEvents : null;
+  }, [dragEvents]);
 
 
 // ────────────────────────────────────────────────────────────────
@@ -186,16 +283,28 @@ if (form.template === 'group-battle') {
   setParamOpen(false);
   alert('이벤트가 생성되었습니다.');
   return;
-}      const parsed = JSON.parse(form.paramsJson || '{}');
+}
+      const parsed = JSON.parse(form.paramsJson || '{}');
+      if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
+        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        return;
+      }
+      if (form.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
+        alert('그룹/방/개인 홀별 지목전은 사용 홀, 참가자 조건을 모두 설정하고, 그룹 모드는 그룹 멤버, 개인 모드는 참가자를 1명 이상 선택해야 합니다.');
+        return;
+      }
+      const isBingo = form.template === 'bingo';
+      const isGroupRoomHoleBattle = form.template === 'group-room-hole-battle';
+      const battleMode = isGroupRoomHoleBattle ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
         params: parsed,
-        target: 'person',
-        rankOrder: 'asc',
-        inputMode: form.inputMode,                // refresh | accumulate
-        attempts: Number(form.attempts || 4),     // 누적 칸수
+        target: isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'),
+        rankOrder: isBingo ? 'desc' : (isGroupRoomHoleBattle ? 'asc' : 'asc'),
+        inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
+        attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
       };
       const list = [...eventsOfSelected, item];
@@ -227,21 +336,297 @@ if (form.template === 'group-battle') {
     return () => document.removeEventListener('click', onClick);
   }, []);
 
-  const onOpenMenu = (ev, e) => {
-    e.stopPropagation();
+  const openMenuFromButton = (ev, btnEl) => {
     const id = (openMenuId === ev.id) ? null : ev.id;
     setOpenMenuId(id);
     setTimeout(() => {
       try {
-        const btnRect = e.currentTarget.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - btnRect.bottom;
-        const NEED = 160; // 메뉴 높이 대략치
+        const btnRect = btnEl?.getBoundingClientRect?.();
+        const spaceBelow = window.innerHeight - (btnRect?.bottom || 0);
+        const NEED = 200; // 메뉴 높이 대략치
         setMenuUpId(spaceBelow < NEED ? ev.id : null);
       } catch {
         setMenuUpId(null);
       }
     }, 0);
   };
+
+  function detachTouchReorderListeners() {
+    const cleanup = reorderTouchCleanupRef.current;
+    if (typeof cleanup === 'function') cleanup();
+    reorderTouchCleanupRef.current = null;
+  }
+
+  function detachMouseReorderListeners() {
+    const cleanup = reorderMouseCleanupRef.current;
+    if (typeof cleanup === 'function') cleanup();
+    reorderMouseCleanupRef.current = null;
+  }
+
+  function clearReorderSession() {
+    const state = reorderPressRef.current || {};
+    if (state.timer) {
+      clearTimeout(state.timer);
+    }
+    detachTouchReorderListeners();
+    detachMouseReorderListeners();
+    reorderPressRef.current = { timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' };
+    dragEventIdRef.current = '';
+    dragEventsRef.current = null;
+    dragOverIdRef.current = '';
+    dragIndexRef.current = -1;
+    if (dragTranslateRafRef.current) {
+      cancelAnimationFrame(dragTranslateRafRef.current);
+      dragTranslateRafRef.current = null;
+    }
+    setDragEventId('');
+    setDragEvents(null);
+    setDragLiftOn(false);
+    setDragTranslateY(0);
+    try {
+      document.body.style.userSelect = '';
+      document.body.style.touchAction = '';
+      document.body.style.webkitUserSelect = '';
+      document.body.style.overflow = '';
+      document.body.style.overscrollBehavior = '';
+      document.documentElement.style.overflow = '';
+      document.documentElement.style.overscrollBehavior = '';
+    } catch {}
+  }
+
+  const finalizeReorder = useCallback(async () => {
+    const nextList = Array.isArray(dragEventsRef.current) ? dragEventsRef.current : null;
+    const changed = !!nextList && nextList.length === eventsOfSelected.length
+      && nextList.some((item, idx) => String(item?.id) !== String(eventsOfSelected[idx]?.id));
+
+    clearReorderSession();
+
+    if (changed) {
+      await updateEventImmediate({ events: nextList }, false);
+    }
+  }, [eventsOfSelected, updateEventImmediate]);
+
+  const updateDragOrderByPoint = (clientY) => {
+    const activeEventId = String(dragEventIdRef.current || reorderPressRef.current?.eventId || '');
+    if (!activeEventId) return;
+    const currentList = Array.isArray(dragEventsRef.current) ? dragEventsRef.current : eventsOfSelected;
+    const activeItem = currentList.find((item) => String(item?.id) === activeEventId);
+    if (!activeItem) return;
+
+    const passiveList = currentList.filter((item) => String(item?.id) !== activeEventId);
+    let nextIndex = passiveList.length;
+
+    for (let i = 0; i < passiveList.length; i += 1) {
+      const passiveId = String(passiveList[i]?.id || '');
+      const el = listItemRefs.current?.[passiveId];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      const pivotY = rect.top + (rect.height / 2);
+      if (Number(clientY || 0) < pivotY) {
+        nextIndex = i;
+        break;
+      }
+    }
+
+    if (dragIndexRef.current === nextIndex) return;
+
+    const next = [...passiveList];
+    next.splice(nextIndex, 0, activeItem);
+    const changed = next.length === currentList.length
+      && next.some((item, idx) => String(item?.id) !== String(currentList[idx]?.id));
+    if (!changed) {
+      dragIndexRef.current = nextIndex;
+      return;
+    }
+
+    dragIndexRef.current = nextIndex;
+    dragOverIdRef.current = String(passiveList[nextIndex]?.id || passiveList[nextIndex - 1]?.id || '');
+    dragEventsRef.current = next;
+    setDragEvents(next);
+  };
+
+  const applyDragTranslate = (clientY) => {
+    const nextY = Number(clientY || 0) - Number(dragStartYRef.current || 0);
+    if (dragTranslateRafRef.current) cancelAnimationFrame(dragTranslateRafRef.current);
+    dragTranslateRafRef.current = requestAnimationFrame(() => {
+      setDragTranslateY(nextY);
+      dragTranslateRafRef.current = null;
+    });
+  };
+
+  const activateReorder = useCallback((ev) => {
+    suppressMenuClickRef.current = true;
+    const currentState = reorderPressRef.current || {};
+    dragStartYRef.current = Number(currentState.startY || 0);
+    reorderPressRef.current = {
+      ...(currentState || {}),
+      timer: null,
+      active: true,
+      eventId: ev.id,
+    };
+    dragEventIdRef.current = String(ev.id || '');
+    dragOverIdRef.current = '';
+    setDragEventId(ev.id);
+    setDragLiftOn(true);
+    setDragTranslateY(0);
+    const seeded = eventsOfSelected.slice();
+    dragIndexRef.current = seeded.findIndex((item) => String(item?.id) === String(ev.id));
+    dragEventsRef.current = seeded;
+    setDragEvents(seeded);
+    try {
+      document.body.style.userSelect = 'none';
+      document.body.style.touchAction = 'none';
+      document.body.style.webkitUserSelect = 'none';
+      document.body.style.overflow = 'hidden';
+      document.body.style.overscrollBehavior = 'contain';
+      document.documentElement.style.overflow = 'hidden';
+      document.documentElement.style.overscrollBehavior = 'contain';
+    } catch {}
+  }, [eventsOfSelected]);
+
+  const startTouchReorder = useCallback((ev, rawEvent) => {
+    rawEvent.stopPropagation();
+    if (typeof rawEvent.preventDefault === 'function' && rawEvent.cancelable !== false) rawEvent.preventDefault();
+    const touch = rawEvent.touches?.[0];
+    if (!touch) return;
+    clearReorderSession();
+    suppressMenuClickRef.current = false;
+    setOpenMenuId(null);
+    setMenuUpId(null);
+
+    const touchId = touch.identifier;
+    reorderPressRef.current = {
+      timer: setTimeout(() => activateReorder(ev), TOUCH_LONG_PRESS_MS),
+      active: false,
+      eventId: ev.id,
+      startX: Number(touch.clientX || 0),
+      startY: Number(touch.clientY || 0),
+      mode: 'touch',
+      touchId,
+    };
+
+    const readTouch = (evt) => {
+      const allTouches = [...Array.from(evt.touches || []), ...Array.from(evt.changedTouches || [])];
+      return allTouches.find((item) => item.identifier === touchId) || allTouches[0] || null;
+    };
+
+    const handleTouchMove = (moveEvt) => {
+      const state = reorderPressRef.current || {};
+      const currentTouch = readTouch(moveEvt);
+      if (!currentTouch) return;
+      const dx = Math.abs(Number(currentTouch.clientX || 0) - Number(state.startX || 0));
+      const dy = Math.abs(Number(currentTouch.clientY || 0) - Number(state.startY || 0));
+
+      if (!state.active) {
+        if (dx > TOUCH_CANCEL_PX || dy > TOUCH_CANCEL_PX) {
+          if (state.timer) {
+            clearTimeout(state.timer);
+            reorderPressRef.current = { ...(state || {}), timer: null };
+          }
+        }
+        return;
+      }
+
+      if (typeof moveEvt.preventDefault === 'function' && moveEvt.cancelable !== false) moveEvt.preventDefault();
+      setDragLiftOn(true);
+      applyDragTranslate(Number(currentTouch.clientY || 0));
+      updateDragOrderByPoint(Number(currentTouch.clientY || 0));
+    };
+
+    const handleTouchEnd = async () => {
+      const state = reorderPressRef.current || {};
+      if (state.timer) {
+        clearTimeout(state.timer);
+        reorderPressRef.current = { ...(state || {}), timer: null };
+      }
+      if (state.active) {
+        suppressMenuClickRef.current = true;
+        await finalizeReorder();
+      } else {
+        clearReorderSession();
+      }
+    };
+
+    window.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: false, capture: true });
+    window.addEventListener('touchcancel', handleTouchEnd, { passive: false, capture: true });
+    reorderTouchCleanupRef.current = () => {
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [activateReorder, applyDragTranslate, finalizeReorder]);
+
+  const startMouseReorder = useCallback((ev, rawEvent) => {
+    rawEvent.stopPropagation();
+    if (typeof rawEvent.button === 'number' && rawEvent.button !== 0) return;
+    clearReorderSession();
+    suppressMenuClickRef.current = false;
+    setOpenMenuId(null);
+    setMenuUpId(null);
+
+    reorderPressRef.current = {
+      timer: setTimeout(() => activateReorder(ev), MOUSE_LONG_PRESS_MS),
+      active: false,
+      eventId: ev.id,
+      startX: Number(rawEvent.clientX || 0),
+      startY: Number(rawEvent.clientY || 0),
+      mode: 'mouse',
+    };
+
+    const handleMouseMove = (moveEvt) => {
+      const state = reorderPressRef.current || {};
+      const dx = Math.abs(Number(moveEvt.clientX || 0) - Number(state.startX || 0));
+      const dy = Math.abs(Number(moveEvt.clientY || 0) - Number(state.startY || 0));
+      if (!state.active) {
+        if (dx > MOUSE_CANCEL_PX || dy > MOUSE_CANCEL_PX) {
+          if (state.timer) {
+            clearTimeout(state.timer);
+            reorderPressRef.current = { ...(state || {}), timer: null };
+          }
+        }
+        return;
+      }
+      if (typeof moveEvt.preventDefault === 'function') moveEvt.preventDefault();
+      setDragLiftOn(true);
+      applyDragTranslate(Number(moveEvt.clientY || 0));
+      updateDragOrderByPoint(Number(moveEvt.clientY || 0));
+    };
+
+    const handleMouseEnd = async () => {
+      const state = reorderPressRef.current || {};
+      if (state.timer) {
+        clearTimeout(state.timer);
+        reorderPressRef.current = { ...(state || {}), timer: null };
+      }
+      if (state.active) {
+        suppressMenuClickRef.current = true;
+        await finalizeReorder();
+      } else {
+        clearReorderSession();
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseEnd);
+    reorderMouseCleanupRef.current = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseEnd);
+    };
+  }, [activateReorder, applyDragTranslate, finalizeReorder]);
+
+  const onMoreTouchStart = (ev, e) => {
+    startTouchReorder(ev, e);
+  };
+
+  const onMoreMouseDown = (ev, e) => {
+    startMouseReorder(ev, e);
+  };
+
+  useEffect(() => () => {
+    clearReorderSession();
+  }, []);
+
 
   const toggleEnable = async (ev) => {
     const next = eventsOfSelected.map(e => e.id === ev.id ? { ...e, enabled: !e.enabled } : e);
@@ -400,14 +785,28 @@ if (editForm?.template === 'group-battle') {
   setEditParamOpen(false);
   alert('저장되었습니다.');
   return;
-}      const parsed = JSON.parse(editForm.paramsJson || '{}');
+}
+      const parsed = JSON.parse(editForm.paramsJson || '{}');
+      if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
+        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        return;
+      }
+      if (editForm.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
+        alert('그룹/방/개인 홀별 지목전은 사용 홀, 참가자 조건을 모두 설정하고, 그룹 모드는 그룹 멤버, 개인 모드는 참가자를 1명 이상 선택해야 합니다.');
+        return;
+      }
+      const isBingoEdit = editForm.template === 'bingo';
+      const isGroupRoomHoleBattleEdit = editForm.template === 'group-room-hole-battle';
+      const battleModeEdit = isGroupRoomHoleBattleEdit ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: parsed,
-        inputMode: editForm.inputMode,
-        attempts: Number(editForm.attempts || 4),
+        target: isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target),
+        rankOrder: isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder),
+        inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
+        attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
       await updateEventImmediate({ events: next }, false);
       setEditId(null);
@@ -491,15 +890,55 @@ if (editForm?.template === 'group-battle') {
   const perR = inputsAll?.[previewId]?.room   || {};
   const perT = inputsAll?.[previewId]?.team   || {};
 
+  const holeRankForcePreview = useMemo(() => {
+    if (!previewDef || previewDef.template !== 'hole-rank-force') return null;
+    return computeHoleRankForce(previewDef, participants, inputsAll, { roomNames, roomCount });
+  }, [previewDef, participants, inputsAll, roomNames, roomCount]);
+
+  const bingoPreview = useMemo(() => {
+    if (!previewDef || previewDef.template !== 'bingo') return null;
+    return computeBingo(previewDef, participants, inputsAll, { roomNames, roomCount });
+  }, [previewDef, participants, inputsAll, roomNames, roomCount]);
+
   const personRows = useMemo(() => {
     if (!previewDef) return [];
+    if (previewDef.template === 'hole-rank-force') {
+      const rows = Array.isArray(holeRankForcePreview?.personRows)
+        ? holeRankForcePreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
+    if (previewDef.template === 'bingo') {
+      const rows = Array.isArray(bingoPreview?.personRows)
+        ? bingoPreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
     const rows = participants.map(p => ({ id: p.id, name: p.nickname, room: p.room, score: compute(previewDef, perP[p.id]) }));
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, previewDef, sign]);
+  }, [participants, perP, previewDef, sign, holeRankForcePreview, bingoPreview]);
 
   const roomRows = useMemo(() => {
     if (!previewDef) return [];
+    if (previewDef.template === 'hole-rank-force') {
+      const arr = Array.isArray(holeRankForcePreview?.roomRows)
+        ? holeRankForcePreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
+        : [];
+      arr.sort((a, b) => sign * (a.score - b.score));
+      return arr;
+    }
+    if (previewDef.template === 'bingo') {
+      const baseRows = Array.isArray(bingoPreview?.personRows)
+        ? bingoPreview.personRows.map((r) => ({ id: r.id, room: r.room, value: r.value, name: r.name }))
+        : [];
+      const arr = buildBingoRoomRowsFromPersonRows(baseRows, roomCount, roomNames)
+        .map((r) => ({ room: r.room, name: r.name, score: r.value }));
+      arr.sort((a, b) => sign * (a.score - b.score));
+      return arr;
+    }
     const arr = [];
     for (let r = 1; r <= roomCount; r++) {
       const ppl = participants.filter(p => p.room === r);
@@ -508,11 +947,25 @@ if (editForm?.template === 'group-battle') {
     }
     arr.sort((a, b) => sign * (a.score - b.score));
     return arr;
-  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign]);
+  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview]);
 
   // 팀(포볼) 계산: 1조/2조 기준으로 A/B팀 구성
   const teamRows = useMemo(() => {
     if (!previewDef) return [];
+    if (previewDef.template === 'hole-rank-force') {
+      const rows = Array.isArray(holeRankForcePreview?.teamRows)
+        ? holeRankForcePreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
+    if (previewDef.template === 'bingo') {
+      const rows = Array.isArray(bingoPreview?.teamRows)
+        ? bingoPreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
+        : [];
+      rows.sort((a, b) => sign * (a.score - b.score));
+      return rows;
+    }
     const rows = [];
     for (let r = 1; r <= roomCount; r++) {
       const ppl = participants.filter(p => p.room === r);
@@ -533,7 +986,7 @@ if (editForm?.template === 'group-battle') {
     }
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign]);
+  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview]);
 
   /* ── 이벤트 불러오기(다른 대회에서) ───────────────────── */
   const [importFromId, setImportFromId] = useState('');
@@ -566,6 +1019,29 @@ if (editForm?.template === 'group-battle') {
       const metric = ev?.params?.metric === 'score' ? '점수' : '결과';
       return `group-battle · ${m} · ${metric}`;
     }
+    if (ev?.template === 'hole-rank-force') {
+      const holes = Array.isArray(ev?.params?.selectedHoles) && ev.params.selectedHoles.length ? ev.params.selectedHoles.length : 18;
+      const slots = Array.isArray(ev?.params?.selectedSlots) && ev.params.selectedSlots.length ? ev.params.selectedSlots.length : 4;
+      return `hole-rank-force · ${holes}홀 · 참가자${slots}명`;
+    }
+    if (ev?.template === 'pick-lineup') {
+      const mode = ev?.params?.mode === 'jo' ? '조' : '개인';
+      if (mode === '개인') {
+        const count = Math.max(1, Math.min(4, Number(ev?.params?.pickCount || 1)));
+        return `pick-lineup · 개인 · ${count}명 선택`;
+      }
+      const openGroups = Array.isArray(ev?.params?.openGroups) && ev.params.openGroups.length
+        ? ev.params.openGroups.map((g) => `${g}조`).join(', ')
+        : '1조';
+      const lastHalf = ev?.params?.lastPlaceHalf ? ' · 꼴등반띵' : '';
+      return `pick-lineup · 조 · ${openGroups}${lastHalf}`;
+    }
+    if (ev?.template === 'bingo') {
+      return `bingo · ${getBingoCountText(ev?.params)}`;
+    }
+    if (ev?.template === 'group-room-hole-battle') {
+      return `group-room-hole-battle · ${getGroupRoomHoleBattleMetaText(ev?.params)}`;
+    }
     const t = ev.template === 'raw-number' ? 'raw-number'
       : ev.template === 'range-convert' ? 'range'
       : ev.template === 'range-convert-bonus' ? 'range+bonus'
@@ -580,7 +1056,7 @@ if (editForm?.template === 'group-battle') {
   const [handicapEditId, setHandicapEditId] = useState(null);
 
   const openHandicapEditor = (ev) => {
-    if (!ev || ev.template !== 'group-battle') return;
+    if (!ev || (ev.template !== 'group-battle' && ev.template !== 'pick-lineup')) return;
     setHandicapEditId(ev.id);
     setOpenMenuId(null);
     setMenuUpId(null);
@@ -595,12 +1071,57 @@ if (editForm?.template === 'group-battle') {
     return (eventsOfSelected || []).find(e => e.id === handicapEditId) || null;
   }, [eventsOfSelected, handicapEditId]);
 
+  const pickLineupMonitorEvent = useMemo(() => {
+    if (!monitorId) return null;
+    return (eventsOfSelected || []).find((e) => e.id === monitorId) || null;
+  }, [eventsOfSelected, monitorId]);
+
+  const bingoMonitorEvent = useMemo(() => {
+    if (!bingoMonitorId) return null;
+    return (eventsOfSelected || []).find((e) => e.id === bingoMonitorId) || null;
+  }, [eventsOfSelected, bingoMonitorId]);
+
+  const groupRoomHoleMonitorEvent = useMemo(() => {
+    if (!groupRoomHoleMonitorId) return null;
+    return (eventsOfSelected || []).find((e) => e.id === groupRoomHoleMonitorId) || null;
+  }, [eventsOfSelected, groupRoomHoleMonitorId]);
+
   const saveHandicapOverrides = async (overridesMap) => {
     if (!handicapEditEvent) return;
     const safe = (overridesMap && typeof overridesMap === 'object') ? overridesMap : {};
     const next = (eventsOfSelected || []).map(e => {
       if (e.id !== handicapEditEvent.id) return e;
       const params = { ...(e.params || {}), handicapOverrides: safe };
+      return { ...e, params };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
+  const togglePickLineupLock = async (locked) => {
+    if (!pickLineupMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== pickLineupMonitorEvent.id) return e;
+      const params = { ...(e.params || {}), selectionLocked: !!locked };
+      return { ...e, params };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
+  const toggleBingoInputLock = async (locked) => {
+    if (!bingoMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== bingoMonitorEvent.id) return e;
+      const params = { ...(e.params || {}), inputLocked: !!locked };
+      return { ...e, params };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
+  const toggleGroupRoomHoleLock = async (locked) => {
+    if (!groupRoomHoleMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== groupRoomHoleMonitorEvent.id) return e;
+      const params = { ...(e.params || {}), selectionLocked: !!locked };
       return { ...e, params };
     });
     await updateEventImmediate({ events: next }, false);
@@ -738,7 +1259,9 @@ if (editForm?.template === 'group-battle') {
                   {TEMPLATE_REGISTRY.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
                 </select>
               </label>
-              <p className={css.help}>{getTemplateHelp(form.template)}</p>
+              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && form.template !== 'bingo' && form.template !== 'group-room-hole-battle' && (
+                <p className={css.help}>{getTemplateHelp(form.template)}</p>
+              )}
 
 
 {form.template === 'group-battle' && (
@@ -758,6 +1281,40 @@ if (editForm?.template === 'group-battle') {
       if (Array.isArray(next.groups)) setGbGroups(next.groups);
       if (Array.isArray(next.memberIds)) setGbMemberIds(next.memberIds);
     }}
+  />
+)}
+
+{form.template === 'hole-rank-force' && (
+  <HoleRankForceEditor
+    variant="create"
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'bingo' && (
+  <BingoEditor
+    variant="create"
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'group-room-hole-battle' && (
+  <GroupRoomHoleBattleEditor
+    participants={participants}
+    roomNames={roomNames}
+    roomCount={roomCount}
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'pick-lineup' && (
+  <PickLineupEditor
+    participants={participants}
+    value={params}
+    onChange={(next) => setParams(next)}
   />
 )}
               {uiCreate.factor && (
@@ -899,24 +1456,104 @@ if (editForm?.template === 'group-battle') {
 
             {!eventsOfSelected.length && <div className={css.empty}>등록된 이벤트가 없습니다.</div>}
 
-            {eventsOfSelected.map(ev => (
-              <div key={ev.id} className={css.listItem}>
+            {orderedEvents.map((ev) => (
+              <div
+                key={ev.id}
+                data-event-id={ev.id}
+                className={css.listItem}
+                ref={(el) => {
+                  if (el) listItemRefs.current[ev.id] = el;
+                  else delete listItemRefs.current[ev.id];
+                }}
+                style={dragEventId === ev.id ? { opacity: 0.99, borderColor: '#8bb6ff', background: '#f8fbff', transform: dragLiftOn ? `translateY(${dragTranslateY}px) scale(1.012)` : 'none', boxShadow: dragLiftOn ? '0 16px 34px rgba(37,99,235,.18)' : undefined, zIndex: dragLiftOn ? 40 : undefined, position: dragLiftOn ? 'relative' : undefined, transition: dragLiftOn ? 'none' : undefined, willChange: dragLiftOn ? 'transform' : undefined } : undefined}
+              >
                 <div className={css.listHead}>
                   <div className={css.listTitle}><b>{ev.title}</b></div>
                   <div className={css.headRight}>
                     <span className={ev.enabled ? css.badgeOn : css.badgeOff}>{ev.enabled ? '사용' : '숨김'}</span>
                     <div className={css.moreWrap} ref={menuRef}>
-                      <button className={css.moreBtn} onClick={(e) => onOpenMenu(ev, e)}>⋮</button>
+                      <button
+                        className={`${css.moreBtn} ${dragEventId === ev.id ? css.moreBtnDragging : ''}`}
+                        onTouchStart={(e) => onMoreTouchStart(ev, e)}
+                        onMouseDown={(e) => onMoreMouseDown(ev, e)}
+                        onContextMenu={(e) => e.preventDefault()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (suppressMenuClickRef.current) {
+                            suppressMenuClickRef.current = false;
+                            return;
+                          }
+                          if (dragEventIdRef.current) {
+                            clearReorderSession();
+                          }
+                          openMenuFromButton(ev, e.currentTarget);
+                        }}
+                        title="길게 눌러 순서 이동"
+                      >
+                        ⋮
+                      </button>
                       {openMenuId === ev.id && (
                         <div className={`${css.menu} ${menuUpId===ev.id ? css.menuUp : ''}`} onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => toggleEnable(ev)}>{ev.enabled ? '숨기기' : '사용'}</button>
                           <button onClick={() => openEdit(ev)}>수정</button>
-                          {ev?.template === 'group-battle' ? (
-                            <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
+                          {ev?.template === 'group-battle' || ev?.template === 'pick-lineup' ? (
+                            <>
+                              <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
+                              {ev?.template === 'pick-lineup' && (
+                                <button
+                                  onClick={() => {
+                                    setMonitorId(ev.id);
+                                    setOpenMenuId(null);
+                                    setMenuUpId(null);
+                                  }}
+                                >
+                                  선택 현황/마감
+                                </button>
+                              )}
+                            </>
                           ) : (
                             <>
-                              <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
-                              <button onClick={() => clearInputs(ev)}>입력 초기화</button>
+                              {ev?.template === 'bingo' && (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setBingoMonitorId(ev.id);
+                                      setBingoMonitorMode('status');
+                                      setOpenMenuId(null);
+                                      setMenuUpId(null);
+                                    }}
+                                  >
+                                    입력 현황/마감
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setBingoMonitorId(ev.id);
+                                      setBingoMonitorMode('special');
+                                      setOpenMenuId(null);
+                                      setMenuUpId(null);
+                                    }}
+                                  >
+                                    Special Zone 현황
+                                  </button>
+                                </>
+                              )}
+                              {ev?.template === 'group-room-hole-battle' && (
+                                <button
+                                  onClick={() => {
+                                    setGroupRoomHoleMonitorId(ev.id);
+                                    setOpenMenuId(null);
+                                    setMenuUpId(null);
+                                  }}
+                                >
+                                  입력 현황/마감
+                                </button>
+                              )}
+                              {templateUi(ev?.template).supportsQuickInput !== false && (
+                                <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
+                              )}
+                              {templateUi(ev?.template).supportsEventInputs !== false && (
+                                <button onClick={() => clearInputs(ev)}>입력 초기화</button>
+                              )}
                             </>
                           )}
                           <button className={css.btnDanger} onClick={() => removeEvent(ev)}>삭제</button>
@@ -1020,6 +1657,40 @@ if (editForm?.template === 'group-battle') {
       if (Array.isArray(next.groups)) setEditGbGroups(next.groups);
       if (Array.isArray(next.memberIds)) setEditGbMemberIds(next.memberIds);
     }}
+  />
+)}
+
+{editForm.template === 'hole-rank-force' && (
+  <HoleRankForceEditor
+    variant="edit"
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
+
+{editForm.template === 'bingo' && (
+  <BingoEditor
+    variant="edit"
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
+
+{editForm.template === 'group-room-hole-battle' && (
+  <GroupRoomHoleBattleEditor
+    participants={participants}
+    roomNames={roomNames}
+    roomCount={roomCount}
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
+
+{editForm.template === 'pick-lineup' && (
+  <PickLineupEditor
+    participants={participants}
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
   />
 )}
                       {uiEdit.factor && (
@@ -1140,7 +1811,7 @@ if (editForm?.template === 'group-battle') {
 
             <div className={css.controlsRow}>
               <select className={`${css.selectInline} ${css.selectGrow}`} value={previewId} onChange={e => setPreviewId(e.target.value)}>
-                {eventsOfSelected.map(ev => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
+                {orderedEvents.map(ev => <option key={ev.id} value={ev.id}>{ev.title}</option>)}
               </select>
 
               <select
@@ -1167,25 +1838,62 @@ if (editForm?.template === 'group-battle') {
             {!previewDef && <div className={css.empty}>선택된 이벤트가 없습니다.</div>}
 
             {previewDef && viewTab === 'person' && (
-              <ol className={css.previewList}>
-                {personRows.map((r, i) => (
-                  <li key={r.id}>
-                    <span><span className={css.rank}>{i + 1}.</span> {r.name} <small className={css.dim}>({r.room ? roomNames[r.room - 1] : '-'})</small></span>
-                    <b className={css.score}>{fmt2(r.score)}</b>
-                  </li>
-                ))}
-              </ol>
+              previewDef.template === 'hole-rank-force' ? (
+                <HoleRankForcePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                />
+              ) : previewDef.template === 'pick-lineup' ? (
+                <PickLineupPreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputs={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                />
+              ) : previewDef.template === 'group-room-hole-battle' ? (
+                <GroupRoomHoleBattlePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : (
+                <ol className={css.previewList}>
+                  {personRows.map((r, i) => (
+                    <li key={r.id}>
+                      <span><span className={css.rank}>{i + 1}.</span> {r.name} <small className={css.dim}>({r.room ? roomNames[r.room - 1] : '-'})</small></span>
+                      <b className={css.score}>{fmt2(r.score)}</b>
+                    </li>
+                  ))}
+                </ol>
+              )
             )}
 
             {previewDef && viewTab === 'room' && (
-              <ol className={css.previewList}>
-                {roomRows.map((r, i) => (
-                  <li key={r.room}>
-                    <span><span className={css.rank}>{i + 1}.</span> {r.name}</span>
-                    <b className={css.score}>{fmt2(r.score)}</b>
-                  </li>
-                ))}
-              </ol>
+              previewDef.template === 'group-room-hole-battle' ? (
+                <GroupRoomHoleBattlePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : (
+                <ol className={css.previewList}>
+                  {roomRows.map((r, i) => (
+                    <li key={r.room}>
+                      <span><span className={css.rank}>{i + 1}.</span> {r.name}</span>
+                      <b className={css.score}>{fmt2(r.score)}</b>
+                    </li>
+                  ))}
+                </ol>
+              )
             )}
 
             {previewDef && viewTab === 'team' && (
@@ -1201,15 +1909,24 @@ if (editForm?.template === 'group-battle') {
 
             {previewDef && viewTab === 'group' && (
               <div style={{ marginTop: 8 }}>
-                {previewDef.template !== 'group-battle' ? (
-                  <div className={css.empty}>그룹/개인 대결 이벤트가 아닙니다.</div>
-                ) : (
+                {previewDef.template === 'group-battle' ? (
                   <GroupBattlePreview
                     eventDef={previewDef}
                     participants={participants}
                     roomNames={roomNames}
                     order={viewOrder}
                   />
+                ) : previewDef.template === 'group-room-hole-battle' ? (
+                  <GroupRoomHoleBattlePreview
+                    eventDef={previewDef}
+                    participants={participants}
+                    inputsByEvent={inputsAll?.[previewId] || {}}
+                    roomNames={roomNames}
+                    roomCount={roomCount}
+                    viewTab={viewTab}
+                  />
+                ) : (
+                  <div className={css.empty}>그룹 미리보기를 지원하는 이벤트가 아닙니다.</div>
                 )}
               </div>
             )}
@@ -1217,8 +1934,8 @@ if (editForm?.template === 'group-battle') {
 
         <div style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 120px)' }} />
 
-        {/* group-battle 전용: 이벤트 결과에만 반영되는 G핸디 수정(다른 페이지와 연동 금지) */}
-        {handicapEditEvent?.template === 'group-battle' && (
+        {/* 이벤트 결과 전용 G핸디 수정(다른 페이지와 연동 금지) */}
+        {(handicapEditEvent?.template === 'group-battle' || handicapEditEvent?.template === 'pick-lineup') && (
           <GroupBattleHandicapEditor
             eventDef={handicapEditEvent}
             participants={participants}
@@ -1227,6 +1944,42 @@ if (editForm?.template === 'group-battle') {
               await saveHandicapOverrides(nextMap);
               closeHandicapEditor();
             }}
+          />
+        )}
+
+        {pickLineupMonitorEvent?.template === 'pick-lineup' && (
+          <PickLineupSelectionMonitor
+            eventDef={pickLineupMonitorEvent}
+            participants={participants}
+            inputsByEvent={(eventData?.eventInputs || {})[pickLineupMonitorEvent.id] || {}}
+            roomNames={roomNames}
+            onClose={() => setMonitorId(null)}
+            onToggleLock={togglePickLineupLock}
+          />
+        )}
+
+        {bingoMonitorEvent?.template === 'bingo' && (
+          <BingoSelectionMonitor
+            eventDef={bingoMonitorEvent}
+            participants={participants}
+            inputsByEvent={(eventData?.eventInputs || {})[bingoMonitorEvent.id] || {}}
+            roomNames={roomNames}
+            onClose={() => setBingoMonitorId(null)}
+            onToggleLock={toggleBingoInputLock}
+            initialMode={bingoMonitorMode}
+          />
+        )}
+
+
+        {groupRoomHoleMonitorEvent?.template === 'group-room-hole-battle' && (
+          <GroupRoomHoleBattleMonitor
+            eventDef={groupRoomHoleMonitorEvent}
+            participants={participants}
+            inputsByEvent={(eventData?.eventInputs || {})[groupRoomHoleMonitorEvent.id] || {}}
+            roomNames={roomNames}
+            roomCount={roomCount}
+            onClose={() => setGroupRoomHoleMonitorId(null)}
+            onToggleLock={toggleGroupRoomHoleLock}
           />
         )}
 

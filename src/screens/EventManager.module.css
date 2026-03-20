@@ -159,6 +159,7 @@
   margin-bottom: 8px;
   background: #fff;
   overflow: visible; /* 메뉴가 카드 밖으로 나가도 보이도록 */
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background-color .18s ease;
 }
 .listHead {
   display: flex;
@@ -187,6 +188,17 @@
   border-radius: 8px;
   border: 1px solid #d1d5db;
   background: #fff;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  cursor: grab;
+}
+.moreBtnDragging {
+  cursor: grabbing;
+  border-color: #8bb6ff;
+  background: #f8fbff;
 }
 .menu {
   position: absolute;

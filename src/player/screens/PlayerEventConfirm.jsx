@@ -15,6 +15,10 @@ import tCss    from './PlayerEventConfirm.module.css';
 
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
+import { computePickLineup } from '../../events/pickLineup';
+import { computeHoleRankForce } from '../../events/holeRankForce';
+import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
+import { buildBingoRoomRowsFromPersonRows, computeBingo } from '../../events/bingo';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -146,6 +150,95 @@ const events = useMemo(
     const agg = params?.aggregator || 'sum';
 
 
+
+    // ── hole-rank-force(홀별 강제 순위 점수) ─────────────────────
+    if (template === 'hole-rank-force') {
+      const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames, roomCount });
+      if (target === 'room') {
+        const rows = (data.roomRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.name,
+          value: r.value,
+        }));
+        return { kind: 'room', metricLabel: '합계', rows };
+      }
+      if (target === 'team') {
+        const rows = (data.teamRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.label,
+          value: r.value,
+        }));
+        return { kind: 'team', metricLabel: '합계', rows };
+      }
+      const rows = (data.personRows || []).map((r, i) => ({
+        key: r.key || String(i),
+        rank: i + 1,
+        label: r.name,
+        room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
+        value: r.value,
+      }));
+      return { kind: 'person', metricLabel: '합계', rows };
+    }
+
+    // ── pick-lineup(개인/조 선택 대결) ──────────────────────────
+    if (template === 'pick-lineup') {
+      const data = computePickLineup(ev, participants, inputsByEvent?.[evId] || {}, { roomNames });
+      const rows = (data?.rows || []).map((r, i) => ({
+        key: r.key || String(i),
+        rank: i + 1,
+        label: r.name,
+        room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
+        value: r.value,
+      }));
+      return { kind: 'person', metricLabel: '합계', rows };
+    }
+
+    // ── bingo(빙고) ───────────────────────────────────────────────
+    if (template === 'bingo') {
+      const data = computeBingo(ev, participants, inputsByEvent, { roomNames, roomCount });
+      if (target === 'team') {
+        const rows = (data.teamRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.label,
+          value: r.value,
+        }));
+        return { kind: 'team', metricLabel: '빙고', rows };
+      }
+      if (target === 'person') {
+        const rows = (data.personRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: i + 1,
+          label: r.name,
+          room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
+          value: r.value,
+        }));
+        return { kind: 'person', metricLabel: '빙고', rows };
+      }
+      const roomRows = buildBingoRoomRowsFromPersonRows(data.personRows || [], roomCount, roomNames);
+      const rows = roomRows.map((r, i) => ({
+        key: r.key || String(i),
+        rank: i + 1,
+        label: r.name,
+        value: r.value,
+      }));
+      return { kind: 'room', metricLabel: '빙고', rows };
+    }
+
+    // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
+    if (template === 'group-room-hole-battle') {
+      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
+      const metricLabel = '합계';
+      const rows = (data.rows || []).map((row, i) => ({
+        key: row.key || String(i),
+        rank: i + 1,
+        label: row.name,
+        value: row.value,
+      }));
+      return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
+    }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────
     // - 입력 이벤트가 아니므로 inputsByEvent를 사용하지 않음

@@ -1,6 +1,7 @@
 /* /src/player/screens/PlayerScoreInput.module.css */
 
 :root{
+  --player-tabbar-h: 56px;
   --row-h: 32px;
   --c-gray: #ddd;
   --c-blue: #1e40ff;
@@ -17,7 +18,7 @@
   --arrow-glyph-right:'→';
 }
 
-.page{ padding:12px; padding-bottom:160px; }
+.page{ padding:12px; padding-bottom:calc(160px + env(safe-area-inset-bottom)); }
 .card{ background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); padding-bottom:12px; margin-top:4px; }
 .roomTitle{ font-weight:700; font-size:1.05rem; padding:10px 12px 0; }
 
@@ -60,9 +61,9 @@
 
 .footerNav{
   position:fixed; left:0; right:0;
-  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--player-tabbar-h));
   display:flex; gap:12px; justify-content:space-between; align-items:center;
-  padding:10px 16px; background:#fff; border-top:none; z-index:20;
+  padding:10px 16px; background:#fff; border-top:none; box-shadow: 0 -1px 0 rgba(15,23,42,.04); z-index:30;
 }
 .navBtn{
   flex: 1;
