@@ -4,6 +4,7 @@
 :root {
   --row-h: 32px;
   --c-gray-border: #d0d7de;
+  --sticky-divider-w: 1px;
 }
 
 .eventCard { 
@@ -48,8 +49,6 @@
   z-index: 4;
   background:#fafafa;
   background-clip: padding-box;
-  border-right-color: transparent;
-  box-shadow: 1px 0 0 0 var(--c-gray-border);
 }
 
 .table tbody td:first-child{
@@ -58,16 +57,35 @@
   z-index: 2;
   background:#fff;
   background-clip: padding-box;
-  border-right-color: transparent;
-  box-shadow: 1px 0 0 0 var(--c-gray-border);
 }
 
 .subtotalRow td:first-child{
   z-index: 3;
   background:#fbfdff;
   background-clip: padding-box;
-  border-right-color: transparent;
-  box-shadow: 1px 0 0 0 var(--c-gray-border);
+}
+
+.table thead th:first-child::after,
+.table tbody td:first-child::after{
+  content:'';
+  position:absolute;
+  top:-1px;
+  bottom:-1px;
+  right:calc(var(--sticky-divider-w) * -1);
+  width:var(--sticky-divider-w);
+  background:var(--c-gray-border);
+  pointer-events:none;
+}
+
+.subtotalRow td:first-child::after{
+  content:'';
+  position:absolute;
+  top:-1px;
+  bottom:-1px;
+  right:calc(var(--sticky-divider-w) * -1);
+  width:var(--sticky-divider-w);
+  background:var(--c-gray-border);
+  pointer-events:none;
 }
 
 .cellEditable { position: relative; }
@@ -280,14 +298,6 @@
   margin:0 12px 0 !important;
 }
 
-.previewAccentWrap{
-  border: 2px solid #8fb8ff;
-  border-radius: 12px;
-  box-shadow: 0 0 0 3px rgba(143, 184, 255, 0.14);
-  background: #fbfdff;
-  padding: 2px;
-}
-
 /*
   환산 적용 미리보기 간격/크기 3안
   - tight    : 제목과 아래 표를 가장 가깝게
@@ -306,7 +316,6 @@
 .viewerPresetTight .viewerTableWrap{
   margin:0 12px 0 !important;
 }
-
 
 .viewerPresetBalanced{
   margin-top:18px;
@@ -332,6 +341,17 @@
   margin:3px 12px 0 !important;
 }
 
+.previewFrame{
+  box-sizing:border-box;
+  border:2px solid #4a8cff;
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 0 0 3px rgba(74,140,255,.12);
+  overflow-x:auto;
+  overflow-y:hidden;
+}
+
+
 
 .pickPreviewWrap{
   margin-top:12px;
@@ -339,9 +359,8 @@
 
 
 .pickPreviewTable{
-  width:calc(100% - 24px) !important;
-  max-width:calc(100% - 24px);
-  margin-right:24px;
+  width:100% !important;
+  max-width:100%;
   table-layout:fixed;
   box-sizing:border-box;
 }
