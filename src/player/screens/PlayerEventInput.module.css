@@ -6,7 +6,7 @@
   --c-gray-border: #d0d7de;
   --table-line-w: 1px;
   --preview-frame-c: #4f95ff;
-  --preview-frame-shadow: rgba(79,149,255,.18);
+  --preview-frame-w: 2px;
 }
 
 .eventCard { 
@@ -50,10 +50,12 @@
   left: 0;
   z-index: 4;
   background:#fafafa;
-  border:none;
-  outline: var(--table-line-w) solid var(--c-gray-border);
-  outline-offset: calc(-1 * var(--table-line-w));
+  border-left:var(--table-line-w) solid var(--c-gray-border);
+  border-top:var(--table-line-w) solid var(--c-gray-border);
+  border-right:var(--table-line-w) solid var(--c-gray-border);
+  border-bottom:var(--table-line-w) solid var(--c-gray-border);
   box-shadow:none;
+  background-clip:padding-box;
 }
 
 .table tbody td:first-child{
@@ -61,10 +63,12 @@
   left: 0;
   z-index: 2;
   background:#fff;
-  border:none;
-  outline: var(--table-line-w) solid var(--c-gray-border);
-  outline-offset: calc(-1 * var(--table-line-w));
+  border-left:var(--table-line-w) solid var(--c-gray-border);
+  border-top:var(--table-line-w) solid var(--c-gray-border);
+  border-right:var(--table-line-w) solid var(--c-gray-border);
+  border-bottom:var(--table-line-w) solid var(--c-gray-border);
   box-shadow:none;
+  background-clip:padding-box;
 }
 
 .table thead th:nth-child(2),
@@ -288,10 +292,10 @@
   box-sizing:border-box;
   overflow-x:auto !important;
   overflow-y:hidden !important;
-  border:3px solid var(--preview-frame-c);
-  border-radius:14px;
+  border:var(--preview-frame-w) solid var(--preview-frame-c);
+  border-radius:12px;
   background:#fff;
-  box-shadow:0 0 0 2px var(--preview-frame-shadow);
+  box-shadow:none;
 }
 
 /*
@@ -314,10 +318,10 @@
   box-sizing:border-box;
   overflow-x:auto !important;
   overflow-y:hidden !important;
-  border:3px solid var(--preview-frame-c);
-  border-radius:14px;
+  border:var(--preview-frame-w) solid var(--preview-frame-c);
+  border-radius:12px;
   background:#fff;
-  box-shadow:0 0 0 2px var(--preview-frame-shadow);
+  box-shadow:none;
 }
 
 .viewerPresetBalanced{
@@ -354,6 +358,7 @@
   width:100% !important;
   max-width:100%;
   margin:0 !important;
+  border-collapse:collapse;
   table-layout:fixed;
   box-sizing:border-box;
   min-width:0;
@@ -370,14 +375,14 @@
 
 
 .pickPreviewTableWrap{
-  width:100%;
+  width:auto;
   box-sizing:border-box;
   overflow-x:auto !important;
   overflow-y:hidden !important;
-  border:3px solid var(--preview-frame-c);
-  border-radius:14px;
+  border:var(--preview-frame-w) solid var(--preview-frame-c);
+  border-radius:12px;
   background:#fff;
-  box-shadow:0 0 0 2px var(--preview-frame-shadow);
+  box-shadow:none;
 }
 
 .pickPreviewTitle{
