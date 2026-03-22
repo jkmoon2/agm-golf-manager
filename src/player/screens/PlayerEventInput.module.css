@@ -289,6 +289,10 @@
 
 .viewerTableWrap{
   margin:0 12px 0 !important;
+  display:inline-block;
+  width:fit-content;
+  max-width:calc(100% - 24px);
+  min-width:0;
   box-sizing:border-box;
   overflow-x:auto !important;
   overflow-y:hidden !important;
@@ -296,6 +300,11 @@
   border-radius:12px;
   background:#fff;
   box-shadow:none;
+  padding:0;
+}
+
+.viewerTableWrap > .table{
+  margin:0 !important;
 }
 
 /*
@@ -315,6 +324,10 @@
 }
 .viewerPresetTight .viewerTableWrap{
   margin:0 12px 0 !important;
+  display:inline-block;
+  width:fit-content;
+  max-width:calc(100% - 24px);
+  min-width:0;
   box-sizing:border-box;
   overflow-x:auto !important;
   overflow-y:hidden !important;
@@ -322,6 +335,11 @@
   border-radius:12px;
   background:#fff;
   box-shadow:none;
+  padding:0;
+}
+
+.viewerTableWrap > .table{
+  margin:0 !important;
 }
 
 .viewerPresetBalanced{
