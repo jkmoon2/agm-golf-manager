@@ -1277,9 +1277,17 @@ export default function PlayerEventInput(){
               currentParticipantId: selfParticipantId,
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
-            const battleSelectionRows = battleCfg.mode === 'group'
-              ? getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 })
-              : (battleData.inputRows || []);
+            const battleSelectionRows = (() => {
+              if (battleCfg.mode === 'group') {
+                return getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+              }
+              if (battleCfg.mode === 'room') {
+                const allRows = Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
+                const mine = allRows.find((row) => Number(row?.roomNo) === Number(roomIdx));
+                return mine ? [mine] : allRows.slice(0, 1);
+              }
+              return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
+            })();
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
             const battlePreviewShowRank = battleCfg.mode === 'person';
@@ -1350,7 +1358,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {battleLocked && <div className={tCss.lockNotice}>지목 입력이 마감되어 닉네임 선택만 잠깁니다. 점수 입력은 계속 가능합니다.</div>}
+                {battleLocked && <div className={tCss.lockNotice}>닉네임 선택 마감, 점수 입력만 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${battleSelectionWidth}px` }}>
@@ -1495,7 +1503,7 @@ export default function PlayerEventInput(){
                       </button>
                     )}
                   </div>
-                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.viewerTableWrap}`}>
+                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.viewerTableWrap} ${tCss.previewAccentWrap}`}>
                     <table className={tCss.table} style={{ width: `${battlePreviewWidth}px` }}>
                       <colgroup>
                         <col style={{ width: '110px' }} />
@@ -1584,7 +1592,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {bingoLocked && <div className={tCss.lockNotice}>입력이 마감되어 더 이상 수정할 수 없습니다.</div>}
+                {bingoLocked && <div className={tCss.lockNotice}>빙고판 입력 마감, 점수 입력만 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
@@ -1633,12 +1641,12 @@ export default function PlayerEventInput(){
                                     spellCheck={false}
                                     className={tCss.cellInput}
                                     value={cellValue}
-                                    disabled={!p || bingoLocked}
-                                    onChange={e => p && !bingoLocked && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
-                                    onBlur={e => p && !bingoLocked && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    disabled={!p}
+                                    onChange={e => p && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    onBlur={e => p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
-                                      if (p && !bingoLocked) {
+                                      if (p) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -1647,7 +1655,7 @@ export default function PlayerEventInput(){
                                     onPointerCancel={() => cancelEventLongPress(inputKey)}
                                     onPointerLeave={() => cancelEventLongPress(inputKey)}
                                     onTouchStart={(e) => {
-                                      if (p && !bingoLocked) {
+                                      if (p) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -1909,7 +1917,7 @@ export default function PlayerEventInput(){
                 {hasPreviewRows && (
                   <div className={tCss.pickPreviewWrap}>
                     <div className={tCss.pickPreviewTitle}>선택 미리보기</div>
-                    <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.pickPreviewTableWrap}`}>
+                    <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.pickPreviewTableWrap} ${tCss.previewAccentWrap}`}>
                       <table className={`${tCss.table} ${tCss.pickPreviewTable}`}>
                         <colgroup>
                           <col style={{ width: `${pickPreviewNickPx}px` }} />
@@ -2094,7 +2102,7 @@ export default function PlayerEventInput(){
               {hasForcedViewer && forcedRoom && (
                 <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
                   <div className={tCss.viewerTitle}>환산 적용 미리보기</div>
-                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.viewerTableWrap}`}>
+                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow} ${tCss.viewerTableWrap} ${tCss.previewAccentWrap}`}>
                     <table className={tCss.table} style={{ width: `${tableWidthPct}%` }}>
                       <colgroup>
                         <col style={{ width: `${NICK_PCT}%` }} />

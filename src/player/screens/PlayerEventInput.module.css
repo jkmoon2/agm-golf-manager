@@ -3,7 +3,7 @@
 
 :root {
   --row-h: 32px;
-  --c-gray-border: #ddd;
+  --c-gray-border: #d0d7de;
 }
 
 .eventCard { 
@@ -47,7 +47,9 @@
   left: 0;
   z-index: 4;
   background:#fafafa;
-  box-shadow:none;
+  background-clip: padding-box;
+  border-right-color: transparent;
+  box-shadow: 1px 0 0 0 var(--c-gray-border);
 }
 
 .table tbody td:first-child{
@@ -55,13 +57,17 @@
   left: 0;
   z-index: 2;
   background:#fff;
-  box-shadow:none;
+  background-clip: padding-box;
+  border-right-color: transparent;
+  box-shadow: 1px 0 0 0 var(--c-gray-border);
 }
 
 .subtotalRow td:first-child{
   z-index: 3;
   background:#fbfdff;
-  box-shadow:none;
+  background-clip: padding-box;
+  border-right-color: transparent;
+  box-shadow: 1px 0 0 0 var(--c-gray-border);
 }
 
 .cellEditable { position: relative; }
@@ -274,6 +280,14 @@
   margin:0 12px 0 !important;
 }
 
+.previewAccentWrap{
+  border: 2px solid #8fb8ff;
+  border-radius: 12px;
+  box-shadow: 0 0 0 3px rgba(143, 184, 255, 0.14);
+  background: #fbfdff;
+  padding: 2px;
+}
+
 /*
   환산 적용 미리보기 간격/크기 3안
   - tight    : 제목과 아래 표를 가장 가깝게
@@ -292,6 +306,7 @@
 .viewerPresetTight .viewerTableWrap{
   margin:0 12px 0 !important;
 }
+
 
 .viewerPresetBalanced{
   margin-top:18px;

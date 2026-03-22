@@ -1436,8 +1436,10 @@ if (editForm?.template === 'group-battle') {
                   {(importList || []).map((ev, idx) => (
                     <label key={idx} className={css.importItem}>
                       <input type="checkbox" checked={!!ev._checked} onChange={() => toggleImportCheck(idx)} />
-                      <span className={css.importTitle}>{ev.title}</span>
-                      <span className={css.meta}> · {formatMeta(ev)}</span>
+                      <span className={css.importInfo}>
+                        <span className={css.importTitle}>{ev.title}</span>
+                        <span className={css.importMeta}>· {formatMeta(ev)}</span>
+                      </span>
                     </label>
                   ))}
                 </div>
