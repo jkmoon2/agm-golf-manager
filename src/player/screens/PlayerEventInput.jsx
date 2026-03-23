@@ -1263,9 +1263,6 @@ export default function PlayerEventInput(){
             const battleCfg = normalizeGroupRoomHoleBattleParams(ev?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
             const battleSelectedHoles = Array.isArray(battleCfg.selectedHoles) ? battleCfg.selectedHoles : [];
             const battleLocked = !!ev?.params?.selectionLocked;
-            const battleIsMatch = battleCfg.battleType !== 'stroke';
-            const battleLiveSlot = inputsByEvent?.[ev.id] || {};
-            const battlePreviewSlot = battleIsMatch ? (inputsByEventServer?.[ev.id] || {}) : battleLiveSlot;
             const battleScoreParticipants = getGroupRoomBattleScoreParticipants(ev, participants, {
               roomNames,
               roomCount: allRoomNos.length || roomNames.length || 0,
@@ -1273,29 +1270,29 @@ export default function PlayerEventInput(){
               currentParticipantId: selfParticipantId,
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
-            const battleData = computeGroupRoomHoleBattle(ev, participants, battleLiveSlot, {
+            const battleData = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[ev.id] || {}, {
               roomNames,
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
               currentParticipantId: selfParticipantId,
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
-            const battlePreviewData = battleIsMatch
-              ? computeGroupRoomHoleBattle(ev, participants, battlePreviewSlot, {
-                  roomNames,
-                  roomCount: allRoomNos.length || roomNames.length || 0,
-                  currentRoomNo: roomIdx,
-                  currentParticipantId: selfParticipantId,
-                  currentParticipantNickname: String(selfParticipant?.nickname || ''),
-                })
-              : battleData;
+            const battleIsMatch = battleCfg.mode !== 'person' && battleCfg.battleType !== 'stroke';
+            const isMyBattleGroupRow = (row) => {
+              const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [];
+              const memberNames = (Array.isArray(row?.members) ? row.members : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
+              return (selfParticipantId && memberIds.includes(selfParticipantId))
+                || (selfParticipantNickname && memberNames.includes(selfParticipantNickname));
+            };
             const battleSelectionRows = (() => {
               if (battleCfg.mode === 'group') {
-                return getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+                const allRows = getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+                if (battleLocked) return allRows;
+                const mine = allRows.filter((row) => isMyBattleGroupRow(row));
+                return mine.length ? mine : allRows.slice(0, 1);
               }
               if (battleCfg.mode === 'room') {
                 const allRows = Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
-                if (battleIsMatch) return allRows;
                 const mine = allRows.find((row) => Number(row?.roomNo) === Number(roomIdx));
                 return mine ? [mine] : allRows.slice(0, 1);
               }
@@ -1303,39 +1300,33 @@ export default function PlayerEventInput(){
             })();
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
-            const battlePreviewShowRank = !battleIsMatch && battleCfg.mode === 'person';
+            const battlePreviewShowRank = battleCfg.mode === 'person' && !battleIsMatch;
+            const battlePreviewAllRowsBase = battleIsMatch
+              ? (battleData.rows || [])
+              : battleCfg.mode === 'person'
+                ? (battleData.rows || [])
+                : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
             const battlePreviewExpanded = !!battlePreviewExpandedMap?.[ev.id];
-            const battleMyPreviewKeys = new Set((battlePreviewData.rows || []).filter((row) => {
-              if (battleCfg.mode === 'room') {
-                const roomNos = Array.isArray(row?.roomNos) ? row.roomNos.map(Number) : [];
-                const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String) : [];
-                return roomNos.includes(Number(roomIdx)) || (selfParticipantId && memberIds.includes(selfParticipantId));
+            const battlePreviewRowsBase = (() => {
+              if (battleIsMatch) {
+                if (battleCfg.mode === 'group' && !battleLocked) {
+                  const mine = battlePreviewAllRowsBase.filter((row) => isMyBattleGroupRow(row));
+                  return mine.length ? mine : battlePreviewAllRowsBase.slice(0, 1);
+                }
+                return battlePreviewAllRowsBase;
               }
-              if (battleCfg.mode === 'group') {
-                const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String) : [];
-                const memberNames = (Array.isArray(row?.members) ? row.members : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
-                return (selfParticipantId && memberIds.includes(selfParticipantId)) || (selfParticipantNickname && memberNames.includes(selfParticipantNickname));
-              }
-              return String(row?.personId || '') === String(selfParticipantId || '');
-            }).map((row) => String(row?.key || '')));
-            const battlePreviewAllRowsBase = Array.isArray(battlePreviewData.rows) ? battlePreviewData.rows : [];
-            const battlePreviewRowsResolved = (() => {
-              if (battleIsMatch && !battleLocked) {
-                const mine = battlePreviewAllRowsBase.filter((row) => battleMyPreviewKeys.has(String(row?.key || '')));
-                return mine.length ? mine : battlePreviewAllRowsBase.slice(0, 1);
-              }
-              if (battleCfg.mode === 'room' && !battlePreviewExpanded && battlePreviewAllRowsBase.length > 1 && !battleIsMatch) {
-                const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
-                return mine ? [mine] : battlePreviewAllRowsBase.slice(0, 1);
-              }
-              return battlePreviewAllRowsBase;
+              if (battleCfg.mode !== 'room' || battlePreviewExpanded) return battlePreviewAllRowsBase;
+              const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
+              if (mine) return [mine];
+              return battlePreviewAllRowsBase.slice(0, 1);
             })();
-            const battlePreviewRankByKey = new Map((battlePreviewData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
+            const battlePreviewRowsResolved = battleIsMatch
+              ? battlePreviewRowsBase
+              : battlePreviewRowsBase.map((rowBase) => (battleData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase);
+            const battlePreviewRankByKey = new Map((battleData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
             const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54 + (battlePreviewShowRank ? 54 : 0));
-            const battleShowSelectionTable = !(battleCfg.mode === 'room' && battleIsMatch);
             const canEditBattleSelection = (row) => {
               if (battleLocked) return false;
-              if (battleCfg.mode === 'room' && battleIsMatch) return false;
               if (battleCfg.mode !== 'group') return true;
 
               const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [];
@@ -1366,7 +1357,7 @@ export default function PlayerEventInput(){
             });
             const battleScoreGrandTotal = battleScoreSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
             const battleScoreGrandHasAny = battleScoreSubtotal.some((item) => item.hasAny);
-            const battlePreviewSubtotal = battleSelectedHoles.map((holeNo) => {
+            const battlePreviewSubtotal = battleIsMatch ? [] : battleSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
               battlePreviewRowsResolved.forEach((row) => {
@@ -1379,8 +1370,8 @@ export default function PlayerEventInput(){
               });
               return { holeNo, sum, hasAny };
             });
-            const battlePreviewGrandTotal = battlePreviewSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
-            const battlePreviewGrandHasAny = battlePreviewSubtotal.some((item) => item.hasAny);
+            const battlePreviewGrandTotal = battleIsMatch ? 0 : battlePreviewSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
+            const battlePreviewGrandHasAny = battleIsMatch ? false : battlePreviewSubtotal.some((item) => item.hasAny);
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -1388,62 +1379,57 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {battleLocked && <div className={tCss.lockNotice}>마감 완료되어 A/B(또는 상대) 결과가 함께 표시됩니다. 저장 전 임시 입력값은 비교에 반영되지 않습니다.</div>}
-                {!battleLocked && battleIsMatch && <div className={tCss.lockNotice}>매치플레이는 저장 완료된 점수만 비교되며, 마감 전에는 본인 팀/그룹만 표시됩니다.</div>}
+                {battleLocked && <div className={tCss.lockNotice}>지목 입력이 마감되어 닉네임 선택만 잠깁니다. 점수 입력은 계속 가능합니다.</div>}
 
-                {battleShowSelectionTable ? (
-                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                    <table className={tCss.table} style={{ width: `${battleSelectionWidth}px` }}>
-                      <colgroup>
-                        <col style={{ width: '110px' }} />
-                        {battleSelectedHoles.map((holeNo) => <col key={`battle-head-${holeNo}`} style={{ width: '72px' }} />)}
-                      </colgroup>
-                      <thead>
-                        <tr>
-                          <th>닉네임</th>
-                          {battleSelectedHoles.map((holeNo) => <th key={`battle-head-cell-${holeNo}`}>{holeNo}</th>)}
+                <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                  <table className={tCss.table} style={{ width: `${battleSelectionWidth}px` }}>
+                    <colgroup>
+                      <col style={{ width: '110px' }} />
+                      {battleSelectedHoles.map((holeNo) => <col key={`battle-head-${holeNo}`} style={{ width: '72px' }} />)}
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>닉네임</th>
+                        {battleSelectedHoles.map((holeNo) => <th key={`battle-head-cell-${holeNo}`}>{holeNo}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {battleSelectionRows.map((row) => (
+                        <tr key={`battle-row-${row.key}`}>
+                          <td className={tCss.pickInputNick}>{row.name}</td>
+                          {battleSelectedHoles.map((holeNo) => {
+                            const ids = getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
+                            const buttonText = getGroupRoomCellText(ids, participantById);
+                            return (
+                              <td key={`battle-cell-${row.key}-${holeNo}`} className={tCss.cellEditable}>
+                                <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    className={tCss.pickSelectButton}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!canEditBattleSelection(row)) return;
+                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo);
+                                      if (same) {
+                                        setBattleMenuState(null);
+                                        return;
+                                      }
+                                      openBattleMenuAt(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                    }}
+                                    disabled={!canEditBattleSelection(row)}
+                                    title={buttonText}
+                                  >
+                                    <span className={tCss.pickSelectText}>{buttonText}</span>
+                                  </button>
+                                </div>
+                              </td>
+                            );
+                          })}
                         </tr>
-                      </thead>
-                      <tbody>
-                        {battleSelectionRows.map((row) => (
-                          <tr key={`battle-row-${row.key}`}>
-                            <td className={tCss.pickInputNick}>{row.name}</td>
-                            {battleSelectedHoles.map((holeNo) => {
-                              const ids = getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
-                              const buttonText = getGroupRoomCellText(ids, participantById);
-                              return (
-                                <td key={`battle-cell-${row.key}-${holeNo}`} className={tCss.cellEditable}>
-                                  <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
-                                    <button
-                                      type="button"
-                                      className={tCss.pickSelectButton}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (!canEditBattleSelection(row)) return;
-                                        const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo);
-                                        if (same) {
-                                          setBattleMenuState(null);
-                                          return;
-                                        }
-                                        openBattleMenuAt(ev.id, row.key, holeNo, row.members, e.currentTarget);
-                                      }}
-                                      disabled={!canEditBattleSelection(row)}
-                                      title={buttonText}
-                                    >
-                                      <span className={tCss.pickSelectText}>{buttonText}</span>
-                                    </button>
-                                  </div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className={tCss.lockNotice}>방 모드 매치플레이는 운영자가 편성한 A/B 팀 기준으로 각 방 입력 점수를 자동 합산합니다.</div>
-                )}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`} style={{ marginTop: 12 }}>
                   <table className={tCss.table} style={{ width: `${battleScoreWidth}px` }}>
@@ -1527,8 +1513,8 @@ export default function PlayerEventInput(){
 
                 <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
-                    <div className={tCss.viewerTitle} style={{ margin: 0 }}>{battleIsMatch ? '매치플레이 미리보기' : '선택 미리보기'}</div>
-                    {battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && !battleIsMatch && (
+                    <div className={tCss.viewerTitle} style={{ margin: 0 }}>선택 미리보기</div>
+                    {!battleIsMatch && battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setBattlePreviewExpandedMap((prev) => ({ ...prev, [ev.id]: !battlePreviewExpanded }))}
@@ -1560,17 +1546,30 @@ export default function PlayerEventInput(){
                             <td>{row.name}</td>
                             {battleSelectedHoles.map((holeNo) => {
                               const hole = Array.isArray(row?.holes) ? row.holes.find((item) => Number(item?.holeNo) === Number(holeNo)) : null;
-                              if (battleIsMatch) {
-                                return (
-                                  <td key={`battle-preview-cell-${row.key}-${holeNo}`} style={hole?.matchComplete ? { color: hole?.matchColor || '#111827', fontWeight: 800 } : undefined}>
-                                    {hole?.matchComplete ? (hole?.matchCode || 'AS') : ''}
-                                  </td>
-                                );
-                              }
                               const value = Number(hole?.value);
-                              return <td key={`battle-preview-cell-${row.key}-${holeNo}`}>{Number.isFinite(value) ? formatDisplayNumber(value) : ''}</td>;
+                              const toneStyle = hole?.tone === 'up'
+                                ? { color: '#dc2626', fontWeight: 800 }
+                                : hole?.tone === 'down'
+                                  ? { color: '#2563eb', fontWeight: 800 }
+                                  : hole?.tone === 'as'
+                                    ? { color: '#111827', fontWeight: 800 }
+                                    : null;
+                              return (
+                                <td key={`battle-preview-cell-${row.key}-${holeNo}`} style={toneStyle || undefined}>
+                                  {battleIsMatch ? (hole?.displayValue || '') : (Number.isFinite(value) ? formatDisplayNumber(value) : '')}
+                                </td>
+                              );
                             })}
-                            <td className={tCss.totalCell} style={battleIsMatch ? { color: row?.totalColor || '#111827', fontWeight: 800 } : undefined}>{battleIsMatch ? (row?.totalLabel || 'AS') : formatDisplayNumber(row.value)}</td>
+                            <td
+                              className={battleIsMatch ? '' : tCss.totalCell}
+                              style={battleIsMatch ? (row?.valueTone === 'up'
+                                ? { color: '#dc2626', fontWeight: 900 }
+                                : row?.valueTone === 'down'
+                                  ? { color: '#2563eb', fontWeight: 900 }
+                                  : { color: '#111827', fontWeight: 900 }) : undefined}
+                            >
+                              {battleIsMatch ? (row?.valueDisplay || '') : formatDisplayNumber(row.value)}
+                            </td>
                             {battlePreviewShowRank && <td className={tCss.subtotalBlue}>{battlePreviewRankByKey.get(String(row?.key || '')) || ''}</td>}
                           </tr>
                         ))}

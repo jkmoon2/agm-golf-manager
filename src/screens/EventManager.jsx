@@ -74,13 +74,6 @@ function getBingoCountText(params) {
 function isValidGroupRoomHoleBattleParams(params) {
   const safe = normalizeGroupRoomHoleBattleParams(params);
   if (!Array.isArray(safe.selectedHoles) || safe.selectedHoles.length < 1) return false;
-  if (safe.mode === 'room' && safe.battleType !== 'stroke') {
-    return Array.isArray(safe.roomTeams) && safe.roomTeams.slice(0, 2).every((team) => {
-      const roomNos = Array.isArray(team?.roomNos) ? team.roomNos : [];
-      const memberIds = Array.isArray(team?.memberIds) ? team.memberIds : [];
-      return roomNos.length > 0 || memberIds.length > 0;
-    });
-  }
   if (!Number.isFinite(Number(safe.pickCount)) || Number(safe.pickCount) < 1) return false;
   if (!Number.isFinite(Number(safe.maxPerParticipant)) || Number(safe.maxPerParticipant) < 1) return false;
   if (safe.mode === 'group') {
@@ -100,18 +93,13 @@ function getGroupRoomHoleBattleMetaText(params) {
   const pickCount = Number.isFinite(Number(safe.pickCount)) ? `${Number(safe.pickCount)}명` : '미설정';
   const maxCount = Number.isFinite(Number(safe.maxPerParticipant)) ? `최대 ${Number(safe.maxPerParticipant)}회` : '미설정';
   const modeText = safe.mode === 'room' ? '방' : safe.mode === 'person' ? '개인' : '그룹';
-  const battleText = safe.battleType === 'match-fourball' ? '매치(포볼)' : safe.battleType === 'match' ? '매치플레이' : '스트로크';
+  const battleText = safe.battleType === 'matchplay' ? '매치플레이' : safe.battleType === 'match-fourball' ? '매치(포볼)' : '스트로크';
   const extra = safe.mode === 'person'
     ? ` · ${Array.isArray(safe.personIds) ? safe.personIds.length : 0}명`
     : safe.mode === 'group'
       ? ` · ${Array.isArray(safe.groups) ? safe.groups.length : 0}개 그룹`
-      : safe.mode === 'room' && safe.battleType !== 'stroke'
-        ? ` · ${Array.isArray(safe.roomTeams) ? safe.roomTeams.slice(0, 2).map((team) => (team?.name || '')).filter(Boolean).join('/') : ''}`
-        : '';
-  const ruleText = safe.mode === 'room' && safe.battleType !== 'stroke'
-    ? '방합산'
-    : `${pickCount} · ${maxCount}`;
-  return `${modeText}${extra} · ${battleText} · ${holeCount}홀 · ${ruleText}`;
+      : '';
+  return `${modeText}${extra} · ${battleText} · ${holeCount}홀 · ${pickCount} · ${maxCount}`;
 }
 
 

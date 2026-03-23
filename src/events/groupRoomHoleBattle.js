@@ -7,9 +7,14 @@ export function defaultGroupRoomHoleBattleParams() {
   return {
     selectedHoles: Array.from({ length: 18 }, (_, i) => i + 1),
     mode: 'group',
+    battleType: 'stroke',
     groups: [
       { name: '그룹1', memberIds: [], leaderIds: [] },
       { name: '그룹2', memberIds: [], leaderIds: [] },
+    ],
+    roomTeams: [
+      { key: 'team-a', name: 'A팀', roomNos: [], memberIds: [] },
+      { key: 'team-b', name: 'B팀', roomNos: [], memberIds: [] },
     ],
     personIds: [],
     pickCount: null,
@@ -20,6 +25,10 @@ export function defaultGroupRoomHoleBattleParams() {
 
 export function normalizeGroupRoomMode(mode) {
   return mode === 'room' || mode === 'person' ? mode : 'group';
+}
+
+export function normalizeGroupRoomBattleType(type) {
+  return type === 'matchplay' || type === 'match-fourball' ? type : 'stroke';
 }
 
 function normalizeOptionalInt(value, min, max) {
@@ -56,12 +65,63 @@ export function normalizeGroupRows(groups) {
   });
 }
 
+function normalizeRoomTeamRows(roomTeams, opt = {}) {
+  const participants = Array.isArray(opt?.participants) ? opt.participants : [];
+  const participantIds = new Set(participants.map((p) => String(p?.id || '')).filter(Boolean));
+  const roomCount = Math.max(0, Number(opt?.roomCount || 0));
+  const src = Array.isArray(roomTeams) ? roomTeams : [];
+  const base = [
+    src[0] || { key: 'team-a', name: 'A팀', roomNos: [], memberIds: [] },
+    src[1] || { key: 'team-b', name: 'B팀', roomNos: [], memberIds: [] },
+  ];
+
+  const rows = base.map((team, idx) => ({
+    key: String(team?.key || (idx === 0 ? 'team-a' : 'team-b')),
+    name: String(team?.name || (idx === 0 ? 'A팀' : 'B팀')),
+    roomNos: Array.from(new Set((Array.isArray(team?.roomNos) ? team.roomNos : [])
+      .map((n) => Number(n))
+      .filter((n) => Number.isFinite(n) && n >= 1 && (!roomCount || n <= roomCount)))),
+    memberIds: normalizeIdList(team?.memberIds).filter((id) => participantIds.has(id)),
+  }));
+
+  rows[0].roomNos = rows[0].roomNos.filter((roomNo) => !rows[1].roomNos.includes(roomNo));
+  rows[1].memberIds = rows[1].memberIds.filter((id) => !rows[0].memberIds.includes(id));
+
+  const roomOfParticipant = new Map(participants.map((p) => [String(p?.id || ''), Number(p?.room || 0)]));
+  const splitRoomNos = new Set();
+  rows.forEach((team) => {
+    team.memberIds.forEach((id) => {
+      const roomNo = Number(roomOfParticipant.get(String(id)) || 0);
+      if (roomNo >= 1) splitRoomNos.add(roomNo);
+    });
+  });
+
+  if (splitRoomNos.size) {
+    rows.forEach((team) => {
+      team.roomNos = team.roomNos.filter((roomNo) => !splitRoomNos.has(roomNo));
+    });
+  }
+
+  rows.forEach((team) => {
+    const roomSet = new Set(team.roomNos);
+    team.memberIds = team.memberIds.filter((id) => {
+      const roomNo = Number(roomOfParticipant.get(String(id)) || 0);
+      return !roomSet.has(roomNo);
+    });
+  });
+
+  return rows;
+}
+
 export function normalizeGroupRoomHoleBattleParams(params, opt = {}) {
   const base = defaultGroupRoomHoleBattleParams();
   const src = params && typeof params === 'object' ? params : {};
   const mode = normalizeGroupRoomMode(src.mode || base.mode);
+  const battleType = normalizeGroupRoomBattleType(src.battleType || base.battleType);
   const selectedHoles = normalizeSelectedHoles(src.selectedHoles || base.selectedHoles);
-  const pickCount = normalizeOptionalInt(src.pickCount, 1, 4);
+  const pickCount = battleType === 'match-fourball'
+    ? 2
+    : normalizeOptionalInt(src.pickCount, 1, 4);
   const maxPerParticipant = normalizeOptionalInt(src.maxPerParticipant, 1, 8);
   const roomCount = Math.max(0, Number(opt?.roomCount || 0));
   const roomNames = Array.isArray(opt?.roomNames) ? opt.roomNames : [];
@@ -70,11 +130,14 @@ export function normalizeGroupRoomHoleBattleParams(params, opt = {}) {
   const groupsRaw = normalizeGroupRows(src.groups && src.groups.length ? src.groups : base.groups);
   const groups = groupsRaw.filter((g) => mode !== 'group' || g.memberIds.length > 0 || typeof g.name === 'string');
   const personIds = normalizeIdList(src.personIds);
+  const roomTeams = normalizeRoomTeamRows(src.roomTeams && src.roomTeams.length ? src.roomTeams : base.roomTeams, { participants, roomCount });
 
   return {
     selectedHoles: selectedHoles.length ? selectedHoles : base.selectedHoles,
     mode,
+    battleType,
     groups: mode === 'group' ? (groups.length ? groups : normalizeGroupRows(base.groups)) : normalizeGroupRows(groupsRaw),
+    roomTeams,
     personIds,
     pickCount,
     maxPerParticipant,
@@ -126,6 +189,32 @@ function getRoomRows(cfg, participants = []) {
       members,
     };
   }).filter((row) => row.memberIds.length > 0);
+}
+
+function getRoomTeamRows(cfg, participants = []) {
+  const byId = getParticipantsById(participants);
+  const teamRows = Array.isArray(cfg.roomTeams) ? cfg.roomTeams : [];
+  return teamRows.map((team, idx) => {
+    const roomMembers = (Array.isArray(participants) ? participants : []).filter((p) => (Array.isArray(team?.roomNos) ? team.roomNos : []).includes(Number(p?.room || 0)));
+    const splitMembers = (Array.isArray(team?.memberIds) ? team.memberIds : []).map((id) => byId.get(String(id))).filter(Boolean);
+    const memberMap = new Map();
+    [...roomMembers, ...splitMembers].forEach((member) => {
+      const id = String(member?.id || '');
+      if (id) memberMap.set(id, member);
+    });
+    const members = Array.from(memberMap.values());
+    return {
+      key: String(team?.key || `room-team-${idx + 1}`),
+      type: 'room-team',
+      teamKey: String(team?.key || `room-team-${idx + 1}`),
+      teamIndex: idx,
+      name: String(team?.name || (idx === 0 ? 'A팀' : `팀${idx + 1}`)),
+      displayName: String(team?.name || (idx === 0 ? 'A팀' : `팀${idx + 1}`)),
+      roomNos: Array.isArray(team?.roomNos) ? team.roomNos.map((n) => Number(n)).filter((n) => Number.isFinite(n)) : [],
+      memberIds: members.map((member) => String(member?.id || '')).filter(Boolean),
+      members,
+    };
+  });
 }
 
 function getPersonPool(cfg, participants = []) {
@@ -303,10 +392,161 @@ function buildInputRowDetail(row, shared, cfg, byId, inputsByEvent) {
   return {
     ...row,
     value,
+    valueDisplay: String(value),
+    valueTone: 'neutral',
     holes,
     usage: countParticipantUsageForRow(shared, row.key),
     complete: isBattleRowSelectionComplete(row, shared, { params: cfg }),
   };
+}
+
+function getCompetitiveValueFromScores(scores = [], battleType = 'matchplay') {
+  const nums = (Array.isArray(scores) ? scores : []).map((n) => Number(n)).filter((n) => Number.isFinite(n));
+  if (!nums.length) return null;
+  if (battleType === 'match-fourball') return Math.min(...nums);
+  return nums.reduce((sum, n) => sum + n, 0);
+}
+
+function getMatchToneByDiff(diff) {
+  if (diff > 0) return 'up';
+  if (diff < 0) return 'down';
+  return 'as';
+}
+
+export function formatMatchTotal(diff, readyCount = 0) {
+  const n = Number(diff || 0);
+  if (!Number.isFinite(n) || readyCount < 1) return '';
+  if (n > 0) return `${n}UP`;
+  if (n < 0) return `${Math.abs(n)}DOWN`;
+  return 'AS';
+}
+
+function buildGroupMatchRows(rowsBase, cfg, shared, byId, inputsByEvent) {
+  return rowsBase.map((row, idx) => {
+    const opponent = idx % 2 === 0 ? rowsBase[idx + 1] : rowsBase[idx - 1];
+    let diffSum = 0;
+    let readyCount = 0;
+    const holes = cfg.selectedHoles.map((holeNo) => {
+      const ids = getBattleCellIds(shared, row.key, holeNo, row.memberIds);
+      const members = ids.map((id) => byId.get(String(id))).filter(Boolean);
+      const scores = members.map((member) => getBattleScoreValue(inputsByEvent, member?.id, holeNo));
+      const selfReady = ids.length === Math.max(1, Number(cfg.pickCount || 1)) && scores.every((n) => Number.isFinite(n));
+      const selfValue = selfReady ? getCompetitiveValueFromScores(scores, cfg.battleType) : null;
+
+      let oppIds = [];
+      let oppMembers = [];
+      let oppScores = [];
+      let oppReady = false;
+      let oppValue = null;
+      if (opponent) {
+        oppIds = getBattleCellIds(shared, opponent.key, holeNo, opponent.memberIds);
+        oppMembers = oppIds.map((id) => byId.get(String(id))).filter(Boolean);
+        oppScores = oppMembers.map((member) => getBattleScoreValue(inputsByEvent, member?.id, holeNo));
+        oppReady = oppIds.length === Math.max(1, Number(cfg.pickCount || 1)) && oppScores.every((n) => Number.isFinite(n));
+        oppValue = oppReady ? getCompetitiveValueFromScores(oppScores, cfg.battleType) : null;
+      }
+
+      let points = 0;
+      let displayValue = '';
+      let tone = 'neutral';
+      if (Number.isFinite(selfValue) && Number.isFinite(oppValue)) {
+        if (selfValue < oppValue) points = 1;
+        else if (selfValue > oppValue) points = -1;
+        else points = 0;
+        tone = getMatchToneByDiff(points);
+        displayValue = points > 0 ? 'UP' : points < 0 ? 'DOWN' : 'AS';
+        diffSum += points;
+        readyCount += 1;
+      }
+
+      return {
+        holeNo,
+        ids,
+        members,
+        value: selfValue,
+        label: members.map((member) => String(member?.nickname || '')).join(' / '),
+        points,
+        displayValue,
+        tone,
+        ready: Number.isFinite(selfValue) && Number.isFinite(oppValue),
+      };
+    });
+
+    return {
+      ...row,
+      holes,
+      value: diffSum,
+      valueDisplay: formatMatchTotal(diffSum, readyCount),
+      valueTone: getMatchToneByDiff(diffSum),
+      matchReadyCount: readyCount,
+      complete: isBattleRowSelectionComplete(row, shared, { params: cfg }),
+    };
+  });
+}
+
+function buildRoomTeamMatchRows(rowsBase, cfg, inputsByEvent) {
+  return rowsBase.map((row, idx) => {
+    const opponent = idx % 2 === 0 ? rowsBase[idx + 1] : rowsBase[idx - 1];
+    let diffSum = 0;
+    let readyCount = 0;
+    const holes = cfg.selectedHoles.map((holeNo) => {
+      const scores = (Array.isArray(row?.members) ? row.members : []).map((member) => getBattleScoreValue(inputsByEvent, member?.id, holeNo));
+      const selfReady = scores.length > 0 && scores.every((n) => Number.isFinite(n));
+      const selfValue = selfReady ? getCompetitiveValueFromScores(scores, cfg.battleType) : null;
+      const oppScores = (Array.isArray(opponent?.members) ? opponent.members : []).map((member) => getBattleScoreValue(inputsByEvent, member?.id, holeNo));
+      const oppReady = oppScores.length > 0 && oppScores.every((n) => Number.isFinite(n));
+      const oppValue = oppReady ? getCompetitiveValueFromScores(oppScores, cfg.battleType) : null;
+
+      let points = 0;
+      let displayValue = '';
+      let tone = 'neutral';
+      if (Number.isFinite(selfValue) && Number.isFinite(oppValue)) {
+        if (selfValue < oppValue) points = 1;
+        else if (selfValue > oppValue) points = -1;
+        else points = 0;
+        tone = getMatchToneByDiff(points);
+        displayValue = points > 0 ? 'UP' : points < 0 ? 'DOWN' : 'AS';
+        diffSum += points;
+        readyCount += 1;
+      }
+
+      return {
+        holeNo,
+        ids: row.memberIds,
+        members: row.members,
+        value: selfValue,
+        label: row.members.map((member) => String(member?.nickname || '')).join(' / '),
+        points,
+        displayValue,
+        tone,
+        ready: Number.isFinite(selfValue) && Number.isFinite(oppValue),
+      };
+    });
+
+    return {
+      ...row,
+      holes,
+      value: diffSum,
+      valueDisplay: formatMatchTotal(diffSum, readyCount),
+      valueTone: getMatchToneByDiff(diffSum),
+      matchReadyCount: readyCount,
+      complete: holes.every((hole) => hole.ready),
+    };
+  });
+}
+
+function sortRowsByMetric(rows = [], sign = 1) {
+  const safeRows = Array.isArray(rows) ? [...rows] : [];
+  safeRows.sort((a, b) => {
+    const av = Number(a?.value);
+    const bv = Number(b?.value);
+    const aReady = String(a?.valueDisplay || '').trim() !== '' || Number.isFinite(av);
+    const bReady = String(b?.valueDisplay || '').trim() !== '' || Number.isFinite(bv);
+    if (aReady !== bReady) return aReady ? -1 : 1;
+    if (Number.isFinite(av) && Number.isFinite(bv) && av !== bv) return sign * (av - bv);
+    return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+  });
+  return safeRows;
 }
 
 export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsByEvent = {}, opt = {}) {
@@ -315,7 +555,9 @@ export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsBy
     roomNames: opt?.roomNames,
     roomCount: opt?.roomCount,
   });
-  const sign = eventDef?.rankOrder === 'desc' ? -1 : 1;
+  const sign = (cfg.battleType !== 'stroke' && cfg.mode !== 'person')
+    ? -1
+    : (eventDef?.rankOrder === 'desc' ? -1 : 1);
   const shared = getBattleSharedInputs(inputsByEvent);
   const byId = getParticipantsById(participants);
 
@@ -358,18 +600,20 @@ export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsBy
         members: [participant],
         memberIds: [pid],
         value,
+        valueDisplay: String(value),
+        valueTone: 'neutral',
         holes,
         usage: {},
         complete: isBattleParticipantScoreComplete(inputsByEvent, pid, cfg.selectedHoles),
       };
     });
 
-    rows.sort((a, b) => sign * (a.value - b.value) || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+    const sortedRows = sortRowsByMetric(rows, sign);
 
     return {
       kind: 'person',
       metric: 'score',
-      rows,
+      rows: sortedRows,
       inputRows,
       config: cfg,
       shared,
@@ -381,10 +625,22 @@ export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsBy
   const rowsBase = getGroupRoomHoleBattleRows(eventDef, participants, opt);
   const inputRowsBase = getGroupRoomHoleBattleInputRows(eventDef, participants, opt);
   const scoreParticipants = getGroupRoomBattleScoreParticipants(eventDef, participants, opt);
-
-  const rows = rowsBase.map((row) => buildInputRowDetail(row, shared, cfg, byId, inputsByEvent));
   const inputRows = inputRowsBase.map((row) => buildInputRowDetail(row, shared, cfg, byId, inputsByEvent));
-  rows.sort((a, b) => sign * (a.value - b.value) || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+
+  let rows;
+  let kind = cfg.mode === 'room' ? 'room' : 'group';
+  let metric = 'score';
+  if (cfg.mode === 'group' && cfg.battleType !== 'stroke') {
+    rows = buildGroupMatchRows(getGroupRows(cfg, participants), cfg, shared, byId, inputsByEvent);
+    metric = 'match';
+  } else if (cfg.mode === 'room' && cfg.battleType !== 'stroke') {
+    rows = buildRoomTeamMatchRows(getRoomTeamRows(cfg, participants), cfg, inputsByEvent);
+    metric = 'match';
+  } else {
+    rows = rowsBase.map((row) => buildInputRowDetail(row, shared, cfg, byId, inputsByEvent));
+  }
+
+  rows = sortRowsByMetric(rows, sign);
 
   const participantRows = scoreParticipants.map((participant) => ({
     id: String(participant?.id || ''),
@@ -395,8 +651,8 @@ export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsBy
   }));
 
   return {
-    kind: cfg.mode === 'room' ? 'room' : 'group',
-    metric: 'score',
+    kind,
+    metric,
     rows,
     inputRows,
     config: cfg,

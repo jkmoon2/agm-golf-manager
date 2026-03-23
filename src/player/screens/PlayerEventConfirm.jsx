@@ -25,6 +25,7 @@ const isFiniteNum = (n) => Number.isFinite(n);
 
 // 소수점 1자리 표시(정수면 소수점 생략)
 const fmtScore = (n) => {
+  if (typeof n === 'string') return String(n || '-');
   if (!isFiniteNum(n)) return '-';
   const r = Math.round(n * 10) / 10;
   return (r % 1 === 0) ? String(r) : r.toFixed(1);
@@ -230,16 +231,22 @@ const events = useMemo(
     // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
     if (template === 'group-room-hole-battle') {
       const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
-      const metricLabel = data?.isMatchPlay ? '결과' : '합계';
+      const isMatch = data?.config?.battleType !== 'stroke' && data?.kind !== 'person';
+      const metricLabel = isMatch ? '결과' : '합계';
       const rows = (data.rows || []).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
         label: row.name,
-        value: data?.isMatchPlay ? Number(row?.matchNet || 0) : row.value,
-        valueLabel: data?.isMatchPlay ? (row?.totalLabel || 'AS') : null,
-        valueColor: data?.isMatchPlay ? (row?.totalColor || '#111827') : null,
+        value: isMatch ? (row.valueDisplay || '') : row.value,
       }));
-      return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
+      const kind = isMatch && data?.kind === 'room'
+        ? 'team'
+        : data?.kind === 'group'
+          ? 'group'
+          : data?.kind === 'person'
+            ? 'person'
+            : 'room';
+      return { kind, metricLabel, rows };
     }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────
@@ -439,7 +446,7 @@ const events = useMemo(
                           <td className={tCss.cell}>
                             {res.kind === 'person' ? (row.room || '-') : row.label}
                           </td>
-                          <td className={tCss.cell} style={row.valueColor ? { color: row.valueColor, fontWeight: 800 } : undefined}>{row.valueLabel || fmtScore(row.value)}</td>
+                          <td className={tCss.cell}>{fmtScore(row.value)}</td>
                         </tr>
                       ))}
                     </tbody>
