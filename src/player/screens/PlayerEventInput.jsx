@@ -1327,6 +1327,7 @@ export default function PlayerEventInput(){
             const battlePreviewRowsResolved = battlePreviewAllRowsBase.map((rowBase) => (battlePreviewData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase);
             const battlePreviewRankByKey = new Map((battlePreviewData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
             const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54 + (battlePreviewShowRank ? 54 : 0));
+            const battlePreviewExpanded = !!battlePreviewExpandedMap[ev.id];
             const canEditBattleSelection = (row) => {
               if (battleLocked) return false;
               if (battleCfg.mode === 'person') return true;
