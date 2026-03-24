@@ -295,7 +295,7 @@ export function normalizeBattleCellIds(value, allowedIds = []) {
 
 export function getBattleSharedInputs(inputsByEvent) {
   const slot = inputsByEvent && typeof inputsByEvent === 'object' ? inputsByEvent : {};
-  const shared = slot?.shared && typeof shared === 'object' ? shared : {};
+  const shared = slot?.shared && typeof slot.shared === 'object' ? slot.shared : {};
   const rows = shared?.rows && typeof shared.rows === 'object' ? shared.rows : {};
   return { ...shared, rows };
 }
