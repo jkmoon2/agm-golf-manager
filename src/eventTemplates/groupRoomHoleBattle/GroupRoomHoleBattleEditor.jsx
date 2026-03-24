@@ -2,10 +2,9 @@
 import React, { useMemo, useState } from 'react';
 import {
   defaultGroupRoomHoleBattleParams,
-  getBattleTypeLabel,
   getGroupRoomDisplayName,
   getRoomLabel,
-  getRoomTeamDisplayName,
+  normalizeBattleType,
   normalizeGroupRoomHoleBattleParams,
 } from '../../events/groupRoomHoleBattle';
 
@@ -15,8 +14,10 @@ function summaryHoles(selectedHoles) {
   return (Array.isArray(selectedHoles) ? selectedHoles : []).map((holeNo) => `${holeNo}홀`).join(', ') || '기본값';
 }
 
-function getBattleTypeSummary(value) {
-  return getBattleTypeLabel(value);
+function battleTypeLabel(type) {
+  if (type === 'match') return '매치플레이';
+  if (type === 'fourball') return '매치(포볼)';
+  return '스트로크';
 }
 
 export default function GroupRoomHoleBattleEditor({ participants = [], roomNames = [], roomCount = 0, value, onChange }) {
@@ -24,7 +25,7 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     () => normalizeGroupRoomHoleBattleParams(value || defaultGroupRoomHoleBattleParams(), { participants, roomNames, roomCount }),
     [value, participants, roomNames, roomCount]
   );
-  const [openKey, setOpenKey] = useState('');
+  const [openKey, setOpenKey] = useState('mode');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerType, setPickerType] = useState('group');
   const [pickerGroupIdx, setPickerGroupIdx] = useState(0);
@@ -39,6 +40,15 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     });
   };
 
+  const updateRoomTeams = (patch) => {
+    emit({
+      roomTeams: {
+        ...(safe.roomTeams || {}),
+        ...patch,
+      },
+    });
+  };
+
   const toggleHole = (holeNo) => {
     const has = safe.selectedHoles.includes(holeNo);
     const next = has ? safe.selectedHoles.filter((n) => n !== holeNo) : [...safe.selectedHoles, holeNo];
@@ -47,19 +57,21 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
 
   const resetHoles = () => emit({ selectedHoles: defaultGroupRoomHoleBattleParams().selectedHoles });
 
-  const setBattleType = (battleType) => {
-    const patch = { battleType };
-    if (battleType === 'matchplay') patch.pickCount = 1;
-    if (battleType === 'match-fourball') patch.pickCount = 2;
-    emit(patch);
-  };
-
   const setMode = (mode) => {
     emit({ mode: mode === 'room' || mode === 'person' ? mode : 'group' });
   };
 
+  const setBattleType = (type) => {
+    const battleType = normalizeBattleType(type);
+    const nextPatch = { battleType };
+    if (battleType === 'fourball' && (!Number.isFinite(Number(safe.pickCount)) || Number(safe.pickCount) < 2)) {
+      nextPatch.pickCount = 2;
+    }
+    emit(nextPatch);
+  };
+
   const setGroupName = (gi, name) => {
-    const next = safe.groups.map((group, idx) => (idx === gi ? { ...group, name } : group));
+    const next = safe.groups.map((group, idx) => idx === gi ? { ...group, name } : group);
     emit({ groups: next });
   };
 
@@ -140,9 +152,9 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
 
   const participantsByRoom = useMemo(() => {
     const out = Array.from({ length: Math.max(0, Number(roomCount || 0)) }, (_, idx) => ({ roomNo: idx + 1, members: [] }));
-    participantsSafe.forEach((participant) => {
-      const roomNo = Number(participant?.room || 0);
-      if (roomNo >= 1 && roomNo <= out.length) out[roomNo - 1].members.push(participant);
+    participantsSafe.forEach((p) => {
+      const roomNo = Number(p?.room || 0);
+      if (roomNo >= 1 && roomNo <= out.length) out[roomNo - 1].members.push(p);
     });
     return out;
   }, [participantsSafe, roomCount]);
@@ -162,36 +174,33 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     return names.length ? `리더: ${names.join(', ')}` : '리더 미지정';
   };
 
-  const setRoomTeam = (roomNo, side) => {
-    const nextRoomTeams = {
-      ...(safe.roomTeams || {}),
-      [String(roomNo)]: side,
-    };
-    emit({ roomTeams: nextRoomTeams });
-  };
-
-  const setRoomSplitParticipantTeam = (roomNo, participantId, side) => {
-    const roomKey = String(roomNo);
-    const nextRoomSplitAssignments = {
-      ...(safe.roomSplitAssignments || {}),
-      [roomKey]: {
-        ...((safe.roomSplitAssignments || {})[roomKey] || {}),
-        [String(participantId)]: side,
-      },
-    };
-    emit({ roomSplitAssignments: nextRoomSplitAssignments });
-  };
-
   const selectedPersonNames = (Array.isArray(safe.personIds) ? safe.personIds : []).map((id) => byId.get(String(id))?.nickname).filter(Boolean);
-  const summaryMode = `${getBattleTypeSummary(safe.battleType)} · ${safe.mode === 'room'
-    ? '방 모드'
-    : safe.mode === 'person'
-      ? `개인 모드 · ${selectedPersonNames.length}명 선택`
-      : `그룹 모드 · ${safe.groups.length}개 그룹`}`;
+  const summaryMode = `${battleTypeLabel(safe.battleType)} · ${safe.mode === 'room' ? '방 모드' : safe.mode === 'person' ? `개인 모드 · ${selectedPersonNames.length}명 선택` : `그룹 모드 · ${safe.groups.length}개 그룹`}`;
   const summaryRules = [
     safe.pickCount ? `${safe.pickCount}명` : '참가자수 미설정',
     safe.maxPerParticipant ? `인당 최대 ${safe.maxPerParticipant}회` : '선택횟수 미설정',
   ].join(' · ');
+
+  const roomAssignments = safe.roomTeams?.roomAssignments || {};
+  const splitMembers = safe.roomTeams?.splitMembers || {};
+
+  const setRoomAssignment = (roomNo, team) => {
+    updateRoomTeams({
+      roomAssignments: {
+        ...roomAssignments,
+        [String(roomNo)]: team,
+      },
+    });
+  };
+
+  const setSplitMemberTeam = (pid, team) => {
+    updateRoomTeams({
+      splitMembers: {
+        ...splitMembers,
+        [String(pid)]: team,
+      },
+    });
+  };
 
   return (
     <div style={box}>
@@ -217,19 +226,19 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
       </AccordionBox>
 
       <AccordionBox
-        title="그룹 / 방 / 개인 모드"
+        title="경기 방식 / 그룹 / 방 / 개인 모드"
         summary={summaryMode}
         open={openKey === 'mode'}
         onToggle={() => setOpenKey((prev) => (prev === 'mode' ? '' : 'mode'))}
       >
-        <div style={miniSectionLabel}>경기 방식</div>
+        <div style={subLabel}>경기 방식</div>
         <div style={pillGrid3Style}>
           <button type="button" onClick={() => setBattleType('stroke')} style={{ ...pillStyle, ...(safe.battleType === 'stroke' ? pillOnStyle : null) }}>스트로크</button>
-          <button type="button" onClick={() => setBattleType('matchplay')} style={{ ...pillStyle, ...(safe.battleType === 'matchplay' ? pillOnStyle : null) }}>매치플레이</button>
-          <button type="button" onClick={() => setBattleType('match-fourball')} style={{ ...pillStyle, ...(safe.battleType === 'match-fourball' ? pillOnStyle : null) }}>매치(포볼)</button>
+          <button type="button" onClick={() => setBattleType('match')} style={{ ...pillStyle, ...(safe.battleType === 'match' ? pillOnStyle : null) }}>매치플레이</button>
+          <button type="button" onClick={() => setBattleType('fourball')} style={{ ...pillStyle, ...(safe.battleType === 'fourball' ? pillOnStyle : null) }}>매치(포볼)</button>
         </div>
 
-        <div style={miniSectionLabel}>모드</div>
+        <div style={subLabelBlock}>모드</div>
         <div style={pillGrid3Style}>
           <button type="button" onClick={() => setMode('group')} style={{ ...pillStyle, ...(safe.mode === 'group' ? pillOnStyle : null) }}>그룹</button>
           <button type="button" onClick={() => setMode('room')} style={{ ...pillStyle, ...(safe.mode === 'room' ? pillOnStyle : null) }}>방</button>
@@ -273,43 +282,41 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
               {selectedPersonNames.length ? selectedPersonNames.slice(0, 8).join(', ') + (selectedPersonNames.length > 8 ? ` 외 ${selectedPersonNames.length - 8}명` : '') : '선택된 참가자가 없습니다.'}
             </div>
             {safe.battleType !== 'stroke' && (
-              <div style={noteBox}>개인 모드의 매치플레이/매치(포볼)은 추후 업데이트 예정입니다. 현재는 스트로크 방식처럼 미리보기가 표시됩니다.</div>
+              <div style={noticeBox}>개인 모드의 매치플레이/포볼은 추후 업데이트 예정입니다. 현재는 스트로크 방식으로 입력됩니다.</div>
             )}
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
             {participantsByRoom.map((room) => {
-              const roomKey = String(room.roomNo);
-              const roomTeam = safe.roomTeams?.[roomKey] || '';
-              const isSplit = roomTeam === 'split';
+              const roomMode = String(roomAssignments[String(room.roomNo)] || '');
               return (
                 <div key={`room-${room.roomNo}`} style={roomRow}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={roomHead}>
                     <div>
                       <div style={roomTitle}>{getRoomLabel(room.roomNo, roomNames)}</div>
-                      <div style={roomMembersText}>{room.members.map((participant) => participant?.nickname).filter(Boolean).join(', ') || '참가자 없음'}</div>
+                      <div style={roomMembersText}>{room.members.map((p) => p?.nickname).filter(Boolean).join(', ') || '참가자 없음'}</div>
                     </div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: '#344054' }}>{getRoomTeamDisplayName(roomTeam)}</div>
+                    <div style={roomPillWrap}>
+                      <button type="button" onClick={() => setRoomAssignment(room.roomNo, 'A')} style={{ ...roomPill, ...(roomMode === 'A' ? roomPillOn : null) }}>A팀</button>
+                      <button type="button" onClick={() => setRoomAssignment(room.roomNo, 'B')} style={{ ...roomPill, ...(roomMode === 'B' ? roomPillOn : null) }}>B팀</button>
+                      <button type="button" onClick={() => setRoomAssignment(room.roomNo, 'SPLIT')} style={{ ...roomPill, ...(roomMode === 'SPLIT' ? roomPillOn : null) }}>분할</button>
+                    </div>
                   </div>
 
-                  <div style={{ ...pillGrid3Style, marginTop: 10 }}>
-                    <button type="button" onClick={() => setRoomTeam(room.roomNo, 'A')} style={{ ...pillStyle, ...(roomTeam === 'A' ? pillOnStyle : null) }}>A팀</button>
-                    <button type="button" onClick={() => setRoomTeam(room.roomNo, 'B')} style={{ ...pillStyle, ...(roomTeam === 'B' ? pillOnStyle : null) }}>B팀</button>
-                    <button type="button" onClick={() => setRoomTeam(room.roomNo, 'split')} style={{ ...pillStyle, ...(roomTeam === 'split' ? pillOnStyle : null) }}>분할</button>
-                  </div>
-
-                  {isSplit && (
-                    <div style={splitBox}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#475467', marginBottom: 8 }}>분할 방 참가자 배정</div>
-                      {room.members.map((participant) => {
-                        const pid = String(participant?.id || '');
-                        const assigned = safe.roomSplitAssignments?.[roomKey]?.[pid] || '';
+                  {roomMode === 'SPLIT' && (
+                    <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+                      {room.members.map((member) => {
+                        const pid = String(member?.id || '');
+                        const assigned = String(splitMembers[pid] || '');
                         return (
-                          <div key={`split-${roomKey}-${pid}`} style={splitRow}>
-                            <div style={{ fontSize: 13, color: '#344054', fontWeight: 700 }}>{participant?.nickname || ''}</div>
-                            <div style={splitButtons}>
-                              <button type="button" onClick={() => setRoomSplitParticipantTeam(room.roomNo, pid, 'A')} style={{ ...splitBtn, ...(assigned === 'A' ? splitBtnOn : null) }}>A팀</button>
-                              <button type="button" onClick={() => setRoomSplitParticipantTeam(room.roomNo, pid, 'B')} style={{ ...splitBtn, ...(assigned === 'B' ? splitBtnOn : null) }}>B팀</button>
+                          <div key={`split-${pid}`} style={splitMemberRow}>
+                            <div style={splitMemberMeta}>
+                              <div style={{ fontWeight: 700, color: '#183153' }}>{member?.nickname || ''}</div>
+                              <div style={{ fontSize: 12, color: '#667085' }}>G{member?.handicap ?? 0}</div>
+                            </div>
+                            <div style={roomPillWrap}>
+                              <button type="button" onClick={() => setSplitMemberTeam(pid, 'A')} style={{ ...roomPill, ...(assigned === 'A' ? roomPillOn : null) }}>A팀</button>
+                              <button type="button" onClick={() => setSplitMemberTeam(pid, 'B')} style={{ ...roomPill, ...(assigned === 'B' ? roomPillOn : null) }}>B팀</button>
                             </div>
                           </div>
                         );
@@ -319,7 +326,6 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
                 </div>
               );
             })}
-            <div style={noteBox}>방 모드 매치플레이는 A팀/B팀 전체 인원의 홀별 합산 점수를 비교하여 UP / DOWN / AS를 표시합니다.</div>
           </div>
         )}
       </AccordionBox>
@@ -333,21 +339,13 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
         <div style={{ display: 'grid', gap: 10 }}>
           <label style={labelBox}>
             <span style={fieldLabel}>홀마다 선택할 참가자 수</span>
-            <select
-              value={safe.pickCount ?? ''}
-              disabled={safe.battleType === 'matchplay' || safe.battleType === 'match-fourball'}
-              onChange={(e) => emit({ pickCount: e.target.value === '' ? null : Math.max(1, Math.min(4, Number(e.target.value || 1))) })}
-              style={{ ...select, ...(safe.battleType === 'matchplay' || safe.battleType === 'match-fourball' ? disabledSelect : null) }}
-            >
+            <select value={safe.pickCount ?? ''} onChange={(e) => emit({ pickCount: e.target.value === '' ? null : Math.max(1, Math.min(4, Number(e.target.value || 1))) })} style={select}>
               <option value="">선택</option>
               <option value={1}>1명</option>
               <option value={2}>2명</option>
               <option value={3}>3명</option>
               <option value={4}>4명</option>
             </select>
-            {(safe.battleType === 'matchplay' || safe.battleType === 'match-fourball') && (
-              <div style={{ fontSize: 12, color: '#667085' }}>{safe.battleType === 'matchplay' ? '매치플레이는 홀마다 1명 선택 고정입니다.' : '매치(포볼)은 홀마다 2명 선택 고정입니다.'}</div>
-            )}
           </label>
           <label style={labelBox}>
             <span style={fieldLabel}>참가자별 최대 선택 횟수</span>
@@ -362,26 +360,26 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
       {pickerOpen && (
         <div style={modalBackdrop} onClick={closePicker}>
           <div style={modalCard} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <div style={{ fontWeight: 700 }}>
                 {pickerType === 'person' ? '참가자 선택' : pickerType === 'leader' ? `리더 선택 - ${getGroupRoomDisplayName(safe.groups[pickerGroupIdx]?.name, pickerGroupIdx, '그룹')}` : `멤버 선택 - ${getGroupRoomDisplayName(safe.groups[pickerGroupIdx]?.name, pickerGroupIdx, '그룹')}`}
               </div>
               <button type="button" onClick={closePicker} style={btnStyle}>닫기</button>
             </div>
 
-            <div style={{ marginTop: 10, maxHeight: 340, overflow: 'auto', border: '1px solid #eef2f7', borderRadius: 10, padding: 8 }}>
+            <div style={{ marginTop: 10, maxHeight: 340, overflow:'auto', border: '1px solid #eef2f7', borderRadius: 10, padding: 8 }}>
               {(pickerType === 'leader'
-                ? participantsSafe.filter((participant) => Array.isArray(safe.groups[pickerGroupIdx]?.memberIds) && safe.groups[pickerGroupIdx].memberIds.map(String).includes(String(participant?.id || '')))
+                ? participantsSafe.filter((p) => Array.isArray(safe.groups[pickerGroupIdx]?.memberIds) && safe.groups[pickerGroupIdx].memberIds.map(String).includes(String(p?.id || '')))
                 : participantsSafe
-              ).map((participant) => {
-                const pid = String(participant.id);
+              ).map((p) => {
+                const pid = String(p.id);
                 const checked = pickerType === 'person'
                   ? (Array.isArray(safe.personIds) ? safe.personIds.map(String).includes(pid) : false)
                   : pickerType === 'leader'
                     ? (Array.isArray(safe.groups[pickerGroupIdx]?.leaderIds) ? safe.groups[pickerGroupIdx].leaderIds.map(String).includes(pid) : false)
                     : (Array.isArray(safe.groups[pickerGroupIdx]?.memberIds) ? safe.groups[pickerGroupIdx].memberIds.map(String).includes(pid) : false);
                 return (
-                  <label key={pid} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px' }}>
+                  <label key={pid} style={{ display:'flex', alignItems:'center', gap: 8, padding: '6px 4px' }}>
                     <input
                       type="checkbox"
                       checked={checked}
@@ -392,9 +390,9 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
                       }}
                     />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14 }}>{participant.nickname}</div>
-                      <div style={{ fontSize: 12, color: '#777' }}>
-                        {participant.room ? `${participant.room}번방` : '미배정'} · {participant.group}조 · G{participant.handicap ?? 0}
+                      <div style={{ fontSize: 14 }}>{p.nickname}</div>
+                      <div style={{ fontSize: 12, color:'#777' }}>
+                        {p.room ? `${p.room}번방` : '미배정'} · {p.group}조 · G{p.handicap ?? 0}
                       </div>
                     </div>
                   </label>
@@ -403,7 +401,7 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
             </div>
 
             {pickerType === 'group' && (
-              <div style={{ marginTop: 8, fontSize: 12, color: '#777' }}>
+              <div style={{ marginTop: 8, fontSize: 12, color:'#777' }}>
                 * 한 참가자는 여러 그룹에 중복 포함될 수 없습니다. (선택 시 다른 그룹은 자동 해제)
               </div>
             )}
@@ -447,9 +445,9 @@ const pillOnStyle = { borderColor: '#8bb6ff', color: '#1d4ed8', background: '#ee
 const labelBox = { display: 'grid', gap: 6, minWidth: 0 };
 const fieldLabel = { fontSize: 13, fontWeight: 700, color: '#344054' };
 const select = { width: '100%', height: 42, borderRadius: 10, border: '1px solid #d0d7de', background: '#fff', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
-const disabledSelect = { background: '#f8fafc', color: '#475467' };
+const subLabel = { marginTop: 10, fontSize: 12, color: '#667085', fontWeight: 700 };
+const subLabelBlock = { marginTop: 14, fontSize: 12, color: '#667085', fontWeight: 700 };
 const miniLabel = { fontSize: 12, color: '#666', marginBottom: 6 };
-const miniSectionLabel = { marginTop: 10, fontSize: 12, color: '#667085', fontWeight: 700 };
 const groupBox = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, background: '#fff' };
 const groupHead = { display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 8 };
 const inputStyle = { flex: 1, height: 40, borderRadius: 10, border: '1px solid #d0d7de', background: '#fff', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
@@ -457,13 +455,14 @@ const btnStyle = { border: '1px solid #cbd5e1', background: '#fff', borderRadius
 const btnDangerStyle = { ...btnStyle, border: '1px solid #fecaca', color: '#b91c1c', height: 40 };
 const addBtn = { width: '100%', border: '1px dashed #98a2b3', background: '#f8fafc', color: '#344054', borderRadius: 12, padding: '10px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
 const roomRow = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, background: '#fff' };
+const roomHead = { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' };
 const roomTitle = { fontSize: 13, fontWeight: 800, color: '#183153' };
 const roomMembersText = { marginTop: 4, fontSize: 12, color: '#667085', lineHeight: 1.5 };
-const splitBox = { marginTop: 10, padding: 10, borderRadius: 12, border: '1px solid #e5e7eb', background: '#f8fafc' };
-const splitRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8 };
-const splitButtons = { display: 'flex', alignItems: 'center', gap: 6 };
-const splitBtn = { border: '1px solid #d0d7de', background: '#fff', color: '#344054', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
-const splitBtnOn = { borderColor: '#8bb6ff', background: '#eef5ff', color: '#1d4ed8' };
-const noteBox = { marginTop: 10, padding: '10px 12px', borderRadius: 12, background: '#f8fafc', border: '1px solid #e5e7eb', fontSize: 12, color: '#667085', lineHeight: 1.55 };
+const roomPillWrap = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' };
+const roomPill = { border: '1px solid #d1d5db', background: '#fff', color: '#344054', borderRadius: 999, padding: '7px 11px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+const roomPillOn = { borderColor: '#8bb6ff', background: '#eef5ff', color: '#1d4ed8' };
+const splitMemberRow = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', borderRadius: 10, border: '1px solid #eef2f7', background: '#f8fafc' };
+const splitMemberMeta = { minWidth: 0, display: 'grid', gap: 2 };
+const noticeBox = { marginTop: 10, border: '1px solid #dbeafe', background: '#eff6ff', color: '#1d4ed8', borderRadius: 10, padding: '10px 12px', fontSize: 12, lineHeight: 1.5 };
 const modalBackdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 9999 };
 const modalCard = { width: '100%', maxWidth: 520, background: '#fff', borderRadius: 14, padding: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.2)' };

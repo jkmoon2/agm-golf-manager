@@ -27,7 +27,11 @@ import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import { computeHoleRankForce } from '../events/holeRankForce';
 import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
-import { getBattleTypeLabel, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
+import { normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
+
+function getGroupRoomBattleTypeText(type) {
+  return type === 'match' ? '매치플레이' : type === 'fourball' ? '매치(포볼)' : '스트로크';
+}
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -93,12 +97,13 @@ function getGroupRoomHoleBattleMetaText(params) {
   const pickCount = Number.isFinite(Number(safe.pickCount)) ? `${Number(safe.pickCount)}명` : '미설정';
   const maxCount = Number.isFinite(Number(safe.maxPerParticipant)) ? `최대 ${Number(safe.maxPerParticipant)}회` : '미설정';
   const modeText = safe.mode === 'room' ? '방' : safe.mode === 'person' ? '개인' : '그룹';
+  const battleTypeText = getGroupRoomBattleTypeText(safe.battleType);
   const extra = safe.mode === 'person'
     ? ` · ${Array.isArray(safe.personIds) ? safe.personIds.length : 0}명`
     : safe.mode === 'group'
       ? ` · ${Array.isArray(safe.groups) ? safe.groups.length : 0}개 그룹`
       : '';
-  return `${getBattleTypeLabel(safe.battleType)} · ${modeText}${extra} · ${holeCount}홀 · ${pickCount} · ${maxCount}`;
+  return `${battleTypeText} · ${modeText}${extra} · ${holeCount}홀 · ${pickCount} · ${maxCount}`;
 }
 
 
@@ -295,16 +300,14 @@ if (form.template === 'group-battle') {
       }
       const isBingo = form.template === 'bingo';
       const isGroupRoomHoleBattle = form.template === 'group-room-hole-battle';
-      const battleSafe = isGroupRoomHoleBattle ? normalizeGroupRoomHoleBattleParams(parsed) : null;
-      const battleMode = battleSafe ? battleSafe.mode : 'group';
-      const battleRankOrder = battleSafe && battleSafe.battleType !== 'stroke' ? 'desc' : 'asc';
+      const battleMode = isGroupRoomHoleBattle ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
         params: parsed,
         target: isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'),
-        rankOrder: isBingo ? 'desc' : (isGroupRoomHoleBattle ? battleRankOrder : 'asc'),
+        rankOrder: isBingo ? 'desc' : (isGroupRoomHoleBattle ? 'asc' : 'asc'),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -799,16 +802,14 @@ if (editForm?.template === 'group-battle') {
       }
       const isBingoEdit = editForm.template === 'bingo';
       const isGroupRoomHoleBattleEdit = editForm.template === 'group-room-hole-battle';
-      const battleSafeEdit = isGroupRoomHoleBattleEdit ? normalizeGroupRoomHoleBattleParams(parsed) : null;
-      const battleModeEdit = battleSafeEdit ? battleSafeEdit.mode : 'group';
-      const battleRankOrderEdit = battleSafeEdit && battleSafeEdit.battleType !== 'stroke' ? 'desc' : 'asc';
+      const battleModeEdit = isGroupRoomHoleBattleEdit ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: parsed,
         target: isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target),
-        rankOrder: isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? battleRankOrderEdit : e.rankOrder),
+        rankOrder: isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);

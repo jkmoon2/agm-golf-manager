@@ -7,8 +7,9 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
   const locked = !!eventDef?.params?.selectionLocked;
   const inputRows = Array.isArray(data.inputRows) && data.inputRows.length ? data.inputRows : (Array.isArray(data.rows) ? data.rows : []);
   const doneCount = inputRows.filter((row) => row.complete).length;
-  const scoreDoneCount = data.participantRows.filter((row) => row.complete).length;
+  const scoreDoneCount = (data.participantRows || []).filter((row) => row.complete).length;
   const modeLabel = data.kind === 'group' ? '그룹 모드' : data.kind === 'person' ? '개인 모드' : '방 모드';
+  const battleTypeLabel = data?.battleType === 'match' ? '매치플레이' : data?.battleType === 'fourball' ? '매치(포볼)' : '스트로크';
 
   return (
     <div style={backdrop} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>
@@ -16,14 +17,14 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
         <div style={headerRow}>
           <div style={{ minWidth: 0 }}>
             <div style={title}>입력 현황 / 마감</div>
-            <div style={subTitle}>{eventDef?.title || '그룹/방/개인 홀별 지목전'} · {modeLabel}</div>
+            <div style={subTitle}>{eventDef?.title || '그룹/방/개인 홀별 지목전'} · {battleTypeLabel} · {modeLabel}</div>
           </div>
           <button type="button" style={btn} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>닫기</button>
         </div>
 
         <div style={summaryBox}>
           <div style={summaryItem}><b>{doneCount}</b> / {inputRows.length} 지목 완료</div>
-          <div style={summaryItem}><b>{scoreDoneCount}</b> / {data.participantRows.length} 점수 완료</div>
+          <div style={summaryItem}><b>{scoreDoneCount}</b> / {(data.participantRows || []).length} 점수 완료</div>
           <div style={summaryItem}>상태: <b style={{ color: locked ? '#dc2626' : '#2563eb' }}>{locked ? '마감' : '진행중'}</b></div>
           <button type="button" style={locked ? btnSub : btnPrimary} onClick={() => (typeof onToggleLock === 'function' ? onToggleLock(!locked) : null)}>
             {locked ? '재오픈' : '마감'}
@@ -33,19 +34,19 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
         <div style={{ marginTop: 12, fontWeight: 800, color: '#183153' }}>지목 입력 현황</div>
         <div style={listWrap}>
           {inputRows.map((row) => {
-            const filled = row.holes.filter((hole) => hole.ids.length === Math.max(1, Number(data.config.pickCount || 1))).length;
+            const filled = (row.holes || []).filter((hole) => hole.ids.length === Math.max(1, Number(data.config.pickCount || 1))).length;
             return (
               <div key={row.key} style={rowBox}>
                 <div style={rowHead}>
                   <div style={{ minWidth: 0 }}>
                     <span style={rowName}>{row.name}</span>
-                    <span style={rowMeta}> ({data.kind === 'group' ? '그룹' : data.kind === 'person' ? '개인선택자' : '방'})</span>
+                    <span style={rowMeta}> ({data.kind === 'group' ? '그룹' : data.kind === 'person' ? '개인선택자' : '팀'})</span>
                   </div>
                   <span style={row.complete ? badgeDone : badgeWait}>{row.complete ? '완료' : '대기'}</span>
                 </div>
                 <div style={rowBody}>
-                  <div style={summaryText}>입력 홀 {filled}/{data.config.selectedHoles.length} · 합계 {row.value}</div>
-                  <div style={metaLine}>{row.holes.map((hole) => `${hole.holeNo}홀:${hole.label || '-'}`).join(' / ')}</div>
+                  <div style={summaryText}>입력 홀 {filled}/{data.config.selectedHoles.length} · 결과 {row.displayValue || row.value || '-'}</div>
+                  <div style={metaLine}>{(row.holes || []).map((hole) => `${hole.holeNo}홀:${hole.label || '-'}`).join(' / ')}</div>
                 </div>
               </div>
             );
@@ -54,7 +55,7 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
 
         <div style={{ marginTop: 14, fontWeight: 800, color: '#183153' }}>홀별 점수 입력 현황</div>
         <div style={listWrap}>
-          {data.participantRows.map((row) => (
+          {(data.participantRows || []).map((row) => (
             <div key={`score-${row.id}`} style={rowBox}>
               <div style={rowHead}>
                 <div style={{ minWidth: 0 }}>

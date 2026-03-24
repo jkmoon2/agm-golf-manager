@@ -151,12 +151,14 @@ export const TEMPLATE_REGISTRY = [
         { name: '그룹1', memberIds: [], leaderIds: [] },
         { name: '그룹2', memberIds: [], leaderIds: [] },
       ],
+      roomTeams: {
+        roomAssignments: {},
+        splitMembers: {},
+      },
       personIds: [],
-      pickCount: 1,
-      maxPerParticipant: 1,
+      pickCount: null,
+      maxPerParticipant: null,
       selectionLocked: false,
-      roomTeams: {},
-      roomSplitAssignments: {},
     },
     help: '',
     ui: {
