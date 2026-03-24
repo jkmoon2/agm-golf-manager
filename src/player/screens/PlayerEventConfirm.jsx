@@ -25,7 +25,6 @@ const isFiniteNum = (n) => Number.isFinite(n);
 
 // 소수점 1자리 표시(정수면 소수점 생략)
 const fmtScore = (n) => {
-  if (typeof n === 'string') return String(n || '-');
   if (!isFiniteNum(n)) return '-';
   const r = Math.round(n * 10) / 10;
   return (r % 1 === 0) ? String(r) : r.toFixed(1);
@@ -231,22 +230,16 @@ const events = useMemo(
     // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
     if (template === 'group-room-hole-battle') {
       const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
-      const isMatch = data?.config?.battleType !== 'stroke' && data?.kind !== 'person';
-      const metricLabel = isMatch ? '결과' : '합계';
+      const metricLabel = data?.metric === 'match' ? '결과' : '합계';
       const rows = (data.rows || []).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
         label: row.name,
-        value: isMatch ? (row.valueDisplay || '') : row.value,
+        value: row.value,
+        displayText: row.displayTotal || '',
+        displayColor: row.displayColor || '',
       }));
-      const kind = isMatch && data?.kind === 'room'
-        ? 'team'
-        : data?.kind === 'group'
-          ? 'group'
-          : data?.kind === 'person'
-            ? 'person'
-            : 'room';
-      return { kind, metricLabel, rows };
+      return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
     }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────
@@ -446,7 +439,7 @@ const events = useMemo(
                           <td className={tCss.cell}>
                             {res.kind === 'person' ? (row.room || '-') : row.label}
                           </td>
-                          <td className={tCss.cell}>{fmtScore(row.value)}</td>
+                          <td className={tCss.cell} style={row.displayColor ? { color: row.displayColor, fontWeight: 800 } : undefined}>{row.displayText || fmtScore(row.value)}</td>
                         </tr>
                       ))}
                     </tbody>
