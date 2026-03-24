@@ -178,18 +178,6 @@ function getGroupRoomCellText(ids = [], byId = new Map()){
   return names.length ? names.join(' / ') : '선택';
 }
 
-function getBattleResultColor(text = '') {
-  if (text === 'UP') return '#d92d20';
-  if (text === 'DOWN') return '#175cd3';
-  return '#111827';
-}
-
-function getBattleTotalColor(text = '') {
-  if (String(text).includes('UP')) return '#d92d20';
-  if (String(text).includes('DOWN')) return '#175cd3';
-  return '#111827';
-}
-
 function getGroupRoomMenuWidthPx(){
   return getPickMenuWidthPx();
 }
@@ -1019,10 +1007,10 @@ export default function PlayerEventInput(){
     } else {
       const currentCountForMember = Number(usage[nextId] || 0) - (currentIds.includes(nextId) ? 1 : 0);
       if (currentCountForMember >= cfg.maxPerParticipant) {
-        return currentIds;
+        return;
       }
       if (nextIds.length >= cfg.pickCount) {
-        return currentIds;
+        return;
       }
       nextIds = [...nextIds, nextId];
     }
@@ -1033,7 +1021,6 @@ export default function PlayerEventInput(){
     slot.shared = { ...shared, rows };
     all[ev.id] = slot;
     setDraft(all);
-    return nextIds;
   };
 
   const saveDraft = async () => {
@@ -1290,55 +1277,57 @@ export default function PlayerEventInput(){
               currentParticipantId: selfParticipantId,
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
-            const battleIsMatchLike = battleCfg.battleType === 'match' || battleCfg.battleType === 'fourball';
-            const battlePreviewData = computeGroupRoomHoleBattle(ev, participants, battleIsMatchLike ? (inputsByEventServer?.[ev.id] || {}) : (inputsByEvent?.[ev.id] || {}), {
-              roomNames,
-              roomCount: allRoomNos.length || roomNames.length || 0,
-              currentRoomNo: roomIdx,
-              currentParticipantId: selfParticipantId,
-              currentParticipantNickname: String(selfParticipant?.nickname || ''),
-            });
-            const isSelectionMine = (row) => {
-              const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [];
-              const memberNames = (Array.isArray(row?.members) ? row.members : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
-              return (selfParticipantId && memberIds.includes(selfParticipantId))
-                || (selfParticipantNickname && memberNames.includes(selfParticipantNickname));
-            };
-            const battleSelectionRowsAll = (() => {
+            const isBattleMatchLike = battleCfg.mode !== 'person' && (battleCfg.battleType === 'matchplay' || battleCfg.battleType === 'fourball');
+            const battleSelectionRows = (() => {
               if (battleCfg.mode === 'group') {
-                return getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+                if (battleLocked) {
+                  return getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+                }
+                return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
               }
               if (battleCfg.mode === 'room') {
-                return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
+                const allRows = Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
+                const mine = allRows.find((row) => Number(row?.roomNo) === Number(roomIdx));
+                return mine ? [mine] : allRows.slice(0, 1);
               }
               return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
             })();
-            const battleSelectionRows = (() => {
-              if (battleLocked || battleCfg.mode === 'person') return battleSelectionRowsAll;
-              const mine = battleSelectionRowsAll.filter((row) => isSelectionMine(row));
-              return mine.length ? mine : battleSelectionRowsAll.slice(0, 1);
-            })();
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
-            const battlePreviewShowRank = battleCfg.mode === 'person' && !battleIsMatchLike;
+            const battlePreviewShowRank = battleCfg.mode === 'person';
             const battlePreviewAllRowsBase = battleCfg.mode === 'person'
-              ? (battlePreviewData.rows || [])
+              ? (battleData.rows || [])
               : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
-            const battlePreviewRowsResolved = battlePreviewAllRowsBase.map((rowBase) => (battlePreviewData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase);
-            const battlePreviewRankByKey = new Map((battlePreviewData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
+            const battlePreviewExpanded = !!battlePreviewExpandedMap?.[ev.id];
+            const battlePreviewRowsBase = (() => {
+              if (battleCfg.mode !== 'room' || battlePreviewExpanded) return battlePreviewAllRowsBase;
+              const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
+              if (mine) return [mine];
+              return battlePreviewAllRowsBase.slice(0, 1);
+            })();
+            const battlePreviewRowsResolved = battlePreviewRowsBase.map((rowBase) => (battleData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase);
+            const battlePreviewRankByKey = new Map((battleData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
             const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54 + (battlePreviewShowRank ? 54 : 0));
-            const battlePreviewExpanded = !!battlePreviewExpandedMap[ev.id];
+            const getBattleResultStyle = (hole) => {
+              const text = String(hole?.displayValue || hole?.resultText || '');
+              if (text === 'UP' || /UP$/.test(text)) return { color: '#dc2626', fontWeight: 800 };
+              if (text === 'DOWN' || /DOWN$/.test(text)) return { color: '#2563eb', fontWeight: 800 };
+              if (text === 'AS') return { color: '#111827', fontWeight: 800 };
+              return null;
+            };
             const canEditBattleSelection = (row) => {
               if (battleLocked) return false;
-              if (battleCfg.mode === 'person') return true;
+              if (battleCfg.mode !== 'group') return true;
+
               const memberIds = Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [];
               const memberNames = (Array.isArray(row?.members) ? row.members : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
               const isMine = (selfParticipantId && memberIds.includes(selfParticipantId))
                 || (selfParticipantNickname && memberNames.includes(selfParticipantNickname));
               if (!isMine) return false;
-              if (battleCfg.mode !== 'group') return true;
+
               const leaders = Array.isArray(row?.leaderIds) ? row.leaderIds.map(String).filter(Boolean) : [];
               if (!leaders.length) return true;
+
               const leaderNames = (Array.isArray(row?.leaders) ? row.leaders : []).map((member) => String(member?.nickname || '').trim().toLowerCase()).filter(Boolean);
               return (selfParticipantId && leaders.includes(selfParticipantId))
                 || (selfParticipantNickname && leaderNames.includes(selfParticipantNickname));
@@ -1348,7 +1337,6 @@ export default function PlayerEventInput(){
               let hasAny = false;
               battleScoreParticipants.forEach((member) => {
                 const raw = inputsByEvent?.[ev.id]?.person?.[member?.id]?.values?.[holeNo - 1] ?? '';
-                if (raw === '' || raw == null) return;
                 const n = Number(raw);
                 if (Number.isFinite(n)) {
                   sum += n;
@@ -1359,7 +1347,10 @@ export default function PlayerEventInput(){
             });
             const battleScoreGrandTotal = battleScoreSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
             const battleScoreGrandHasAny = battleScoreSubtotal.some((item) => item.hasAny);
-            const battlePreviewSubtotal = battleIsMatchLike ? [] : battleSelectedHoles.map((holeNo) => {
+            const battlePreviewSubtotal = battleSelectedHoles.map((holeNo) => {
+              if (isBattleMatchLike) {
+                return { holeNo, sum: 0, hasAny: false };
+              }
               let sum = 0;
               let hasAny = false;
               battlePreviewRowsResolved.forEach((row) => {
@@ -1516,7 +1507,7 @@ export default function PlayerEventInput(){
                 <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
                     <div className={tCss.viewerTitle} style={{ margin: 0 }}>선택 미리보기</div>
-                    {!battleIsMatchLike && battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && (
+                    {battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setBattlePreviewExpandedMap((prev) => ({ ...prev, [ev.id]: !battlePreviewExpanded }))}
@@ -1548,25 +1539,23 @@ export default function PlayerEventInput(){
                             <td>{row.name}</td>
                             {battleSelectedHoles.map((holeNo) => {
                               const hole = Array.isArray(row?.holes) ? row.holes.find((item) => Number(item?.holeNo) === Number(holeNo)) : null;
-                              if (battleIsMatchLike) {
-                                const text = String(hole?.displayValue || '');
-                                return <td key={`battle-preview-cell-${row.key}-${holeNo}`} style={{ color: getBattleResultColor(text), fontWeight: 800 }}>{text}</td>;
+                              if (isBattleMatchLike) {
+                                const text = String(hole?.displayValue || hole?.resultText || '');
+                                return <td key={`battle-preview-cell-${row.key}-${holeNo}`} style={getBattleResultStyle(hole)}>{text}</td>;
                               }
                               const value = Number(hole?.value);
                               return <td key={`battle-preview-cell-${row.key}-${holeNo}`}>{Number.isFinite(value) ? formatDisplayNumber(value) : ''}</td>;
                             })}
-                            <td className={tCss.totalCell} style={battleIsMatchLike ? { color: getBattleTotalColor(String(row.displayValue || '')), fontWeight: 900 } : undefined}>{battleIsMatchLike ? (row.displayValue || '') : formatDisplayNumber(row.value)}</td>
+                            <td className={tCss.totalCell} style={isBattleMatchLike ? getBattleResultStyle({ displayValue: row.displayValue }) : null}>{isBattleMatchLike ? (row.displayValue || 'AS') : formatDisplayNumber(row.value)}</td>
                             {battlePreviewShowRank && <td className={tCss.subtotalBlue}>{battlePreviewRankByKey.get(String(row?.key || '')) || ''}</td>}
                           </tr>
                         ))}
-                        {!battleIsMatchLike && (
-                          <tr className={tCss.subtotalRow}>
-                            <td className={tCss.subtotalLabel}>소계</td>
-                            {battlePreviewSubtotal.map((item) => <td key={`battle-preview-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
-                            <td className={tCss.subtotalRed}>{battlePreviewGrandHasAny ? formatDisplayNumber(battlePreviewGrandTotal) : ''}</td>
-                            {battlePreviewShowRank && <td className={tCss.subtotalBlue}></td>}
-                          </tr>
-                        )}
+                        <tr className={tCss.subtotalRow}>
+                          <td className={tCss.subtotalLabel}>소계</td>
+                          {battlePreviewSubtotal.map((item) => <td key={`battle-preview-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
+                          <td className={tCss.subtotalRed}>{isBattleMatchLike ? '' : (battlePreviewGrandHasAny ? formatDisplayNumber(battlePreviewGrandTotal) : '')}</td>
+                          {battlePreviewShowRank && <td className={tCss.subtotalBlue}></td>}
+                        </tr>
                       </tbody>
                     </table>
                   </div>
@@ -2322,10 +2311,10 @@ export default function PlayerEventInput(){
                       className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
                       onClick={() => {
                         if (disabled) return;
-                        const nextIds = patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, value) || [];
-                        if (nextIds.length >= Math.max(1, Number(cfg.pickCount || 1))) {
-                          setBattleMenuState(null);
-                        }
+                        patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, value);
+                        const nextCount = active ? Math.max(0, currentIds.length - 1) : Math.min(Number(cfg.pickCount || 1), currentIds.length + 1);
+                        const keepOpen = !active && Number(cfg.pickCount || 1) > 1 && nextCount < Number(cfg.pickCount || 1);
+                        if (!keepOpen) setBattleMenuState(null);
                       }}
                       disabled={disabled}
                       title={displayPickOption(member)}

@@ -230,16 +230,14 @@ const events = useMemo(
     // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
     if (template === 'group-room-hole-battle') {
       const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
-      const isMatchLike = data?.metric === 'match';
-      const metricLabel = isMatchLike ? '결과' : '합계';
+      const metricLabel = data?.metric === 'match' ? '결과' : '합계';
       const rows = (data.rows || []).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
         label: row.name,
-        value: row.value,
-        displayValue: row.displayValue,
+        value: data?.metric === 'match' ? (row.displayValue || 'AS') : row.value,
       }));
-      return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows, isMatchLike };
+      return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
     }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────
@@ -439,7 +437,7 @@ const events = useMemo(
                           <td className={tCss.cell}>
                             {res.kind === 'person' ? (row.room || '-') : row.label}
                           </td>
-                          <td className={tCss.cell}>{res.isMatchLike ? (row.displayValue || '-') : fmtScore(row.value)}</td>
+                          <td className={tCss.cell}>{fmtScore(row.value)}</td>
                         </tr>
                       ))}
                     </tbody>
