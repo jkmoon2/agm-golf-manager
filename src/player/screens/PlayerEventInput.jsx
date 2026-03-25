@@ -574,12 +574,13 @@ export default function PlayerEventInput(){
   };
 
 
-  const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null) => {
+  const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null, menuOpt = {}) => {
     const rect = buttonEl?.getBoundingClientRect?.();
     const menuWidth = getGroupRoomMenuWidthPx();
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 360;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 640;
-    const estimatedHeight = Math.min(Math.max((Array.isArray(options) ? options.length : 0) + 2, 5) * 40 + 16, Math.min(viewportHeight * 0.56, 360));
+    const extraRows = menuOpt?.viewOnly ? 1 : 2;
+    const estimatedHeight = Math.min(Math.max((Array.isArray(options) ? options.length : 0) + extraRows, 5) * 40 + 16, Math.min(viewportHeight * 0.56, 360));
     const left = rect
       ? Math.max(8, Math.min(rect.left + (rect.width / 2) - (menuWidth / 2), viewportWidth - menuWidth - 8))
       : 12;
@@ -593,7 +594,7 @@ export default function PlayerEventInput(){
         top = Math.max(8, rect.top - estimatedHeight - 6);
       }
     }
-    setBattleMenuState({ evId, rowKey, holeNo, left, top, width: menuWidth });
+    setBattleMenuState({ evId, rowKey, holeNo, left, top, width: menuWidth, viewOnly: !!menuOpt?.viewOnly });
   };
 
   const roomMembers = useMemo(() => {
@@ -633,6 +634,14 @@ export default function PlayerEventInput(){
       const next = current === '' ? '-' : (current.startsWith('-') ? current : `-${current}`);
       patchAccum(evId, pid, idx, next, attemptsOverride);
       setTimeout(() => focusEventInput(evId, pid, idx), 0);
+    }, LONG_PRESS_MS);
+  };
+
+  const startBattleInspectLongPress = (evId, rowKey, holeNo, members = [], buttonEl = null) => {
+    const key = `battle:${evId}:${rowKey}:${holeNo}`;
+    cancelEventLongPress(key);
+    longPressTimersRef.current[key] = setTimeout(() => {
+      openBattleMenuAt(evId, rowKey, holeNo, members, buttonEl, { viewOnly: true });
     }, LONG_PRESS_MS);
   };
 
@@ -1402,6 +1411,8 @@ export default function PlayerEventInput(){
                           {battleSelectedHoles.map((holeNo) => {
                             const ids = getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
                             const buttonText = getGroupRoomCellText(ids, participantById);
+                            const editable = canEditBattleSelection(row);
+                            const canInspectLockedCell = battleLocked && ids.length > 0;
                             return (
                               <td key={`battle-cell-${row.key}-${holeNo}`} className={tCss.cellEditable}>
                                 <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
@@ -1410,15 +1421,30 @@ export default function PlayerEventInput(){
                                     className={tCss.pickSelectButton}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (!canEditBattleSelection(row)) return;
-                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo);
+                                      if (!editable) return;
+                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo) && !battleMenuState?.viewOnly;
                                       if (same) {
                                         setBattleMenuState(null);
                                         return;
                                       }
                                       openBattleMenuAt(ev.id, row.key, holeNo, row.members, e.currentTarget);
                                     }}
-                                    disabled={!canEditBattleSelection(row)}
+                                    onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      if (!canInspectLockedCell) return;
+                                      startBattleInspectLongPress(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                    }}
+                                    onPointerUp={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onPointerCancel={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onPointerLeave={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onTouchStart={(e) => {
+                                      e.stopPropagation();
+                                      if (!canInspectLockedCell) return;
+                                      startBattleInspectLongPress(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                    }}
+                                    onTouchEnd={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onTouchCancel={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    disabled={!battleLocked && !editable}
                                     title={buttonText}
                                   >
                                     <span className={tCss.pickSelectText}>{buttonText}</span>
@@ -2282,9 +2308,15 @@ export default function PlayerEventInput(){
             : getGroupRoomHoleBattleInputRows(activeEvent, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
           const row = rows.find((item) => String(item.key) === String(battleMenuState.rowKey));
           if (!row) return null;
-          const shared = getBattleSharedInputs(inputsByEvent?.[battleMenuState.evId] || {});
+          const activeBattleSource = battleMenuState?.viewOnly ? inputsByEventServer : inputsByEvent;
+          const shared = getBattleSharedInputs(activeBattleSource?.[battleMenuState.evId] || {});
           const currentIds = getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
           const usage = countParticipantUsageForRow(shared, row.key);
+          const viewOnly = !!battleMenuState?.viewOnly;
+          const orderedMembers = [
+            ...row.members.filter((member) => currentIds.includes(String(member?.id || ''))),
+            ...row.members.filter((member) => !currentIds.includes(String(member?.id || ''))),
+          ];
           return createPortal(
             <div
               className={tCss.pickMenuOverlay}
@@ -2302,23 +2334,25 @@ export default function PlayerEventInput(){
                 onClick={(e) => e.stopPropagation()}
               >
                 <div style={{ padding: '6px 10px 8px', fontSize: 12, color: '#667085', borderBottom: '1px solid #eef2f7' }}>
-                  {row.name} · {battleMenuState.holeNo}홀 · {currentIds.length}/{cfg.pickCount}명
+                  {row.name} · {battleMenuState.holeNo}홀 · {currentIds.length}/{cfg.pickCount}명{viewOnly ? ' · 선택 보기' : ''}
                 </div>
-                <button
-                  type="button"
-                  className={`${tCss.pickMenuOption} ${!currentIds.length ? tCss.pickMenuOptionActive : ''}`}
-                  onClick={() => {
-                    patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, '');
-                    setBattleMenuState(null);
-                  }}
-                >
-                  선택 해제
-                </button>
-                {row.members.map((member) => {
+                {!viewOnly && (
+                  <button
+                    type="button"
+                    className={`${tCss.pickMenuOption} ${!currentIds.length ? tCss.pickMenuOptionActive : ''}`}
+                    onClick={() => {
+                      patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, '');
+                      setBattleMenuState(null);
+                    }}
+                  >
+                    선택 해제
+                  </button>
+                )}
+                {orderedMembers.map((member) => {
                   const value = String(member?.id || '');
                   const active = currentIds.includes(value);
                   const used = Number(usage[value] || 0);
-                  const disabled = !active && (currentIds.length >= cfg.pickCount || used >= cfg.maxPerParticipant);
+                  const disabled = viewOnly || (!active && (currentIds.length >= cfg.pickCount || used >= cfg.maxPerParticipant));
                   return (
                     <button
                       key={`battle-menu-${value}`}

@@ -383,6 +383,15 @@ function formatMatchTotal(net) {
   return n > 0 ? `${Math.abs(n)}UP` : `${Math.abs(n)}DOWN`;
 }
 
+function getBattleCompareValue(scores = [], battleType = 'stroke') {
+  const safeScores = (Array.isArray(scores) ? scores : []).filter((n) => Number.isFinite(n));
+  if (!safeScores.length) return null;
+  if (battleType === 'fourball') {
+    return Math.min(...safeScores);
+  }
+  return safeScores.reduce((sum, n) => sum + n, 0);
+}
+
 function buildMatchPairRows(rowsBase, shared, cfg, byId, inputsByEvent) {
   const baseRows = rowsBase.map((row) => ({
     ...row,
@@ -416,8 +425,8 @@ function buildMatchPairRows(rowsBase, shared, cfg, byId, inputsByEvent) {
       const rightScores = rightMembers.map((member) => getBattleScoreValue(inputsByEvent, member?.id, holeNo));
       const leftReady = leftIds.length === requiredCount && leftScores.every((n) => Number.isFinite(n));
       const rightReady = rightIds.length === requiredCount && rightScores.every((n) => Number.isFinite(n));
-      const leftValue = leftReady ? leftScores.reduce((sum, n) => sum + n, 0) : null;
-      const rightValue = rightReady ? rightScores.reduce((sum, n) => sum + n, 0) : null;
+      const leftValue = leftReady ? getBattleCompareValue(leftScores, cfg.battleType) : null;
+      const rightValue = rightReady ? getBattleCompareValue(rightScores, cfg.battleType) : null;
       const leftResult = compareMatchValues(leftValue, rightValue);
       const rightResult = compareMatchValues(rightValue, leftValue);
       const ready = leftReady && rightReady;
@@ -496,6 +505,7 @@ function buildRoomMatchRows(rowsBase, shared, cfg, byId, inputsByEvent) {
 
   cfg.selectedHoles.forEach((holeNo, holeIdx) => {
     const teamTotals = { A: 0, B: 0 };
+    const teamCompareScores = { A: [], B: [] };
     const teamReadyFlags = { A: true, B: true };
     const teamHasPlayers = { A: false, B: false };
 
@@ -505,7 +515,7 @@ function buildRoomMatchRows(rowsBase, shared, cfg, byId, inputsByEvent) {
       const scores = members.map((member) => getBattleScoreValue(inputsByEvent, member?.id, holeNo));
       const ownReady = ids.length === requiredCount && scores.every((n) => Number.isFinite(n));
       const rowTeamKey = getRoomRowTeamKey(cfg, row, members);
-      const rowValue = ownReady ? scores.reduce((sum, n) => sum + n, 0) : null;
+      const rowValue = ownReady ? getBattleCompareValue(scores, cfg.battleType) : null;
 
       row.holes[holeIdx] = {
         holeNo,
@@ -526,12 +536,22 @@ function buildRoomMatchRows(rowsBase, shared, cfg, byId, inputsByEvent) {
         teamReadyFlags[rowTeamKey] = false;
         return;
       }
-      teamTotals[rowTeamKey] += Number(rowValue || 0);
+      if (cfg.battleType === 'fourball') {
+        if (Number.isFinite(rowValue)) teamCompareScores[rowTeamKey].push(Number(rowValue));
+      } else {
+        teamTotals[rowTeamKey] += Number(rowValue || 0);
+      }
     });
 
     const ready = teamHasPlayers.A && teamHasPlayers.B && teamReadyFlags.A && teamReadyFlags.B;
-    const resultA = ready ? compareMatchValues(teamTotals.A, teamTotals.B) : { text: '', score: null, color: '' };
-    const resultB = ready ? compareMatchValues(teamTotals.B, teamTotals.A) : { text: '', score: null, color: '' };
+    const compareValueA = cfg.battleType === 'fourball'
+      ? (teamCompareScores.A.length ? Math.min(...teamCompareScores.A) : null)
+      : teamTotals.A;
+    const compareValueB = cfg.battleType === 'fourball'
+      ? (teamCompareScores.B.length ? Math.min(...teamCompareScores.B) : null)
+      : teamTotals.B;
+    const resultA = ready ? compareMatchValues(compareValueA, compareValueB) : { text: '', score: null, color: '' };
+    const resultB = ready ? compareMatchValues(compareValueB, compareValueA) : { text: '', score: null, color: '' };
 
     baseRows.forEach((row) => {
       const hole = row.holes[holeIdx];
