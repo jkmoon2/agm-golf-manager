@@ -611,6 +611,7 @@ export default function PlayerEventInput(){
   const [bingoUiState, setBingoUiState] = useState({});
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
+  const pendingSavedInputsSigRef = useRef('');
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -645,8 +646,30 @@ export default function PlayerEventInput(){
     }, LONG_PRESS_MS);
   };
 
+  const cloneEventInputs = (value) => {
+    try {
+      return value ? JSON.parse(JSON.stringify(value)) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const stringifyEventInputs = (value) => {
+    try {
+      return JSON.stringify(value || {});
+    } catch {
+      return '';
+    }
+  };
+
   useEffect(() => {
-    if (!dirty) setDraft(inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
+    if (dirty) return;
+    const serverSig = stringifyEventInputs(inputsByEventServer);
+    if (pendingSavedInputsSigRef.current) {
+      if (serverSig !== pendingSavedInputsSigRef.current) return;
+      pendingSavedInputsSigRef.current = '';
+    }
+    setDraft(cloneEventInputs(inputsByEventServer));
   }, [inputsByEventServer, dirty]);
 
   const inputsByEvent = draft || {};
@@ -1081,7 +1104,9 @@ export default function PlayerEventInput(){
         await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
       }
 
-      setDraft(merged ? JSON.parse(JSON.stringify(merged)) : {});
+      const savedClone = cloneEventInputs(merged);
+      pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
+      setDraft(savedClone);
       setDirty(false);
       alert('저장되었습니다.');
     }catch(e){
@@ -1287,6 +1312,7 @@ export default function PlayerEventInput(){
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
             const isBattleMatchLike = battleCfg.mode !== 'person' && (battleCfg.battleType === 'matchplay' || battleCfg.battleType === 'fourball');
+            const isBattleRoomTeamSelection = battleCfg.mode === 'room' && isBattleMatchLike && battleCfg?.roomTeams?.selectionMode === 'team';
             const battlePreviewData = isBattleMatchLike
               ? computeGroupRoomHoleBattle(ev, participants, inputsByEventServer?.[ev.id] || {}, {
                   roomNames,
@@ -1305,6 +1331,7 @@ export default function PlayerEventInput(){
               }
               if (battleCfg.mode === 'room') {
                 const allRows = Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
+                if (isBattleRoomTeamSelection) return allRows;
                 const mine = allRows.find((row) => Number(row?.roomNo) === Number(roomIdx));
                 return mine ? [mine] : allRows.slice(0, 1);
               }
@@ -1318,7 +1345,7 @@ export default function PlayerEventInput(){
               : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
             const battlePreviewExpanded = !!battlePreviewExpandedMap?.[ev.id];
             const battlePreviewRowsBase = (() => {
-              if (battleCfg.mode !== 'room' || battlePreviewExpanded) return battlePreviewAllRowsBase;
+              if (battleCfg.mode !== 'room' || battlePreviewExpanded || isBattleRoomTeamSelection) return battlePreviewAllRowsBase;
               const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
               if (mine) return [mine];
               return battlePreviewAllRowsBase.slice(0, 1);
@@ -1409,10 +1436,12 @@ export default function PlayerEventInput(){
                         <tr key={`battle-row-${row.key}`}>
                           <td className={tCss.pickInputNick}>{row.name}</td>
                           {battleSelectedHoles.map((holeNo) => {
-                            const ids = getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
-                            const buttonText = getGroupRoomCellText(ids, participantById);
-                            const editable = canEditBattleSelection(row);
-                            const canInspectLockedCell = battleLocked && ids.length > 0;
+                            const ids = isBattleRoomTeamSelection
+                              ? (Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [])
+                              : getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
+                            const buttonText = isBattleRoomTeamSelection ? String(row?.name || '') : getGroupRoomCellText(ids, participantById);
+                            const editable = isBattleRoomTeamSelection ? false : canEditBattleSelection(row);
+                            const canInspectLockedCell = battleLocked && (ids.length > 0 || isBattleRoomTeamSelection);
                             return (
                               <td key={`battle-cell-${row.key}-${holeNo}`} className={tCss.cellEditable}>
                                 <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
@@ -1445,7 +1474,9 @@ export default function PlayerEventInput(){
                                     onTouchEnd={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
                                     onTouchCancel={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
                                     disabled={!battleLocked && !editable}
-                                    title={buttonText}
+                                    title={isBattleRoomTeamSelection
+                                      ? (Array.isArray(row?.members) ? row.members.map((member) => String(member?.nickname || '')).filter(Boolean).join(' / ') : String(buttonText || ''))
+                                      : buttonText}
                                   >
                                     <span className={tCss.pickSelectText}>{buttonText}</span>
                                   </button>
@@ -1957,7 +1988,9 @@ export default function PlayerEventInput(){
                                         openPickMenuAt(ev.id, p.id, idx, options, e.currentTarget);
                                       }}
                                       disabled={!p || locked}
-                                      title={buttonText}
+                                      title={isBattleRoomTeamSelection
+                                      ? (Array.isArray(row?.members) ? row.members.map((member) => String(member?.nickname || '')).filter(Boolean).join(' / ') : String(buttonText || ''))
+                                      : buttonText}
                                     >
                                       <span className={tCss.pickSelectText}>{buttonText}</span>
                                     </button>
@@ -2310,9 +2343,12 @@ export default function PlayerEventInput(){
           if (!row) return null;
           const activeBattleSource = battleMenuState?.viewOnly ? inputsByEventServer : inputsByEvent;
           const shared = getBattleSharedInputs(activeBattleSource?.[battleMenuState.evId] || {});
-          const currentIds = getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
-          const usage = countParticipantUsageForRow(shared, row.key);
           const viewOnly = !!battleMenuState?.viewOnly;
+          const isBattleRoomTeamSelection = activeEvent?.params?.mode === 'room' && (activeEvent?.params?.battleType === 'matchplay' || activeEvent?.params?.battleType === 'fourball') && activeEvent?.params?.roomTeams?.selectionMode === 'team' && row?.roomSelectionMode === 'team';
+          const currentIds = isBattleRoomTeamSelection
+            ? (Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [])
+            : getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
+          const usage = isBattleRoomTeamSelection ? {} : countParticipantUsageForRow(shared, row.key);
           const orderedMembers = [
             ...row.members.filter((member) => currentIds.includes(String(member?.id || ''))),
             ...row.members.filter((member) => !currentIds.includes(String(member?.id || ''))),
@@ -2334,7 +2370,7 @@ export default function PlayerEventInput(){
                 onClick={(e) => e.stopPropagation()}
               >
                 <div style={{ padding: '6px 10px 8px', fontSize: 12, color: '#667085', borderBottom: '1px solid #eef2f7' }}>
-                  {row.name} · {battleMenuState.holeNo}홀 · {currentIds.length}/{cfg.pickCount}명{viewOnly ? ' · 선택 보기' : ''}
+                  {row.name} · {battleMenuState.holeNo}홀 · {isBattleRoomTeamSelection ? `${currentIds.length}명` : `${currentIds.length}/${cfg.pickCount}명`}{viewOnly ? ' · 선택 보기' : ''}
                 </div>
                 {!viewOnly && (
                   <button
