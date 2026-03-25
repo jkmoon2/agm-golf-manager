@@ -1988,9 +1988,7 @@ export default function PlayerEventInput(){
                                         openPickMenuAt(ev.id, p.id, idx, options, e.currentTarget);
                                       }}
                                       disabled={!p || locked}
-                                      title={isBattleRoomTeamSelection
-                                      ? (Array.isArray(row?.members) ? row.members.map((member) => String(member?.nickname || '')).filter(Boolean).join(' / ') : String(buttonText || ''))
-                                      : buttonText}
+                                      title={buttonText}
                                     >
                                       <span className={tCss.pickSelectText}>{buttonText}</span>
                                     </button>

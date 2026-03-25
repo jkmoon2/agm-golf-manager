@@ -431,8 +431,8 @@ function buildMatchPairRows(rowsBase, shared, cfg, byId, inputsByEvent) {
     value: 0,
     sortValue: 0,
     displayValue: 'AS',
-    usage: isRoomTeamSelection ? {} : countParticipantUsageForRow(shared, row.key),
-    complete: isRoomTeamSelection ? true : isBattleRowSelectionComplete(row, shared, { params: cfg }),
+    usage: countParticipantUsageForRow(shared, row.key),
+    complete: isBattleRowSelectionComplete(row, shared, { params: cfg }),
     holes: [],
   }));
 
@@ -600,8 +600,8 @@ function buildRoomMatchRows(rowsBase, shared, cfg, byId, inputsByEvent) {
     value: 0,
     sortValue: 0,
     displayValue: 'AS',
-    usage: isRoomTeamSelection ? {} : countParticipantUsageForRow(shared, row.key),
-    complete: isRoomTeamSelection ? true : isBattleRowSelectionComplete(row, shared, { params: cfg }),
+    usage: countParticipantUsageForRow(shared, row.key),
+    complete: isBattleRowSelectionComplete(row, shared, { params: cfg }),
     holes: [],
   }));
 
