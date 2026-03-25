@@ -162,6 +162,18 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     });
   };
 
+
+  const setRoomPickMode = (pickMode) => {
+    emit({
+      roomTeams: {
+        ...(safe.roomTeams || {}),
+        roomAssignments: { ...((safe.roomTeams && safe.roomTeams.roomAssignments) || {}) },
+        splitMembers: { ...((safe.roomTeams && safe.roomTeams.splitMembers) || {}) },
+        pickMode: pickMode === 'overall' ? 'overall' : 'individual',
+      },
+    });
+  };
+
   const participantsByRoom = useMemo(() => {
     const out = Array.from({ length: Math.max(0, Number(roomCount || 0)) }, (_, idx) => ({ roomNo: idx + 1, members: [] }));
     participantsSafe.forEach((p) => {
@@ -187,8 +199,11 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
   };
 
   const selectedPersonNames = (Array.isArray(safe.personIds) ? safe.personIds : []).map((id) => byId.get(String(id))?.nickname).filter(Boolean);
+  const roomAssignments = safe.roomTeams?.roomAssignments || {};
+  const splitMembers = safe.roomTeams?.splitMembers || {};
+  const roomPickMode = String(safe.roomTeams?.pickMode || 'individual');
   const summaryMode = `${battleTypeLabel(safe.battleType)} · ${safe.mode === 'room'
-    ? '방 모드'
+    ? `방 모드${safe.battleType !== 'stroke' ? ` · ${roomPickMode === 'overall' ? '전체' : '개별'}` : ''}`
     : safe.mode === 'person'
       ? `개인 모드 · ${selectedPersonNames.length}명 선택`
       : `그룹 모드 · ${safe.groups.length}개 그룹`}`;
@@ -196,9 +211,6 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     safe.pickCount ? `${safe.pickCount}명` : '참가자수 미설정',
     safe.maxPerParticipant ? `인당 최대 ${safe.maxPerParticipant}회` : '선택횟수 미설정',
   ].join(' · ');
-
-  const roomAssignments = safe.roomTeams?.roomAssignments || {};
-  const splitMembers = safe.roomTeams?.splitMembers || {};
 
   return (
     <div style={box}>
@@ -283,6 +295,12 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+            {safe.battleType !== 'stroke' && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => setRoomPickMode('overall')} style={{ ...roomPill, ...(roomPickMode === 'overall' ? roomPillOn : null) }}>전체</button>
+                <button type="button" onClick={() => setRoomPickMode('individual')} style={{ ...roomPill, ...(roomPickMode === 'individual' ? roomPillOn : null) }}>개별</button>
+              </div>
+            )}
             {participantsByRoom.map((room) => {
               const roomMode = String(roomAssignments[String(room.roomNo)] || '').toUpperCase();
               return (

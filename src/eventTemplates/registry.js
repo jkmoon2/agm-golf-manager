@@ -154,6 +154,7 @@ export const TEMPLATE_REGISTRY = [
       roomTeams: {
         roomAssignments: {},
         splitMembers: {},
+        pickMode: 'individual',
       },
       personIds: [],
       pickCount: null,

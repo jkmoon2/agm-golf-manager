@@ -574,7 +574,7 @@ export default function PlayerEventInput(){
   };
 
 
-  const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null) => {
+  const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null, infoOnly = false) => {
     const rect = buttonEl?.getBoundingClientRect?.();
     const menuWidth = getGroupRoomMenuWidthPx();
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 360;
@@ -593,7 +593,7 @@ export default function PlayerEventInput(){
         top = Math.max(8, rect.top - estimatedHeight - 6);
       }
     }
-    setBattleMenuState({ evId, rowKey, holeNo, left, top, width: menuWidth });
+    setBattleMenuState({ evId, rowKey, holeNo, left, top, width: menuWidth, infoOnly: !!infoOnly });
   };
 
   const roomMembers = useMemo(() => {
@@ -633,6 +633,15 @@ export default function PlayerEventInput(){
       const next = current === '' ? '-' : (current.startsWith('-') ? current : `-${current}`);
       patchAccum(evId, pid, idx, next, attemptsOverride);
       setTimeout(() => focusEventInput(evId, pid, idx), 0);
+    }, LONG_PRESS_MS);
+  };
+
+
+  const startBattleInfoLongPress = (evId, rowKey, holeNo, members, buttonEl) => {
+    const key = `battle-info:${evId}:${rowKey}:${holeNo}`;
+    cancelEventLongPress(key);
+    longPressTimersRef.current[key] = setTimeout(() => {
+      openBattleMenuAt(evId, rowKey, holeNo, members, buttonEl, true);
     }, LONG_PRESS_MS);
   };
 
@@ -1270,14 +1279,20 @@ export default function PlayerEventInput(){
               currentParticipantId: selfParticipantId,
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
-            const battleData = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[ev.id] || {}, {
+            const isBattleMatchLike = battleCfg.mode !== 'person' && (battleCfg.battleType === 'matchplay' || battleCfg.battleType === 'fourball');
+            const battlePreviewInputs = isBattleMatchLike
+              ? {
+                  ...(inputsByEvent?.[ev.id] || {}),
+                  person: { ...(((inputsByEventServer || {})?.[ev.id] || {})?.person || {}) },
+                }
+              : (inputsByEvent?.[ev.id] || {});
+            const battleData = computeGroupRoomHoleBattle(ev, participants, battlePreviewInputs, {
               roomNames,
               roomCount: allRoomNos.length || roomNames.length || 0,
               currentRoomNo: roomIdx,
               currentParticipantId: selfParticipantId,
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
-            const isBattleMatchLike = battleCfg.mode !== 'person' && (battleCfg.battleType === 'matchplay' || battleCfg.battleType === 'fourball');
             const battleSelectionRows = (() => {
               if (battleCfg.mode === 'group') {
                 if (battleLocked) {
@@ -1286,6 +1301,9 @@ export default function PlayerEventInput(){
                 return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
               }
               if (battleCfg.mode === 'room') {
+                if (isBattleMatchLike && String(battleCfg?.roomTeams?.pickMode || 'individual') === 'overall') {
+                  return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
+                }
                 const allRows = Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
                 const mine = allRows.find((row) => Number(row?.roomNo) === Number(roomIdx));
                 return mine ? [mine] : allRows.slice(0, 1);
@@ -1297,10 +1315,12 @@ export default function PlayerEventInput(){
             const battlePreviewShowRank = battleCfg.mode === 'person';
             const battlePreviewAllRowsBase = battleCfg.mode === 'person'
               ? (battleData.rows || [])
-              : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+              : (battleCfg.mode === 'room' && isBattleMatchLike
+                ? (battleData.rows || [])
+                : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 }));
             const battlePreviewExpanded = !!battlePreviewExpandedMap?.[ev.id];
             const battlePreviewRowsBase = (() => {
-              if (battleCfg.mode !== 'room' || battlePreviewExpanded) return battlePreviewAllRowsBase;
+              if (battleCfg.mode !== 'room' || battlePreviewExpanded || isBattleMatchLike) return battlePreviewAllRowsBase;
               const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
               if (mine) return [mine];
               return battlePreviewAllRowsBase.slice(0, 1);
@@ -1372,7 +1392,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {battleLocked && <div className={tCss.lockNotice}>지목 입력이 마감되어 닉네임 선택만 잠깁니다. 점수 입력은 계속 가능합니다.</div>}
+                {battleLocked && <div className={tCss.lockNotice}>닉네임 선택 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${battleSelectionWidth}px` }}>
@@ -1401,18 +1421,36 @@ export default function PlayerEventInput(){
                                     className={tCss.pickSelectButton}
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      if (isBattleMatchLike && battleCfg.mode === 'room' && String(battleCfg?.roomTeams?.pickMode || 'individual') === 'overall') return;
                                       if (!canEditBattleSelection(row)) return;
-                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo);
+                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo) && !battleMenuState?.infoOnly;
                                       if (same) {
                                         setBattleMenuState(null);
                                         return;
                                       }
                                       openBattleMenuAt(ev.id, row.key, holeNo, row.members, e.currentTarget);
                                     }}
-                                    disabled={!canEditBattleSelection(row)}
-                                    title={buttonText}
+                                    onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      if (battleLocked && !(isBattleMatchLike && battleCfg.mode === 'room' && String(battleCfg?.roomTeams?.pickMode || 'individual') === 'overall')) {
+                                        startBattleInfoLongPress(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                      }
+                                    }}
+                                    onPointerUp={() => cancelEventLongPress(`battle-info:${ev.id}:${row.key}:${holeNo}`)}
+                                    onPointerCancel={() => cancelEventLongPress(`battle-info:${ev.id}:${row.key}:${holeNo}`)}
+                                    onPointerLeave={() => cancelEventLongPress(`battle-info:${ev.id}:${row.key}:${holeNo}`)}
+                                    onTouchStart={(e) => {
+                                      e.stopPropagation();
+                                      if (battleLocked && !(isBattleMatchLike && battleCfg.mode === 'room' && String(battleCfg?.roomTeams?.pickMode || 'individual') === 'overall')) {
+                                        startBattleInfoLongPress(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                      }
+                                    }}
+                                    onTouchEnd={() => cancelEventLongPress(`battle-info:${ev.id}:${row.key}:${holeNo}`)}
+                                    onTouchCancel={() => cancelEventLongPress(`battle-info:${ev.id}:${row.key}:${holeNo}`)}
+                                    disabled={false}
+                                    title={isBattleMatchLike && battleCfg.mode === 'room' && String(battleCfg?.roomTeams?.pickMode || 'individual') === 'overall' ? row.name : buttonText}
                                   >
-                                    <span className={tCss.pickSelectText}>{buttonText}</span>
+                                    <span className={tCss.pickSelectText}>{isBattleMatchLike && battleCfg.mode === 'room' && String(battleCfg?.roomTeams?.pickMode || 'individual') === 'overall' ? row.name : buttonText}</span>
                                   </button>
                                 </div>
                               </td>
@@ -1507,7 +1545,7 @@ export default function PlayerEventInput(){
                 <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
                     <div className={tCss.viewerTitle} style={{ margin: 0 }}>선택 미리보기</div>
-                    {battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && (
+                    {battleCfg.mode === 'room' && !isBattleMatchLike && battlePreviewAllRowsBase.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setBattlePreviewExpandedMap((prev) => ({ ...prev, [ev.id]: !battlePreviewExpanded }))}
@@ -1529,7 +1567,7 @@ export default function PlayerEventInput(){
                         <tr>
                           <th>닉네임</th>
                           {battleSelectedHoles.map((holeNo) => <th key={`battle-preview-head-${holeNo}`}>{holeNo}</th>)}
-                          <th>합계</th>
+                          <th>{isBattleMatchLike ? '결과' : '합계'}</th>
                           {battlePreviewShowRank && <th>순위</th>}
                         </tr>
                       </thead>
@@ -1550,12 +1588,14 @@ export default function PlayerEventInput(){
                             {battlePreviewShowRank && <td className={tCss.subtotalBlue}>{battlePreviewRankByKey.get(String(row?.key || '')) || ''}</td>}
                           </tr>
                         ))}
-                        <tr className={tCss.subtotalRow}>
-                          <td className={tCss.subtotalLabel}>소계</td>
-                          {battlePreviewSubtotal.map((item) => <td key={`battle-preview-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
-                          <td className={tCss.subtotalRed}>{isBattleMatchLike ? '' : (battlePreviewGrandHasAny ? formatDisplayNumber(battlePreviewGrandTotal) : '')}</td>
-                          {battlePreviewShowRank && <td className={tCss.subtotalBlue}></td>}
-                        </tr>
+                        {!isBattleMatchLike && (
+                          <tr className={tCss.subtotalRow}>
+                            <td className={tCss.subtotalLabel}>소계</td>
+                            {battlePreviewSubtotal.map((item) => <td key={`battle-preview-sub-${item.holeNo}`} className={tCss.subtotalBlue}>{item.hasAny ? formatDisplayNumber(item.sum) : ''}</td>)}
+                            <td className={tCss.subtotalRed}>{battlePreviewGrandHasAny ? formatDisplayNumber(battlePreviewGrandTotal) : ''}</td>
+                            {battlePreviewShowRank && <td className={tCss.subtotalBlue}></td>}
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -1610,7 +1650,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {bingoLocked && <div className={tCss.lockNotice}>입력이 마감되어 더 이상 수정할 수 없습니다.</div>}
+                {bingoLocked && <div className={tCss.lockNotice}>빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
@@ -1659,12 +1699,12 @@ export default function PlayerEventInput(){
                                     spellCheck={false}
                                     className={tCss.cellInput}
                                     value={cellValue}
-                                    disabled={!p || bingoLocked}
-                                    onChange={e => p && !bingoLocked && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
-                                    onBlur={e => p && !bingoLocked && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    disabled={!p}
+                                    onChange={e => p && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    onBlur={e => p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
-                                      if (p && !bingoLocked) {
+                                      if (p) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -1673,7 +1713,7 @@ export default function PlayerEventInput(){
                                     onPointerCancel={() => cancelEventLongPress(inputKey)}
                                     onPointerLeave={() => cancelEventLongPress(inputKey)}
                                     onTouchStart={(e) => {
-                                      if (p && !bingoLocked) {
+                                      if (p) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -1916,7 +1956,7 @@ export default function PlayerEventInput(){
                                         openPickMenuAt(ev.id, p.id, idx, options, e.currentTarget);
                                       }}
                                       disabled={!p || locked}
-                                      title={buttonText}
+                                      title={isBattleMatchLike && battleCfg.mode === 'room' && String(battleCfg?.roomTeams?.pickMode || 'individual') === 'overall' ? row.name : buttonText}
                                     >
                                       <span className={tCss.pickSelectText}>{buttonText}</span>
                                     </button>
@@ -2244,7 +2284,7 @@ export default function PlayerEventInput(){
                         patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, value, requiredCount);
                         setPickMenuState(null);
                       }}
-                      disabled={disabled}
+                      disabled={disabled || viewOnly}
                       title={displayPickOption(opt)}
                     >
                       {displayPickOption(opt)}
@@ -2270,6 +2310,7 @@ export default function PlayerEventInput(){
           const shared = getBattleSharedInputs(inputsByEvent?.[battleMenuState.evId] || {});
           const currentIds = getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
           const usage = countParticipantUsageForRow(shared, row.key);
+          const viewOnly = !!battleMenuState.infoOnly;
           return createPortal(
             <div
               className={tCss.pickMenuOverlay}
@@ -2287,18 +2328,20 @@ export default function PlayerEventInput(){
                 onClick={(e) => e.stopPropagation()}
               >
                 <div style={{ padding: '6px 10px 8px', fontSize: 12, color: '#667085', borderBottom: '1px solid #eef2f7' }}>
-                  {row.name} · {battleMenuState.holeNo}홀 · {currentIds.length}/{cfg.pickCount}명
+                  {row.name} · {battleMenuState.holeNo}홀 · {viewOnly ? '선택 확인' : `${currentIds.length}/${cfg.pickCount}명`}
                 </div>
-                <button
-                  type="button"
-                  className={`${tCss.pickMenuOption} ${!currentIds.length ? tCss.pickMenuOptionActive : ''}`}
-                  onClick={() => {
-                    patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, '');
-                    setBattleMenuState(null);
-                  }}
-                >
-                  선택 해제
-                </button>
+                {!viewOnly && (
+                  <button
+                    type="button"
+                    className={`${tCss.pickMenuOption} ${!currentIds.length ? tCss.pickMenuOptionActive : ''}`}
+                    onClick={() => {
+                      patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, '');
+                      setBattleMenuState(null);
+                    }}
+                  >
+                    선택 해제
+                  </button>
+                )}
                 {row.members.map((member) => {
                   const value = String(member?.id || '');
                   const active = currentIds.includes(value);
@@ -2310,13 +2353,13 @@ export default function PlayerEventInput(){
                       type="button"
                       className={`${tCss.pickMenuOption} ${active ? tCss.pickMenuOptionActive : ''}`}
                       onClick={() => {
-                        if (disabled) return;
+                        if (disabled || viewOnly) return;
                         patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, value);
                         const nextCount = active ? Math.max(0, currentIds.length - 1) : Math.min(Number(cfg.pickCount || 1), currentIds.length + 1);
                         const keepOpen = !active && Number(cfg.pickCount || 1) > 1 && nextCount < Number(cfg.pickCount || 1);
                         if (!keepOpen) setBattleMenuState(null);
                       }}
-                      disabled={disabled}
+                      disabled={disabled || viewOnly}
                       title={displayPickOption(member)}
                     >
                       <span>{displayPickOption(member)}</span>
