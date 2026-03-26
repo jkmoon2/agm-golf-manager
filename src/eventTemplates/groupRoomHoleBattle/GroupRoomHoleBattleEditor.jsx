@@ -162,13 +162,13 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
     });
   };
 
-  const setRoomSelectionMode = (selectionMode) => {
+  const setRoomSelectionMode = (nextMode) => {
     emit({
       roomTeams: {
         ...(safe.roomTeams || {}),
+        selectionMode: nextMode === 'team' ? 'team' : 'individual',
         roomAssignments: { ...((safe.roomTeams && safe.roomTeams.roomAssignments) || {}) },
         splitMembers: { ...((safe.roomTeams && safe.roomTeams.splitMembers) || {}) },
-        selectionMode: selectionMode === 'team' ? 'team' : 'individual',
       },
     });
   };
@@ -210,7 +210,7 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
 
   const roomAssignments = safe.roomTeams?.roomAssignments || {};
   const splitMembers = safe.roomTeams?.splitMembers || {};
-  const roomSelectionMode = safe.roomTeams?.selectionMode === 'team' ? 'team' : 'individual';
+  const roomSelectionMode = String(safe.roomTeams?.selectionMode || '').toLowerCase() === 'team' ? 'team' : 'individual';
 
   return (
     <div style={box}>
@@ -296,15 +296,9 @@ export default function GroupRoomHoleBattleEditor({ participants = [], roomNames
         ) : (
           <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
             {safe.battleType !== 'stroke' && (
-              <div style={{ padding: 10, border: '1px solid #eef2f7', borderRadius: 12, background: '#fff' }}>
-                <div style={{ fontSize: 12, color: '#667085', marginBottom: 8 }}>방 모드 선택 방식</div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => setRoomSelectionMode('team')} style={{ ...roomPill, ...(roomSelectionMode === 'team' ? roomPillOn : null) }}>전체</button>
-                  <button type="button" onClick={() => setRoomSelectionMode('individual')} style={{ ...roomPill, ...(roomSelectionMode === 'individual' ? roomPillOn : null) }}>개별</button>
-                </div>
-                <div style={{ marginTop: 6, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
-                  {roomSelectionMode === 'team' ? '전체: A팀/B팀 단위로 비교합니다.' : '개별: 각 홀마다 팀 소속 참가자를 직접 선택합니다.'}
-                </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => setRoomSelectionMode('team')} style={{ ...roomPill, ...(roomSelectionMode === 'team' ? roomPillOn : null) }}>전체</button>
+                <button type="button" onClick={() => setRoomSelectionMode('individual')} style={{ ...roomPill, ...(roomSelectionMode === 'individual' ? roomPillOn : null) }}>개별</button>
               </div>
             )}
             {participantsByRoom.map((room) => {
