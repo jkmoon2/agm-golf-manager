@@ -912,11 +912,14 @@ export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsBy
   const scoreParticipants = getGroupRoomBattleScoreParticipants(eventDef, participants, opt);
 
   const isRoomTeamSelection = cfg.mode === 'room' && isMatchLike && cfg?.roomTeams?.selectionMode === 'team';
+  const roomAggregateRowsBase = cfg.mode === 'room' && isMatchLike && !isRoomTeamSelection
+    ? getRoomSelectionRows(cfg, participants)
+    : inputRowsBase;
   const rows = isMatchLike
     ? (cfg.mode === 'room'
       ? (isRoomTeamSelection
         ? buildRoomTeamMatchRows(rowsBase, cfg, byId, inputsByEvent)
-        : buildRoomAggregateMatchRows(inputRowsBase, shared, cfg, byId, inputsByEvent))
+        : buildRoomAggregateMatchRows(roomAggregateRowsBase, shared, cfg, byId, inputsByEvent))
       : buildMatchPairRows(rowsBase, shared, cfg, byId, inputsByEvent))
     : rowsBase.map((row) => buildInputRowDetail(row, shared, cfg, byId, inputsByEvent));
 
