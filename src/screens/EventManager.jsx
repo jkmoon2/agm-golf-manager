@@ -27,7 +27,7 @@ import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import { computeHoleRankForce } from '../events/holeRankForce';
 import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
-import { normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
+import { normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -92,13 +92,15 @@ function getGroupRoomHoleBattleMetaText(params) {
   const holeCount = Array.isArray(safe.selectedHoles) ? safe.selectedHoles.length : 0;
   const pickCount = Number.isFinite(Number(safe.pickCount)) ? `${Number(safe.pickCount)}명` : '미설정';
   const maxCount = Number.isFinite(Number(safe.maxPerParticipant)) ? `최대 ${Number(safe.maxPerParticipant)}회` : '미설정';
+  const battleType = normalizeBattleType(safe.battleType);
+  const battleText = battleType === 'matchplay' ? '매치플레이' : battleType === 'fourball' ? '매치(포볼)' : '스트로크';
   const modeText = safe.mode === 'room' ? '방' : safe.mode === 'person' ? '개인' : '그룹';
   const extra = safe.mode === 'person'
     ? ` · ${Array.isArray(safe.personIds) ? safe.personIds.length : 0}명`
     : safe.mode === 'group'
       ? ` · ${Array.isArray(safe.groups) ? safe.groups.length : 0}개 그룹`
       : '';
-  return `${modeText}${extra} · ${holeCount}홀 · ${pickCount} · ${maxCount}`;
+  return `${battleText} · ${modeText}${extra} · ${holeCount}홀 · ${pickCount} · ${maxCount}`;
 }
 
 
@@ -1436,8 +1438,10 @@ if (editForm?.template === 'group-battle') {
                   {(importList || []).map((ev, idx) => (
                     <label key={idx} className={css.importItem}>
                       <input type="checkbox" checked={!!ev._checked} onChange={() => toggleImportCheck(idx)} />
-                      <span className={css.importTitle}>{ev.title}</span>
-                      <span className={css.meta}> · {formatMeta(ev)}</span>
+                      <span className={css.importInfo}>
+                        <span className={css.importTitle}>{ev.title}</span>
+                        <span className={css.importMeta}>· {formatMeta(ev)}</span>
+                      </span>
                     </label>
                   ))}
                 </div>

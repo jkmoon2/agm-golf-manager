@@ -146,10 +146,15 @@ export const TEMPLATE_REGISTRY = [
     defaultParams: {
       selectedHoles: Array.from({ length: 18 }, (_, i) => i + 1),
       mode: 'group',
+      battleType: 'stroke',
       groups: [
         { name: '그룹1', memberIds: [], leaderIds: [] },
         { name: '그룹2', memberIds: [], leaderIds: [] },
       ],
+      roomTeams: {
+        roomAssignments: {},
+        splitMembers: {},
+      },
       personIds: [],
       pickCount: null,
       maxPerParticipant: null,

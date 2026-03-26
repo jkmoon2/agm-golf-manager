@@ -18,7 +18,7 @@ export default function GroupRoomHoleBattlePreview({ eventDef, participants = []
             <span style={rank}>{idx + 1}.</span> {row.name}
             <small style={meta}> · 완료 {row.complete ? '완료' : '진행중'}</small>
           </span>
-          <b style={score}>{row.value}</b>
+          <b style={score}>{data.metric === 'match' ? (row.displayValue || 'AS') : row.value}</b>
         </li>
       ))}
     </ol>

@@ -44,7 +44,7 @@ export default function GroupRoomHoleBattleMonitor({ eventDef, participants = []
                   <span style={row.complete ? badgeDone : badgeWait}>{row.complete ? '완료' : '대기'}</span>
                 </div>
                 <div style={rowBody}>
-                  <div style={summaryText}>입력 홀 {filled}/{data.config.selectedHoles.length} · 합계 {row.value}</div>
+                  <div style={summaryText}>입력 홀 {filled}/{data.config.selectedHoles.length} · 합계 {data.metric === 'match' ? (row.displayValue || 'AS') : row.value}</div>
                   <div style={metaLine}>{row.holes.map((hole) => `${hole.holeNo}홀:${hole.label || '-'}`).join(' / ')}</div>
                 </div>
               </div>

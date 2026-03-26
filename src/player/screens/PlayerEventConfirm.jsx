@@ -230,12 +230,12 @@ const events = useMemo(
     // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
     if (template === 'group-room-hole-battle') {
       const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
-      const metricLabel = '합계';
+      const metricLabel = data?.metric === 'match' ? '결과' : '합계';
       const rows = (data.rows || []).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
         label: row.name,
-        value: row.value,
+        value: data?.metric === 'match' ? (row.displayValue || 'AS') : row.value,
       }));
       return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
     }
