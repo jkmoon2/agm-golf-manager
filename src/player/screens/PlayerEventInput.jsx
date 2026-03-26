@@ -1313,6 +1313,17 @@ export default function PlayerEventInput(){
             });
             const isBattleMatchLike = battleCfg.mode !== 'person' && (battleCfg.battleType === 'matchplay' || battleCfg.battleType === 'fourball');
             const isBattleRoomTeamSelection = battleCfg.mode === 'room' && isBattleMatchLike && battleCfg?.roomTeams?.selectionMode === 'team';
+            const battleSelfRoomTeamKey = (() => {
+              if (battleCfg.mode !== 'room' || !isBattleMatchLike) return '';
+              const roomKey = String(roomIdx || '');
+              const roomMode = String(battleCfg?.roomTeams?.roomAssignments?.[roomKey] || '').toUpperCase();
+              if (roomMode === 'A' || roomMode === 'B') return roomMode;
+              if (roomMode === 'SPLIT') {
+                const split = String(battleCfg?.roomTeams?.splitMembers?.[String(selfParticipantId || '')] || '').toUpperCase();
+                if (split === 'A' || split === 'B') return split;
+              }
+              return '';
+            })();
             const battlePreviewData = isBattleMatchLike
               ? computeGroupRoomHoleBattle(ev, participants, inputsByEventServer?.[ev.id] || {}, {
                   roomNames,
@@ -1331,21 +1342,37 @@ export default function PlayerEventInput(){
               }
               if (battleCfg.mode === 'room') {
                 const allRows = Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
-                if (isBattleRoomTeamSelection) return allRows;
-                const mine = allRows.find((row) => Number(row?.roomNo) === Number(roomIdx));
-                return mine ? [mine] : allRows.slice(0, 1);
+                if (isBattleRoomTeamSelection) {
+                  if (battleLocked || !battleSelfRoomTeamKey) return allRows;
+                  const mine = allRows.filter((row) => String(row?.roomTeamKey || '') === battleSelfRoomTeamKey);
+                  return mine.length ? mine : allRows;
+                }
+                if (isBattleMatchLike) {
+                  if (battleLocked) return allRows;
+                  const splitRows = allRows.filter((row) => Number(row?.roomNo) === Number(roomIdx) && String(row?.roomTeamMode || '').toUpperCase() === 'SPLIT');
+                  if (splitRows.length) return splitRows;
+                  const mineTeamRows = battleSelfRoomTeamKey
+                    ? allRows.filter((row) => String(row?.roomTeamKey || '') === battleSelfRoomTeamKey)
+                    : [];
+                  if (mineTeamRows.length) {
+                    const ownRoomRows = mineTeamRows.filter((row) => Number(row?.roomNo) === Number(roomIdx));
+                    return ownRoomRows.length ? ownRoomRows : mineTeamRows;
+                  }
+                }
+                const mine = allRows.filter((row) => Number(row?.roomNo) === Number(roomIdx));
+                return mine.length ? mine : allRows.slice(0, 1);
               }
               return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
             })();
             const battleSelectionWidth = Math.max(100, 110 + battleSelectedHoles.length * 72);
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
             const battlePreviewShowRank = battleCfg.mode === 'person';
-            const battlePreviewAllRowsBase = battleCfg.mode === 'person'
+            const battlePreviewAllRowsBase = (battleCfg.mode === 'person' || (battleCfg.mode === 'room' && isBattleMatchLike))
               ? (battlePreviewData.rows || [])
               : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
             const battlePreviewExpanded = !!battlePreviewExpandedMap?.[ev.id];
             const battlePreviewRowsBase = (() => {
-              if (battleCfg.mode !== 'room' || battlePreviewExpanded || isBattleRoomTeamSelection) return battlePreviewAllRowsBase;
+              if (battleCfg.mode !== 'room' || isBattleMatchLike || battlePreviewExpanded || isBattleRoomTeamSelection) return battlePreviewAllRowsBase;
               const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
               if (mine) return [mine];
               return battlePreviewAllRowsBase.slice(0, 1);
@@ -1573,7 +1600,7 @@ export default function PlayerEventInput(){
                 <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
                     <div className={tCss.viewerTitle} style={{ margin: 0 }}>선택 미리보기</div>
-                    {battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && (
+                    {battleCfg.mode === 'room' && !isBattleMatchLike && battlePreviewAllRowsBase.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setBattlePreviewExpandedMap((prev) => ({ ...prev, [ev.id]: !battlePreviewExpanded }))}
@@ -2347,9 +2374,25 @@ export default function PlayerEventInput(){
             ? (Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [])
             : getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
           const usage = isBattleRoomTeamSelection ? {} : countParticipantUsageForRow(shared, row.key);
+          const battleMenuSelfTeamKey = (() => {
+            const roomKey = String(roomIdx || '');
+            const roomMode = String(cfg?.roomTeams?.roomAssignments?.[roomKey] || '').toUpperCase();
+            if (roomMode === 'A' || roomMode === 'B') return roomMode;
+            if (roomMode === 'SPLIT') {
+              const split = String(cfg?.roomTeams?.splitMembers?.[String(selfParticipantId || '')] || '').toUpperCase();
+              if (split === 'A' || split === 'B') return split;
+            }
+            return '';
+          })();
+          const battleMenuMembers = (!viewOnly && cfg.mode === 'room' && (cfg.battleType === 'matchplay' || cfg.battleType === 'fourball') && String(row?.roomTeamMode || '').toUpperCase() === 'SPLIT' && battleMenuSelfTeamKey)
+            ? (Array.isArray(row?.members) ? row.members.filter((member) => {
+                const split = String(cfg?.roomTeams?.splitMembers?.[String(member?.id || '')] || '').toUpperCase();
+                return split === battleMenuSelfTeamKey;
+              }) : [])
+            : (Array.isArray(row?.members) ? row.members : []);
           const orderedMembers = [
-            ...row.members.filter((member) => currentIds.includes(String(member?.id || ''))),
-            ...row.members.filter((member) => !currentIds.includes(String(member?.id || ''))),
+            ...battleMenuMembers.filter((member) => currentIds.includes(String(member?.id || ''))),
+            ...battleMenuMembers.filter((member) => !currentIds.includes(String(member?.id || ''))),
           ];
           return createPortal(
             <div

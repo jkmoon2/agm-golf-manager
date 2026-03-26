@@ -187,6 +187,37 @@ function getRoomRows(cfg, participants = []) {
   }).filter((row) => row.memberIds.length > 0);
 }
 
+
+function getRoomSelectionRows(cfg, participants = []) {
+  const rows = getRoomRows(cfg, participants);
+  return rows.flatMap((row) => {
+    const roomMode = String(row?.roomTeamMode || '').toUpperCase();
+    if (roomMode === 'SPLIT') {
+      const teamRows = ['A', 'B'].map((teamKey) => {
+        const members = (Array.isArray(row?.members) ? row.members : []).filter((member) => getRoomMemberTeamKey(cfg, member) === teamKey);
+        if (!members.length) return null;
+        return {
+          ...row,
+          key: `${row.key}-${teamKey}`,
+          roomTeamKey: teamKey,
+          roomSelectionMode: 'individual',
+          name: `${row.name} ${teamKey}팀`,
+          displayName: `${row.displayName || row.name} ${teamKey}팀`,
+          memberIds: members.map((member) => String(member?.id || '')).filter(Boolean),
+          members,
+        };
+      }).filter(Boolean);
+      return teamRows;
+    }
+    const teamKey = roomMode === 'A' || roomMode === 'B' ? roomMode : '';
+    return [{
+      ...row,
+      roomTeamKey: teamKey,
+      roomSelectionMode: 'individual',
+    }];
+  });
+}
+
 function getRoomTeamRows(cfg, participants = []) {
   const buckets = { A: [], B: [] };
   (Array.isArray(participants) ? participants : []).forEach((member) => {
@@ -253,10 +284,25 @@ export function getGroupRoomHoleBattleInputRows(eventDef, participants = [], opt
 
   if (cfg.mode === 'room') {
     if (cfg.battleType !== 'stroke' && cfg?.roomTeams?.selectionMode === 'team') {
-      return getRoomTeamRows(cfg, participants);
+      const rows = getRoomTeamRows(cfg, participants);
+      if (!cfg.selectionLocked) {
+        const mine = rows.filter((row) => String(row?.roomTeamKey || '') === getRoomMemberTeamKey(cfg, { id: currentParticipantId, room: currentRoomNo }));
+        if (mine.length) return mine;
+      }
+      return rows;
     }
-    const rows = getRoomRows(cfg, participants);
+    const rows = (cfg.battleType !== 'stroke') ? getRoomSelectionRows(cfg, participants) : getRoomRows(cfg, participants);
     if (currentRoomNo >= 1) {
+      const roomMode = String(cfg?.roomTeams?.roomAssignments?.[String(currentRoomNo)] || '').toUpperCase();
+      if (cfg.battleType !== 'stroke' && roomMode === 'SPLIT') {
+        const mineTeam = getRoomMemberTeamKey(cfg, { id: currentParticipantId, room: currentRoomNo });
+        const splitRows = rows.filter((item) => Number(item?.roomNo) === currentRoomNo);
+        if (!cfg.selectionLocked && mineTeam) {
+          const mine = splitRows.filter((item) => String(item?.roomTeamKey || '') === mineTeam);
+          if (mine.length) return mine;
+        }
+        return splitRows.length ? splitRows : [];
+      }
       const row = rows.find((item) => Number(item?.roomNo) === currentRoomNo);
       return row ? [row] : [];
     }
@@ -593,6 +639,112 @@ function buildRoomTeamMatchRows(rowsBase, cfg, byId, inputsByEvent) {
   return baseRows;
 }
 
+
+function buildRoomAggregateMatchRows(inputRowsBase, shared, cfg, byId, inputsByEvent) {
+  const requiredCount = Math.max(1, Number(cfg.pickCount || 1));
+  const teamRows = ['A', 'B'].map((teamKey) => ({
+    key: `room-team-${teamKey}`,
+    type: 'room-team',
+    roomTeamKey: teamKey,
+    roomSelectionMode: 'team',
+    name: `${teamKey}팀`,
+    displayName: `${teamKey}팀`,
+    memberIds: (Array.isArray(cfg.participants) ? cfg.participants : [])
+      .filter((member) => getRoomMemberTeamKey(cfg, member) === teamKey)
+      .map((member) => String(member?.id || ''))
+      .filter(Boolean),
+    members: (Array.isArray(cfg.participants) ? cfg.participants : []).filter((member) => getRoomMemberTeamKey(cfg, member) === teamKey),
+    value: 0,
+    sortValue: 0,
+    displayValue: 'AS',
+    usage: {},
+    complete: true,
+    holes: [],
+  }));
+  const rowA = teamRows[0];
+  const rowB = teamRows[1];
+
+  cfg.selectedHoles.forEach((holeNo, holeIdx) => {
+    const teamTotals = { A: 0, B: 0 };
+    const teamCompareScores = { A: [], B: [] };
+    const teamReadyFlags = { A: true, B: true };
+    const teamHasRows = { A: false, B: false };
+    const teamMemberMap = { A: new Map(), B: new Map() };
+    const teamIdsMap = { A: new Set(), B: new Set() };
+
+    (Array.isArray(inputRowsBase) ? inputRowsBase : []).forEach((row) => {
+      const teamKey = String(row?.roomTeamKey || '').toUpperCase();
+      if (teamKey !== 'A' && teamKey !== 'B') return;
+      teamHasRows[teamKey] = true;
+      const ids = getBattleCellIds(shared, row.key, holeNo, row.memberIds);
+      const members = ids.map((id) => byId.get(String(id))).filter(Boolean);
+      ids.forEach((id) => teamIdsMap[teamKey].add(String(id)));
+      members.forEach((member) => teamMemberMap[teamKey].set(String(member?.id || ''), member));
+      const scores = members.map((member) => getBattleScoreValue(inputsByEvent, member?.id, holeNo));
+      const ownReady = ids.length === requiredCount && scores.every((n) => Number.isFinite(n));
+      if (!ownReady) {
+        teamReadyFlags[teamKey] = false;
+        return;
+      }
+      const rowValue = getBattleCompareValue(scores, cfg.battleType);
+      if (cfg.battleType === 'fourball') {
+        if (Number.isFinite(rowValue)) teamCompareScores[teamKey].push(Number(rowValue));
+      } else {
+        teamTotals[teamKey] += Number(rowValue || 0);
+      }
+    });
+
+    const ready = teamHasRows.A && teamHasRows.B && teamReadyFlags.A && teamReadyFlags.B;
+    const compareValueA = cfg.battleType === 'fourball'
+      ? (teamCompareScores.A.length ? Math.min(...teamCompareScores.A) : null)
+      : teamTotals.A;
+    const compareValueB = cfg.battleType === 'fourball'
+      ? (teamCompareScores.B.length ? Math.min(...teamCompareScores.B) : null)
+      : teamTotals.B;
+    const resultA = ready ? compareMatchValues(compareValueA, compareValueB) : { text: '', score: null, color: '' };
+    const resultB = ready ? compareMatchValues(compareValueB, compareValueA) : { text: '', score: null, color: '' };
+
+    rowA.holes[holeIdx] = {
+      holeNo,
+      ids: Array.from(teamIdsMap.A),
+      members: Array.from(teamMemberMap.A.values()),
+      value: compareValueA,
+      ready,
+      displayValue: ready ? resultA.text : '',
+      resultText: ready ? resultA.text : '',
+      resultColor: ready ? resultA.color : '',
+      label: Array.from(teamMemberMap.A.values()).map((member) => String(member?.nickname || '')).join(' / '),
+      roomSelectionMode: 'team',
+      teamKey: 'A',
+    };
+    rowB.holes[holeIdx] = {
+      holeNo,
+      ids: Array.from(teamIdsMap.B),
+      members: Array.from(teamMemberMap.B.values()),
+      value: compareValueB,
+      ready,
+      displayValue: ready ? resultB.text : '',
+      resultText: ready ? resultB.text : '',
+      resultColor: ready ? resultB.color : '',
+      label: Array.from(teamMemberMap.B.values()).map((member) => String(member?.nickname || '')).join(' / '),
+      roomSelectionMode: 'team',
+      teamKey: 'B',
+    };
+
+    if (ready) {
+      rowA.value += Number(resultA.score || 0);
+      rowB.value += Number(resultB.score || 0);
+    }
+  });
+
+  teamRows.forEach((row) => {
+    row.sortValue = row.value;
+    row.displayValue = formatMatchTotal(row.value);
+  });
+
+  return teamRows.filter((row) => Array.isArray(row?.members) && row.members.length > 0);
+}
+
 function buildRoomMatchRows(rowsBase, shared, cfg, byId, inputsByEvent) {
   const requiredCount = Math.max(1, Number(cfg.pickCount || 1));
   const baseRows = rowsBase.map((row) => ({
@@ -764,7 +916,7 @@ export function computeGroupRoomHoleBattle(eventDef, participants = [], inputsBy
     ? (cfg.mode === 'room'
       ? (isRoomTeamSelection
         ? buildRoomTeamMatchRows(rowsBase, cfg, byId, inputsByEvent)
-        : buildRoomMatchRows(rowsBase, shared, cfg, byId, inputsByEvent))
+        : buildRoomAggregateMatchRows(inputRowsBase, shared, cfg, byId, inputsByEvent))
       : buildMatchPairRows(rowsBase, shared, cfg, byId, inputsByEvent))
     : rowsBase.map((row) => buildInputRowDetail(row, shared, cfg, byId, inputsByEvent));
 
