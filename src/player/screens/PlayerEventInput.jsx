@@ -574,12 +574,13 @@ export default function PlayerEventInput(){
   };
 
 
-  const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null) => {
+  const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null, menuOpt = {}) => {
     const rect = buttonEl?.getBoundingClientRect?.();
     const menuWidth = getGroupRoomMenuWidthPx();
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 360;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 640;
-    const estimatedHeight = Math.min(Math.max((Array.isArray(options) ? options.length : 0) + 2, 5) * 40 + 16, Math.min(viewportHeight * 0.56, 360));
+    const extraRows = menuOpt?.viewOnly ? 1 : 2;
+    const estimatedHeight = Math.min(Math.max((Array.isArray(options) ? options.length : 0) + extraRows, 5) * 40 + 16, Math.min(viewportHeight * 0.56, 360));
     const left = rect
       ? Math.max(8, Math.min(rect.left + (rect.width / 2) - (menuWidth / 2), viewportWidth - menuWidth - 8))
       : 12;
@@ -593,7 +594,7 @@ export default function PlayerEventInput(){
         top = Math.max(8, rect.top - estimatedHeight - 6);
       }
     }
-    setBattleMenuState({ evId, rowKey, holeNo, left, top, width: menuWidth });
+    setBattleMenuState({ evId, rowKey, holeNo, left, top, width: menuWidth, viewOnly: !!menuOpt?.viewOnly });
   };
 
   const roomMembers = useMemo(() => {
@@ -610,6 +611,7 @@ export default function PlayerEventInput(){
   const [bingoUiState, setBingoUiState] = useState({});
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
+  const pendingSavedInputsSigRef = useRef('');
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -636,8 +638,38 @@ export default function PlayerEventInput(){
     }, LONG_PRESS_MS);
   };
 
+  const startBattleInspectLongPress = (evId, rowKey, holeNo, members = [], buttonEl = null) => {
+    const key = `battle:${evId}:${rowKey}:${holeNo}`;
+    cancelEventLongPress(key);
+    longPressTimersRef.current[key] = setTimeout(() => {
+      openBattleMenuAt(evId, rowKey, holeNo, members, buttonEl, { viewOnly: true });
+    }, LONG_PRESS_MS);
+  };
+
+  const cloneEventInputs = (value) => {
+    try {
+      return value ? JSON.parse(JSON.stringify(value)) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const stringifyEventInputs = (value) => {
+    try {
+      return JSON.stringify(value || {});
+    } catch {
+      return '';
+    }
+  };
+
   useEffect(() => {
-    if (!dirty) setDraft(inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
+    if (dirty) return;
+    const serverSig = stringifyEventInputs(inputsByEventServer);
+    if (pendingSavedInputsSigRef.current) {
+      if (serverSig !== pendingSavedInputsSigRef.current) return;
+      pendingSavedInputsSigRef.current = '';
+    }
+    setDraft(cloneEventInputs(inputsByEventServer));
   }, [inputsByEventServer, dirty]);
 
   const inputsByEvent = draft || {};
@@ -1072,7 +1104,9 @@ export default function PlayerEventInput(){
         await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
       }
 
-      setDraft(merged ? JSON.parse(JSON.stringify(merged)) : {});
+      const savedClone = cloneEventInputs(merged);
+      pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
+      setDraft(savedClone);
       setDirty(false);
       alert('저장되었습니다.');
     }catch(e){
@@ -1278,9 +1312,16 @@ export default function PlayerEventInput(){
               currentParticipantNickname: String(selfParticipant?.nickname || ''),
             });
             const isBattleMatchLike = battleCfg.mode !== 'person' && (battleCfg.battleType === 'matchplay' || battleCfg.battleType === 'fourball');
-            const isBattleRoomTeamSelection = battleCfg.mode === 'room'
-              && isBattleMatchLike
-              && String(battleCfg?.roomTeams?.selectionMode || '').toLowerCase() === 'team';
+            const isBattleRoomTeamSelection = battleCfg.mode === 'room' && isBattleMatchLike && battleCfg?.roomTeams?.selectionMode === 'team';
+            const battlePreviewData = isBattleMatchLike
+              ? computeGroupRoomHoleBattle(ev, participants, inputsByEventServer?.[ev.id] || {}, {
+                  roomNames,
+                  roomCount: allRoomNos.length || roomNames.length || 0,
+                  currentRoomNo: roomIdx,
+                  currentParticipantId: selfParticipantId,
+                  currentParticipantNickname: String(selfParticipant?.nickname || ''),
+                })
+              : battleData;
             const battleSelectionRows = (() => {
               if (battleCfg.mode === 'group') {
                 if (battleLocked) {
@@ -1289,10 +1330,8 @@ export default function PlayerEventInput(){
                 return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
               }
               if (battleCfg.mode === 'room') {
-                if (isBattleRoomTeamSelection) {
-                  return Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
-                }
                 const allRows = Array.isArray(battleData.inputRows) ? battleData.inputRows : [];
+                if (isBattleRoomTeamSelection) return allRows;
                 const mine = allRows.find((row) => Number(row?.roomNo) === Number(roomIdx));
                 return mine ? [mine] : allRows.slice(0, 1);
               }
@@ -1302,20 +1341,17 @@ export default function PlayerEventInput(){
             const battleScoreWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54);
             const battlePreviewShowRank = battleCfg.mode === 'person';
             const battlePreviewAllRowsBase = battleCfg.mode === 'person'
-              ? (battleData.rows || [])
-              : isBattleRoomTeamSelection
-                ? (battleData.rows || [])
-                : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+              ? (battlePreviewData.rows || [])
+              : getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
             const battlePreviewExpanded = !!battlePreviewExpandedMap?.[ev.id];
             const battlePreviewRowsBase = (() => {
-              if (isBattleRoomTeamSelection) return battlePreviewAllRowsBase;
-              if (battleCfg.mode !== 'room' || battlePreviewExpanded) return battlePreviewAllRowsBase;
+              if (battleCfg.mode !== 'room' || battlePreviewExpanded || isBattleRoomTeamSelection) return battlePreviewAllRowsBase;
               const mine = battlePreviewAllRowsBase.find((row) => Number(row?.roomNo) === Number(roomIdx));
               if (mine) return [mine];
               return battlePreviewAllRowsBase.slice(0, 1);
             })();
-            const battlePreviewRowsResolved = battlePreviewRowsBase.map((rowBase) => (battleData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase);
-            const battlePreviewRankByKey = new Map((battleData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
+            const battlePreviewRowsResolved = battlePreviewRowsBase.map((rowBase) => (battlePreviewData.rows || []).find((item) => String(item?.key) === String(rowBase?.key)) || rowBase);
+            const battlePreviewRankByKey = new Map((battlePreviewData.rows || []).map((row, idx) => [String(row?.key || ''), idx + 1]));
             const battlePreviewWidth = Math.max(100, 110 + battleSelectedHoles.length * 62 + 54 + (battlePreviewShowRank ? 54 : 0));
             const getBattleResultStyle = (hole) => {
               const text = String(hole?.displayValue || hole?.resultText || '');
@@ -1381,7 +1417,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {battleLocked && <div className={tCss.lockNotice}>지목 입력이 마감되어 닉네임 선택만 잠깁니다. 점수 입력은 계속 가능합니다.</div>}
+                {battleLocked && <div className={tCss.lockNotice}>닉네임 선택 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${battleSelectionWidth}px` }}>
@@ -1400,8 +1436,12 @@ export default function PlayerEventInput(){
                         <tr key={`battle-row-${row.key}`}>
                           <td className={tCss.pickInputNick}>{row.name}</td>
                           {battleSelectedHoles.map((holeNo) => {
-                            const ids = getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
-                            const buttonText = isBattleRoomTeamSelection ? row.name : getGroupRoomCellText(ids, participantById);
+                            const ids = isBattleRoomTeamSelection
+                              ? (Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [])
+                              : getGroupRoomBattleCellIds(ev.id, row.key, holeNo, row.memberIds);
+                            const buttonText = isBattleRoomTeamSelection ? String(row?.name || '') : getGroupRoomCellText(ids, participantById);
+                            const editable = isBattleRoomTeamSelection ? false : canEditBattleSelection(row);
+                            const canInspectLockedCell = battleLocked && (ids.length > 0 || isBattleRoomTeamSelection);
                             return (
                               <td key={`battle-cell-${row.key}-${holeNo}`} className={tCss.cellEditable}>
                                 <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
@@ -1410,17 +1450,33 @@ export default function PlayerEventInput(){
                                     className={tCss.pickSelectButton}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (isBattleRoomTeamSelection) return;
-                                      if (!canEditBattleSelection(row)) return;
-                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo);
+                                      if (!editable) return;
+                                      const same = battleMenuState?.evId === ev.id && String(battleMenuState?.rowKey) === String(row.key) && Number(battleMenuState?.holeNo) === Number(holeNo) && !battleMenuState?.viewOnly;
                                       if (same) {
                                         setBattleMenuState(null);
                                         return;
                                       }
                                       openBattleMenuAt(ev.id, row.key, holeNo, row.members, e.currentTarget);
                                     }}
-                                    disabled={isBattleRoomTeamSelection || !canEditBattleSelection(row)}
-                                    title={buttonText}
+                                    onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      if (!canInspectLockedCell) return;
+                                      startBattleInspectLongPress(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                    }}
+                                    onPointerUp={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onPointerCancel={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onPointerLeave={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onTouchStart={(e) => {
+                                      e.stopPropagation();
+                                      if (!canInspectLockedCell) return;
+                                      startBattleInspectLongPress(ev.id, row.key, holeNo, row.members, e.currentTarget);
+                                    }}
+                                    onTouchEnd={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    onTouchCancel={() => cancelEventLongPress(`battle:${ev.id}:${row.key}:${holeNo}`)}
+                                    disabled={!battleLocked && !editable}
+                                    title={isBattleRoomTeamSelection
+                                      ? (Array.isArray(row?.members) ? row.members.map((member) => String(member?.nickname || '')).filter(Boolean).join(' / ') : String(buttonText || ''))
+                                      : buttonText}
                                   >
                                     <span className={tCss.pickSelectText}>{buttonText}</span>
                                   </button>
@@ -1517,7 +1573,7 @@ export default function PlayerEventInput(){
                 <div className={`${tCss.viewerWrap} ${getForcedPreviewPresetClass(tCss)}`}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
                     <div className={tCss.viewerTitle} style={{ margin: 0 }}>선택 미리보기</div>
-                    {battleCfg.mode === 'room' && !isBattleRoomTeamSelection && battlePreviewAllRowsBase.length > 1 && (
+                    {battleCfg.mode === 'room' && battlePreviewAllRowsBase.length > 1 && (
                       <button
                         type="button"
                         onClick={() => setBattlePreviewExpandedMap((prev) => ({ ...prev, [ev.id]: !battlePreviewExpanded }))}
@@ -1544,22 +1600,26 @@ export default function PlayerEventInput(){
                         </tr>
                       </thead>
                       <tbody>
-                        {battlePreviewRowsResolved.map((row) => (
-                          <tr key={`battle-preview-row-${row.key}`}>
-                            <td>{row.name}</td>
-                            {battleSelectedHoles.map((holeNo) => {
-                              const hole = Array.isArray(row?.holes) ? row.holes.find((item) => Number(item?.holeNo) === Number(holeNo)) : null;
-                              if (isBattleMatchLike) {
-                                const text = String(hole?.displayValue || hole?.resultText || '');
-                                return <td key={`battle-preview-cell-${row.key}-${holeNo}`} style={getBattleResultStyle(hole)}>{text}</td>;
-                              }
-                              const value = Number(hole?.value);
-                              return <td key={`battle-preview-cell-${row.key}-${holeNo}`}>{Number.isFinite(value) ? formatDisplayNumber(value) : ''}</td>;
-                            })}
-                            <td className={tCss.totalCell} style={isBattleMatchLike ? getBattleResultStyle({ displayValue: row.displayValue }) : null}>{isBattleMatchLike ? (row.displayValue || 'AS') : formatDisplayNumber(row.value)}</td>
-                            {battlePreviewShowRank && <td className={tCss.subtotalBlue}>{battlePreviewRankByKey.get(String(row?.key || '')) || ''}</td>}
-                          </tr>
-                        ))}
+                        {battlePreviewRowsResolved.map((row) => {
+                          const battleRowHasResult = Array.isArray(row?.holes)
+                            && row.holes.some((item) => String(item?.displayValue || item?.resultText || '').trim());
+                          return (
+                            <tr key={`battle-preview-row-${row.key}`}>
+                              <td>{row.name}</td>
+                              {battleSelectedHoles.map((holeNo) => {
+                                const hole = Array.isArray(row?.holes) ? row.holes.find((item) => Number(item?.holeNo) === Number(holeNo)) : null;
+                                if (isBattleMatchLike) {
+                                  const text = String(hole?.displayValue || hole?.resultText || '');
+                                  return <td key={`battle-preview-cell-${row.key}-${holeNo}`} style={getBattleResultStyle(hole)}>{text}</td>;
+                                }
+                                const value = Number(hole?.value);
+                                return <td key={`battle-preview-cell-${row.key}-${holeNo}`}>{Number.isFinite(value) ? formatDisplayNumber(value) : ''}</td>;
+                              })}
+                              <td className={tCss.totalCell} style={isBattleMatchLike && battleRowHasResult ? getBattleResultStyle({ displayValue: row.displayValue }) : null}>{isBattleMatchLike ? (battleRowHasResult ? (row.displayValue || '') : '') : formatDisplayNumber(row.value)}</td>
+                              {battlePreviewShowRank && <td className={tCss.subtotalBlue}>{battlePreviewRankByKey.get(String(row?.key || '')) || ''}</td>}
+                            </tr>
+                          );
+                        })}
                         {!isBattleMatchLike && (
                           <tr className={tCss.subtotalRow}>
                             <td className={tCss.subtotalLabel}>소계</td>
@@ -1622,7 +1682,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {bingoLocked && <div className={tCss.lockNotice}>입력이 마감되어 더 이상 수정할 수 없습니다.</div>}
+                {bingoLocked && <div className={tCss.lockNotice}>빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
@@ -1671,12 +1731,12 @@ export default function PlayerEventInput(){
                                     spellCheck={false}
                                     className={tCss.cellInput}
                                     value={cellValue}
-                                    disabled={!p || bingoLocked}
-                                    onChange={e => p && !bingoLocked && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
-                                    onBlur={e => p && !bingoLocked && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    disabled={!p}
+                                    onChange={e => p && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    onBlur={e => p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
-                                      if (p && !bingoLocked) {
+                                      if (p) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -1685,7 +1745,7 @@ export default function PlayerEventInput(){
                                     onPointerCancel={() => cancelEventLongPress(inputKey)}
                                     onPointerLeave={() => cancelEventLongPress(inputKey)}
                                     onTouchStart={(e) => {
-                                      if (p && !bingoLocked) {
+                                      if (p) {
                                         e.stopPropagation();
                                         startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
@@ -2279,9 +2339,18 @@ export default function PlayerEventInput(){
             : getGroupRoomHoleBattleInputRows(activeEvent, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
           const row = rows.find((item) => String(item.key) === String(battleMenuState.rowKey));
           if (!row) return null;
-          const shared = getBattleSharedInputs(inputsByEvent?.[battleMenuState.evId] || {});
-          const currentIds = getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
-          const usage = countParticipantUsageForRow(shared, row.key);
+          const activeBattleSource = battleMenuState?.viewOnly ? inputsByEventServer : inputsByEvent;
+          const shared = getBattleSharedInputs(activeBattleSource?.[battleMenuState.evId] || {});
+          const viewOnly = !!battleMenuState?.viewOnly;
+          const isBattleRoomTeamSelection = activeEvent?.params?.mode === 'room' && (activeEvent?.params?.battleType === 'matchplay' || activeEvent?.params?.battleType === 'fourball') && activeEvent?.params?.roomTeams?.selectionMode === 'team' && row?.roomSelectionMode === 'team';
+          const currentIds = isBattleRoomTeamSelection
+            ? (Array.isArray(row?.memberIds) ? row.memberIds.map(String).filter(Boolean) : [])
+            : getBattleCellIds(shared, row.key, battleMenuState.holeNo, row.memberIds);
+          const usage = isBattleRoomTeamSelection ? {} : countParticipantUsageForRow(shared, row.key);
+          const orderedMembers = [
+            ...row.members.filter((member) => currentIds.includes(String(member?.id || ''))),
+            ...row.members.filter((member) => !currentIds.includes(String(member?.id || ''))),
+          ];
           return createPortal(
             <div
               className={tCss.pickMenuOverlay}
@@ -2299,23 +2368,25 @@ export default function PlayerEventInput(){
                 onClick={(e) => e.stopPropagation()}
               >
                 <div style={{ padding: '6px 10px 8px', fontSize: 12, color: '#667085', borderBottom: '1px solid #eef2f7' }}>
-                  {row.name} · {battleMenuState.holeNo}홀 · {currentIds.length}/{cfg.pickCount}명
+                  {row.name} · {battleMenuState.holeNo}홀 · {isBattleRoomTeamSelection ? `${currentIds.length}명` : `${currentIds.length}/${cfg.pickCount}명`}{viewOnly ? ' · 선택 보기' : ''}
                 </div>
-                <button
-                  type="button"
-                  className={`${tCss.pickMenuOption} ${!currentIds.length ? tCss.pickMenuOptionActive : ''}`}
-                  onClick={() => {
-                    patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, '');
-                    setBattleMenuState(null);
-                  }}
-                >
-                  선택 해제
-                </button>
-                {row.members.map((member) => {
+                {!viewOnly && (
+                  <button
+                    type="button"
+                    className={`${tCss.pickMenuOption} ${!currentIds.length ? tCss.pickMenuOptionActive : ''}`}
+                    onClick={() => {
+                      patchGroupRoomBattleCell(activeEvent, row, battleMenuState.holeNo, '');
+                      setBattleMenuState(null);
+                    }}
+                  >
+                    선택 해제
+                  </button>
+                )}
+                {orderedMembers.map((member) => {
                   const value = String(member?.id || '');
                   const active = currentIds.includes(value);
                   const used = Number(usage[value] || 0);
-                  const disabled = !active && (currentIds.length >= cfg.pickCount || used >= cfg.maxPerParticipant);
+                  const disabled = viewOnly || (!active && (currentIds.length >= cfg.pickCount || used >= cfg.maxPerParticipant));
                   return (
                     <button
                       key={`battle-menu-${value}`}
