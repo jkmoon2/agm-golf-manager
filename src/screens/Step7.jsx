@@ -7,7 +7,6 @@ import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
 
 const LONG_PRESS_MS = 600;
-const MAX_ROOM_CAPACITY = 4;
 
 // 점수 입력 시 부분 숫자(-, 빈문자 등) 허용하는 헬퍼 (기존 그대로)
 function isPartialNumber(str) {
@@ -20,6 +19,7 @@ export default function Step7() {
   const {
     participants = [],
     roomNames = [],
+    roomCapacities = [],
     onScoreChange,
     onManualAssign,
     onCancel,
@@ -95,6 +95,13 @@ export default function Step7() {
     paddingBottom: `calc(${FOOTER_H}px + ${safeBottom})`,
     WebkitOverflowScrolling: 'touch',
     touchAction: 'pan-y',
+  };
+
+  const getRoomCapacity = (roomNo) => {
+    const idx = Number(roomNo) - 1;
+    const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+    const safe = Number.isFinite(raw) ? raw : 4;
+    return Math.min(4, Math.max(1, safe));
   };
 
   // 1조/2조 판별 (group 필드 우선, 없으면 id로 fallback)
@@ -195,7 +202,7 @@ export default function Step7() {
     const dstCount = dstMembers.length;
 
     // 0팀/1팀(<= 2명) → 그냥 팀 이동
-    if (dstCount <= MAX_ROOM_CAPACITY - 2) {
+    if (dstCount <= getRoomCapacity(dstRoom) - 2) {
       await applyBulkChanges([
         { id: me1.id, fields: { room: dstRoom } },
         { id: me2.id, fields: { room: dstRoom } },
@@ -207,7 +214,7 @@ export default function Step7() {
     }
 
     // 정원 4명이 아니면(중간 애매한 상태) 방 구성이 이상하다고 안내
-    if (dstCount !== MAX_ROOM_CAPACITY) {
+    if (dstCount !== getRoomCapacity(dstRoom)) {
       alert('해당 방의 인원 구성이 2팀(4명) 기준이 아닙니다.');
       return;
     }

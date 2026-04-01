@@ -3,12 +3,20 @@
 // ⬆️ 반드시 최상단에 import 배치 (ESLint: import/first 준수)
 import { runTransaction, doc } from 'firebase/firestore';
 
+const roomCapacityAt = (roomCapacities, roomNo) => {
+  const idx = Number(roomNo) - 1;
+  const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+  const safe = Number.isFinite(raw) ? raw : 4;
+  return Math.min(4, Math.max(1, safe));
+};
+
 // 스트로크 방 선택 유틸
 // 규칙: 같은 방에 같은 group(조)은 금지. 그 안에서 "순수 랜덤" (옵션으로 균형랜덤도 지원)
 export function pickRoomForStroke({
   me,            // { id, group, room, ... }
   participants,  // 전체 참가자 배열
   roomCount,     // 방 개수 (정수)
+  roomCapacities = [],
   strategy = 'pure', // 'pure' | 'balanced'
 }) {
   const myGroup = Number(me.group) || 0;
@@ -31,16 +39,16 @@ export function pickRoomForStroke({
   let candidates = [];
   for (let r = 1; r <= roomCount; r++) {
     const slot = byRoom.get(r);
-    if (!slot.groups.has(myGroup) && slot.people.length < 4) {
+    if (!slot.groups.has(myGroup) && slot.people.length < roomCapacityAt(roomCapacities, r)) {
       candidates.push({ r, cnt: slot.people.length });
     }
   }
 
-  // 만약 전부 같은 조 있거나 꽉 찼다면, 아직 4명 미만인 방 중에서
+  // 만약 전부 같은 조 있거나 꽉 찼다면, 아직 정원 미만인 방 중에서
   if (candidates.length === 0) {
     for (let r = 1; r <= roomCount; r++) {
       const slot = byRoom.get(r);
-      if (slot.people.length < 4) candidates.push({ r, cnt: slot.people.length });
+      if (slot.people.length < roomCapacityAt(roomCapacities, r)) candidates.push({ r, cnt: slot.people.length });
     }
   }
   // 그래도 없으면 1~roomCount 중 랜덤 (이론상 거의 없음)
@@ -60,7 +68,7 @@ export function pickRoomForStroke({
 
 // 트랜잭션 기반 스트로크 배정 (Admin/Player 동시 배정 충돌 방지)
 // - 동일 방에 같은 조 금지
-// - 방당 4명 제한
+// - 방당 설정 정원 제한
 // - 현재 스냅샷 기준으로 방을 선택하고 즉시 커밋
 export async function transactionalAssignStroke({ db, eventId, participantId }) {
   if (!db || !eventId || !participantId) throw new Error('invalid_args');
@@ -70,6 +78,7 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
     if (!snap.exists()) throw new Error('event_not_found');
     const data = snap.data() || {};
     const roomCount = Number(data.roomCount || 0) || 0;
+    const roomCapacities = Array.from({ length: roomCount }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
     const parts = Array.isArray(data.participants) ? data.participants.map((p, i) => ({
       ...(p && typeof p === 'object' ? p : {}),
       id: p?.id ?? i,
@@ -92,17 +101,18 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
       me,
       participants: parts,
       roomCount,
+      roomCapacities,
       strategy: 'balanced',
     });
 
     const chosen = Number(typeof picked === 'number' ? picked : (picked?.roomNumber ?? picked?.room) || 0) || 0;
     if (!chosen) throw new Error('no_room');
 
-    // 유효성 재확인: 선택된 방에 동일 조가 있는지, 인원이 4 미만인지
+    // 유효성 재확인: 선택된 방에 동일 조가 있는지, 인원이 정원 미만인지
     const current = parts.filter(p => Number(p.room) === chosen);
     const hasSameGroup = current.some(p => Number(p.group) === Number(me.group));
     if (hasSameGroup) throw new Error('conflict_same_group');
-    if (current.length >= 4) throw new Error('room_full');
+    if (current.length >= roomCapacityAt(roomCapacities, chosen)) throw new Error('room_full');
 
     // 커밋
     parts[meIdx] = { ...me, room: chosen };

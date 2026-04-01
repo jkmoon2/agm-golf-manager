@@ -3,9 +3,16 @@
 import { arrayUnion, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { sanitizeForFirestore } from '../../utils/sanitizeForFirestore';
 
+const roomCapacityAt = (roomCapacities, roomNo) => {
+  const idx = Number(roomNo) - 1;
+  const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+  const safe = Number.isFinite(raw) ? raw : 4;
+  return Math.min(4, Math.max(1, safe));
+};
+
 // 포볼: 1조가 실행, 미배정 2조 중에서 랜덤으로 팀원 선택 + 방(여유 2자리) 랜덤
 export function pickRoomAndPartnerForFourball({
-  me, participants, roomCount, roomCapacity = 4, strategy = 'pure', // strategy는 방 고를 때만 사용 ('pure'|'balanced')
+  me, participants, roomCount, roomCapacity = 4, roomCapacities = [], strategy = 'pure', // strategy는 방 고를 때만 사용 ('pure'|'balanced')
 }) {
   const myGroup = Number(me.group) || 0;
   if (myGroup !== 1) {
@@ -35,7 +42,8 @@ export function pickRoomAndPartnerForFourball({
   let candidates = [];
   for (let r = 1; r <= roomCount; r++) {
     const cnt = byRoom.get(r).people.length;
-    if (cnt <= roomCapacity - 2) candidates.push({ r, cnt });
+    const cap = roomCapacityAt(roomCapacities, r) || roomCapacity;
+    if (cnt <= cap - 2) candidates.push({ r, cnt });
   }
   // 그래도 없으면(이상 케이스) 모든 방 중 가장 인원이 적은 방에서 진행
   if (candidates.length === 0) {
@@ -63,18 +71,6 @@ export function pickRoomAndPartnerForFourball({
 
 /*
   Firestore 트랜잭션 버전(모듈러 SDK)
-  - 기존 샘플(compat: db.collection / db.runTransaction) 때문에
-    `t.collection is not a function` 에러가 발생했고,
-    fallback tx(수동 tx)로 내려가면서 participantsFourball 분리 저장 이벤트에서
-    "배정이 풀리는" 문제가 생겼습니다.
-
-  ✅ 현재 프로젝트 표준
-  - 이벤트 루트 문서에 participants + participantsFourball(모드별 필드) 동시 저장
-  - 트랜잭션 내부에서 최신 스냅샷 기준으로 방/파트너를 확정
-  - fourballRooms/{roomNumber} 도 같이 갱신(운영 화면과 동기화)
-
-  호출부(PlayerContext)에서 사용하는 형태:
-    transactionalAssignFourball({ db, eventId, participants, roomCount, selfId })
 */
 
 const normId = (v) => String(v ?? '').trim();
@@ -86,6 +82,7 @@ export async function transactionalAssignFourball({
   eventId,
   participants, // (옵션) caller가 가진 로컬 participants. 트랜잭션에서는 서버 스냅샷을 우선.
   roomCount,
+  roomCapacities = [],
   selfId,
 
   // (레거시) 예전 샘플 형태: me/partner/roomNumber
@@ -120,6 +117,7 @@ export async function transactionalAssignFourball({
     }));
 
     const rc = toInt(roomCount, toInt(data?.roomCount, 4));
+    const caps = Array.from({ length: rc }, (_, i) => roomCapacityAt(data?.roomCapacities || roomCapacities, i + 1));
     if (!rc || rc < 1) throw new Error('invalid_roomCount');
 
     // 1) 레거시 인자(me/partner/roomNumber)가 들어오면 그대로 확정
@@ -141,10 +139,10 @@ export async function transactionalAssignFourball({
         const r = toInt(p.room, 0);
         if (r >= 1 && r <= rc) counts[r - 1] += 1;
       }
-      // 여유 2자리 이상(roomCapacity=4 기준) 방 후보
+      // 여유 2자리 이상 방 후보
       let roomCandidates = [];
       for (let r = 1; r <= rc; r++) {
-        if (counts[r - 1] <= 2) roomCandidates.push(r);
+        if (counts[r - 1] <= caps[r - 1] - 2) roomCandidates.push(r);
       }
       if (roomCandidates.length === 0) {
         const min = Math.min(...counts);

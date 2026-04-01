@@ -32,6 +32,13 @@ const TIMINGS = {
   spinDuringPartnerPick: 1800,
 };
 
+const roomCapacityAt = (roomCapacities, roomNo) => {
+  const idx = Number(roomNo) - 1;
+  const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+  const safe = Number.isFinite(raw) ? raw : 4;
+  return Math.min(4, Math.max(1, safe));
+};
+
 async function ensureAuthReady() {
   try {
     if (!auth?.currentUser) {
@@ -86,11 +93,12 @@ export default function PlayerRoomSelect() {
 }
 
 function StrokeLikeSelect() {
-  const { roomNames, participants, participant, assignStrokeForOne } = useContext(PlayerContext);
+  const { roomNames, roomCapacities, participants, participant, assignStrokeForOne } = useContext(PlayerContext);
   return (
     <BaseRoomSelect
       variant="stroke"
       roomNames={roomNames}
+      roomCapacities={roomCapacities}
       participants={participants}
       participant={participant}
       onAssign={async (myId) => {
@@ -102,12 +110,13 @@ function StrokeLikeSelect() {
 }
 
 function FourballLikeSelect() {
-  const { roomNames, participants, participant, assignFourballForOneAndPartner } =
+  const { roomNames, roomCapacities, participants, participant, assignFourballForOneAndPartner } =
     useContext(PlayerContext);
   return (
     <BaseRoomSelect
       variant="fourball"
       roomNames={roomNames}
+      roomCapacities={roomCapacities}
       participants={participants}
       participant={participant}
       onAssign={async (myId) => {
@@ -118,7 +127,7 @@ function FourballLikeSelect() {
   );
 }
 
-function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
+function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, participant, onAssign }) {
   const navigate = useNavigate();
   const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
@@ -349,7 +358,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
         String(p.id) !== String(viewParticipant?.id)
     );
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
-    const isFull = currentCount >= 4;
+    const isFull = currentCount >= roomCapacityAt(roomCapacities, roomNo);
     return !sameGroupExists && !isFull;
   };
 
@@ -357,7 +366,7 @@ function BaseRoomSelect({ variant, roomNames, participants, participant, onAssig
     if (variant !== 'fourball') return true;
     if (!roomNo) return false;
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
-    return currentCount < 4;
+    return currentCount <= roomCapacityAt(roomCapacities, roomNo) - 2;
   };
 
   const saveMyRoom = (roomNo) => {

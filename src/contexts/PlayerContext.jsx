@@ -174,26 +174,36 @@ const countInRoom = (list, roomCount) => {
   return counts;
 };
 
-// 스트로크용: “같은 조 중복 금지 + 정원 4미만”을 만족하는 방 목록
-const validRoomsForStroke = (list, roomCount, me) => {
+const roomCapacityAt = (roomCapacities, roomNo) => {
+  const idx = Number(roomNo) - 1;
+  const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+  const safe = Number.isFinite(raw) ? raw : 4;
+  return Math.min(4, Math.max(1, safe));
+};
+
+// 스트로크용: “같은 조 중복 금지 + 방 정원 미만”을 만족하는 방 목록
+const validRoomsForStroke = (list, roomCount, me, roomCapacities) => {
   const myGroup = toInt(me?.group, 0);
   const counts = countInRoom(list, roomCount);
   const rooms = [];
   for (let r = 1; r <= roomCount; r++) {
     const sameGroupExists = list.some(p => toInt(p.room) === r && toInt(p.group) === myGroup && normId(p.id) !== normId(me?.id));
-    if (!sameGroupExists && counts[r - 1] < 4) rooms.push(r);
+    if (!sameGroupExists && counts[r - 1] < roomCapacityAt(roomCapacities, r)) rooms.push(r);
   }
   if (rooms.length === 0) {
-    for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < 4) rooms.push(r);
+    for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < roomCapacityAt(roomCapacities, r)) rooms.push(r);
   }
   return rooms;
 };
 
-// 포볼용: “정원 4미만”을 만족하는 방 목록
-const validRoomsForFourball = (list, roomCount) => {
+// 포볼용: “방 정원 - neededSeats 이상 여유”를 만족하는 방 목록
+const validRoomsForFourball = (list, roomCount, roomCapacities, neededSeats = 2) => {
   const counts = countInRoom(list, roomCount);
   const rooms = [];
-  for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < 4) rooms.push(r);
+  for (let r = 1; r <= roomCount; r++) {
+    const cap = roomCapacityAt(roomCapacities, r);
+    if (counts[r - 1] <= cap - neededSeats) rooms.push(r);
+  }
   return rooms.length ? rooms : Array.from({ length: roomCount }, (_, i) => i + 1);
 };
 
@@ -267,6 +277,7 @@ export function PlayerProvider({ children }) {
   const [mode, setMode]                   = useState('stroke');
   const [roomCount, setRoomCount]         = useState(4);
   const [roomNames, setRoomNames]         = useState([]);
+  const [roomCapacities, setRoomCapacities] = useState(Array(4).fill(4));
   const [rooms, setRooms]                 = useState([]);
   const [participants, setParticipants]   = useState([]);
   // ✅ scores SSOT(EventContext) 사용: Player쪽에서 /scores 중복 구독 금지
@@ -370,8 +381,10 @@ const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legac
 
       const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
       const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
+      const caps = Array.from({ length: rc }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
       setRoomCount(rc);
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
+      setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
       let me = null;
@@ -462,8 +475,10 @@ if (!idCached) {
       setParticipants(typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(partArr) : partArr);
       const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
       const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
+      const caps = Array.from({ length: rc }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
       setRoomCount(rc);
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
+      setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
       setParticipant((prev) => {
         if (!prev) return prev;
@@ -626,6 +641,7 @@ if (!idCached) {
       const legacy = Array.isArray(data?.participants) ? data.participants : [];
       const base = primary.length ? mergeParticipantsById(primary, legacy) : legacy;
       const parts = base.map((p, i) => normalizeParticipantRecord(p, i));
+      const caps = Array.from({ length: roomCount }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
 
       const me = parts.find((p) => normId(p.id) === pid) ||
                  (participant ? parts.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
@@ -635,7 +651,7 @@ if (!idCached) {
         return { roomNumber: Number(me.room), alreadyAssigned: true, next: parts };
       }
 
-      let candidates = validRoomsForStroke(parts, roomCount, me);
+      let candidates = validRoomsForStroke(parts, roomCount, me, caps);
       if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
       const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
@@ -696,7 +712,7 @@ if (!idCached) {
       try {
         if (typeof transactionalAssignFourball === 'function') {
           const result = await transactionalAssignFourball({
-            db, eventId, participants, roomCount, selfId: pid,
+            db, eventId, participants, roomCount, roomCapacities, selfId: pid,
           });
           if (result?.nextParticipants) {
             setParticipants(result.nextParticipants);
@@ -740,11 +756,12 @@ if (!idCached) {
             room: p?.room ?? null,
             partner: p?.partner != null ? normId(p?.partner) : null,
           }));
+          const caps = Array.from({ length: roomCount }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
 
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');
 
-          const rooms = validRoomsForFourball(parts, roomCount);
+          const rooms = validRoomsForFourball(parts, roomCount, caps, 2);
           const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
           const pool = parts.filter(
@@ -793,7 +810,7 @@ if (!idCached) {
       }
     }
 
-    const rooms = validRoomsForFourball(participants, roomCount);
+    const rooms = validRoomsForFourball(participants, roomCount, roomCapacities, 2);
     const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
     let mateId = '';
@@ -833,7 +850,7 @@ if (!idCached) {
     <PlayerContext.Provider
       value={{
         eventId, setEventId,
-        mode, roomCount, roomNames, rooms,
+        mode, roomCount, roomNames, roomCapacities, rooms,
         participants, participant,
         setParticipant,
         authCode, setAuthCode,

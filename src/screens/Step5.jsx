@@ -42,6 +42,7 @@ export default function Step5() {
     setParticipants,
     roomCount,
     roomNames,
+    roomCapacities = [],
     goPrev,
     goNext,
 
@@ -86,6 +87,15 @@ export default function Step5() {
     const v = Number.isFinite(n) ? n : null;
     return { ...p, room: v, roomNumber: v };
   };
+
+  const getRoomCapacity = (roomNo) => {
+    const idx = Number(roomNo) - 1;
+    const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+    const safe = Number.isFinite(raw) ? raw : 4;
+    return Math.min(4, Math.max(1, safe));
+  };
+
+  const getRoomCountNow = (list, roomNo) => list.filter((p) => getRoomValue(p) === Number(roomNo)).length;
 
 
   useEffect(() => {
@@ -394,7 +404,7 @@ export default function Step5() {
           .filter((p) => p.group === target.group && getRoomValue(p) != null)
           .map((p) => getRoomValue(p));
 
-        const available = rooms.filter((r) => !usedRooms.includes(r));
+        const available = rooms.filter((r) => !usedRooms.includes(r) && getRoomCountNow(ps, r) < getRoomCapacity(r));
         chosen = available.length ? available[Math.floor(Math.random() * available.length)] : null;
 
         nextList = ps.map((p) => (p.id === id ? withRoomValue(p, chosen) : p));
@@ -503,6 +513,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     let targetNickname = null;
     let prevRoom = null;
     let nextList = null;
+    let blockedFull = false;
 
     setParticipants((ps) => {
       const target = ps.find((p) => p.id === id);
@@ -515,6 +526,12 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
       if (room == null) {
         nextList = ps.map((p) => (p.id === id ? { ...p, room: null, roomNumber: null } : p));
         return nextList;
+      }
+
+      const roomCountNow = getRoomCountNow(ps, room);
+      if (roomCountNow >= getRoomCapacity(room) && prevRoom !== room) {
+        blockedFull = true;
+        return ps;
       }
 
       // 같은 조가 같은 방에 들어가면 안 되므로, 이미 같은 조가 그 방에 있으면 "맞트레이드(스왑)"
@@ -534,6 +551,11 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     });
 
     closeForceMenu();
+
+    if (blockedFull) {
+      alert('선택한 방 정원이 가득 찼습니다.');
+      return;
+    }
 
     if (room != null) {
       const displayName = (roomNames?.[room - 1] || `${room}번 방`).trim();
@@ -562,8 +584,9 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
 
         const unassigned = updated.filter((p) => p.group === group && getRoomValue(p) == null);
 
-        const slots = rooms.filter((r) => !assigned.includes(r));
-        const shuffled = [...slots].sort(() => Math.random() - 0.5);
+        const slots = rooms.filter((r) => !assigned.includes(r) && getRoomCountNow(updated, r) < getRoomCapacity(r));
+        const fallbackSlots = rooms.filter((r) => getRoomCountNow(updated, r) < getRoomCapacity(r));
+        const shuffled = [...(slots.length ? slots : fallbackSlots)].sort(() => Math.random() - 0.5);
 
         unassigned.forEach((p, idx) => {
           const r = shuffled[idx] ?? null;

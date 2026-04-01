@@ -7,6 +7,15 @@ import { EventContext } from "../contexts/EventContext";
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
+const normalizeRoomCapacities = (count, caps) => {
+  const rc = Math.max(1, Number(count) || 0);
+  return Array.from({ length: rc }, (_, i) => {
+    const raw = Number(Array.isArray(caps) ? caps[i] : 4);
+    const safe = Number.isFinite(raw) ? raw : 4;
+    return Math.min(4, Math.max(1, safe));
+  });
+};
+
 export default function Step2() {
 
   // ── iOS Safe-Bottom & BottomTab 대응 (footer 고정 + 컨텐츠 스크롤) ─────────
@@ -35,8 +44,11 @@ export default function Step2() {
     setRoomCount,
     roomNames,
     setRoomNames,
+    roomCapacities,
+    setRoomCapacities,
     goPrev,
-    goNext
+    goNext,
+    mode,
   } = useContext(StepContext);
 
   // EventContext에서 현재 eventId 가져오기
@@ -50,6 +62,9 @@ export default function Step2() {
       ? roomNames
       : Array.from({ length: defaultCount }, () => "")
   );
+  const [localRoomCapacities, setLocalRoomCapacities] = useState(
+    normalizeRoomCapacities(defaultCount, roomCapacities)
+  );
   const [composingIdx, setComposingIdx] = useState(null);
 
   // Context 변경 시 로컬 상태 동기화
@@ -61,7 +76,8 @@ export default function Step2() {
         ? roomNames
         : Array.from({ length: count }, () => "")
     );
-  }, [roomCount, roomNames]);
+    setLocalRoomCapacities(normalizeRoomCapacities(count, roomCapacities));
+  }, [roomCount, roomNames, roomCapacities]);
 
   // 로컬 개수 변경 시 이름 배열 크기 조정
   useEffect(() => {
@@ -75,6 +91,15 @@ export default function Step2() {
         return copy.slice(0, count);
       }
       return copy;
+    });
+    setLocalRoomCapacities(prev => {
+      const copy = [...prev];
+      if (copy.length < count) {
+        return copy.concat(Array(count - copy.length).fill(4));
+      } else if (copy.length > count) {
+        return copy.slice(0, count);
+      }
+      return normalizeRoomCapacities(count, copy);
     });
   }, [localRoomCount]);
 
@@ -95,9 +120,12 @@ export default function Step2() {
     setLocalRoomCount(finalCount);
     setRoomCount(finalCount);
 
-    const resized = Array(finalCount).fill("");
-    setLocalRoomNames(resized);
-    setRoomNames(resized);
+    const resizedNames = Array.from({ length: finalCount }, (_, i) => localRoomNames?.[i] ?? '');
+    const resizedCaps = normalizeRoomCapacities(finalCount, localRoomCapacities);
+    setLocalRoomNames(resizedNames);
+    setRoomNames(resizedNames);
+    setLocalRoomCapacities(resizedCaps);
+    setRoomCapacities(resizedCaps);
   };
 
   // 방 이름 blur 시 최종값 Context 저장
@@ -110,20 +138,37 @@ export default function Step2() {
     }
   };
 
+  const handleCapacityChange = (idx, value) => {
+    const safe = Math.min(4, Math.max(1, Number(value) || 4));
+    const next = [...localRoomCapacities];
+    next[idx] = safe;
+    setLocalRoomCapacities(next);
+    setRoomCapacities(next);
+  };
+
   // Firestore에 방 정보 저장 후 Context 업데이트, 다음 스텝 이동
   const handleNext = async () => {
     if (!eventId) {
       alert('이벤트 ID가 없습니다. 다시 시작해주세요.');
       return;
     }
+
+    const finalCaps = normalizeRoomCapacities(localRoomCount, localRoomCapacities);
+    if ((mode === 'fourball' || mode === 'agm') && finalCaps.some((v) => Number(v) % 2 !== 0)) {
+      const ok = window.confirm('AGM 포볼 모드에서는 2명 단위 배정이라 1명/3명 방은 남는 자리가 생길 수 있습니다.\n그래도 계속 진행할까요?');
+      if (!ok) return;
+    }
+
     // 1) Firestore 업데이트
     await updateDoc(doc(db, 'events', eventId), {
       roomCount: localRoomCount,
-      roomNames: localRoomNames
+      roomNames: localRoomNames,
+      roomCapacities: finalCaps,
     });
     // 2) Context 업데이트
     setRoomCount(localRoomCount);
     setRoomNames(localRoomNames);
+    setRoomCapacities(finalCaps);
     // 3) 다음 STEP
     goNext();
   };
@@ -166,6 +211,16 @@ export default function Step2() {
               onCompositionEnd={e => handleNameCompositionEnd(e, i)}
               onBlur={e => handleRoomNameBlur(i, e)}
             />
+            <select
+              className={styles.capacitySelect}
+              value={Number(localRoomCapacities?.[i] || 4)}
+              onChange={(e) => handleCapacityChange(i, e.target.value)}
+              aria-label={`${i + 1}번 방 인원 수`}
+            >
+              {[1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>{n}명</option>
+              ))}
+            </select>
           </div>
         ))}
       </div>

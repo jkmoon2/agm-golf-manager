@@ -62,6 +62,48 @@ function participantsSeedOf(list = []) {
   }
 }
 
+const KNOWN_EVENT_SUBCOLLECTIONS = [
+  'participants',
+  'preMembers',
+  'memberships',
+  'scores',
+  'fourballRooms',
+  'rooms',
+  'eventInputs',
+  'players',
+  'playerStates',
+];
+
+async function deleteCollectionDocs(colRef, chunkSize = 50) {
+  const snap = await getDocs(colRef);
+  if (!snap?.docs?.length) return;
+  for (let i = 0; i < snap.docs.length; i += chunkSize) {
+    const chunk = snap.docs.slice(i, i + chunkSize);
+    await Promise.all(chunk.map((d) => deleteDoc(d.ref)));
+  }
+}
+
+async function deleteKnownEventSubcollections(eventId) {
+  if (!eventId) return;
+  for (const name of KNOWN_EVENT_SUBCOLLECTIONS) {
+    try {
+      await deleteCollectionDocs(collection(db, 'events', eventId, name));
+    } catch (e) {
+      console.warn(`[EventContext] subcollection delete failed: ${name}`, e);
+    }
+  }
+}
+
+function isMissingDocError(error) {
+  const code = String(error?.code || '').toLowerCase();
+  const msg = String(error?.message || error || '').toLowerCase();
+  return (
+    code.includes('not-found') ||
+    msg.includes('no document to update') ||
+    msg.includes('not found')
+  );
+}
+
 /* participants 포함 업데이트에 파생필드 자동 부여 */
 function enrichParticipantsDerived(updates) {
   if (!updates || typeof updates !== 'object') return updates;
@@ -254,6 +296,30 @@ export function EventProvider({ children }) {
     }
   };
 
+  const clearCurrentEventSelection = useCallback((targetId) => {
+    if (!targetId) return;
+    try {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    } catch {}
+    queuedUpdatesRef.current = null;
+    setEventData(null);
+    lastEventDataRef.current = null;
+    scoresMapRef.current = {};
+    setScoresMap({});
+    scoresReadyRef.current = false;
+    setScoresReady(false);
+    setEventId((prev) => (prev === targetId ? null : prev));
+    try {
+      if (localStorage.getItem('eventId') === targetId) {
+        localStorage.removeItem('eventId');
+      }
+    } catch {}
+  }, []);
+
+
   const normalizePublicView = (data) => {
     const d = data || {};
     const pv = d.publicView || {};
@@ -384,6 +450,10 @@ export function EventProvider({ children }) {
       if (cancelled) return;
       const docRef = doc(db, 'events', eventId);
       unsub = onSnapshot(docRef, { includeMetadataChanges: true }, (snap) => {
+        if (!snap.exists()) {
+          clearCurrentEventSelection(eventId);
+          return;
+        }
         applyIncomingEventData(snap.data());
       });
     });
@@ -391,7 +461,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -461,11 +531,14 @@ export function EventProvider({ children }) {
         queuedUpdatesRef.current = null;
         try {
           const ref = doc(db, 'events', eventId);
-          await setDoc(ref, sanitizeUndefinedDeep(toWrite), { merge: true });
+          await updateDoc(ref, sanitizeUndefinedDeep(toWrite));
           lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...toWrite };
           setEventData((prev) => (prev ? { ...prev, ...toWrite } : toWrite));
           try { broadcastEventSync(eventId, { reason: 'updateEvent' }); } catch {}
         } catch (e) {
+          if (isMissingDocError(e)) {
+            clearCurrentEventSelection(eventId);
+          }
           console.warn('[EventContext] updateEvent (debounced) failed:', e, 'payload:', toWrite);
         } finally {
           resolve();
@@ -496,7 +569,7 @@ export function EventProvider({ children }) {
     }
     try {
       const ref = doc(db, 'events', eventId);
-      await setDoc(ref, sanitizeUndefinedDeep(enriched), { merge: true });
+      await updateDoc(ref, sanitizeUndefinedDeep(enriched));
 
       // 즉시 저장 후 디바운스 큐/타이머 정리
       try {
@@ -511,6 +584,11 @@ export function EventProvider({ children }) {
       setEventData((prev) => (prev ? { ...prev, ...enriched } : enriched));
       try { broadcastEventSync(eventId, { reason: 'updateEventImmediate' }); } catch {}
     } catch (e) {
+      if (isMissingDocError(e)) {
+        clearCurrentEventSelection(eventId);
+        console.warn('[EventContext] updateEventImmediate skipped: target event was already deleted.', e);
+        return;
+      }
       console.warn('[EventContext] updateEventImmediate failed:', e);
       throw e;
     }
@@ -524,11 +602,10 @@ export function EventProvider({ children }) {
 
   const deleteEvent = async (id) => {
     await ensureAuthed();
+    await deleteKnownEventSubcollections(id);
     await deleteDoc(doc(db, 'events', id));
-    if (eventId === id) {
-      setEventId(null);
-      localStorage.removeItem('eventId');
-    }
+    clearCurrentEventSelection(id);
+    try { broadcastEventSync(id, { reason: 'deleteEvent' }); } catch {}
   };
 
   // 탭 이탈/가려짐 시 강제 플러시
@@ -1010,6 +1087,7 @@ export function EventProvider({ children }) {
             mode,
             roomCount: 4,
             roomNames: Array(4).fill(''),
+            roomCapacities: Array(4).fill(4),
             uploadMethod: '',
             uploadFileNameStroke: '',
             uploadFileNameFourball: '',
