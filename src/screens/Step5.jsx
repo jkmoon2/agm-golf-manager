@@ -54,7 +54,7 @@ export default function Step5() {
   // ✅ SSOT 통일: 점수는 /events/{eventId}/scores/{pid} 에만 저장(양방향 실시간)
   //    - Step5/7/Admin, Player 모두 동일한 scores를 읽고/쓰도록 정리
   //    - participants 배열에는 score를 영구 저장하지 않음(방배정/명단만 유지)
-  const { eventId, updateEventImmediate, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
+  const { eventId, updateEventImmediate, persistRoomsFromParticipants, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
 
   const rooms = useMemo(
     () => Array.from({ length: Number(roomCount || 0) }, (_, i) => i + 1),
@@ -70,6 +70,7 @@ export default function Step5() {
 
   // ✅ [ADD] onNext에서 항상 최신 participants로 저장하기 위한 스냅샷 ref
   const latestParticipantsRef = useRef(participants);
+  const lastRoomSyncSigRef = useRef('');
 
   // room / roomNumber 통합 처리 (스트로크/포볼 공통)
   const getRoomValue = (p) => {
@@ -202,6 +203,13 @@ export default function Step5() {
           await updateEventImmediate(docUpdate);
         }
 
+        // ✅ 2-2 room SSOT: Step5에서 즉시 배정 변경 시 rooms/fourballRooms 미러도 같이 맞춤
+        const roomSig = sig ? JSON.stringify(roomTable || {}) : '';
+        if (roomSig && roomSig !== lastRoomSyncSigRef.current && typeof persistRoomsFromParticipants === 'function') {
+          await persistRoomsFromParticipants(sanitized);
+          lastRoomSyncSigRef.current = roomSig;
+        }
+
         if (sig) lastSyncedSigRef.current = sig;
       } catch (e) {
         console.warn('[Step5] syncParticipantsToEvent error:', e);
@@ -217,7 +225,7 @@ export default function Step5() {
         }
       }
     },
-    [eventId, updateEventImmediate]
+    [eventId, updateEventImmediate, persistRoomsFromParticipants]
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
