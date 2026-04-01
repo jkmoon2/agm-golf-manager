@@ -143,6 +143,28 @@ function mergeParticipantsById(primary = [], legacy = []) {
   return Array.from(map.values());
 }
 
+function toSafeInt(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+function normalizeParticipantRecord(p, fallbackId = '') {
+  const base = (p && typeof p === 'object') ? p : {};
+  const room = (base?.room ?? base?.roomNumber ?? null);
+  return {
+    ...base,
+    id: String(base?.id ?? fallbackId ?? ''),
+    nickname: String(base?.nickname ?? '').trim(),
+    handicap: toSafeInt(base?.handicap, 0),
+    group: toSafeInt(base?.group, 0),
+    authCode: String(base?.authCode ?? ''),
+    room,
+    roomNumber: room,
+    partner: base?.partner != null ? String(base.partner) : null,
+    selected: !!base?.selected,
+  };
+}
+
 // room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
 function normalizeParticipantsRoomFields(list) {
   if (!Array.isArray(list)) return [];
