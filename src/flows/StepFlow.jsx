@@ -167,9 +167,6 @@ export default function StepFlow() {
         x.group    !== y.group    ||
         x.nickname !== y.nickname ||
         x.handicap !== y.handicap ||
-        // ✅ [SSOT] score는 /scores 서브컬렉션이 단일 원본이므로
-        // participants 동기화 비교에서는 제외합니다.
-        // (서버 participants에 score가 없어서 로컬 점수가 지워지는 현상 방지)
         x.room     !== y.room     ||
         x.partner  !== y.partner  ||
         x.selected !== y.selected
@@ -257,6 +254,15 @@ export default function StepFlow() {
         }
       }
 
+      const localDirtyAt = localDirtyParticipantsMsRef.current || 0;
+      const localDirtyRecent = !!localDirtyAt && (Date.now() - localDirtyAt < 4000);
+      if (localDirtyRecent) {
+        if (!remoteAt || remoteAt < localDirtyAt) {
+          return prevList;
+        }
+      }
+
+      localDirtyParticipantsMsRef.current = 0;
       return remoteList;
     });
     applyingRemoteParticipantsRef.current = false;
@@ -287,8 +293,7 @@ export default function StepFlow() {
     }
     if (Object.prototype.hasOwnProperty.call(copy, "dirty")) delete copy.dirty;    
 
-    // score는 /scores 서브컬렉션 SSOT이므로 events 루트 participants 저장에서는 제거
-    // (participants는 방/팀/명단 정보만 담당)
+    // score는 number 또는 null로 정규화
     if (typeof copy.score === "string") {
       const t = copy.score.trim();
       if (t === "") copy.score = null;
@@ -302,7 +307,6 @@ export default function StepFlow() {
       const n = Number(copy.score);
       copy.score = Number.isFinite(n) ? n : null;
     }
-    if (Object.prototype.hasOwnProperty.call(copy, 'score')) delete copy.score;
 
     const roomVal = copy.roomNumber ?? copy.room ?? null;
 
@@ -325,6 +329,7 @@ export default function StepFlow() {
     });
     return table;
   };
+
 
   // 저장 헬퍼: 함수 값을 제거하고 순수 JSON만 전달
   // ★ patch-start: make save async and await remote write to ensure persistence before route changes
@@ -371,6 +376,7 @@ export default function StepFlow() {
         } catch {}
         // [COMPAT] 참고용 roomTable도 같이 저장(읽지 않으면 무시됨)
         clean.roomTable   = buildRoomTable(compat);
+        // ✅ [SYNC_GUARD] 점수는 /scores SSOT, participants 저장 payload에는 배정 관련 필드만 유지
         // ✅ rooms 하위 컬렉션 저장용으로도 기억
         participantsForRooms = compat;
       } else if (typeof value !== 'function' && value !== undefined) {
@@ -413,6 +419,7 @@ export default function StepFlow() {
 
       // 성공한 경우에만 lastSaveSignatureRef 업데이트
       if (sig) lastSaveSignatureRef.current = sig;
+      localDirtyParticipantsMsRef.current = 0;
     } catch (e) {
       console.warn('[StepFlow] save(updateEvent*) failed (continue):', e);
     } finally {

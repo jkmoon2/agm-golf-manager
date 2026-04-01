@@ -143,28 +143,6 @@ function mergeParticipantsById(primary = [], legacy = []) {
   return Array.from(map.values());
 }
 
-function toSafeInt(v, fallback = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : fallback;
-}
-
-function normalizeParticipantRecord(p, fallbackId = '') {
-  const base = (p && typeof p === 'object') ? p : {};
-  const room = (base?.room ?? base?.roomNumber ?? null);
-  return {
-    ...base,
-    id: String(base?.id ?? fallbackId ?? ''),
-    nickname: String(base?.nickname ?? '').trim(),
-    handicap: toSafeInt(base?.handicap, 0),
-    group: toSafeInt(base?.group, 0),
-    authCode: String(base?.authCode ?? ''),
-    room,
-    roomNumber: room,
-    partner: base?.partner != null ? String(base.partner) : null,
-    selected: !!base?.selected,
-  };
-}
-
 // room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
 function normalizeParticipantsRoomFields(list) {
   if (!Array.isArray(list)) return [];
@@ -487,9 +465,17 @@ export function EventProvider({ children }) {
 
   useEffect(() => {
     if (!eventId) return;
+    // ✅ [SYNC_GUARD] Player 라우트에서는 PlayerContext가 별도 refresh를 수행하므로
+    // EventContext까지 중복 refresh(getDoc/getDocs)를 돌리지 않음.
+    // onSnapshot은 그대로 유지되어 실시간 반영은 계속 동작합니다.
+    if (isPlayerRoute) return;
 
     let raf = 0;
+    let lastScheduledAt = 0;
     const scheduleRefresh = () => {
+      const now = Date.now();
+      if (now - lastScheduledAt < 350) return;
+      lastScheduledAt = now;
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => { refreshEventNow(); refreshScoresNow(); });
     };
@@ -516,7 +502,7 @@ export function EventProvider({ children }) {
       document.removeEventListener('visibilitychange', onVisible);
       try { unsubSync(); } catch {}
     };
-  }, [eventId, refreshEventNow, refreshScoresNow]);
+  }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
 
   const loadEvent = async (id) => {
     setEventId(id);
@@ -1037,73 +1023,44 @@ export function EventProvider({ children }) {
     }
   };
 
-  // ✅ participants → 방 배정 미러 저장
-  // - events/{eventId}.roomTable        : 경량 미러(방 번호 → 참가자 id 배열)
-  // - events/{eventId}/rooms            : 운영/대시보드용 멤버 스냅샷
-  // - events/{eventId}/fourballRooms    : 포볼 대시보드용 멤버 스냅샷
+  // ✅ participants → rooms 스냅샷 저장 (/events/{eventId}/rooms + event.roomTable)
   async function persistRoomsFromParticipants(listOverride) {
     try {
       const eid = eventId;
       if (!eid) return;
-
       const list = Array.isArray(listOverride)
         ? listOverride
         : lastEventDataRef.current?.participants || [];
       if (!Array.isArray(list)) return;
 
-      const currentMode = normalizeMode(lastEventDataRef.current?.mode || 'stroke');
-      const roomTable = {};
+      // 1) participants 배열에서 방별 멤버 맵 구성
       const roomsById = {};
-
-      for (const raw of list) {
-        const p = normalizeParticipantRecord(raw, raw?.id);
-        const rmRaw = p?.roomNumber ?? p?.room;
-        if (rmRaw === undefined || rmRaw === null || rmRaw === '') continue;
-
-        const rm = Number(rmRaw);
-        if (!Number.isFinite(rm) || rm <= 0) continue;
-
+      for (const p of list) {
+        const rm = p?.room;
+        if (rm === undefined || rm === null || rm === '') continue;
         const key = String(rm);
-        if (!roomTable[key]) roomTable[key] = [];
         if (!roomsById[key]) roomsById[key] = [];
-
-        roomTable[key].push(p?.id);
         roomsById[key].push({
           id: String(p?.id ?? ''),
           nickname: String(p?.nickname ?? ''),
           group: Number(p?.group ?? 0),
           handicap: Number(p?.handicap ?? 0),
-          partner: p?.partner != null ? String(p.partner) : null,
-          room: rm,
-          roomNumber: rm,
         });
       }
 
-      const syncRoomCollection = async (subName, includeForMode = true) => {
-        if (!includeForMode) return;
-        const colRef = collection(db, 'events', eid, subName);
-        const existing = await getDocs(colRef);
-        const delJobs = existing.docs.map((d) => deleteDoc(d.ref));
-        if (delJobs.length) await Promise.all(delJobs);
+      // 2) 하위 컬렉션 재구성
+      const root = collection(db, 'events', eid, 'rooms');
+      const existing = await getDocs(root);
+      const delJobs = existing.docs.map((d) => deleteDoc(d.ref));
+      if (delJobs.length) await Promise.all(delJobs);
 
-        const setJobs = Object.entries(roomsById).map(([rid, members]) =>
-          setDoc(doc(colRef, rid), {
-            roomNo: Number(rid),
-            members,
-            updatedAt: serverTimestamp(),
-          }),
-        );
-        if (setJobs.length) await Promise.all(setJobs);
-      };
+      const setJobs = Object.entries(roomsById).map(([rid, members]) =>
+        setDoc(doc(root, rid), { members, updatedAt: serverTimestamp() }),
+      );
+      if (setJobs.length) await Promise.all(setJobs);
 
-      // 1) 공통 rooms 미러는 항상 갱신
-      await syncRoomCollection('rooms', true);
-
-      // 2) 포볼 모드에서는 fourballRooms도 동일한 멤버 스냅샷으로 맞춤
-      await syncRoomCollection('fourballRooms', currentMode === 'fourball');
-
-      // 3) 이벤트 루트 roomTable은 경량 미러(id 배열)로 통일
-      await updateEventImmediate({ roomTable }, false);
+      // 3) 이벤트 루트에도 roomTable 저장(경량 미러)
+      await updateEventImmediate({ roomTable: roomsById }, false);
     } catch (err) {
       console.warn('[EventContext] persistRoomsFromParticipants error', err);
     }
