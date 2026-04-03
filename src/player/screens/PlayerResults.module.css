@@ -123,11 +123,13 @@
 
 /* ─ 팀결과표 전용: 열 폭 제어 ─
    ✔ 핵심: rowSpan 때문에 tbody에서 nth-child 인덱스가 흔들립니다.
-     → tbody의 폭 지정은 제거하고, <colgroup>만으로 열 폭을 고정합니다. */
+     → tbody의 폭 지정은 제거하고, <colgroup>만으로 열 폭을 고정합니다.
+   ✔ 추가 보정: 최종결과표와 팀결과표의 오른쪽 끝선을 맞추기 위해
+     팀결과표는 래퍼 폭을 기준으로 가득 차게 표시합니다. */
 .teamTable{
   table-layout: fixed;
-  width: auto;          /* roomTable의 max-content 덮어쓰기 */
-  min-width: unset;     /* 최소 폭 강제 해제 (팀 전용 변수만 반영) */
+  width: 100%;         /* 최종결과표와 동일하게 래퍼 우측 끝까지 맞춤 */
+  min-width: 100%;     /* 내용이 짧아도 우측 끝선이 안쪽으로 들어오지 않게 */
 }
 .teamTable thead tr > th,
 .teamTable tbody tr > td{
