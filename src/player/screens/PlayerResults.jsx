@@ -11,6 +11,7 @@ import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
+import useLatestEventData from '../hooks/useLatestEventData';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
@@ -138,10 +139,12 @@ function orderRoomFourball(roomArr = []) {
 
 export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
-  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
+  const { eventData: ctxEventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;
-  const eventId = eventData?.id || eventData?.eventId || routeEventId || '';
+  const initialEventId = ctxEventData?.id || ctxEventData?.eventId || routeEventId || '';
+  const eventData = useLatestEventData(initialEventId, ctxEventData);
+  const eventId = eventData?.id || eventData?.eventId || initialEventId || '';
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);

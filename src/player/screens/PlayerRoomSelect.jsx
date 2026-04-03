@@ -8,6 +8,7 @@ import styles from './PlayerRoomSelect.module.css';
 
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+import useLatestEventData from '../hooks/useLatestEventData';
 import { signInAnonymously } from 'firebase/auth';
 
 
@@ -132,17 +133,31 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
+  const latestEventId = urlEventId || ctxEventId || playerEventId;
+  const latestEventData = useLatestEventData(latestEventId, eventData);
+
+  const effectiveRoomNames = useMemo(() => {
+    return Array.isArray(latestEventData?.roomNames) && latestEventData.roomNames.length
+      ? latestEventData.roomNames
+      : (Array.isArray(roomNames) ? roomNames : []);
+  }, [latestEventData?.roomNames, roomNames]);
+
+  const effectiveRoomCapacities = useMemo(() => {
+    return Array.isArray(latestEventData?.roomCapacities) && latestEventData.roomCapacities.length
+      ? latestEventData.roomCapacities
+      : (Array.isArray(roomCapacities) ? roomCapacities : []);
+  }, [latestEventData?.roomCapacities, roomCapacities]);
 
   // ✅ SSOT: STEP1 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
   // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
   const effectiveParticipants = useMemo(() => {
     const safeArr = (v) => (Array.isArray(v) ? v : []);
-    const modeFromEvent = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+    const modeFromEvent = (latestEventData?.mode === 'fourball' || latestEventData?.mode === 'agm') ? 'fourball' : 'stroke';
     const md = (variant === 'fourball' || variant === 'stroke') ? variant : modeFromEvent;
     const field = (md === 'fourball') ? 'participantsFourball' : 'participantsStroke';
 
-    const primary = safeArr(eventData?.[field]);
-    const legacy  = safeArr(eventData?.participants);
+    const primary = safeArr(latestEventData?.[field]);
+    const legacy  = safeArr(latestEventData?.participants);
 
     // 모드별 필드가 있으면 legacy와 id 기준으로 병합(호환)
     const mergedRaw = primary.length
@@ -173,10 +188,10 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   }, [
     variant,
     participants,
-    eventData?.mode,
-    eventData?.participants,
-    eventData?.participantsStroke,
-    eventData?.participantsFourball,
+    latestEventData?.mode,
+    latestEventData?.participants,
+    latestEventData?.participantsStroke,
+    latestEventData?.participantsFourball,
   ]);
 
   const effectiveParticipant = useMemo(() => {
@@ -217,21 +232,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     }
   }, [urlEventId, playerEventId, ctxEventId, loadEvent]);
 
-  const [fallbackGate, setFallbackGate] = useState(null);
-  useEffect(() => {
-    const id = urlEventId || ctxEventId || playerEventId;
-    if (!id) return;
-    if (eventData?.playerGate) { setFallbackGate(null); return; }
-    const ref = doc(db, 'events', id);
-    const unsub = onSnapshot(ref, (snap) => {
-      const d = snap.data();
-      if (d?.playerGate) setFallbackGate(normalizeGate(d.playerGate));
-      else setFallbackGate(null);
-    });
-    return unsub;
-  }, [urlEventId, ctxEventId, playerEventId, eventData?.playerGate]);
-
-  const gate = eventData?.playerGate ? normalizeGate(eventData.playerGate) : (fallbackGate || {});
+  const gate = latestEventData?.playerGate ? normalizeGate(latestEventData.playerGate) : {};
   const step2Enabled = (gate?.steps?.[2] || 'enabled') === 'enabled';
   const teamConfirmEnabled = !!(gate?.step1?.teamConfirmEnabled ?? true);
 
@@ -268,12 +269,15 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const [flowStep, setFlowStep] = useState('idle');
 
   const participantsLoaded = Array.isArray(effectiveParticipants) && effectiveParticipants.length > 0;
+  const hasParticipantIdentity = useMemo(() => {
+    return (viewParticipant?.id != null) || !!String(viewParticipant?.authCode || participant?.authCode || '').trim();
+  }, [viewParticipant?.id, viewParticipant?.authCode, participant?.authCode]);
   const isMeReady = useMemo(() => {
     if (!viewParticipant?.id) return false;
     if (!participantsLoaded) return false;
     return effectiveParticipants.some((p) => String(p.id) === String(viewParticipant.id));
   }, [participantsLoaded, effectiveParticipants, viewParticipant?.id]);
-  const isSyncing = participantsLoaded && !isMeReady;
+  const isSyncing = participantsLoaded && hasParticipantIdentity && !isMeReady;
 
   useEffect(() => {
     if (viewParticipant?.room != null && flowStep === 'idle') {
@@ -283,8 +287,8 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   }, [viewParticipant?.room, flowStep]);
 
   const getLabel = (num) =>
-    Array.isArray(roomNames) && roomNames[num - 1]?.trim()
-      ? roomNames[num - 1].trim()
+    Array.isArray(effectiveRoomNames) && effectiveRoomNames[num - 1]?.trim()
+      ? effectiveRoomNames[num - 1].trim()
       : `${num}번방`;
 
   const compactMembers = useMemo(() => {
@@ -346,7 +350,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     return arr.slice(0, 4);
   }, [teamMembers]);
 
-  const roomCount = useMemo(() => (Array.isArray(roomNames) ? roomNames.length : 0), [roomNames]);
+  const roomCount = useMemo(() => (Array.isArray(effectiveRoomNames) ? effectiveRoomNames.length : 0), [effectiveRoomNames]);
   const isValidStrokeRoom = (roomNo) => {
     if (variant !== 'stroke') return true;
     if (!roomNo) return false;
@@ -358,7 +362,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
         String(p.id) !== String(viewParticipant?.id)
     );
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
-    const isFull = currentCount >= roomCapacityAt(roomCapacities, roomNo);
+    const isFull = currentCount >= roomCapacityAt(effectiveRoomCapacities, roomNo);
     return !sameGroupExists && !isFull;
   };
 
@@ -366,7 +370,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     if (variant !== 'fourball') return true;
     if (!roomNo) return false;
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
-    return currentCount <= roomCapacityAt(roomCapacities, roomNo) - 2;
+    return currentCount <= roomCapacityAt(effectiveRoomCapacities, roomNo) - 2;
   };
 
   const saveMyRoom = (roomNo) => {

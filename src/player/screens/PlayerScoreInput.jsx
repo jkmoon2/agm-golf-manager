@@ -8,6 +8,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerScoreInput.module.css';
 import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
+import useLatestEventData from '../hooks/useLatestEventData';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -99,11 +100,11 @@ export default function PlayerScoreInput() {
     roomNames = [],
   } = useContext(PlayerContext);
 
-  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady, upsertScores } = useContext(EventContext) || {};
+  const { eventData: ctxEventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady, upsertScores } = useContext(EventContext) || {};
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
   const eventId = ctxEventId || routeEventId;
-
+  const eventData = useLatestEventData(eventId, ctxEventData);
 
   // ✅ SSOT: STEP4 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
   // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
