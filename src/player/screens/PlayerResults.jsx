@@ -9,9 +9,9 @@ import styles from './PlayerResults.module.css';
 
 import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
-import useLatestEventData from '../hooks/useLatestEventData';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
@@ -139,12 +139,11 @@ function orderRoomFourball(roomArr = []) {
 
 export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
-  const { eventData: ctxEventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
+  const { scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
+  const eventData = useEffectivePlayerEventData();
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;
-  const initialEventId = ctxEventData?.id || ctxEventData?.eventId || routeEventId || '';
-  const eventData = useLatestEventData(initialEventId, ctxEventData);
-  const eventId = eventData?.id || eventData?.eventId || initialEventId || '';
+  const eventId = eventData?.id || eventData?.eventId || routeEventId || '';
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);

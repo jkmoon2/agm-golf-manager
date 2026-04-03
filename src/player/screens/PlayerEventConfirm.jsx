@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext }   from '../../contexts/EventContext';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import StickyNavBar       from '../components/StickyNavBar';
 
 import baseCss from './PlayerRoomTable.module.css';
@@ -19,7 +20,6 @@ import { computePickLineup } from '../../events/pickLineup';
 import { computeHoleRankForce } from '../../events/holeRankForce';
 import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
 import { buildBingoRoomRowsFromPersonRows, computeBingo } from '../../events/bingo';
-import useLatestEventData from '../hooks/useLatestEventData';
 
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
@@ -117,8 +117,8 @@ export default function PlayerEventConfirm() {
   const { eventId: urlEventId } = useParams();
 
   const { roomCount, roomNames } = useContext(PlayerContext) || {};
-  const { eventId, loadEvent, eventData: ctxEventData, overlayScoresToParticipants } = useContext(EventContext) || {};
-  const eventData = useLatestEventData(urlEventId || eventId, ctxEventData);
+  const { eventId, loadEvent, overlayScoresToParticipants } = useContext(EventContext) || {};
+  const eventData = useEffectivePlayerEventData();
 
   useEffect(() => {
     if (urlEventId && urlEventId !== eventId && typeof loadEvent === 'function') {

@@ -8,10 +8,10 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './PlayerRoomTable.module.css';
 import { EventContext } from '../../contexts/EventContext';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
-import useLatestEventData from '../hooks/useLatestEventData';
 
 
 function getPlayerTabId(){
@@ -182,8 +182,8 @@ function buildRoomMatrix(participants, roomNames) {
 export default function PlayerRoomTable() {
   const navigate = useNavigate();
   const { eventId: paramId } = useParams();
-  const { eventId: ctxId, loadEvent, eventData: ctxEventData } = useContext(EventContext) || {};
-  const eventData = useLatestEventData(paramId || ctxId, ctxEventData);
+  const { eventId: ctxId, loadEvent } = useContext(EventContext) || {};
+  const eventData = useEffectivePlayerEventData();
 
   // ★ patch: 실시간 게이트 구독 + 최신판 선택
   const [fallbackGate, setFallbackGate] = useState(null);
