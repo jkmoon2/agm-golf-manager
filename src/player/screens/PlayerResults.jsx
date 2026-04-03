@@ -9,7 +9,6 @@ import styles from './PlayerResults.module.css';
 
 import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
-import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 
@@ -139,16 +138,14 @@ function orderRoomFourball(roomArr = []) {
 
 export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
-  const { scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
-  const eventData = useEffectivePlayerEventData();
+  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;
   const eventId = eventData?.id || eventData?.eventId || routeEventId || '';
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
-  const effectiveScoresMap = (ctxScoresMap && typeof ctxScoresMap === 'object') ? ctxScoresMap : {};
-  const effectiveScoresReady = Boolean(ctxScoresReady);
+  const { scoresMap: effectiveScoresMap, scoresReady: effectiveScoresReady } = useEffectiveScoresMap(eventId, ctxScoresMap, ctxScoresReady);
 
   // 게이트 폴백
   useEffect(() => {

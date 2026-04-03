@@ -6,9 +6,9 @@ import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
-import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import styles from './PlayerScoreInput.module.css';
 import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
+import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -100,8 +100,7 @@ export default function PlayerScoreInput() {
     roomNames = [],
   } = useContext(PlayerContext);
 
-  const { scoresMap: ctxScoresMap, scoresReady: ctxScoresReady, upsertScores } = useContext(EventContext) || {};
-  const eventData = useEffectivePlayerEventData();
+  const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady, upsertScores } = useContext(EventContext) || {};
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
   const eventId = ctxEventId || routeEventId;
@@ -198,8 +197,7 @@ export default function PlayerScoreInput() {
   }, [orderedRoomPlayers]);
 
   // ✅ scores SSOT: EventContext 제공 scoresMap 사용 (중복 구독 금지)
-  const scoresReady = Boolean(ctxScoresReady);
-  const scoresMap = (ctxScoresMap && typeof ctxScoresMap === 'object') ? ctxScoresMap : {};
+  const { scoresMap, scoresReady } = useEffectiveScoresMap(eventId, ctxScoresMap, ctxScoresReady);
 
 
   // ★ 기준 스냅샷 & 현재 입력
