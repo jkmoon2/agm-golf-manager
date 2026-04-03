@@ -42,6 +42,79 @@ function getPairNo(p){
   return NaN;
 }
 
+function getPreviewGroupNo(p) {
+  const cand = p?.group ?? p?.groupNo ?? p?.groupNumber ?? p?.jo ?? p?.joNo ?? p?.groupIndex;
+  const n = Number(cand);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function buildJoRoomRows(personRowsBase = [], participants = [], roomCount = 0, roomNames = [], rankOrder = 'desc') {
+  const byId = new Map((participants || []).map((p) => [String(p?.id), p]));
+  const groupBuckets = new Map();
+
+  (personRowsBase || []).forEach((row) => {
+    const src = byId.get(String(row?.id)) || {};
+    const groupNo = getPreviewGroupNo(src);
+    const roomNo = Number(src?.room ?? row?.room ?? NaN);
+    if (!Number.isFinite(groupNo) || !Number.isFinite(roomNo) || roomNo < 1) return;
+    const safe = {
+      id: row?.id,
+      name: String(row?.name ?? src?.nickname ?? ''),
+      room: roomNo,
+      group: groupNo,
+      score: Number(row?.score ?? 0),
+      handicap: Number(src?.handicap ?? 0),
+    };
+    if (!groupBuckets.has(groupNo)) groupBuckets.set(groupNo, []);
+    groupBuckets.get(groupNo).push(safe);
+  });
+
+  const roomMap = new Map(
+    Array.from({ length: Math.max(0, Number(roomCount) || 0) }, (_, i) => {
+      const roomNo = i + 1;
+      return [roomNo, {
+        room: roomNo,
+        name: roomNames[roomNo - 1]?.trim() || `${roomNo}번방`,
+        score: 0,
+        detail: [],
+      }];
+    })
+  );
+
+  const sortDir = rankOrder === 'asc' ? 1 : -1; // asc=조↓(낮은 점수 우선), desc=조↑(높은 점수 우선)
+
+  Array.from(groupBuckets.entries())
+    .sort((a, b) => a[0] - b[0])
+    .forEach(([groupNo, rows]) => {
+      const ordered = [...rows].sort((a, b) => {
+        if (a.score !== b.score) return sortDir * (a.score - b.score);
+        if (a.handicap !== b.handicap) return a.handicap - b.handicap;
+        if (a.room !== b.room) return a.room - b.room;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+      });
+      const maxPoint = ordered.length;
+      ordered.forEach((row, idx) => {
+        const converted = maxPoint - idx;
+        const bucket = roomMap.get(row.room);
+        if (!bucket) return;
+        bucket.score += converted;
+        bucket.detail.push({
+          id: row.id,
+          name: row.name,
+          group: groupNo,
+          rawScore: row.score,
+          converted,
+        });
+      });
+    });
+
+  const rows = Array.from(roomMap.values());
+  rows.forEach((row) => {
+    row.detail.sort((a, b) => a.group - b.group || b.converted - a.converted || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+  });
+  rows.sort((a, b) => b.score - a.score || a.room - b.room);
+  return rows;
+}
 
 // ★ 전역 confirm을 직접 쓰지 않는 안전 래퍼(ESLint 경고 대응)
 function askConfirm(message){
@@ -820,7 +893,7 @@ if (editForm?.template === 'group-battle') {
   };
 
   /* ── 미리보기(계산) ───────────────────────────────────── */
-  const [viewTab, setViewTab] = useState('person'); // person | room | team
+  const [viewTab, setViewTab] = useState('person'); // person | room | team | group | jo
   const [viewOrder, setViewOrder] = useState('asc');
   const sign = viewOrder === 'desc' ? -1 : 1;
 
@@ -902,26 +975,26 @@ if (editForm?.template === 'group-battle') {
     return computeBingo(previewDef, participants, inputsAll, { roomNames, roomCount });
   }, [previewDef, participants, inputsAll, roomNames, roomCount]);
 
-  const personRows = useMemo(() => {
+  const personRowsBase = useMemo(() => {
     if (!previewDef) return [];
     if (previewDef.template === 'hole-rank-force') {
-      const rows = Array.isArray(holeRankForcePreview?.personRows)
+      return Array.isArray(holeRankForcePreview?.personRows)
         ? holeRankForcePreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
         : [];
-      rows.sort((a, b) => sign * (a.score - b.score));
-      return rows;
     }
     if (previewDef.template === 'bingo') {
-      const rows = Array.isArray(bingoPreview?.personRows)
+      return Array.isArray(bingoPreview?.personRows)
         ? bingoPreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
         : [];
-      rows.sort((a, b) => sign * (a.score - b.score));
-      return rows;
     }
-    const rows = participants.map(p => ({ id: p.id, name: p.nickname, room: p.room, score: compute(previewDef, perP[p.id]) }));
+    return participants.map((p) => ({ id: p.id, name: p.nickname, room: p.room, score: compute(previewDef, perP[p.id]) }));
+  }, [participants, perP, previewDef, holeRankForcePreview, bingoPreview]);
+
+  const personRows = useMemo(() => {
+    const rows = [...personRowsBase];
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, previewDef, sign, holeRankForcePreview, bingoPreview]);
+  }, [personRowsBase, sign]);
 
   const roomRows = useMemo(() => {
     if (!previewDef) return [];
@@ -989,6 +1062,12 @@ if (editForm?.template === 'group-battle') {
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
   }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview]);
+
+
+  const joRoomRows = useMemo(() => {
+    if (!previewDef) return [];
+    return buildJoRoomRows(personRowsBase, participants, roomCount, roomNames, viewOrder);
+  }, [previewDef, personRowsBase, participants, roomCount, roomNames, viewOrder]);
 
   /* ── 이벤트 불러오기(다른 대회에서) ───────────────────── */
   const [importFromId, setImportFromId] = useState('');
@@ -1581,6 +1660,7 @@ if (editForm?.template === 'group-battle') {
                         <option value="room">방</option>
                         <option value="team">팀</option>
                 <option value="group">그룹</option>
+                <option value="jo">조</option>
                       </select>
 
                       {quickTarget === 'person' && (
@@ -1827,6 +1907,7 @@ if (editForm?.template === 'group-battle') {
                 <option value="room">방</option>
                 <option value="team">팀</option>
                 <option value="group">그룹</option>
+                <option value="jo">조</option>
               </select>
 
               <select
@@ -1834,8 +1915,17 @@ if (editForm?.template === 'group-battle') {
                 value={viewOrder}
                 onChange={e => { const v = e.target.value; setViewOrder(v); persistPreviewConfig(undefined, v); }}
               >
-                <option value="asc">오름</option>
-                <option value="desc">내림</option>
+                {viewTab === 'jo' ? (
+                  <>
+                    <option value="desc">조↑</option>
+                    <option value="asc">조↓</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="asc">오름</option>
+                    <option value="desc">내림</option>
+                  </>
+                )}
               </select>
             </div>
 
@@ -1898,6 +1988,25 @@ if (editForm?.template === 'group-battle') {
                   ))}
                 </ol>
               )
+            )}
+
+            {previewDef && viewTab === 'jo' && (
+              <ol className={css.previewList}>
+                {joRoomRows.map((r, i) => {
+                  const breakdown = Array.isArray(r.detail) && r.detail.length
+                    ? r.detail.map((d) => `${d.group}조:${fmt2(d.converted)}`).join(' · ')
+                    : '';
+                  return (
+                    <li key={`jo-${r.room}`}>
+                      <span>
+                        <span className={css.rank}>{i + 1}.</span> {r.name}
+                        {breakdown ? <small className={css.dim}> ({breakdown})</small> : null}
+                      </span>
+                      <b className={css.score}>{fmt2(r.score)}</b>
+                    </li>
+                  );
+                })}
+              </ol>
             )}
 
             {previewDef && viewTab === 'team' && (
