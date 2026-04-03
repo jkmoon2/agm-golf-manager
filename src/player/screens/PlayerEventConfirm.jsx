@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext }   from '../../contexts/EventContext';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import StickyNavBar       from '../components/StickyNavBar';
 
 import baseCss from './PlayerRoomTable.module.css';
@@ -116,7 +117,8 @@ export default function PlayerEventConfirm() {
   const { eventId: urlEventId } = useParams();
 
   const { roomCount, roomNames } = useContext(PlayerContext) || {};
-  const { eventId, loadEvent, eventData, overlayScoresToParticipants } = useContext(EventContext) || {};
+  const { eventId, loadEvent, overlayScoresToParticipants } = useContext(EventContext) || {};
+  const eventData = useEffectivePlayerEventData();
 
   useEffect(() => {
     if (urlEventId && urlEventId !== eventId && typeof loadEvent === 'function') {

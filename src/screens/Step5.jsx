@@ -42,6 +42,7 @@ export default function Step5() {
     setParticipants,
     roomCount,
     roomNames,
+    roomCapacities = [],
     goPrev,
     goNext,
 
@@ -53,7 +54,7 @@ export default function Step5() {
   // ✅ SSOT 통일: 점수는 /events/{eventId}/scores/{pid} 에만 저장(양방향 실시간)
   //    - Step5/7/Admin, Player 모두 동일한 scores를 읽고/쓰도록 정리
   //    - participants 배열에는 score를 영구 저장하지 않음(방배정/명단만 유지)
-  const { eventId, updateEventImmediate, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
+  const { eventId, updateEventImmediate, persistRoomsFromParticipants, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
 
   const rooms = useMemo(
     () => Array.from({ length: Number(roomCount || 0) }, (_, i) => i + 1),
@@ -69,6 +70,7 @@ export default function Step5() {
 
   // ✅ [ADD] onNext에서 항상 최신 participants로 저장하기 위한 스냅샷 ref
   const latestParticipantsRef = useRef(participants);
+  const lastRoomSyncSigRef = useRef('');
 
   // room / roomNumber 통합 처리 (스트로크/포볼 공통)
   const getRoomValue = (p) => {
@@ -86,6 +88,15 @@ export default function Step5() {
     const v = Number.isFinite(n) ? n : null;
     return { ...p, room: v, roomNumber: v };
   };
+
+  const getRoomCapacity = (roomNo) => {
+    const idx = Number(roomNo) - 1;
+    const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+    const safe = Number.isFinite(raw) ? raw : 4;
+    return Math.min(4, Math.max(1, safe));
+  };
+
+  const getRoomCountNow = (list, roomNo) => list.filter((p) => getRoomValue(p) === Number(roomNo)).length;
 
 
   useEffect(() => {
@@ -192,6 +203,13 @@ export default function Step5() {
           await updateEventImmediate(docUpdate);
         }
 
+        // ✅ 2-2 room SSOT: Step5에서 즉시 배정 변경 시 rooms/fourballRooms 미러도 같이 맞춤
+        const roomSig = sig ? JSON.stringify(roomTable || {}) : '';
+        if (roomSig && roomSig !== lastRoomSyncSigRef.current && typeof persistRoomsFromParticipants === 'function') {
+          await persistRoomsFromParticipants(sanitized);
+          lastRoomSyncSigRef.current = roomSig;
+        }
+
         if (sig) lastSyncedSigRef.current = sig;
       } catch (e) {
         console.warn('[Step5] syncParticipantsToEvent error:', e);
@@ -207,7 +225,7 @@ export default function Step5() {
         }
       }
     },
-    [eventId, updateEventImmediate]
+    [eventId, updateEventImmediate, persistRoomsFromParticipants]
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -394,7 +412,7 @@ export default function Step5() {
           .filter((p) => p.group === target.group && getRoomValue(p) != null)
           .map((p) => getRoomValue(p));
 
-        const available = rooms.filter((r) => !usedRooms.includes(r));
+        const available = rooms.filter((r) => !usedRooms.includes(r) && getRoomCountNow(ps, r) < getRoomCapacity(r));
         chosen = available.length ? available[Math.floor(Math.random() * available.length)] : null;
 
         nextList = ps.map((p) => (p.id === id ? withRoomValue(p, chosen) : p));
@@ -503,6 +521,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     let targetNickname = null;
     let prevRoom = null;
     let nextList = null;
+    let blockedFull = false;
 
     setParticipants((ps) => {
       const target = ps.find((p) => p.id === id);
@@ -515,6 +534,12 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
       if (room == null) {
         nextList = ps.map((p) => (p.id === id ? { ...p, room: null, roomNumber: null } : p));
         return nextList;
+      }
+
+      const roomCountNow = getRoomCountNow(ps, room);
+      if (roomCountNow >= getRoomCapacity(room) && prevRoom !== room) {
+        blockedFull = true;
+        return ps;
       }
 
       // 같은 조가 같은 방에 들어가면 안 되므로, 이미 같은 조가 그 방에 있으면 "맞트레이드(스왑)"
@@ -534,6 +559,11 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     });
 
     closeForceMenu();
+
+    if (blockedFull) {
+      alert('선택한 방 정원이 가득 찼습니다.');
+      return;
+    }
 
     if (room != null) {
       const displayName = (roomNames?.[room - 1] || `${room}번 방`).trim();
@@ -562,8 +592,9 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
 
         const unassigned = updated.filter((p) => p.group === group && getRoomValue(p) == null);
 
-        const slots = rooms.filter((r) => !assigned.includes(r));
-        const shuffled = [...slots].sort(() => Math.random() - 0.5);
+        const slots = rooms.filter((r) => !assigned.includes(r) && getRoomCountNow(updated, r) < getRoomCapacity(r));
+        const fallbackSlots = rooms.filter((r) => getRoomCountNow(updated, r) < getRoomCapacity(r));
+        const shuffled = [...(slots.length ? slots : fallbackSlots)].sort(() => Math.random() - 0.5);
 
         unassigned.forEach((p, idx) => {
           const r = shuffled[idx] ?? null;

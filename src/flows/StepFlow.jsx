@@ -102,6 +102,7 @@ export default function StepFlow() {
   const [title, setTitle]               = useState('');
   const [roomCount, setRoomCount]       = useState(4);
   const [roomNames, setRoomNames]       = useState(Array(4).fill(''));
+  const [roomCapacities, setRoomCapacities] = useState(Array(4).fill(4));
   const [uploadMethod, setUploadMethod] = useState('');
 
   // ⭐ patch: participants 상태 + ref 동기화
@@ -166,7 +167,6 @@ export default function StepFlow() {
         x.group    !== y.group    ||
         x.nickname !== y.nickname ||
         x.handicap !== y.handicap ||
-        x.score    !== y.score    ||
         x.room     !== y.room     ||
         x.partner  !== y.partner  ||
         x.selected !== y.selected
@@ -194,6 +194,16 @@ export default function StepFlow() {
     const nextRoomNames = eventData.roomNames || Array(nextRoomCount).fill('');
     if ((roomNames || []).join('|') !== (nextRoomNames || []).join('|')) {
       setRoomNames(nextRoomNames);
+    }
+
+    // roomCapacities
+    const nextRoomCapacities = Array.from({ length: nextRoomCount }, (_, i) => {
+      const raw = Number(Array.isArray(eventData.roomCapacities) ? eventData.roomCapacities[i] : 4);
+      const safe = Number.isFinite(raw) ? raw : 4;
+      return Math.min(4, Math.max(1, safe));
+    });
+    if ((roomCapacities || []).join('|') !== (nextRoomCapacities || []).join('|')) {
+      setRoomCapacities(nextRoomCapacities);
     }
 
     // uploadMethod
@@ -244,6 +254,15 @@ export default function StepFlow() {
         }
       }
 
+      const localDirtyAt = localDirtyParticipantsMsRef.current || 0;
+      const localDirtyRecent = !!localDirtyAt && (Date.now() - localDirtyAt < 4000);
+      if (localDirtyRecent) {
+        if (!remoteAt || remoteAt < localDirtyAt) {
+          return prevList;
+        }
+      }
+
+      localDirtyParticipantsMsRef.current = 0;
       return remoteList;
     });
     applyingRemoteParticipantsRef.current = false;
@@ -311,18 +330,6 @@ export default function StepFlow() {
     return table;
   };
 
-  // [SCORE_SYNC] 방별 점수 배열(집계용 보조 필드, 안 보면 무시됨)
-  const buildRoomScores = (list=[]) => {
-    const scoreByRoom = {};
-    list.forEach(p => {
-      const r = p.room ?? null;
-      if (r == null) return;
-      if (!scoreByRoom[r]) scoreByRoom[r] = [];
-      const v = Number(p.score);
-      scoreByRoom[r].push(Number.isFinite(v) ? v : 0);
-    });
-    return scoreByRoom;
-  };
 
   // 저장 헬퍼: 함수 값을 제거하고 순수 JSON만 전달
   // ★ patch-start: make save async and await remote write to ensure persistence before route changes
@@ -369,8 +376,7 @@ export default function StepFlow() {
         } catch {}
         // [COMPAT] 참고용 roomTable도 같이 저장(읽지 않으면 무시됨)
         clean.roomTable   = buildRoomTable(compat);
-        // [SCORE_SYNC] 참고용 방별 점수도 같이 저장(읽지 않으면 무시됨)
-        clean.scoreByRoom = buildRoomScores(compat);
+        // ✅ [SYNC_GUARD] 점수는 /scores SSOT, participants 저장 payload에는 배정 관련 필드만 유지
         // ✅ rooms 하위 컬렉션 저장용으로도 기억
         participantsForRooms = compat;
       } else if (typeof value !== 'function' && value !== undefined) {
@@ -413,6 +419,7 @@ export default function StepFlow() {
 
       // 성공한 경우에만 lastSaveSignatureRef 업데이트
       if (sig) lastSaveSignatureRef.current = sig;
+      localDirtyParticipantsMsRef.current = 0;
     } catch (e) {
       console.warn('[StepFlow] save(updateEvent*) failed (continue):', e);
     } finally {
@@ -467,6 +474,7 @@ export default function StepFlow() {
       title:        '',
       roomCount:    4,
       roomNames:    Array(4).fill(''),
+      roomCapacities: Array(4).fill(4),
       uploadMethod: '',
       participants: [],
       dateStart:    '',
@@ -476,6 +484,7 @@ export default function StepFlow() {
     setTitle(init.title);
     setRoomCount(init.roomCount);
     setRoomNames(init.roomNames);
+    setRoomCapacities(init.roomCapacities);
     setUploadMethod(init.uploadMethod);
     setParticipants(init.participants);
     setDateStart(init.dateStart);
@@ -508,7 +517,7 @@ export default function StepFlow() {
       return;
     }
     const latest = participantsRef.current || participants;
-    await save({ title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
+    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
@@ -520,7 +529,7 @@ export default function StepFlow() {
       return;
     }
     const latest = participantsRef.current || participants;
-    await save({ title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
+    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
@@ -533,7 +542,7 @@ export default function StepFlow() {
       return;
     }
     const latest = participantsRef.current || participants;
-    await save({ title, roomCount, roomNames, uploadMethod, participants: latest, dateStart, dateEnd });
+    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd });
     navigate(`/admin/home/${n}`);
   };
 
@@ -574,7 +583,10 @@ export default function StepFlow() {
 
   // Step5: 수동 초기화
   const initManual = () => {
-    const data = Array.from({ length: roomCount * 4 }, (_, idx) => ({
+    const totalSlots = (Array.isArray(roomCapacities) && roomCapacities.length)
+      ? roomCapacities.reduce((sum, v) => sum + Math.max(1, Math.min(4, Number(v) || 4)), 0)
+      : roomCount * 4;
+    const data = Array.from({ length: totalSlots }, (_, idx) => ({
       id:       idx,
       group:    1,
       nickname: '',
@@ -587,6 +599,13 @@ export default function StepFlow() {
     }));
     setParticipants(data);
     save({ participants: data });
+  };
+
+  const getRoomCapacity = (roomNo) => {
+    const idx = Number(roomNo) - 1;
+    const raw = Number(Array.isArray(roomCapacities) ? roomCapacities[idx] : 4);
+    const safe = Number.isFinite(raw) ? raw : 4;
+    return Math.min(4, Math.max(1, safe));
   };
 
   // [ADD2] 그룹 판정 헬퍼: group 필드 우선, 없으면 id 홀/짝으로 보조
@@ -718,13 +737,16 @@ export default function StepFlow() {
 
     roomNo = (target.room ?? target.roomNumber ?? null);
     if (roomNo == null) {
-      // 같은 그룹1이 한 방에 최대 2명
+      // 같은 그룹1이 한 방에 최대 floor(capacity / 2)명
       const countByRoom = ps
         .filter(p => isGroup1(p) && (p.room != null || p.roomNumber != null))
         .reduce((acc, p) => { const rn = (p.room ?? p.roomNumber);
           acc[rn] = (acc[rn]||0) + 1; return acc; }, {});
       const candidates = Array.from({ length: roomCount }, (_, i) => i+1)
-        .filter(r => (countByRoom[r] || 0) < 2);
+        .filter(r => {
+          const pairSlots = Math.floor(getRoomCapacity(r) / 2);
+          return pairSlots > 0 && (countByRoom[r] || 0) < pairSlots;
+        });
       roomNo = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null;
     }
 
@@ -776,10 +798,11 @@ export default function StepFlow() {
     let ps = [...participants];
     const roomsArr = Array.from({ length: roomCount }, (_, i) => i+1);
 
-    // 1) 그룹1(리더) 채우기: 방당 최대 2명
+    // 1) 그룹1(리더) 채우기: 방당 최대 floor(capacity / 2)명
     roomsArr.forEach(roomNo => {
       const g1InRoom = ps.filter(p => isGroup1(p) && p.room === roomNo).length;
-      const need = Math.max(0, 2 - g1InRoom);
+      const pairSlots = Math.floor(getRoomCapacity(roomNo) / 2);
+      const need = Math.max(0, pairSlots - g1InRoom);
       if (need <= 0) return;
 
       const freeG1 = ps.filter(p => isGroup1(p) && p.room == null);
@@ -910,6 +933,7 @@ export default function StepFlow() {
     title, changeTitle,
     roomCount, setRoomCount,
     roomNames, setRoomNames,
+    roomCapacities, setRoomCapacities,
     uploadMethod, setUploadMethod,
     participants, setParticipants,
     resetAll, handleFile, initManual,

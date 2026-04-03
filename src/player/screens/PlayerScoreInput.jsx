@@ -8,6 +8,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerScoreInput.module.css';
 import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
+import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -196,8 +197,7 @@ export default function PlayerScoreInput() {
   }, [orderedRoomPlayers]);
 
   // ✅ scores SSOT: EventContext 제공 scoresMap 사용 (중복 구독 금지)
-  const scoresReady = Boolean(ctxScoresReady);
-  const scoresMap = (ctxScoresMap && typeof ctxScoresMap === 'object') ? ctxScoresMap : {};
+  const { scoresMap, scoresReady } = useEffectiveScoresMap(eventId, ctxScoresMap, ctxScoresReady);
 
 
   // ★ 기준 스냅샷 & 현재 입력

@@ -68,6 +68,7 @@ export default function Step1() {
         title: final,
         roomCount: 4,
         roomNames: Array(4).fill(""),
+        roomCapacities: Array(4).fill(4),
         allowStep1: false,
         allowStep2: false,
         allowStep3: false,

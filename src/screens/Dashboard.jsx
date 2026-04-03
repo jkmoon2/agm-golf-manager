@@ -336,8 +336,22 @@ export default function Dashboard() {
   const extractMembers = (roomDoc) => {
     let arr = roomDoc?.members || roomDoc?.players || roomDoc?.list || roomDoc?.team || roomDoc?.people;
     if (Array.isArray(arr)) return arr;
+
     const m = [];
     const tryPush = (x) => { if (!x) return; if (typeof x === 'object') m.push(x); else m.push({ id: x }); };
+
+    // ✅ 2-2 room SSOT: 포볼 레거시 fourballRooms(pairs/singles)도 동일하게 해석
+    if (Array.isArray(roomDoc?.pairs)) {
+      roomDoc.pairs.forEach((pair) => {
+        if (!pair) return;
+        tryPush(pair.p1 ?? pair.a ?? pair.left);
+        tryPush(pair.p2 ?? pair.b ?? pair.right);
+      });
+    }
+    if (Array.isArray(roomDoc?.singles)) {
+      roomDoc.singles.forEach((pid) => tryPush(pid));
+    }
+
     if (roomDoc?.a || roomDoc?.b) { tryPush(roomDoc.a); tryPush(roomDoc.b); }
     if (roomDoc?.p1 || roomDoc?.p2) { tryPush(roomDoc.p1); tryPush(roomDoc.p2); }
     if (m.length) return m;
