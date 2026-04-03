@@ -52,10 +52,18 @@
   /* G핸디 서브타이틀 전용 폰트 크기 */
   --ghead-fz: var(--tbl-title-fz);
 
-  display:flex; flex-direction:column; min-height:100vh; height:100dvh; overflow:hidden;
+  display:flex; flex-direction:column; min-height:100vh; min-height:100dvh; overflow-x:hidden;
 }
 
-.content{ padding:12px; padding-bottom:calc(160px + env(safe-area-inset-bottom)); }
+.content{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+  padding:12px;
+  padding-bottom:calc(220px + env(safe-area-inset-bottom));
+}
 
 .card{ background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); border:1px solid #e5e7eb; }
 .cardHeader{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid #eee; }
