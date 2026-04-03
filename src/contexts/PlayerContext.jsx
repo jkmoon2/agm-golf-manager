@@ -43,6 +43,8 @@ function exposeDiag(part) {
 
 const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
+const PLAYER_MANUAL_REFRESH_COOLDOWN_MS = 1200;
+const PLAYER_SYNC_RAF_MS = 180;
 
 const FOURBALL_USE_TRANSACTION = (() => {
   try {
@@ -135,23 +137,6 @@ function participantsComparableString(p) {
   } catch {
     return String(p?.id || '');
   }
-}
-
-function participantsListComparableString(list = []) {
-  try {
-    return JSON.stringify((Array.isArray(list) ? list : []).map((p) => participantsComparableString(p)));
-  } catch {
-    return String(Array.isArray(list) ? list.length : 0);
-  }
-}
-
-function getParticipantsUpdatedAtMs(data) {
-  try {
-    if (data?.participantsUpdatedAt && typeof data.participantsUpdatedAt.toMillis === 'function') {
-      return data.participantsUpdatedAt.toMillis();
-    }
-  } catch {}
-  return (typeof data?.participantsUpdatedAtClient === 'number') ? data.participantsUpdatedAtClient : 0;
 }
 
 // ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
@@ -310,9 +295,8 @@ export function PlayerProvider({ children }) {
   const [participant, setParticipant]     = useState(null);
   const [allowTeamView, setAllowTeamView] = useState(false);
   const [authCode, setAuthCode]           = useState('');
-
-  // ✅ [SYNC_GUARD] 로컬 배정 직후 늦게 도착한 서버 스냅샷이 방배정/파트너를 덮어쓰지 않도록 보호
-  const lastLocalParticipantsWriteMsRef = useRef(0);
+  const lastPlayerSnapshotAtRef           = useRef(0);
+  const lastPlayerRefreshAtRef            = useRef(0);
 
   const { pathname } = useLocation();
 
@@ -382,6 +366,7 @@ export function PlayerProvider({ children }) {
     if (!eventId) return;
     const ref = doc(db, 'events', eventId);
     const unsub = onSnapshot(ref, (snap) => {
+      lastPlayerSnapshotAtRef.current = Date.now();
       const data = snap.exists() ? (snap.data() || {}) : {};
       const md = normalizeMode(data.mode || 'stroke');
       setMode(md);
@@ -397,23 +382,7 @@ const legacyParts  = Array.isArray(data.participants) ? data.participants : [];
 const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legacyParts) : legacyParts;
 
       const partArr = rawParts.map((p, i) => normalizeParticipantRecord(p, i));
-      const remoteAt = getParticipantsUpdatedAtMs(data);
-      const nextParticipants = typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(partArr) : partArr;
-      setParticipants((prev) => {
-        const prevList = Array.isArray(prev) ? prev : [];
-        if (participantsListComparableString(prevList) === participantsListComparableString(nextParticipants)) {
-          return prevList;
-        }
-        const localWriteAt = lastLocalParticipantsWriteMsRef.current || 0;
-        const localJustWrote = !!localWriteAt && (Date.now() - localWriteAt < 4000);
-        if (localJustWrote && (!remoteAt || remoteAt < localWriteAt)) {
-          return prevList.length ? prevList : nextParticipants;
-        }
-        if (remoteAt && remoteAt >= localWriteAt) {
-          lastLocalParticipantsWriteMsRef.current = 0;
-        }
-        return nextParticipants;
-      });
+      setParticipants(typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(partArr) : partArr);
 
       const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
       const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
@@ -490,8 +459,15 @@ if (!idCached) {
     return () => unsub();
   }, [eventId, authCode]);
 
-  async function refreshPlayerStateNow() {
+  async function refreshPlayerStateNow(opts = {}) {
     if (!eventId) return;
+    const force = !!opts?.force;
+    const now = Date.now();
+    if (!force) {
+      if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
+      if (now - (lastPlayerRefreshAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
+    }
+    lastPlayerRefreshAtRef.current = now;
     try {
       await ensureAuthReady();
       let snap = null;
@@ -508,23 +484,7 @@ if (!idCached) {
       const legacyParts = Array.isArray(data?.participants) ? data.participants : [];
       const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legacyParts) : legacyParts;
       const partArr = rawParts.map((p, i) => normalizeParticipantRecord(p, i));
-      const remoteAt = getParticipantsUpdatedAtMs(data);
-      const nextParticipants = typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(partArr) : partArr;
-      setParticipants((prev) => {
-        const prevList = Array.isArray(prev) ? prev : [];
-        if (participantsListComparableString(prevList) === participantsListComparableString(nextParticipants)) {
-          return prevList;
-        }
-        const localWriteAt = lastLocalParticipantsWriteMsRef.current || 0;
-        const localJustWrote = !!localWriteAt && (Date.now() - localWriteAt < 4000);
-        if (localJustWrote && (!remoteAt || remoteAt < localWriteAt)) {
-          return prevList.length ? prevList : nextParticipants;
-        }
-        if (remoteAt && remoteAt >= localWriteAt) {
-          lastLocalParticipantsWriteMsRef.current = 0;
-        }
-        return nextParticipants;
-      });
+      setParticipants(typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(partArr) : partArr);
       const rn = Array.isArray(data.roomNames) ? data.roomNames : [];
       const rc = Number.isInteger(data.roomCount) ? data.roomCount : (rn.length || 4);
       const caps = Array.from({ length: rc }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
@@ -537,15 +497,20 @@ if (!idCached) {
         const latest = partArr.find((p) => normId(p.id) === normId(prev.id));
         return latest || prev;
       });
+      lastPlayerSnapshotAtRef.current = Date.now();
     } catch {}
   }
 
   useEffect(() => {
     if (!eventId) return;
     let raf = 0;
-    const scheduleRefresh = () => {
+    let lastScheduleAt = 0;
+    const scheduleRefresh = (opts = { force: false }) => {
+      const now = Date.now();
+      if (!opts?.force && now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
+      lastScheduleAt = now;
       if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => { refreshPlayerStateNow(); });
+      raf = requestAnimationFrame(() => { refreshPlayerStateNow({ force: !!opts?.force }); });
     };
     const onFocus = () => scheduleRefresh();
     const onPageShow = () => scheduleRefresh();
@@ -555,7 +520,11 @@ if (!idCached) {
     window.addEventListener('focus', onFocus);
     window.addEventListener('pageshow', onPageShow);
     document.addEventListener('visibilitychange', onVisible);
-    const unsubSync = subscribeEventSync(eventId, () => scheduleRefresh());
+    const unsubSync = subscribeEventSync(eventId, (payload = {}) => {
+      const reason = String(payload?.reason || '');
+      if (reason === 'upsertScores' || reason === 'resetScores') return;
+      scheduleRefresh({ force: true });
+    });
     return () => {
       if (raf) cancelAnimationFrame(raf);
       window.removeEventListener('focus', onFocus);
@@ -603,12 +572,10 @@ if (!idCached) {
 
       const result = Array.from(baseMap.values()).map((p, i) => sanitizeParticipantForWrite(normalizeParticipantRecord(p, i)));
 
-      const participantsUpdatedAtClient = Date.now();
       tx.set(eref, sanitizeForFirestore({
         participants: result,
         [field]: result,
         participantsUpdatedAt: serverTimestamp(),
-        participantsUpdatedAtClient,
         updatedAt: serverTimestamp(),
       }), { merge: true });
 
@@ -629,7 +596,6 @@ if (!idCached) {
     const next = participants.map((p) =>
       normId(p.id) === targetId ? { ...p, room: rid } : p
     );
-    lastLocalParticipantsWriteMsRef.current = Date.now();
     setParticipants(next);
     if (participant && normId(participant.id) === targetId) {
       setParticipant((prev) => prev && { ...prev, room: rid });
@@ -657,7 +623,6 @@ if (!idCached) {
       if (normId(p.id) === b) return { ...p, room: rid, partner: a };
       return p;
     });
-    lastLocalParticipantsWriteMsRef.current = Date.now();
     setParticipants(next);
     if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, partner: b });
     if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, partner: a });
@@ -687,7 +652,6 @@ if (!idCached) {
     await ensureAuthReady();
 
     const pid = normId(participantId || participant?.id);
-    lastLocalParticipantsWriteMsRef.current = Date.now();
     const result = await runTransaction(db, async (tx) => {
       const eref = doc(db, 'events', eventId);
       const snap = await tx.get(eref);
@@ -716,12 +680,10 @@ if (!idCached) {
         normId(p.id) === normId(me.id) ? sanitizeParticipantForWrite({ ...p, room: chosenRoom, roomNumber: chosenRoom }) : sanitizeParticipantForWrite(p)
       );
 
-      const participantsUpdatedAtClient = Date.now();
       tx.set(eref, sanitizeForFirestore({
         participants: next,
         [field]: next,
         participantsUpdatedAt: serverTimestamp(),
-        participantsUpdatedAtClient,
         updatedAt: serverTimestamp(),
       }), { merge: true });
 
@@ -749,7 +711,6 @@ if (!idCached) {
     await ensureAuthReady();
 
     const pid = normId(participantId || participant?.id);
-    lastLocalParticipantsWriteMsRef.current = Date.now();
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
@@ -841,7 +802,6 @@ if (!idCached) {
               participants: next,
               [fieldParts]: next,
               participantsUpdatedAt: serverTimestamp(),
-              participantsUpdatedAtClient: Date.now(),
               updatedAt: serverTimestamp(),
             }),
             { merge: true }

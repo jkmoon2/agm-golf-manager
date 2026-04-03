@@ -243,6 +243,9 @@ const ensureAuthed = (() => {
   };
 })();
 
+const MANUAL_REFRESH_COOLDOWN_MS = 1200;
+const MANUAL_SYNC_RAF_MS = 180;
+
 export function EventProvider({ children }) {
   const location = useLocation();
   const isPlayerRoute = !!location?.pathname?.startsWith('/player');
@@ -260,6 +263,10 @@ export function EventProvider({ children }) {
   const lastEventDataRef = useRef(null);
   const queuedUpdatesRef = useRef(null);
   const debounceTimerRef = useRef(null);
+  const lastEventSnapshotAtRef = useRef(0);
+  const lastScoresSnapshotAtRef = useRef(0);
+  const lastEventRefreshAtRef = useRef(0);
+  const lastScoresRefreshAtRef = useRef(0);
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -396,23 +403,43 @@ export function EventProvider({ children }) {
     return withGate;
   }, []);
 
-  const refreshEventNow = useCallback(async () => {
+  const refreshEventNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
+    const force = !!opts?.force;
+    const now = Date.now();
+    if (!force) {
+      if (now - (lastEventSnapshotAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
+      if (now - (lastEventRefreshAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
+    }
+    lastEventRefreshAtRef.current = now;
     try {
       await ensureAuthed();
       const snap = await getDocFromServer(doc(db, 'events', eventId));
-      if (snap.exists()) applyIncomingEventData(snap.data() || {});
+      if (snap.exists()) {
+        lastEventSnapshotAtRef.current = Date.now();
+        applyIncomingEventData(snap.data() || {});
+      }
     } catch (e) {
       try {
         const snap = await getDoc(doc(db, 'events', eventId));
-        if (snap.exists()) applyIncomingEventData(snap.data() || {});
+        if (snap.exists()) {
+          lastEventSnapshotAtRef.current = Date.now();
+          applyIncomingEventData(snap.data() || {});
+        }
       } catch {}
     }
   }, [eventId, applyIncomingEventData]);
 
-  const refreshScoresNow = useCallback(async () => {
+  const refreshScoresNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
     if (document?.hidden) return;
+    const force = !!opts?.force;
+    const now = Date.now();
+    if (!force) {
+      if (now - (lastScoresSnapshotAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
+      if (now - (lastScoresRefreshAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
+    }
+    lastScoresRefreshAtRef.current = now;
     try {
       await ensureAuthed();
       let snap = null;
@@ -430,6 +457,7 @@ export function EventProvider({ children }) {
         scoresMapRef.current = nextMap;
         setScoresMap(nextMap);
       }
+      lastScoresSnapshotAtRef.current = Date.now();
       if (!scoresReadyRef.current) {
         scoresReadyRef.current = true;
         setScoresReady(true);
@@ -454,6 +482,7 @@ export function EventProvider({ children }) {
           clearCurrentEventSelection(eventId);
           return;
         }
+        lastEventSnapshotAtRef.current = Date.now();
         applyIncomingEventData(snap.data());
       });
     });
@@ -465,35 +494,42 @@ export function EventProvider({ children }) {
 
   useEffect(() => {
     if (!eventId) return;
-    // ✅ [SYNC_GUARD] Player 라우트에서는 PlayerContext가 별도 refresh를 수행하므로
-    // EventContext까지 중복 refresh(getDoc/getDocs)를 돌리지 않음.
-    // onSnapshot은 그대로 유지되어 실시간 반영은 계속 동작합니다.
     if (isPlayerRoute) return;
 
     let raf = 0;
-    let lastScheduledAt = 0;
-    const scheduleRefresh = () => {
+    let lastScheduleAt = 0;
+    const scheduleRefresh = (plan = { event: true, scores: true, force: false }) => {
       const now = Date.now();
-      if (now - lastScheduledAt < 350) return;
-      lastScheduledAt = now;
+      if (!plan?.force && now - lastScheduleAt < MANUAL_SYNC_RAF_MS) return;
+      lastScheduleAt = now;
       if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => { refreshEventNow(); refreshScoresNow(); });
+      raf = requestAnimationFrame(() => {
+        if (plan?.event) refreshEventNow({ force: !!plan?.force });
+        if (plan?.scores) refreshScoresNow({ force: !!plan?.force });
+      });
     };
 
-    const onFocus = () => scheduleRefresh();
-    const onPageShow = () => scheduleRefresh();
+    const onFocus = () => scheduleRefresh({ event: true, scores: true });
+    const onPageShow = () => scheduleRefresh({ event: true, scores: true });
     const onVisible = () => {
       try {
-        if (document.visibilityState === 'visible') scheduleRefresh();
+        if (document.visibilityState === 'visible') scheduleRefresh({ event: true, scores: true });
       } catch {
-        scheduleRefresh();
+        scheduleRefresh({ event: true, scores: true });
       }
     };
 
     window.addEventListener('focus', onFocus);
     window.addEventListener('pageshow', onPageShow);
     document.addEventListener('visibilitychange', onVisible);
-    const unsubSync = subscribeEventSync(eventId, () => scheduleRefresh());
+    const unsubSync = subscribeEventSync(eventId, (payload = {}) => {
+      const reason = String(payload?.reason || '');
+      if (reason === 'upsertScores' || reason === 'resetScores') {
+        scheduleRefresh({ event: false, scores: true, force: true });
+        return;
+      }
+      scheduleRefresh({ event: true, scores: false, force: true });
+    });
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
@@ -916,6 +952,7 @@ export function EventProvider({ children }) {
         });
 
         // 불필요한 리렌더 방지
+        lastScoresSnapshotAtRef.current = Date.now();
         if (!deepEqual(scoresMapRef.current || {}, nextMap || {})) {
           scoresMapRef.current = nextMap;
           setScoresMap(nextMap);
