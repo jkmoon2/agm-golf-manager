@@ -11,6 +11,7 @@ import { StepContext as PlayerStepContext } from '../flows/StepFlow';
 import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
+import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
