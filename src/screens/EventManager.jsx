@@ -93,8 +93,17 @@ function buildJoRoomRows(personRowsBase = [], participants = [], roomCount = 0, 
         return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
       });
       const maxPoint = ordered.length;
+      let prevScore = null;
+      let currentRank = 0;
       ordered.forEach((row, idx) => {
-        const converted = maxPoint - idx;
+        if (idx === 0) {
+          currentRank = 1;
+          prevScore = row.score;
+        } else if (row.score !== prevScore) {
+          currentRank = idx + 1;
+          prevScore = row.score;
+        }
+        const converted = Math.max(1, maxPoint - currentRank + 1);
         const bucket = roomMap.get(row.room);
         if (!bucket) return;
         bucket.score += converted;
@@ -103,6 +112,7 @@ function buildJoRoomRows(personRowsBase = [], participants = [], roomCount = 0, 
           name: row.name,
           group: groupNo,
           rawScore: row.score,
+          rank: currentRank,
           converted,
         });
       });
@@ -110,7 +120,12 @@ function buildJoRoomRows(personRowsBase = [], participants = [], roomCount = 0, 
 
   const rows = Array.from(roomMap.values());
   rows.forEach((row) => {
-    row.detail.sort((a, b) => a.group - b.group || b.converted - a.converted || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+    row.detail.sort((a, b) => {
+      if (a.group !== b.group) return a.group - b.group;
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (b.converted !== a.converted) return b.converted - a.converted;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+    });
   });
   rows.sort((a, b) => b.score - a.score || a.room - b.room);
   return rows;
@@ -1917,8 +1932,8 @@ if (editForm?.template === 'group-battle') {
               >
                 {viewTab === 'jo' ? (
                   <>
-                    <option value="desc">조↑</option>
-                    <option value="asc">조↓</option>
+                    <option value="desc">오름</option>
+                    <option value="asc">내림</option>
                   </>
                 ) : (
                   <>
@@ -1994,15 +2009,51 @@ if (editForm?.template === 'group-battle') {
               <ol className={css.previewList}>
                 {joRoomRows.map((r, i) => {
                   const breakdown = Array.isArray(r.detail) && r.detail.length
-                    ? r.detail.map((d) => `${d.group}조:${fmt2(d.converted)}`).join(' · ')
+                    ? r.detail.map((d) => `${d.group}조:${fmt2(d.converted)}점(${d.rank}위/${fmt2(d.rawScore)}개)`).join('·')
                     : '';
                   return (
-                    <li key={`jo-${r.room}`}>
-                      <span>
-                        <span className={css.rank}>{i + 1}.</span> {r.name}
-                        {breakdown ? <small className={css.dim}> ({breakdown})</small> : null}
-                      </span>
-                      <b className={css.score}>{fmt2(r.score)}</b>
+                    <li
+                      key={`jo-${r.room}`}
+                      style={{
+                        display: 'block',
+                        alignItems: 'stretch',
+                        paddingTop: 6,
+                        paddingBottom: 6,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          minWidth: 0,
+                        }}
+                      >
+                        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span className={css.rank}>{i + 1}.</span> {r.name}
+                        </span>
+                        <b className={css.score} style={{ flex: '0 0 auto' }}>{fmt2(r.score)}</b>
+                      </div>
+                      {breakdown ? (
+                        <div
+                          className={css.dim}
+                          style={{
+                            marginTop: 3,
+                            paddingLeft: 0,
+                            minWidth: 0,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'clip',
+                            lineHeight: 1.15,
+                            fontSize: 11,
+                            letterSpacing: '-0.2px',
+                          }}
+                          title={breakdown}
+                        >
+                          {breakdown}
+                        </div>
+                      ) : null}
                     </li>
                   );
                 })}
