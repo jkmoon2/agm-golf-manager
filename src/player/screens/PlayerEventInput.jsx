@@ -811,8 +811,18 @@ export default function PlayerEventInput(){
   };
 
   const clearBingoBoard = (evId, selectedHoles) => {
-    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const basePid = String(getBingoEditorPid(evId, selectedHoles) || '');
     if (!basePid) return;
+
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!mine || String(basePid) !== String(mine)) {
+      window.alert('본인 빙고판만 초기화할 수 있습니다.');
+      return;
+    }
+
+    const ok = window.confirm('현재 본인 빙고판을 초기화합니다. 정말 진행하시겠습니까?');
+    if (!ok) return;
+
     patchBingoBoard(evId, selectedHoles, basePid, makeEmptyBingoBoard(), false);
     clearBingoMoveIndex(evId);
   };
