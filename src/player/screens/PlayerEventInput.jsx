@@ -772,14 +772,19 @@ export default function PlayerEventInput(){
     const basePid = getBingoEditorPid(evId, selectedHoles);
     const baseState = getBingoPersonState(evId, basePid || roomIds[0], selectedHoles);
     const sourceBoard = normalizeBingoBoard(baseState.board, selectedHoles);
-    if (sharedMode) {
-      const hasExistingOthers = roomIds.some((pid) => String(pid) !== String(basePid || '') && getBingoPersonState(evId, pid, selectedHoles).board.some(Boolean));
-      if (hasExistingOthers) {
-        const owner = String((roomMembers.find((p) => String(p?.id) === String(basePid || ''))?.nickname) || selfParticipant?.nickname || ctxParticipant?.nickname || '현재 닉네임');
-        const ok = window.confirm(`${owner}의 빙고판으로 모두 변경됩니다. 그래도 진행하시겠습니까?`);
-        if (!ok) return;
-      }
-    }
+    const currentShared = getBingoRoomShared(evId);
+    if (currentShared === !!sharedMode) return;
+
+    const hasAnyBoard = roomIds.some((pid) => getBingoPersonState(evId, pid, selectedHoles).board.some(Boolean));
+    const owner = String((roomMembers.find((p) => String(p?.id) === String(basePid || ''))?.nickname) || selfParticipant?.nickname || ctxParticipant?.nickname || '현재 닉네임');
+    const message = sharedMode
+      ? (hasAnyBoard
+          ? `${owner}의 빙고판 기준으로 공통입력으로 전환합니다. 계속하시겠습니까?`
+          : '공통입력으로 전환합니다. 계속하시겠습니까?')
+      : '각자입력으로 전환합니다. 계속하시겠습니까?';
+    const ok = window.confirm(message);
+    if (!ok) return;
+
     const all = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
@@ -795,6 +800,7 @@ export default function PlayerEventInput(){
     slot.person = person;
     all[evId] = slot;
     setDraft(all);
+    setDirty(true);
     setBingoUiState((prev) => ({
       ...prev,
       [evId]: { ...(prev?.[evId] || {}), pid: String(basePid || roomIds[0] || ''), moveIndex: null },
@@ -802,11 +808,17 @@ export default function PlayerEventInput(){
   };
 
   const randomizeBingoBoard = (evId, selectedHoles) => {
-    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const basePid = String(getBingoEditorPid(evId, selectedHoles) || '');
     if (!basePid) return;
-    const ok = window.confirm('순서 없이 무작위로 배치됩니다. 진행하시겠습니까?');
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!mine || String(basePid) !== String(mine)) {
+      window.alert('본인 빙고판만 무작위 배치할 수 있습니다.');
+      return;
+    }
+    const ok = window.confirm('본인 빙고판을 순서 없이 무작위로 배치합니다. 진행하시겠습니까?');
     if (!ok) return;
     patchBingoBoard(evId, selectedHoles, basePid, shuffleArray(selectedHoles.slice(0, 16)), false);
+    setDirty(true);
     clearBingoMoveIndex(evId);
   };
 
@@ -824,16 +836,24 @@ export default function PlayerEventInput(){
     if (!ok) return;
 
     patchBingoBoard(evId, selectedHoles, basePid, makeEmptyBingoBoard(), false);
+    setDirty(true);
     clearBingoMoveIndex(evId);
   };
 
   const applyBingoBoardCell = (evId, selectedHoles, cellIndex) => {
-    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const basePid = String(getBingoEditorPid(evId, selectedHoles) || '');
     const sharedMode = getBingoRoomShared(evId);
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!basePid) return;
+    if (!sharedMode && (!mine || String(basePid) !== String(mine))) {
+      window.alert('본인 빙고판만 입력/수정할 수 있습니다.');
+      return;
+    }
     const ui = getBingoUiForEvent(evId);
     const current = getBingoPersonState(evId, basePid, selectedHoles);
     const nextBoard = getBingoBoardNextState(current.board, selectedHoles, cellIndex, ui?.moveIndex);
     patchBingoBoard(evId, selectedHoles, basePid, nextBoard, sharedMode);
+    setDirty(true);
     clearBingoMoveIndex(evId);
   };
 
@@ -1728,13 +1748,16 @@ export default function PlayerEventInput(){
             const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
             const bingoTotalPct = 12;
             const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
-            const bingoSharedMode = getBingoRoomSharedSaved(ev.id);
+            const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
             const bingoEditorState = getBingoPersonState(ev.id, bingoEditorPid, bingoSelectedHoles);
             const bingoEditorBoard = normalizeBingoBoard(bingoEditorState.board, bingoSelectedHoles);
             const bingoSpecialZones = normalizeBingoSpecialZones(ev?.params?.specialZones);
             const bingoLocked = !!ev?.params?.inputLocked;
+            const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+            const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
+            const bingoCanEditBoard = !!bingoSharedMode || bingoOwnSelected;
             const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
@@ -1906,6 +1929,12 @@ export default function PlayerEventInput(){
                         공통입력
                       </button>
                     </div>
+
+                    {!bingoCanEditBoard && (
+                      <div style={{ marginBottom: 10, fontSize: 12, fontWeight: 700, color: '#b94a48' }}>
+                        본인 빙고판만 입력/수정할 수 있습니다.
+                      </div>
+                    )}
 
                     {!bingoSharedMode && (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
