@@ -700,6 +700,7 @@ export default function PlayerEventInput(){
   }, [inputsByEventServer, dirty]);
 
   const inputsByEvent = draft || {};
+  const previewInputsByEvent = inputsByEventServer || {};
 
   const getBingoRoomMemberIds = () => roomMembers.filter(Boolean).map((p) => String(p.id));
 
@@ -719,18 +720,30 @@ export default function PlayerEventInput(){
     }));
   };
 
-  const getBingoRoomShared = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEvent?.[evId]?.person?.[pid]?.roomShared);
+  const getBingoRoomSharedFrom = (sourceByEvent, evId) => getBingoRoomMemberIds().some((pid) => !!sourceByEvent?.[evId]?.person?.[pid]?.roomShared);
 
-  const getBingoPersonState = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles);
+  const getBingoPersonStateFrom = (sourceByEvent, evId, pid, selectedHoles) => extractBingoPersonInput(sourceByEvent?.[evId]?.person?.[pid], selectedHoles);
 
-  const getBingoEditorPid = (evId, selectedHoles) => {
+  const getBingoEditorPidFrom = (sourceByEvent, evId, selectedHoles) => {
     const roomIds = getBingoRoomMemberIds();
     const ui = getBingoUiForEvent(evId);
-    if (roomIds.includes(String(ui?.pid || ''))) return String(ui.pid);
+    if (sourceByEvent === inputsByEvent && roomIds.includes(String(ui?.pid || ''))) return String(ui.pid);
     if (selfParticipantId && roomIds.includes(String(selfParticipantId))) return String(selfParticipantId);
-    const withBoard = roomIds.find((pid) => getBingoPersonState(evId, pid, selectedHoles).board.some(Boolean));
+    const withBoard = roomIds.find((pid) => getBingoPersonStateFrom(sourceByEvent, evId, pid, selectedHoles).board.some(Boolean));
     return withBoard || roomIds[0] || '';
   };
+
+  const getBingoRoomShared = (evId) => getBingoRoomSharedFrom(inputsByEvent, evId);
+
+  const getBingoPersonState = (evId, pid, selectedHoles) => getBingoPersonStateFrom(inputsByEvent, evId, pid, selectedHoles);
+
+  const getBingoEditorPid = (evId, selectedHoles) => getBingoEditorPidFrom(inputsByEvent, evId, selectedHoles);
+
+  const getPreviewBingoRoomShared = (evId) => getBingoRoomSharedFrom(previewInputsByEvent, evId);
+
+  const getPreviewBingoPersonState = (evId, pid, selectedHoles) => getBingoPersonStateFrom(previewInputsByEvent, evId, pid, selectedHoles);
+
+  const getPreviewBingoEditorPid = (evId, selectedHoles) => getBingoEditorPidFrom(previewInputsByEvent, evId, selectedHoles);
 
   const patchBingoBoard = (evId, selectedHoles, basePid, nextBoard, sharedMode) => {
     const roomIds = getBingoRoomMemberIds();
@@ -1716,6 +1729,10 @@ export default function PlayerEventInput(){
             const bingoUi = getBingoUiForEvent(ev.id);
             const bingoEditorState = getBingoPersonState(ev.id, bingoEditorPid, bingoSelectedHoles);
             const bingoEditorBoard = normalizeBingoBoard(bingoEditorState.board, bingoSelectedHoles);
+            const bingoPreviewSharedMode = getPreviewBingoRoomShared(ev.id);
+            const bingoPreviewEditorPid = getPreviewBingoEditorPid(ev.id, bingoSelectedHoles);
+            const bingoPreviewEditorState = getPreviewBingoPersonState(ev.id, bingoPreviewEditorPid, bingoSelectedHoles);
+            const bingoPreviewEditorBoard = normalizeBingoBoard(bingoPreviewEditorState.board, bingoSelectedHoles);
             const bingoSpecialZones = normalizeBingoSpecialZones(ev?.params?.specialZones);
             const bingoLocked = !!ev?.params?.inputLocked;
             const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
@@ -1734,8 +1751,8 @@ export default function PlayerEventInput(){
             const bingoRawGrandTotal = bingoRawSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
             const bingoRawGrandHasAny = bingoRawSubtotal.some((item) => item.hasAny);
             const bingoPreviewRows = roomMembers.filter(Boolean).map((p) => {
-              const rowState = getBingoPersonState(ev.id, p.id, bingoSelectedHoles);
-              const board = bingoSharedMode ? bingoEditorBoard : normalizeBingoBoard(rowState.board, bingoSelectedHoles);
+              const rowState = getPreviewBingoPersonState(ev.id, p.id, bingoSelectedHoles);
+              const board = bingoPreviewSharedMode ? bingoPreviewEditorBoard : normalizeBingoBoard(rowState.board, bingoSelectedHoles);
               const holeValues = getBingoHoleValues(rowState.values, bingoSelectedHoles);
               return {
                 pid: String(p.id),

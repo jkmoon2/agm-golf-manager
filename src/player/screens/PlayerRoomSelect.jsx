@@ -128,7 +128,7 @@ function FourballLikeSelect() {
   );
 }
 
-function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
+function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, participant, onAssign }) {
   const navigate = useNavigate();
   const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
