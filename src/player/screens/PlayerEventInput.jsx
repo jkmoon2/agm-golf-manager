@@ -6,9 +6,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+import { readPlayerParticipant, readPlayerRoom, writePlayerRoom } from '../utils/playerState';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
@@ -245,6 +245,19 @@ function readRoomFromLocal(eventId){
   return NaN;
 }
 
+function readRoomFromAnyStorage(eventId){
+  const direct = readRoomFromLocal(eventId);
+  if (Number.isFinite(direct) && direct >= 1) return direct;
+  const utilVal = readPlayerRoom(eventId, true);
+  if (Number.isFinite(utilVal) && utilVal >= 1) return utilVal;
+  return NaN;
+}
+
+function hasAnyBingoBoardValue(personInput, selectedHoles){
+  const state = extractBingoPersonInput(personInput, selectedHoles);
+  return normalizeBingoBoard(state.board, selectedHoles).some((v) => String(v || '').trim() !== '');
+}
+
 const MAX_PER_ROOM = 4;
 
 function orderSlotsByPairs(roomArr = [], allParticipants = []) {
@@ -398,8 +411,7 @@ async function ensureMembership(eventId, myRoom) {
 export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
-  const { eventId: ctxId, loadEvent, updateEventImmediate } = useContext(EventContext) || {};
-  const eventData = useEffectivePlayerEventData();
+  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
@@ -527,28 +539,41 @@ export default function PlayerEventInput(){
     return cands.map(Number).find(n => Number.isFinite(n) && n >= 1);
   }, [eventData]);
 
+  const roomFromStoredParticipant = useMemo(() => {
+    const cached = readPlayerParticipant(eventId || ctxId, true);
+    const roomNo = Number(cached?.room ?? cached?.roomNumber ?? NaN);
+    return (Number.isFinite(roomNo) && roomNo >= 1) ? roomNo : NaN;
+  }, [eventId, ctxId]);
+
+  const selfParticipantAnyRoom = useMemo(
+    () => inferSelfParticipant(participants, eventData, NaN, eventId || ctxId),
+    [participants, eventData, eventId, ctxId]
+  );
+
   const roomFromSelf = useMemo(
     () => inferRoomFromSelf(participants, eventData),
     [participants, eventData]
   );
 
   const roomIdx = useMemo(() => {
-    const ls  = readRoomFromLocal(eventId);
-    const pick = [roomFromCtx, ls, roomFromSelf].find(
+    const storedRoom = readRoomFromAnyStorage(eventId || ctxId);
+    const selfRoom = Number(selfParticipantAnyRoom?.room ?? selfParticipantAnyRoom?.roomNumber ?? NaN);
+    const pick = [roomFromCtx, storedRoom, roomFromStoredParticipant, selfRoom, roomFromSelf].find(
       n => Number.isFinite(n) && allRoomNos.includes(n)
     );
-    return pick || allRoomNos[0] || 1;
-  }, [roomFromCtx, roomFromSelf, eventId, allRoomNos]);
+    return (Number.isFinite(pick) && pick >= 1) ? pick : NaN;
+  }, [roomFromCtx, roomFromStoredParticipant, roomFromSelf, selfParticipantAnyRoom, eventId, ctxId, allRoomNos]);
 
   useEffect(() => {
     if (Number.isFinite(roomIdx) && roomIdx >= 1) {
-      try { localStorage.setItem(playerStorageKey(eventId, 'currentRoom'), String(roomIdx)); } catch {}
+      try { localStorage.setItem(playerStorageKey(eventId || ctxId, 'currentRoom'), String(roomIdx)); } catch {}
+      try { writePlayerRoom(eventId || ctxId, roomIdx); } catch {}
     }
-  }, [roomIdx, eventId]);
+  }, [roomIdx, eventId, ctxId]);
 
   const selfParticipant = useMemo(
-    () => inferSelfParticipant(participants, eventData, roomIdx, eventId || ctxId),
-    [participants, eventData, roomIdx, eventId, ctxId]
+    () => inferSelfParticipant(participants, eventData, roomIdx, eventId || ctxId) || selfParticipantAnyRoom || null,
+    [participants, eventData, roomIdx, eventId, ctxId, selfParticipantAnyRoom]
   );
   const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
   const selfParticipantNickname = useMemo(() => String(selfParticipant?.nickname || '').trim().toLowerCase(), [selfParticipant]);
@@ -702,6 +727,7 @@ export default function PlayerEventInput(){
     const roomIds = getBingoRoomMemberIds();
     const ui = getBingoUiForEvent(evId);
     if (roomIds.includes(String(ui?.pid || ''))) return String(ui.pid);
+    if (selfParticipantId && roomIds.includes(String(selfParticipantId))) return String(selfParticipantId);
     const withBoard = roomIds.find((pid) => getBingoPersonState(evId, pid, selectedHoles).board.some(Boolean));
     return withBoard || roomIds[0] || '';
   };
@@ -734,6 +760,21 @@ export default function PlayerEventInput(){
     const basePid = getBingoEditorPid(evId, selectedHoles);
     const baseState = getBingoPersonState(evId, basePid || roomIds[0], selectedHoles);
     const sourceBoard = normalizeBingoBoard(baseState.board, selectedHoles);
+
+    if (sharedMode) {
+      const shouldConfirm = roomIds.some((pid) => {
+        if (String(pid) === String(basePid || '')) return false;
+        const personInput = inputsByEvent?.[evId]?.person?.[pid];
+        if (!hasAnyBingoBoardValue(personInput, selectedHoles)) return false;
+        const prevBoard = normalizeBingoBoard(extractBingoPersonInput(personInput, selectedHoles).board, selectedHoles);
+        return JSON.stringify(prevBoard) !== JSON.stringify(sourceBoard);
+      });
+      if (shouldConfirm) {
+        const ok = window.confirm('기존 입력한 빙고판이 현재 닉네임의 빙고판으로 모두 변경됩니다. 그래도 진행하시겠습니까?');
+        if (!ok) return;
+      }
+    }
+
     const all = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };

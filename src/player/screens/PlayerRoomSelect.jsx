@@ -4,12 +4,12 @@ import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
-import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import styles from './PlayerRoomSelect.module.css';
 
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { signInAnonymously } from 'firebase/auth';
+import { writePlayerRoom } from '../utils/playerState';
 
 
 function getPlayerTabId(){
@@ -128,11 +128,10 @@ function FourballLikeSelect() {
   );
 }
 
-function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, participant, onAssign }) {
+function BaseRoomSelect({ variant, roomNames, participants, participant, onAssign }) {
   const navigate = useNavigate();
   const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
-  const { eventId: ctxEventId, loadEvent } = useContext(EventContext);
-  const eventData = useEffectivePlayerEventData();
+  const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
   const { eventId: urlEventId } = useParams();
 
   // ✅ SSOT: STEP1 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
@@ -376,6 +375,9 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     if (!roomNo || !eid) return;
     try {
       localStorage.setItem(playerStorageKey(eid, 'currentRoom'), String(roomNo));
+    } catch {}
+    try {
+      writePlayerRoom(eid, roomNo);
     } catch {}
   };
 

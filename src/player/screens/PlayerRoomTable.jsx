@@ -118,7 +118,7 @@ function normalizeHiddenRooms(pv, roomCount, viewKey) {
   const min = Math.min(...nums);
   const max = Math.max(...nums);
   const looksOneBased =
-    min >= 1 && max <= roomCount || nums.some(v => v === 1 || v === roomCount);
+    ((min >= 1 && max <= roomCount) || nums.some(v => (v === 1 || v === roomCount)));
 
   const idxs = looksOneBased ? nums.map(v => v - 1) : nums.slice();
   const filtered = idxs.filter(i => i >= 0 && i < roomCount);
