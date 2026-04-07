@@ -648,6 +648,8 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
+  const lastLocalInputSaveAtRef = useRef(0);
+  const seenResetMarksRef = useRef({});
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -690,9 +692,20 @@ export default function PlayerEventInput(){
     }
   };
 
+  const stableSortValue = (value) => {
+    if (Array.isArray(value)) return value.map(stableSortValue);
+    if (value && typeof value === 'object') {
+      return Object.keys(value).sort().reduce((acc, key) => {
+        acc[key] = stableSortValue(value[key]);
+        return acc;
+      }, {});
+    }
+    return value;
+  };
+
   const stringifyEventInputs = (value) => {
     try {
-      return JSON.stringify(value || {});
+      return JSON.stringify(stableSortValue(value || {}));
     } catch {
       return '';
     }
@@ -702,13 +715,43 @@ export default function PlayerEventInput(){
     if (dirty) return;
     const serverSig = stringifyEventInputs(inputsByEventServer);
     if (pendingSavedInputsSigRef.current) {
-      if (serverSig !== pendingSavedInputsSigRef.current) return;
+      if (serverSig !== pendingSavedInputsSigRef.current) {
+        const updatedAtMs = tsToMillis(eventData?.inputsUpdatedAt);
+        if (!(updatedAtMs > Number(lastLocalInputSaveAtRef.current || 0))) return;
+      }
       pendingSavedInputsSigRef.current = '';
     }
     setDraft(cloneEventInputs(inputsByEventServer));
-  }, [inputsByEventServer, dirty]);
+  }, [inputsByEventServer, dirty, eventData?.inputsUpdatedAt]);
 
   const inputsByEvent = draft || {};
+
+  useEffect(() => {
+    const marks = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object')
+      ? eventData.eventInputResets
+      : {};
+    const changedIds = [];
+    Object.entries(marks).forEach(([evId, rawTs]) => {
+      const nextTs = tsToMillis(rawTs) || Number(rawTs) || 0;
+      const prevTs = Number(seenResetMarksRef.current?.[evId] || 0);
+      if (nextTs > prevTs) changedIds.push(String(evId));
+      seenResetMarksRef.current[evId] = nextTs;
+    });
+    if (!changedIds.length) return;
+    pendingSavedInputsSigRef.current = '';
+    setDraft((prev) => {
+      const all = { ...((prev && typeof prev === 'object') ? prev : {}) };
+      changedIds.forEach((evId) => { delete all[evId]; });
+      return all;
+    });
+    setBingoUiState((prev) => {
+      const next = { ...((prev && typeof prev === 'object') ? prev : {}) };
+      changedIds.forEach((evId) => {
+        if (next[evId]) next[evId] = { ...(next[evId] || {}), moveIndex: null };
+      });
+      return next;
+    });
+  }, [eventData?.eventInputResets]);
 
   const getBingoRoomMemberIds = () => roomMembers.filter(Boolean).map((p) => String(p.id));
 
@@ -1178,10 +1221,12 @@ export default function PlayerEventInput(){
       });
 
 
+      const saveTs = Date.now();
+      lastLocalInputSaveAtRef.current = saveTs;
       if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged }, false);
+        await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: saveTs }, false);
       } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
+        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: saveTs }, { merge: true });
       }
 
       const savedClone = cloneEventInputs(merged);

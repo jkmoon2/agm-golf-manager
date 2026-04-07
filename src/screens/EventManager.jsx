@@ -738,11 +738,17 @@ if (form.template === 'group-battle') {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
     const all = { ...(eventData?.eventInputs || {}) };
     delete all[ev.id];
+    const resetClientTs = Date.now();
+    const nextResetMarks = {
+      ...((eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {}),
+      [ev.id]: resetClientTs,
+    };
 
     try {
       if (eventId) {
         await updateDoc(doc(db, 'events', eventId), {
           [`eventInputs.${ev.id}`]: deleteField(),
+          [`eventInputResets.${ev.id}`]: serverTimestamp(),
           inputsUpdatedAt: serverTimestamp(),
         });
 
@@ -762,7 +768,7 @@ if (form.template === 'group-battle') {
       console.warn('[clearInputs] remote patch failed:', e);
     }
 
-    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    await updateEventImmediate({ eventInputs: all, eventInputResets: nextResetMarks, inputsUpdatedAt: resetClientTs }, false);
     try { broadcastEventSync(eventId, { reason: 'clearInputs' }); } catch {}
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));
