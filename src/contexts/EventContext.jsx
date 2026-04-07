@@ -248,7 +248,9 @@ const MANUAL_SYNC_RAF_MS = 180;
 
 export function EventProvider({ children }) {
   const location = useLocation();
-  const isPlayerRoute = !!location?.pathname?.startsWith('/player');
+  const pathname = location?.pathname || '';
+  const isPlayerRoute = !!pathname?.startsWith('/player');
+  const needsAllEventsLive = (!isPlayerRoute) || /\/player\/events(?:\/|$)/.test(pathname);
 
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
@@ -368,6 +370,7 @@ export function EventProvider({ children }) {
 
   // 전체 이벤트 구독
   useEffect(() => {
+    if (!needsAllEventsLive) return undefined;
     let unsub = null,
       cancelled = false;
     ensureAuthed().then(() => {
@@ -382,7 +385,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, []);
+  }, [needsAllEventsLive]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -408,6 +411,8 @@ export function EventProvider({ children }) {
     const force = !!opts?.force;
     const now = Date.now();
     if (!force) {
+      try { if (typeof document !== 'undefined' && document.hidden) return; } catch {}
+      try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
       if (now - (lastEventSnapshotAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
       if (now - (lastEventRefreshAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
     }
@@ -436,6 +441,7 @@ export function EventProvider({ children }) {
     const force = !!opts?.force;
     const now = Date.now();
     if (!force) {
+      try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
       if (now - (lastScoresSnapshotAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
       if (now - (lastScoresRefreshAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
     }
@@ -477,7 +483,7 @@ export function EventProvider({ children }) {
     ensureAuthed().then(() => {
       if (cancelled) return;
       const docRef = doc(db, 'events', eventId);
-      unsub = onSnapshot(docRef, { includeMetadataChanges: true }, (snap) => {
+      unsub = onSnapshot(docRef, (snap) => {
         if (!snap.exists()) {
           clearCurrentEventSelection(eventId);
           return;

@@ -464,6 +464,8 @@ if (!idCached) {
     const force = !!opts?.force;
     const now = Date.now();
     if (!force) {
+      try { if (typeof document !== 'undefined' && document.hidden) return; } catch {}
+      try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
       if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
       if (now - (lastPlayerRefreshAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
     }
@@ -507,7 +509,11 @@ if (!idCached) {
     let lastScheduleAt = 0;
     const scheduleRefresh = (opts = { force: false }) => {
       const now = Date.now();
-      if (!opts?.force && now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
+      if (!opts?.force) {
+        try { if (typeof document !== 'undefined' && document.hidden) return; } catch {}
+        try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
+        if (now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
+      }
       lastScheduleAt = now;
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => { refreshPlayerStateNow({ force: !!opts?.force }); });
