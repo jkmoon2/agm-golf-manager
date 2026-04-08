@@ -7,7 +7,7 @@ import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
-import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
@@ -131,7 +131,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
           />
         </svg>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: 18, fontWeight: 900, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
@@ -648,6 +648,8 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
+  const appliedResetTokensRef = useRef({});
+  const lastSavedInputsAtRef = useRef(0);
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -690,30 +692,62 @@ export default function PlayerEventInput(){
     }
   };
 
-  const stringifyEventInputs = (value) => {
-    const stable = (v) => {
-      if (Array.isArray(v)) return v.map(stable);
-      if (v && typeof v === 'object') {
-        return Object.keys(v).sort().reduce((acc, key) => { acc[key] = stable(v[key]); return acc; }, {});
+  const stableStringify = (value) => {
+    const seen = new WeakSet();
+    const sorter = (input) => {
+      if (Array.isArray(input)) return input.map(sorter);
+      if (input && typeof input === 'object') {
+        if (seen.has(input)) return null;
+        seen.add(input);
+        return Object.keys(input).sort().reduce((acc, key) => {
+          acc[key] = sorter(input[key]);
+          return acc;
+        }, {});
       }
-      return v;
+      return input;
     };
     try {
-      return JSON.stringify(stable(value || {}));
+      return JSON.stringify(sorter(value || {}));
     } catch {
       return '';
     }
   };
 
+  const stringifyEventInputs = (value) => stableStringify(value);
+
+  useEffect(() => {
+    const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+    const prevTokens = appliedResetTokensRef.current || {};
+    const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] ?? '') && String(prevTokens[evId] ?? '') !== String(nextTokens[evId] ?? ''));
+    if (!changedEvIds.length) return;
+    appliedResetTokensRef.current = { ...prevTokens, ...nextTokens };
+    pendingSavedInputsSigRef.current = '';
+    lastSavedInputsAtRef.current = 0;
+    setDraft((prev) => {
+      const next = { ...(prev || {}) };
+      changedEvIds.forEach((evId) => { delete next[evId]; });
+      return next;
+    });
+    setDirty(false);
+    setBingoUiState((prev) => {
+      const next = { ...(prev || {}) };
+      changedEvIds.forEach((evId) => {
+        if (next[evId]) next[evId] = { ...(next[evId] || {}), moveIndex: null };
+      });
+      return next;
+    });
+  }, [eventData?.eventInputResets]);
+
   useEffect(() => {
     if (dirty) return;
     const serverSig = stringifyEventInputs(inputsByEventServer);
     if (pendingSavedInputsSigRef.current) {
-      if (serverSig !== pendingSavedInputsSigRef.current) return;
+      const serverUpdatedAt = Number(eventData?.inputsUpdatedAt?.seconds ? (eventData.inputsUpdatedAt.seconds * 1000) : (eventData?.inputsUpdatedAt || 0));
+      if (serverSig !== pendingSavedInputsSigRef.current && serverUpdatedAt <= Number(lastSavedInputsAtRef.current || 0)) return;
       pendingSavedInputsSigRef.current = '';
     }
     setDraft(cloneEventInputs(inputsByEventServer));
-  }, [inputsByEventServer, dirty]);
+  }, [inputsByEventServer, dirty, eventData?.inputsUpdatedAt]);
 
   const inputsByEvent = draft || {};
 
@@ -1185,29 +1219,15 @@ export default function PlayerEventInput(){
       });
 
 
-      const targetEventId = String(eventId || ctxId || '');
-      let savedViaRoot = false;
+      const savedAt = Date.now();
       if (typeof updateEventImmediate === 'function') {
-        try {
-          await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: Date.now() }, false);
-          savedViaRoot = true;
-        } catch (rootErr) {
-          console.warn('[PlayerEventInput] root eventInputs save failed, fallback to subcollection:', rootErr);
-        }
-      }
-      if (!savedViaRoot) {
-        if (!targetEventId) throw new Error('eventId missing');
-        const jobs = Object.entries(merged || {}).map(([evId, slot]) =>
-          setDoc(
-            doc(db, 'events', targetEventId, 'eventInputs', String(evId)),
-            { ...(slot || {}), evId: String(evId), updatedAt: serverTimestamp() },
-            { merge: true }
-          )
-        );
-        await Promise.all(jobs);
+        await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: savedAt }, false);
+      } else {
+        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: savedAt }, { merge: true });
       }
 
       const savedClone = cloneEventInputs(merged);
+      lastSavedInputsAtRef.current = savedAt;
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
       setDraft(savedClone);
       setDirty(false);

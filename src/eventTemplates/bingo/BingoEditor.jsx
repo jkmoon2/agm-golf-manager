@@ -6,10 +6,10 @@ import { defaultBingoParams, isValidBingoSelectedHoles, normalizeBingoSelectedHo
 const HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
 const POSITIONS = Array.from({ length: 16 }, (_, i) => i + 1);
 
-function getSummary(selectedHoles) {
+function getSummary(selectedHoles, targetHoleCount) {
   const count = selectedHoles.length;
-  if (count === 16) return '16개 선택 완료';
-  if (count > 16) return `${count}개 선택 · ${count - 16}개 더 해제`; 
+  if (count === targetHoleCount) return `${targetHoleCount}홀 선택 완료`;
+  if (count > targetHoleCount) return `${count}개 선택 · ${count - targetHoleCount}개 더 해제`;
   return `${count}개 선택`;
 }
 
@@ -23,11 +23,13 @@ export default function BingoEditor({ value, onChange }) {
       selectedHoles: normalizeBingoSelectedHoles(src.selectedHoles),
       specialZones: normalizeBingoSpecialZones(src.specialZones),
       inputLocked: !!src.inputLocked,
+      targetHoleCount: Number(src.targetHoleCount) === 16 ? 16 : 18,
     };
   }, [value]);
 
   const selectedHoles = safe.selectedHoles;
   const specialZones = safe.specialZones;
+  const targetHoleCount = Number(safe.targetHoleCount) === 16 ? 16 : 18;
   const [openKey, setOpenKey] = useState('');
 
   const emit = (next) => {
@@ -37,13 +39,25 @@ export default function BingoEditor({ value, onChange }) {
   const toggleHole = (holeNo) => {
     const has = selectedHoles.includes(holeNo);
     let next;
-    if (has) {
+    if (targetHoleCount === 18) {
+      if (has) return;
+      next = [...selectedHoles, holeNo];
+    } else if (has) {
       if (selectedHoles.length <= 16) return;
       next = selectedHoles.filter((n) => n !== holeNo);
     } else {
       next = [...selectedHoles, holeNo];
     }
     emit({ ...safe, selectedHoles: normalizeBingoSelectedHoles(next) });
+  };
+
+  const changeTargetHoleCount = (nextTarget) => {
+    const target = Number(nextTarget) === 16 ? 16 : 18;
+    if (target === 18) {
+      emit({ ...safe, targetHoleCount: 18, selectedHoles: HOLES });
+      return;
+    }
+    emit({ ...safe, targetHoleCount: 16, selectedHoles: normalizeBingoSelectedHoles(selectedHoles) });
   };
 
   const toggleSpecialZone = (position) => {
@@ -56,14 +70,18 @@ export default function BingoEditor({ value, onChange }) {
     <div style={box}>
       <AccordionBox
         title="사용 홀 선택"
-        summary={getSummary(selectedHoles)}
+        summary={getSummary(selectedHoles, targetHoleCount)}
         open={openKey === 'holes'}
         onToggle={() => setOpenKey((prev) => (prev === 'holes' ? '' : 'holes'))}
       >
-        <div style={countTextWrap}>
+        <div style={{ ...countTextWrap, gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={() => changeTargetHoleCount(18)} style={{ ...chip, ...(targetHoleCount === 18 ? chipActive : chipInactive), minWidth: 62 }}>18홀</button>
+            <button type="button" onClick={() => changeTargetHoleCount(16)} style={{ ...chip, ...(targetHoleCount === 16 ? chipActive : chipInactive), minWidth: 62 }}>16홀</button>
+          </div>
           <span style={countText}>{selectedHoles.length}/18 선택</span>
-          <span style={{ ...countText, color: isValidBingoSelectedHoles(selectedHoles) ? '#177a45' : '#5b6f95' }}>
-            {isValidBingoSelectedHoles(selectedHoles) ? '완료' : '2개를 해제해 16홀로 맞춰주세요'}
+          <span style={{ ...countText, color: (selectedHoles.length === targetHoleCount) ? '#177a45' : '#5b6f95' }}>
+            {(selectedHoles.length === targetHoleCount) ? '완료' : (targetHoleCount === 16 ? '2개를 해제해 16홀로 맞춰주세요' : '18홀 전체를 선택해야 합니다')}
           </span>
         </div>
         <div style={chipWrap}>

@@ -147,14 +147,20 @@ const fmt2 = (x) => {
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 };
 
+function getBingoTargetHoleCount(params) {
+  const target = Number(params?.targetHoleCount);
+  return target === 16 ? 16 : 18;
+}
+
 function isValidBingoParams(params) {
-  return normalizeBingoSelectedHoles(params?.selectedHoles).length === 16;
+  return normalizeBingoSelectedHoles(params?.selectedHoles).length === getBingoTargetHoleCount(params);
 }
 
 function getBingoCountText(params) {
   const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
+  const target = getBingoTargetHoleCount(params);
   const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
-  return zoneCount ? `${holeCount}홀 · SZ ${zoneCount}` : `${holeCount}홀`;
+  return zoneCount ? `${holeCount}/${target}홀 · SZ ${zoneCount}` : `${holeCount}/${target}홀`;
 }
 
 
@@ -376,7 +382,7 @@ if (form.template === 'group-battle') {
 }
       const parsed = JSON.parse(form.paramsJson || '{}');
       if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
-        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        alert(getBingoTargetHoleCount(parsed) === 16 ? '빙고 이벤트(16홀)는 18홀 중 16홀을 선택해야 합니다.' : '빙고 이벤트(18홀)는 18홀 전체를 선택해야 합니다.');
         return;
       }
       if (form.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
@@ -738,14 +744,14 @@ if (form.template === 'group-battle') {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
     const all = { ...(eventData?.eventInputs || {}) };
     delete all[ev.id];
-    const resetToken = Date.now();
-    const nextResets = { ...(eventData?.eventInputResets || {}), [ev.id]: resetToken };
+    const resetAt = Date.now();
+    const resets = { ...(eventData?.eventInputResets || {}) , [ev.id]: resetAt };
 
     try {
       if (eventId) {
         await updateDoc(doc(db, 'events', eventId), {
           [`eventInputs.${ev.id}`]: deleteField(),
-          [`eventInputResets.${ev.id}`]: resetToken,
+          [`eventInputResets.${ev.id}`]: resetAt,
           inputsUpdatedAt: serverTimestamp(),
         });
 
@@ -765,7 +771,7 @@ if (form.template === 'group-battle') {
       console.warn('[clearInputs] remote patch failed:', e);
     }
 
-    await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets, inputsUpdatedAt: resetToken }, false);
+    await updateEventImmediate({ eventInputs: all, eventInputResets: resets, inputsUpdatedAt: Date.now() }, false);
     try { broadcastEventSync(eventId, { reason: 'clearInputs' }); } catch {}
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));
@@ -881,7 +887,7 @@ if (editForm?.template === 'group-battle') {
 }
       const parsed = JSON.parse(editForm.paramsJson || '{}');
       if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
-        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        alert(getBingoTargetHoleCount(parsed) === 16 ? '빙고 이벤트(16홀)는 18홀 중 16홀을 선택해야 합니다.' : '빙고 이벤트(18홀)는 18홀 전체를 선택해야 합니다.');
         return;
       }
       if (editForm.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
