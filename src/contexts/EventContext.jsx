@@ -248,9 +248,7 @@ const MANUAL_SYNC_RAF_MS = 180;
 
 export function EventProvider({ children }) {
   const location = useLocation();
-  const pathname = location?.pathname || '';
-  const isPlayerRoute = !!pathname?.startsWith('/player');
-  const needsAllEventsLive = (!isPlayerRoute) || /\/player\/events(?:\/|$)/.test(pathname);
+  const isPlayerRoute = !!location?.pathname?.startsWith('/player');
 
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
@@ -263,6 +261,8 @@ export function EventProvider({ children }) {
   const scoresReadyRef = useRef(false);
 
   const lastEventDataRef = useRef(null);
+  const lastRootEventDataRef = useRef(null);
+  const eventInputsOverlayRef = useRef({});
   const queuedUpdatesRef = useRef(null);
   const debounceTimerRef = useRef(null);
   const lastEventSnapshotAtRef = useRef(0);
@@ -370,7 +370,6 @@ export function EventProvider({ children }) {
 
   // 전체 이벤트 구독
   useEffect(() => {
-    if (!needsAllEventsLive) return undefined;
     let unsub = null,
       cancelled = false;
     ensureAuthed().then(() => {
@@ -385,11 +384,20 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [needsAllEventsLive]);
+  }, []);
 
-  const applyIncomingEventData = useCallback((raw) => {
-    const withPV = normalizePublicView(raw || {});
+  const applyIncomingEventData = useCallback((raw, overlayOpt) => {
+    const rawBase = raw || {};
+    lastRootEventDataRef.current = rawBase;
+
+    const withPV = normalizePublicView(rawBase);
     const withGate = normalizePlayerGate(withPV);
+
+    const overlay = (overlayOpt && typeof overlayOpt === 'object') ? overlayOpt : (eventInputsOverlayRef.current || {});
+    if (overlay && typeof overlay === 'object' && Object.keys(overlay).length) {
+      const baseInputs = (withGate.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
+      withGate.eventInputs = { ...baseInputs, ...overlay };
+    }
 
     try {
       const modeNow = normalizeMode(withGate?.mode || 'stroke');
@@ -411,8 +419,6 @@ export function EventProvider({ children }) {
     const force = !!opts?.force;
     const now = Date.now();
     if (!force) {
-      try { if (typeof document !== 'undefined' && document.hidden) return; } catch {}
-      try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
       if (now - (lastEventSnapshotAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
       if (now - (lastEventRefreshAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
     }
@@ -441,7 +447,6 @@ export function EventProvider({ children }) {
     const force = !!opts?.force;
     const now = Date.now();
     if (!force) {
-      try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
       if (now - (lastScoresSnapshotAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
       if (now - (lastScoresRefreshAtRef.current || 0) < MANUAL_REFRESH_COOLDOWN_MS) return;
     }
@@ -479,11 +484,13 @@ export function EventProvider({ children }) {
       return;
     }
     let unsub = null,
+      unsubInputs = null,
       cancelled = false;
+    eventInputsOverlayRef.current = {};
     ensureAuthed().then(() => {
       if (cancelled) return;
       const docRef = doc(db, 'events', eventId);
-      unsub = onSnapshot(docRef, (snap) => {
+      unsub = onSnapshot(docRef, { includeMetadataChanges: true }, (snap) => {
         if (!snap.exists()) {
           clearCurrentEventSelection(eventId);
           return;
@@ -491,10 +498,31 @@ export function EventProvider({ children }) {
         lastEventSnapshotAtRef.current = Date.now();
         applyIncomingEventData(snap.data());
       });
+      try {
+        const colRef = collection(db, 'events', eventId, 'eventInputs');
+        unsubInputs = onSnapshot(colRef, (snap) => {
+          const overlay = {};
+          snap.forEach((d) => {
+            const row = d.data() || {};
+            const slot = { ...row };
+            delete slot.evId;
+            delete slot.updatedAt;
+            overlay[String(d.id)] = slot;
+          });
+          eventInputsOverlayRef.current = overlay;
+          applyIncomingEventData(lastRootEventDataRef.current || lastEventDataRef.current || {}, overlay);
+        }, (err) => {
+          console.warn('[EventContext] eventInputs subcollection listen failed:', err);
+        });
+      } catch (err) {
+        console.warn('[EventContext] eventInputs subcollection listen setup failed:', err);
+      }
     });
     return () => {
       cancelled = true;
+      eventInputsOverlayRef.current = {};
       if (unsub) unsub();
+      if (unsubInputs) unsubInputs();
     };
   }, [eventId, applyIncomingEventData, clearCurrentEventSelection]);
 

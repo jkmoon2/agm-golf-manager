@@ -7,7 +7,7 @@ import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
@@ -648,8 +648,6 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
-  const lastLocalInputsSaveAtRef = useRef(0);
-  const appliedResetTokensRef = useRef({});
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -692,71 +690,30 @@ export default function PlayerEventInput(){
     }
   };
 
-  const stableStringify = (value) => {
-    const walk = (v) => {
-      if (Array.isArray(v)) return v.map(walk);
+  const stringifyEventInputs = (value) => {
+    const stable = (v) => {
+      if (Array.isArray(v)) return v.map(stable);
       if (v && typeof v === 'object') {
-        const out = {};
-        Object.keys(v).sort().forEach((k) => {
-          out[k] = walk(v[k]);
-        });
-        return out;
+        return Object.keys(v).sort().reduce((acc, key) => { acc[key] = stable(v[key]); return acc; }, {});
       }
       return v;
     };
     try {
-      return JSON.stringify(walk(value || {}));
+      return JSON.stringify(stable(value || {}));
     } catch {
       return '';
     }
   };
 
-  const stringifyEventInputs = (value) => stableStringify(value);
-
   useEffect(() => {
+    if (dirty) return;
     const serverSig = stringifyEventInputs(inputsByEventServer);
-    const serverUpdatedAtMs = tsToMillis(eventData?.inputsUpdatedAt);
     if (pendingSavedInputsSigRef.current) {
-      if (serverSig === pendingSavedInputsSigRef.current) {
-        pendingSavedInputsSigRef.current = '';
-      } else if (serverUpdatedAtMs > (lastLocalInputsSaveAtRef.current || 0)) {
-        pendingSavedInputsSigRef.current = '';
-      }
+      if (serverSig !== pendingSavedInputsSigRef.current) return;
+      pendingSavedInputsSigRef.current = '';
     }
-    if (dirty && pendingSavedInputsSigRef.current) return;
-    if (dirty && !pendingSavedInputsSigRef.current) return;
     setDraft(cloneEventInputs(inputsByEventServer));
-  }, [inputsByEventServer, dirty, eventData?.inputsUpdatedAt]);
-
-  useEffect(() => {
-    const resets = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
-    const changedIds = [];
-    Object.entries(resets).forEach(([evId, token]) => {
-      if (!token) return;
-      if (appliedResetTokensRef.current[String(evId)] !== token) {
-        appliedResetTokensRef.current[String(evId)] = token;
-        changedIds.push(String(evId));
-      }
-    });
-    if (!changedIds.length) return;
-
-    pendingSavedInputsSigRef.current = '';
-    setDraft((prev) => {
-      const next = cloneEventInputs(prev);
-      changedIds.forEach((evId) => {
-        if (next && typeof next === 'object') delete next[evId];
-      });
-      return next;
-    });
-    setBingoUiState((prev) => {
-      const next = { ...(prev || {}) };
-      changedIds.forEach((evId) => {
-        if (next[evId]) next[evId] = { ...(next[evId] || {}), moveIndex: null };
-      });
-      return next;
-    });
-    setDirty(false);
-  }, [eventData?.eventInputResets]);
+  }, [inputsByEventServer, dirty]);
 
   const inputsByEvent = draft || {};
 
@@ -1228,19 +1185,29 @@ export default function PlayerEventInput(){
       });
 
 
-      const saveAt = Date.now();
+      const targetEventId = String(eventId || ctxId || '');
+      let savedViaRoot = false;
       if (typeof updateEventImmediate === 'function') {
         try {
-          await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: saveAt }, false);
-        } catch (e) {
-          await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: saveAt }, { merge: true });
+          await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: Date.now() }, false);
+          savedViaRoot = true;
+        } catch (rootErr) {
+          console.warn('[PlayerEventInput] root eventInputs save failed, fallback to subcollection:', rootErr);
         }
-      } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: saveAt }, { merge: true });
+      }
+      if (!savedViaRoot) {
+        if (!targetEventId) throw new Error('eventId missing');
+        const jobs = Object.entries(merged || {}).map(([evId, slot]) =>
+          setDoc(
+            doc(db, 'events', targetEventId, 'eventInputs', String(evId)),
+            { ...(slot || {}), evId: String(evId), updatedAt: serverTimestamp() },
+            { merge: true }
+          )
+        );
+        await Promise.all(jobs);
       }
 
       const savedClone = cloneEventInputs(merged);
-      lastLocalInputsSaveAtRef.current = saveAt;
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
       setDraft(savedClone);
       setDirty(false);
