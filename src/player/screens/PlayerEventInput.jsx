@@ -10,7 +10,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
@@ -648,8 +648,8 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
-  const appliedResetTokensRef = useRef({});
   const lastSavedInputsAtRef = useRef(0);
+  const seenResetTokensRef = useRef({});
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -692,61 +692,38 @@ export default function PlayerEventInput(){
     }
   };
 
-  const stableStringify = (value) => {
-    const seen = new WeakSet();
-    const sorter = (input) => {
-      if (Array.isArray(input)) return input.map(sorter);
-      if (input && typeof input === 'object') {
-        if (seen.has(input)) return null;
-        seen.add(input);
-        return Object.keys(input).sort().reduce((acc, key) => {
-          acc[key] = sorter(input[key]);
-          return acc;
-        }, {});
-      }
-      return input;
-    };
+  const stringifyEventInputs = (value) => {
     try {
-      return JSON.stringify(sorter(value || {}));
+      const seen = new WeakSet();
+      const normalize = (v) => {
+        if (v === null || typeof v !== 'object') return v;
+        if (seen.has(v)) return null;
+        seen.add(v);
+        if (Array.isArray(v)) return v.map(normalize);
+        const out = {};
+        Object.keys(v).sort().forEach((k) => {
+          out[k] = normalize(v[k]);
+        });
+        return out;
+      };
+      return JSON.stringify(normalize(value || {}));
     } catch {
       return '';
     }
   };
 
-  const stringifyEventInputs = (value) => stableStringify(value);
-
   useEffect(() => {
-    const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
-    const prevTokens = appliedResetTokensRef.current || {};
-    const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] ?? '') && String(prevTokens[evId] ?? '') !== String(nextTokens[evId] ?? ''));
-    if (!changedEvIds.length) return;
-    appliedResetTokensRef.current = { ...prevTokens, ...nextTokens };
-    pendingSavedInputsSigRef.current = '';
-    lastSavedInputsAtRef.current = 0;
-    setDraft((prev) => {
-      const next = { ...(prev || {}) };
-      changedEvIds.forEach((evId) => { delete next[evId]; });
-      return next;
-    });
-    setDirty(false);
-    setBingoUiState((prev) => {
-      const next = { ...(prev || {}) };
-      changedEvIds.forEach((evId) => {
-        if (next[evId]) next[evId] = { ...(next[evId] || {}), moveIndex: null };
-      });
-      return next;
-    });
-  }, [eventData?.eventInputResets]);
-
-  useEffect(() => {
-    if (dirty) return;
     const serverSig = stringifyEventInputs(inputsByEventServer);
+    const serverUpdatedAt = Number(eventData?.inputsUpdatedAt || 0) || 0;
     if (pendingSavedInputsSigRef.current) {
-      const serverUpdatedAt = Number(eventData?.inputsUpdatedAt?.seconds ? (eventData.inputsUpdatedAt.seconds * 1000) : (eventData?.inputsUpdatedAt || 0));
-      if (serverSig !== pendingSavedInputsSigRef.current && serverUpdatedAt <= Number(lastSavedInputsAtRef.current || 0)) return;
-      pendingSavedInputsSigRef.current = '';
+      if (serverSig === pendingSavedInputsSigRef.current || (serverUpdatedAt && serverUpdatedAt >= (lastSavedInputsAtRef.current || 0))) {
+        pendingSavedInputsSigRef.current = '';
+      }
     }
+    if (dirty && pendingSavedInputsSigRef.current) return;
+    if (dirty && !pendingSavedInputsSigRef.current) return;
     setDraft(cloneEventInputs(inputsByEventServer));
+    setDirty(false);
   }, [inputsByEventServer, dirty, eventData?.inputsUpdatedAt]);
 
   const inputsByEvent = draft || {};
@@ -768,6 +745,32 @@ export default function PlayerEventInput(){
       [evId]: { ...(prev?.[evId] || {}), moveIndex: null },
     }));
   };
+
+  useEffect(() => {
+    const resets = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+    const changedIds = [];
+    Object.entries(resets).forEach(([evId, token]) => {
+      if (!token) return;
+      if (seenResetTokensRef.current[evId] === token) return;
+      seenResetTokensRef.current[evId] = token;
+      changedIds.push(String(evId));
+    });
+    if (!changedIds.length) return;
+    setDraft((prev) => {
+      const next = cloneEventInputs(prev);
+      changedIds.forEach((evId) => { delete next[evId]; });
+      return next;
+    });
+    setBingoUiState((prev) => {
+      const next = { ...(prev || {}) };
+      changedIds.forEach((evId) => {
+        next[evId] = { ...(next?.[evId] || {}), moveIndex: null };
+      });
+      return next;
+    });
+    pendingSavedInputsSigRef.current = '';
+    setDirty(false);
+  }, [eventData?.eventInputResets]);
 
   const getBingoRoomShared = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEvent?.[evId]?.person?.[pid]?.roomShared);
 
@@ -1219,16 +1222,36 @@ export default function PlayerEventInput(){
       });
 
 
-      const savedAt = Date.now();
-      if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: savedAt }, false);
-      } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: savedAt }, { merge: true });
+      const targetEventId = eventId || ctxId;
+      let saved = false;
+      try {
+        if (typeof updateEventImmediate === 'function') {
+          await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: Date.now() }, false);
+          saved = true;
+        } else if (targetEventId) {
+          await setDoc(doc(db, 'events', targetEventId), { eventInputs: merged, inputsUpdatedAt: Date.now() }, { merge: true });
+          saved = true;
+        }
+      } catch (rootErr) {
+        console.warn('[PlayerEventInput] root eventInputs save failed, trying subcollection fallback:', rootErr);
+      }
+
+      if (!saved) {
+        if (!targetEventId) throw new Error('eventId missing');
+        const writes = Object.entries(merged).map(([evId, slot]) => {
+          const safeSlot = slot && typeof slot === 'object' ? JSON.parse(JSON.stringify(slot)) : {};
+          return setDoc(doc(db, 'events', targetEventId, 'eventInputs', String(evId)), {
+            evId: String(evId),
+            slot: safeSlot,
+            updatedAt: Date.now(),
+          }, { merge: true });
+        });
+        await Promise.all(writes);
       }
 
       const savedClone = cloneEventInputs(merged);
-      lastSavedInputsAtRef.current = savedAt;
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
+      lastSavedInputsAtRef.current = Date.now();
       setDraft(savedClone);
       setDirty(false);
       alert('저장되었습니다.');
@@ -1680,7 +1703,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+-]*"
+                                    pattern="[-+0-9.]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -1788,9 +1811,9 @@ export default function PlayerEventInput(){
 
           if (isBingo) {
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
+            const bingoOnePct = Math.max(6.2, 54 / Math.max(bingoScoreHoles.length || 1, 1));
             const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoTableWidthPct = bingoNickPct + bingoScoreHoles.length * bingoOnePct + bingoTotalPct;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1801,7 +1824,7 @@ export default function PlayerEventInput(){
             const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
             const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
             const bingoCanEditBoard = !!bingoSharedMode || bingoOwnSelected;
-            const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
+            const bingoRawSubtotal = bingoScoreHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
@@ -1842,19 +1865,19 @@ export default function PlayerEventInput(){
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
                     <colgroup>
                       <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
+                      {bingoScoreHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
                       <col style={{ width: `${bingoTotalPct}%` }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
-                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        {bingoScoreHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
                         <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoScoreHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
@@ -1865,7 +1888,7 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={`bingo-row-${rIdx}`}>
                             <td>{p ? p.nickname : ''}</td>
-                            {bingoSelectedHoles.map((holeNo) => {
+                            {bingoScoreHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
@@ -1878,7 +1901,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+-]*"
+                                    pattern="[-+0-9.]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -2269,7 +2292,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern={isHoleRankForce ? "[0-9.+-]*" : "[0-9.]*"}
+                                    pattern={isHoleRankForce ? "[-+0-9.]*" : "[0-9.]*"}
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"

@@ -261,14 +261,13 @@ export function EventProvider({ children }) {
   const scoresReadyRef = useRef(false);
 
   const lastEventDataRef = useRef(null);
-  const lastRootEventDataRef = useRef(null);
-  const eventInputsOverlayRef = useRef({});
   const queuedUpdatesRef = useRef(null);
   const debounceTimerRef = useRef(null);
   const lastEventSnapshotAtRef = useRef(0);
   const lastScoresSnapshotAtRef = useRef(0);
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
+  const eventInputsSubMapRef = useRef({});
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -316,6 +315,7 @@ export function EventProvider({ children }) {
     queuedUpdatesRef.current = null;
     setEventData(null);
     lastEventDataRef.current = null;
+    eventInputsSubMapRef.current = {};
     scoresMapRef.current = {};
     setScoresMap({});
     scoresReadyRef.current = false;
@@ -386,18 +386,22 @@ export function EventProvider({ children }) {
     };
   }, []);
 
-  const applyIncomingEventData = useCallback((raw, overlayOpt) => {
-    const rawBase = raw || {};
-    lastRootEventDataRef.current = rawBase;
 
-    const withPV = normalizePublicView(rawBase);
+  const mergeEventInputsOverlay = (rootInputs, subInputs) => {
+    const out = { ...((rootInputs && typeof rootInputs === 'object') ? rootInputs : {}) };
+    const overlay = (subInputs && typeof subInputs === 'object') ? subInputs : {};
+    Object.entries(overlay).forEach(([evId, slot]) => {
+      if (slot == null) delete out[evId];
+      else out[evId] = slot;
+    });
+    return out;
+  };
+
+  const applyIncomingEventData = useCallback((raw) => {
+    const withPV = normalizePublicView(raw || {});
     const withGate = normalizePlayerGate(withPV);
 
-    const overlay = (overlayOpt && typeof overlayOpt === 'object') ? overlayOpt : (eventInputsOverlayRef.current || {});
-    if (overlay && typeof overlay === 'object' && Object.keys(overlay).length) {
-      const baseInputs = (withGate.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
-      withGate.eventInputs = { ...baseInputs, ...overlay };
-    }
+    withGate.eventInputs = mergeEventInputsOverlay(withGate?.eventInputs, eventInputsSubMapRef.current);
 
     try {
       const modeNow = normalizeMode(withGate?.mode || 'stroke');
@@ -484,9 +488,7 @@ export function EventProvider({ children }) {
       return;
     }
     let unsub = null,
-      unsubInputs = null,
       cancelled = false;
-    eventInputsOverlayRef.current = {};
     ensureAuthed().then(() => {
       if (cancelled) return;
       const docRef = doc(db, 'events', eventId);
@@ -498,33 +500,49 @@ export function EventProvider({ children }) {
         lastEventSnapshotAtRef.current = Date.now();
         applyIncomingEventData(snap.data());
       });
-      try {
-        const colRef = collection(db, 'events', eventId, 'eventInputs');
-        unsubInputs = onSnapshot(colRef, (snap) => {
-          const overlay = {};
-          snap.forEach((d) => {
-            const row = d.data() || {};
-            const slot = { ...row };
-            delete slot.evId;
-            delete slot.updatedAt;
-            overlay[String(d.id)] = slot;
-          });
-          eventInputsOverlayRef.current = overlay;
-          applyIncomingEventData(lastRootEventDataRef.current || lastEventDataRef.current || {}, overlay);
-        }, (err) => {
-          console.warn('[EventContext] eventInputs subcollection listen failed:', err);
-        });
-      } catch (err) {
-        console.warn('[EventContext] eventInputs subcollection listen setup failed:', err);
-      }
     });
     return () => {
       cancelled = true;
-      eventInputsOverlayRef.current = {};
       if (unsub) unsub();
-      if (unsubInputs) unsubInputs();
     };
   }, [eventId, applyIncomingEventData, clearCurrentEventSelection]);
+
+  useEffect(() => {
+    if (!eventId) {
+      eventInputsSubMapRef.current = {};
+      return;
+    }
+    let unsub = null;
+    let cancelled = false;
+    ensureAuthed().then(() => {
+      if (cancelled) return;
+      const colRef = collection(db, 'events', eventId, 'eventInputs');
+      unsub = onSnapshot(colRef, (snap) => {
+        const next = {};
+        snap.forEach((d) => {
+          const data = d.data() || {};
+          const evId = String(data?.evId || d.id || '');
+          if (!evId) return;
+          const slot = (data?.slot && typeof data.slot === 'object')
+            ? data.slot
+            : (() => {
+                const cp = { ...data };
+                delete cp.evId;
+                delete cp.updatedAt;
+                return cp;
+              })();
+          next[evId] = slot;
+        });
+        eventInputsSubMapRef.current = next;
+        const base = lastEventDataRef.current || {};
+        applyIncomingEventData({ ...base, eventInputs: { ...((base && base.eventInputs) || {}) } });
+      });
+    });
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [eventId, applyIncomingEventData]);
 
   useEffect(() => {
     if (!eventId) return;

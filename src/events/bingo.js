@@ -40,9 +40,15 @@ function sortRowsByRankOrder(rows = [], rankOrder = 'desc', labelKey = 'name') {
 export function defaultBingoParams() {
   return {
     selectedHoles: [...ALL_HOLES],
+    scoreHoleCount: 18,
     specialZones: [],
     inputLocked: false,
   };
+}
+
+
+export function normalizeBingoScoreHoleCount(raw) {
+  return Number(raw) === 16 ? 16 : 18;
 }
 
 export function normalizeBingoSelectedHoles(raw) {

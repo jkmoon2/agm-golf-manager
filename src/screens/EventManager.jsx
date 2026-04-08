@@ -147,20 +147,16 @@ const fmt2 = (x) => {
   return s.replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
 };
 
-function getBingoTargetHoleCount(params) {
-  const target = Number(params?.targetHoleCount);
-  return target === 16 ? 16 : 18;
-}
-
 function isValidBingoParams(params) {
-  return normalizeBingoSelectedHoles(params?.selectedHoles).length === getBingoTargetHoleCount(params);
+  return normalizeBingoSelectedHoles(params?.selectedHoles).length === 16;
 }
 
 function getBingoCountText(params) {
   const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
-  const target = getBingoTargetHoleCount(params);
+  const inputHoleCount = Number(params?.scoreHoleCount) === 16 ? 16 : 18;
   const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
-  return zoneCount ? `${holeCount}/${target}홀 · SZ ${zoneCount}` : `${holeCount}/${target}홀`;
+  const base = `${inputHoleCount}홀 입력 · 빙고 ${holeCount}홀`;
+  return zoneCount ? `${base} · SZ ${zoneCount}` : base;
 }
 
 
@@ -382,7 +378,7 @@ if (form.template === 'group-battle') {
 }
       const parsed = JSON.parse(form.paramsJson || '{}');
       if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
-        alert(getBingoTargetHoleCount(parsed) === 16 ? '빙고 이벤트(16홀)는 18홀 중 16홀을 선택해야 합니다.' : '빙고 이벤트(18홀)는 18홀 전체를 선택해야 합니다.');
+        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
       }
       if (form.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
@@ -744,27 +740,31 @@ if (form.template === 'group-battle') {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
     const all = { ...(eventData?.eventInputs || {}) };
     delete all[ev.id];
-    const resetAt = Date.now();
-    const resets = { ...(eventData?.eventInputResets || {}) , [ev.id]: resetAt };
+    const resetToken = Date.now();
+    const resets = { ...(eventData?.eventInputResets || {}) , [ev.id]: resetToken };
 
     try {
       if (eventId) {
         await updateDoc(doc(db, 'events', eventId), {
           [`eventInputs.${ev.id}`]: deleteField(),
-          [`eventInputResets.${ev.id}`]: resetAt,
+          [`eventInputResets.${ev.id}`]: resetToken,
           inputsUpdatedAt: serverTimestamp(),
         });
 
         try {
-          const qs = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
-          const jobs = [];
-          qs.forEach((d) => {
-            const row = d.data() || {};
-            if (String(row?.evId || '').trim() === String(ev.id)) jobs.push(deleteDoc(d.ref));
-          });
-          if (jobs.length) await Promise.all(jobs);
-        } catch (subErr) {
-          console.warn('[clearInputs] subcollection cleanup failed:', subErr);
+          await deleteDoc(doc(db, 'events', eventId, 'eventInputs', String(ev.id)));
+        } catch (subOneErr) {
+          try {
+            const qs = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
+            const jobs = [];
+            qs.forEach((d) => {
+              const row = d.data() || {};
+              if (String(row?.evId || '').trim() === String(ev.id)) jobs.push(deleteDoc(d.ref));
+            });
+            if (jobs.length) await Promise.all(jobs);
+          } catch (subErr) {
+            console.warn('[clearInputs] subcollection cleanup failed:', subErr);
+          }
         }
       }
     } catch (e) {
@@ -887,7 +887,7 @@ if (editForm?.template === 'group-battle') {
 }
       const parsed = JSON.parse(editForm.paramsJson || '{}');
       if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
-        alert(getBingoTargetHoleCount(parsed) === 16 ? '빙고 이벤트(16홀)는 18홀 중 16홀을 선택해야 합니다.' : '빙고 이벤트(18홀)는 18홀 전체를 선택해야 합니다.');
+        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
       }
       if (editForm.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
