@@ -1382,6 +1382,10 @@ export default function PlayerEventInput(){
           const isBingo = ev.template === 'bingo';
           const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
           const bingoSelectedHoles = isBingo ? normalizeBingoSelectedHoles(ev?.params?.selectedHoles) : [];
+          const bingoScoreHoleCount = isBingo ? normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount) : 16;
+          const bingoScoreHoles = isBingo
+            ? (bingoScoreHoleCount === 18 ? Array.from({ length: 18 }, (_, i) => i + 1) : bingoSelectedHoles)
+            : [];
           const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
           const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
