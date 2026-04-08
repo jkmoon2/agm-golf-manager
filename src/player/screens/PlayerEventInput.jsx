@@ -648,6 +648,8 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
+  const lastLocalInputsSaveAtRef = useRef(0);
+  const appliedResetTokensRef = useRef({});
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -690,23 +692,71 @@ export default function PlayerEventInput(){
     }
   };
 
-  const stringifyEventInputs = (value) => {
+  const stableStringify = (value) => {
+    const walk = (v) => {
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === 'object') {
+        const out = {};
+        Object.keys(v).sort().forEach((k) => {
+          out[k] = walk(v[k]);
+        });
+        return out;
+      }
+      return v;
+    };
     try {
-      return JSON.stringify(value || {});
+      return JSON.stringify(walk(value || {}));
     } catch {
       return '';
     }
   };
 
+  const stringifyEventInputs = (value) => stableStringify(value);
+
   useEffect(() => {
-    if (dirty) return;
     const serverSig = stringifyEventInputs(inputsByEventServer);
+    const serverUpdatedAtMs = tsToMillis(eventData?.inputsUpdatedAt);
     if (pendingSavedInputsSigRef.current) {
-      if (serverSig !== pendingSavedInputsSigRef.current) return;
-      pendingSavedInputsSigRef.current = '';
+      if (serverSig === pendingSavedInputsSigRef.current) {
+        pendingSavedInputsSigRef.current = '';
+      } else if (serverUpdatedAtMs > (lastLocalInputsSaveAtRef.current || 0)) {
+        pendingSavedInputsSigRef.current = '';
+      }
     }
+    if (dirty && pendingSavedInputsSigRef.current) return;
+    if (dirty && !pendingSavedInputsSigRef.current) return;
     setDraft(cloneEventInputs(inputsByEventServer));
-  }, [inputsByEventServer, dirty]);
+  }, [inputsByEventServer, dirty, eventData?.inputsUpdatedAt]);
+
+  useEffect(() => {
+    const resets = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+    const changedIds = [];
+    Object.entries(resets).forEach(([evId, token]) => {
+      if (!token) return;
+      if (appliedResetTokensRef.current[String(evId)] !== token) {
+        appliedResetTokensRef.current[String(evId)] = token;
+        changedIds.push(String(evId));
+      }
+    });
+    if (!changedIds.length) return;
+
+    pendingSavedInputsSigRef.current = '';
+    setDraft((prev) => {
+      const next = cloneEventInputs(prev);
+      changedIds.forEach((evId) => {
+        if (next && typeof next === 'object') delete next[evId];
+      });
+      return next;
+    });
+    setBingoUiState((prev) => {
+      const next = { ...(prev || {}) };
+      changedIds.forEach((evId) => {
+        if (next[evId]) next[evId] = { ...(next[evId] || {}), moveIndex: null };
+      });
+      return next;
+    });
+    setDirty(false);
+  }, [eventData?.eventInputResets]);
 
   const inputsByEvent = draft || {};
 
@@ -1178,18 +1228,19 @@ export default function PlayerEventInput(){
       });
 
 
+      const saveAt = Date.now();
       if (typeof updateEventImmediate === 'function') {
         try {
-          await updateEventImmediate({ eventInputs: merged }, false);
-        } catch (evtErr) {
-          console.warn('[PlayerEventInput] updateEventImmediate(eventInputs) failed. Falling back to direct setDoc(eventInputs only).', evtErr);
-          await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
+          await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: saveAt }, false);
+        } catch (e) {
+          await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: saveAt }, { merge: true });
         }
       } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
+        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged, inputsUpdatedAt: saveAt }, { merge: true });
       }
 
       const savedClone = cloneEventInputs(merged);
+      lastLocalInputsSaveAtRef.current = saveAt;
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
       setDraft(savedClone);
       setDirty(false);
