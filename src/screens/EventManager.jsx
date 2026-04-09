@@ -154,9 +154,7 @@ function isValidBingoParams(params) {
 function getBingoCountText(params) {
   const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
   const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
-  const scoreHoleCount = Number(params?.scoreHoleCount) === 16 ? 16 : 18;
-  const base = zoneCount ? `${holeCount}홀 · SZ ${zoneCount}` : `${holeCount}홀`;
-  return `${base} · ${scoreHoleCount}홀 입력`;
+  return zoneCount ? `${holeCount}홀 · SZ ${zoneCount}` : `${holeCount}홀`;
 }
 
 
@@ -740,19 +738,26 @@ if (form.template === 'group-battle') {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
     const all = { ...(eventData?.eventInputs || {}) };
     delete all[ev.id];
-    const resetToken = Date.now();
-    const nextResets = { ...(eventData?.eventInputResets || {}), [ev.id]: resetToken };
+    const nextResetToken = Date.now();
+    const nextResets = { ...((eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {}) };
+    nextResets[ev.id] = nextResetToken;
 
     try {
       if (eventId) {
         await updateDoc(doc(db, 'events', eventId), {
           [`eventInputs.${ev.id}`]: deleteField(),
-          [`eventInputResets.${ev.id}`]: resetToken,
+          [`eventInputResets.${ev.id}`]: nextResetToken,
           inputsUpdatedAt: serverTimestamp(),
         });
 
         try {
-          await deleteDoc(doc(db, 'events', eventId, 'eventInputs', String(ev.id)));
+          const qs = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
+          const jobs = [];
+          qs.forEach((d) => {
+            const row = d.data() || {};
+            if (String(row?.evId || '').trim() === String(ev.id)) jobs.push(deleteDoc(d.ref));
+          });
+          if (jobs.length) await Promise.all(jobs);
         } catch (subErr) {
           console.warn('[clearInputs] subcollection cleanup failed:', subErr);
         }
@@ -761,7 +766,7 @@ if (form.template === 'group-battle') {
       console.warn('[clearInputs] remote patch failed:', e);
     }
 
-    await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets, inputsUpdatedAt: Date.now() }, false);
+    await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false);
     try { broadcastEventSync(eventId, { reason: 'clearInputs' }); } catch {}
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));
