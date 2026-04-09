@@ -53,6 +53,20 @@ function formatDisplayNumber(value){
   return s;
 }
 
+
+function stableStringify(value){
+  const normalize = (v) => {
+    if (Array.isArray(v)) return v.map(normalize);
+    if (v && typeof v === 'object') {
+      const out = {};
+      Object.keys(v).sort().forEach((k) => { out[k] = normalize(v[k]); });
+      return out;
+    }
+    return v;
+  };
+  try { return JSON.stringify(normalize(value || {})); } catch { try { return JSON.stringify(value || {}); } catch { return ''; } }
+}
+
 function makeEmptyBingoBoard(){
   return Array.from({ length: 16 }, () => '');
 }
@@ -648,8 +662,7 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
-  const lastSavedInputsAtRef = useRef(0);
-  const seenResetTokensRef = useRef({});
+  const lastResetTokenByEventRef = useRef({});
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -692,39 +705,42 @@ export default function PlayerEventInput(){
     }
   };
 
-  const stringifyEventInputs = (value) => {
-    try {
-      const seen = new WeakSet();
-      const normalize = (v) => {
-        if (v === null || typeof v !== 'object') return v;
-        if (seen.has(v)) return null;
-        seen.add(v);
-        if (Array.isArray(v)) return v.map(normalize);
-        const out = {};
-        Object.keys(v).sort().forEach((k) => {
-          out[k] = normalize(v[k]);
-        });
-        return out;
-      };
-      return JSON.stringify(normalize(value || {}));
-    } catch {
-      return '';
-    }
-  };
+  const stringifyEventInputs = (value) => stableStringify(value);
 
   useEffect(() => {
+    if (dirty) return;
     const serverSig = stringifyEventInputs(inputsByEventServer);
-    const serverUpdatedAt = Number(eventData?.inputsUpdatedAt || 0) || 0;
     if (pendingSavedInputsSigRef.current) {
-      if (serverSig === pendingSavedInputsSigRef.current || (serverUpdatedAt && serverUpdatedAt >= (lastSavedInputsAtRef.current || 0))) {
-        pendingSavedInputsSigRef.current = '';
-      }
+      if (serverSig !== pendingSavedInputsSigRef.current) return;
+      pendingSavedInputsSigRef.current = '';
     }
-    if (dirty && pendingSavedInputsSigRef.current) return;
-    if (dirty && !pendingSavedInputsSigRef.current) return;
     setDraft(cloneEventInputs(inputsByEventServer));
+  }, [inputsByEventServer, dirty]);
+
+  useEffect(() => {
+    const resetMap = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+    const prevMap = lastResetTokenByEventRef.current || {};
+    const changedIds = Object.keys(resetMap).filter((evId) => String(prevMap[evId] || '') !== String(resetMap[evId] || ''));
+    if (!changedIds.length) {
+      lastResetTokenByEventRef.current = { ...resetMap };
+      return;
+    }
+    lastResetTokenByEventRef.current = { ...resetMap };
+    pendingSavedInputsSigRef.current = '';
+    setDraft((prev) => {
+      const next = cloneEventInputs(prev);
+      changedIds.forEach((evId) => { if (Object.prototype.hasOwnProperty.call(next, evId)) delete next[evId]; });
+      return next;
+    });
+    setBingoUiState((prev) => {
+      const next = { ...(prev || {}) };
+      changedIds.forEach((evId) => {
+        next[evId] = { ...(next[evId] || {}), moveIndex: null };
+      });
+      return next;
+    });
     setDirty(false);
-  }, [inputsByEventServer, dirty, eventData?.inputsUpdatedAt]);
+  }, [eventData?.eventInputResets]);
 
   const inputsByEvent = draft || {};
 
@@ -745,32 +761,6 @@ export default function PlayerEventInput(){
       [evId]: { ...(prev?.[evId] || {}), moveIndex: null },
     }));
   };
-
-  useEffect(() => {
-    const resets = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
-    const changedIds = [];
-    Object.entries(resets).forEach(([evId, token]) => {
-      if (!token) return;
-      if (seenResetTokensRef.current[evId] === token) return;
-      seenResetTokensRef.current[evId] = token;
-      changedIds.push(String(evId));
-    });
-    if (!changedIds.length) return;
-    setDraft((prev) => {
-      const next = cloneEventInputs(prev);
-      changedIds.forEach((evId) => { delete next[evId]; });
-      return next;
-    });
-    setBingoUiState((prev) => {
-      const next = { ...(prev || {}) };
-      changedIds.forEach((evId) => {
-        next[evId] = { ...(next?.[evId] || {}), moveIndex: null };
-      });
-      return next;
-    });
-    pendingSavedInputsSigRef.current = '';
-    setDirty(false);
-  }, [eventData?.eventInputResets]);
 
   const getBingoRoomShared = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEvent?.[evId]?.person?.[pid]?.roomShared);
 
@@ -1221,37 +1211,19 @@ export default function PlayerEventInput(){
         merged[evId] = mSlot;
       });
 
-
       const targetEventId = eventId || ctxId;
-      let saved = false;
-      try {
-        if (typeof updateEventImmediate === 'function') {
-          await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: Date.now() }, false);
-          saved = true;
-        } else if (targetEventId) {
-          await setDoc(doc(db, 'events', targetEventId), { eventInputs: merged, inputsUpdatedAt: Date.now() }, { merge: true });
-          saved = true;
+      const writes = Object.entries(merged).map(async ([evId, slot]) => {
+        const slotHasPerson = !!(slot?.person && Object.keys(slot.person).length);
+        const slotHasShared = !!(slot?.shared && Object.keys(slot.shared).length);
+        if (!slotHasPerson && !slotHasShared) {
+          return setDoc(doc(db, 'events', targetEventId, 'eventInputs', String(evId)), {}, { merge: false });
         }
-      } catch (rootErr) {
-        console.warn('[PlayerEventInput] root eventInputs save failed, trying subcollection fallback:', rootErr);
-      }
-
-      if (!saved) {
-        if (!targetEventId) throw new Error('eventId missing');
-        const writes = Object.entries(merged).map(([evId, slot]) => {
-          const safeSlot = slot && typeof slot === 'object' ? JSON.parse(JSON.stringify(slot)) : {};
-          return setDoc(doc(db, 'events', targetEventId, 'eventInputs', String(evId)), {
-            evId: String(evId),
-            slot: safeSlot,
-            updatedAt: Date.now(),
-          }, { merge: true });
-        });
-        await Promise.all(writes);
-      }
+        return setDoc(doc(db, 'events', targetEventId, 'eventInputs', String(evId)), slot, { merge: false });
+      });
+      await Promise.all(writes);
 
       const savedClone = cloneEventInputs(merged);
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
-      lastSavedInputsAtRef.current = Date.now();
       setDraft(savedClone);
       setDirty(false);
       alert('저장되었습니다.');
@@ -1382,10 +1354,6 @@ export default function PlayerEventInput(){
           const isBingo = ev.template === 'bingo';
           const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
           const bingoSelectedHoles = isBingo ? normalizeBingoSelectedHoles(ev?.params?.selectedHoles) : [];
-          const bingoScoreHoleCount = isBingo ? normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount) : 16;
-          const bingoScoreHoles = isBingo
-            ? (bingoScoreHoleCount === 18 ? Array.from({ length: 18 }, (_, i) => i + 1) : bingoSelectedHoles)
-            : [];
           const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
           const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
@@ -1814,10 +1782,12 @@ export default function PlayerEventInput(){
           }
 
           if (isBingo) {
-            const bingoNickPct = 34;
-            const bingoOnePct = Math.max(6.2, 54 / Math.max(bingoScoreHoles.length || 1, 1));
-            const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoScoreHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
+            const bingoScoreHoles = bingoScoreHoleCount === 18 ? Array.from({ length: 18 }, (_, i) => i + 1) : bingoSelectedHoles;
+            const bingoNickPx = 118;
+            const bingoOnePx = bingoScoreHoleCount === 18 ? 42 : 48;
+            const bingoTotalPx = 56;
+            const bingoTableWidthPx = bingoNickPx + bingoScoreHoles.length * bingoOnePx + bingoTotalPx;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1866,11 +1836,11 @@ export default function PlayerEventInput(){
                 {bingoLocked && <div className={tCss.lockNotice}>빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                  <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
+                  <table className={tCss.table} style={{ width: `${bingoTableWidthPx}px`, minWidth: `${bingoTableWidthPx}px`, tableLayout: 'fixed' }}>
                     <colgroup>
-                      <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoScoreHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
-                      <col style={{ width: `${bingoTotalPct}%` }} />
+                      <col style={{ width: `${bingoNickPx}px` }} />
+                      {bingoScoreHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePx}px` }} />)}
+                      <col style={{ width: `${bingoTotalPx}px` }} />
                     </colgroup>
                     <thead>
                       <tr>
@@ -2296,7 +2266,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern={isHoleRankForce ? "[-+0-9.]*" : "[0-9.]*"}
+                                    pattern={isHoleRankForce ? "[0-9.+-]*" : "[0-9.]*"}
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"

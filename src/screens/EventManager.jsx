@@ -153,10 +153,10 @@ function isValidBingoParams(params) {
 
 function getBingoCountText(params) {
   const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
-  const inputHoleCount = Number(params?.scoreHoleCount) === 16 ? 16 : 18;
   const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
-  const base = `${inputHoleCount}홀 입력 · 빙고 ${holeCount}홀`;
-  return zoneCount ? `${base} · SZ ${zoneCount}` : base;
+  const scoreHoleCount = Number(params?.scoreHoleCount) === 16 ? 16 : 18;
+  const prefix = scoreHoleCount === 18 ? '18홀 입력' : '16홀 입력';
+  return zoneCount ? `${prefix} · ${holeCount}홀 · SZ ${zoneCount}` : `${prefix} · ${holeCount}홀`;
 }
 
 
@@ -738,40 +738,29 @@ if (form.template === 'group-battle') {
   // ★ 입력 초기화(해당 이벤트의 person/room/team 입력을 비움)
   const clearInputs = async (ev) => {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
+    const evId = String(ev?.id || '');
     const all = { ...(eventData?.eventInputs || {}) };
-    delete all[ev.id];
+    delete all[evId];
     const resetToken = Date.now();
-    const resets = { ...(eventData?.eventInputResets || {}) , [ev.id]: resetToken };
 
     try {
       if (eventId) {
         await updateDoc(doc(db, 'events', eventId), {
-          [`eventInputs.${ev.id}`]: deleteField(),
-          [`eventInputResets.${ev.id}`]: resetToken,
+          [`eventInputs.${evId}`]: deleteField(),
+          [`eventInputResets.${evId}`]: resetToken,
           inputsUpdatedAt: serverTimestamp(),
         });
-
         try {
-          await deleteDoc(doc(db, 'events', eventId, 'eventInputs', String(ev.id)));
-        } catch (subOneErr) {
-          try {
-            const qs = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
-            const jobs = [];
-            qs.forEach((d) => {
-              const row = d.data() || {};
-              if (String(row?.evId || '').trim() === String(ev.id)) jobs.push(deleteDoc(d.ref));
-            });
-            if (jobs.length) await Promise.all(jobs);
-          } catch (subErr) {
-            console.warn('[clearInputs] subcollection cleanup failed:', subErr);
-          }
+          await deleteDoc(doc(db, 'events', eventId, 'eventInputs', evId));
+        } catch (subErr) {
+          console.warn('[clearInputs] subcollection cleanup failed:', subErr);
         }
       }
     } catch (e) {
       console.warn('[clearInputs] remote patch failed:', e);
     }
 
-    await updateEventImmediate({ eventInputs: all, eventInputResets: resets, inputsUpdatedAt: Date.now() }, false);
+    await updateEventImmediate({ eventInputs: all, eventInputResets: { ...((eventData?.eventInputResets)||{}), [evId]: resetToken }, inputsUpdatedAt: Date.now() }, false);
     try { broadcastEventSync(eventId, { reason: 'clearInputs' }); } catch {}
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));

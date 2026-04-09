@@ -253,6 +253,7 @@ export function EventProvider({ children }) {
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
+  const eventInputsDocsRef = useRef({});
 
   // ✅ scores 서브컬렉션 SSOT: Admin↔Player 공용 점수 맵(읽기 전용, 루트 문서에 미러링하지 않음)
   const [scoresMap, setScoresMap] = useState({});
@@ -267,7 +268,6 @@ export function EventProvider({ children }) {
   const lastScoresSnapshotAtRef = useRef(0);
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
-  const eventInputsSubMapRef = useRef({});
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -315,7 +315,6 @@ export function EventProvider({ children }) {
     queuedUpdatesRef.current = null;
     setEventData(null);
     lastEventDataRef.current = null;
-    eventInputsSubMapRef.current = {};
     scoresMapRef.current = {};
     setScoresMap({});
     scoresReadyRef.current = false;
@@ -368,6 +367,13 @@ export function EventProvider({ children }) {
     return { ...d, playerGate: { steps: normSteps, step1 } };
   };
 
+  const mergeEventInputsRootAndDocs = useCallback((rootInputs, docInputs) => {
+    const root = (rootInputs && typeof rootInputs === 'object') ? rootInputs : {};
+    const sub = (docInputs && typeof docInputs === 'object') ? docInputs : {};
+    return { ...root, ...sub };
+  }, []);
+
+
   // 전체 이벤트 구독
   useEffect(() => {
     let unsub = null,
@@ -386,22 +392,9 @@ export function EventProvider({ children }) {
     };
   }, []);
 
-
-  const mergeEventInputsOverlay = (rootInputs, subInputs) => {
-    const out = { ...((rootInputs && typeof rootInputs === 'object') ? rootInputs : {}) };
-    const overlay = (subInputs && typeof subInputs === 'object') ? subInputs : {};
-    Object.entries(overlay).forEach(([evId, slot]) => {
-      if (slot == null) delete out[evId];
-      else out[evId] = slot;
-    });
-    return out;
-  };
-
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
     const withGate = normalizePlayerGate(withPV);
-
-    withGate.eventInputs = mergeEventInputsOverlay(withGate?.eventInputs, eventInputsSubMapRef.current);
 
     try {
       const modeNow = normalizeMode(withGate?.mode || 'stroke');
@@ -413,10 +406,14 @@ export function EventProvider({ children }) {
       withGate.participants = mergedArr;
     } catch {}
 
+    const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
+    withGate._eventInputsRoot = rootInputs;
+    withGate.eventInputs = mergeEventInputsRootAndDocs(rootInputs, eventInputsDocsRef.current || {});
+
     setEventData(withGate);
     lastEventDataRef.current = withGate;
     return withGate;
-  }, []);
+  }, [mergeEventInputsRootAndDocs]);
 
   const refreshEventNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
@@ -509,7 +506,7 @@ export function EventProvider({ children }) {
 
   useEffect(() => {
     if (!eventId) {
-      eventInputsSubMapRef.current = {};
+      eventInputsDocsRef.current = {};
       return;
     }
     let unsub = null;
@@ -518,31 +515,28 @@ export function EventProvider({ children }) {
       if (cancelled) return;
       const colRef = collection(db, 'events', eventId, 'eventInputs');
       unsub = onSnapshot(colRef, (snap) => {
-        const next = {};
+        const nextInputs = {};
         snap.forEach((d) => {
           const data = d.data() || {};
-          const evId = String(data?.evId || d.id || '');
-          if (!evId) return;
-          const slot = (data?.slot && typeof data.slot === 'object')
-            ? data.slot
-            : (() => {
-                const cp = { ...data };
-                delete cp.evId;
-                delete cp.updatedAt;
-                return cp;
-              })();
-          next[evId] = slot;
+          nextInputs[String(d.id)] = data && typeof data === 'object' ? data : {};
         });
-        eventInputsSubMapRef.current = next;
-        const base = lastEventDataRef.current || {};
-        applyIncomingEventData({ ...base, eventInputs: { ...((base && base.eventInputs) || {}) } });
+        eventInputsDocsRef.current = nextInputs;
+        setEventData((prev) => {
+          const base = prev || lastEventDataRef.current || {};
+          const rootInputs = (base?._eventInputsRoot && typeof base._eventInputsRoot === 'object')
+            ? base._eventInputsRoot
+            : ((base?.eventInputs && typeof base.eventInputs === 'object') ? base.eventInputs : {});
+          const next = { ...base, _eventInputsRoot: rootInputs, eventInputs: mergeEventInputsRootAndDocs(rootInputs, nextInputs) };
+          lastEventDataRef.current = next;
+          return next;
+        });
       });
     });
     return () => {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, applyIncomingEventData]);
+  }, [eventId, mergeEventInputsRootAndDocs]);
 
   useEffect(() => {
     if (!eventId) return;
