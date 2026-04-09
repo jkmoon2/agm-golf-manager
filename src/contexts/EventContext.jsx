@@ -259,6 +259,7 @@ export function EventProvider({ children }) {
   const scoresMapRef = useRef({});
   const [scoresReady, setScoresReady] = useState(false);
   const scoresReadyRef = useRef(false);
+  const eventInputsSubRef = useRef({});
 
   const lastEventDataRef = useRef(null);
   const queuedUpdatesRef = useRef(null);
@@ -267,7 +268,6 @@ export function EventProvider({ children }) {
   const lastScoresSnapshotAtRef = useRef(0);
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
-  const eventInputsOverlayRef = useRef({});
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -390,12 +390,6 @@ export function EventProvider({ children }) {
     const withGate = normalizePlayerGate(withPV);
 
     try {
-      const baseInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
-      const overlayInputs = (eventInputsOverlayRef.current && typeof eventInputsOverlayRef.current === 'object') ? eventInputsOverlayRef.current : {};
-      withGate.eventInputs = { ...baseInputs, ...overlayInputs };
-    } catch {}
-
-    try {
       const modeNow = normalizeMode(withGate?.mode || 'stroke');
       const field = participantsFieldByMode(modeNow);
       const primaryArr = Array.isArray(withGate?.[field]) ? normalizeParticipantsRoomFields(withGate[field]) : [];
@@ -403,6 +397,19 @@ export function EventProvider({ children }) {
       const mergedArr = primaryArr.length ? mergeParticipantsById(primaryArr, legacyArr) : legacyArr;
       withGate[field] = mergedArr;
       withGate.participants = mergedArr;
+    } catch {}
+
+    try {
+      const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
+      const subInputs = eventInputsSubRef.current || {};
+      Object.entries(subInputs).forEach(([evId, slot]) => {
+        if (!evId) return;
+        const prev = (rootInputs[evId] && typeof rootInputs[evId] === 'object') ? rootInputs[evId] : {};
+        const next = { ...prev, ...(slot || {}) };
+        if (prev.person || slot?.person) next.person = { ...(prev.person || {}), ...((slot && slot.person) || {}) };
+        rootInputs[evId] = next;
+      });
+      withGate.eventInputs = rootInputs;
     } catch {}
 
     setEventData(withGate);
@@ -498,27 +505,24 @@ export function EventProvider({ children }) {
       if (unsub) unsub();
     };
   }, [eventId, applyIncomingEventData, clearCurrentEventSelection]);
-
   useEffect(() => {
     if (!eventId) {
-      eventInputsOverlayRef.current = {};
+      eventInputsSubRef.current = {};
       return;
     }
-    let unsub = null;
-    let cancelled = false;
+    let unsub = null, cancelled = false;
     ensureAuthed().then(() => {
       if (cancelled) return;
       const colRef = collection(db, 'events', eventId, 'eventInputs');
       unsub = onSnapshot(colRef, (snap) => {
-        const overlay = {};
+        const next = {};
         snap.forEach((d) => {
-          const raw = d.data() || {};
-          const evKey = String(raw?.evId || d.id || '').trim();
-          if (!evKey) return;
-          const { evId, updatedAt, ...rest } = raw;
-          overlay[evKey] = rest;
+          const row = d.data() || {};
+          const key = String(row?.evId || d.id || '').trim();
+          if (!key) return;
+          next[key] = row;
         });
-        eventInputsOverlayRef.current = overlay;
+        eventInputsSubRef.current = next;
         if (lastEventDataRef.current) {
           applyIncomingEventData(lastEventDataRef.current);
         }
@@ -529,6 +533,7 @@ export function EventProvider({ children }) {
       if (unsub) unsub();
     };
   }, [eventId, applyIncomingEventData]);
+
 
   useEffect(() => {
     if (!eventId) return;
