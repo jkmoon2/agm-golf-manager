@@ -1,15 +1,13 @@
 // /src/eventTemplates/bingo/BingoEditor.jsx
 
 import React, { useMemo, useState } from 'react';
-import { defaultBingoParams, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { defaultBingoParams, isValidBingoSelectedHoles, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
 
 const HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
 const POSITIONS = Array.from({ length: 16 }, (_, i) => i + 1);
 
-function getSummary(selectedHoles, scoreHoleCount) {
+function getSummary(selectedHoles) {
   const count = selectedHoles.length;
-  const mode = normalizeBingoScoreHoleCount(scoreHoleCount);
-  if (mode === 18) return '18홀 입력 · 16개홀 빙고 적용';
   if (count === 16) return '16개 선택 완료';
   if (count > 16) return `${count}개 선택 · ${count - 16}개 더 해제`; 
   return `${count}개 선택`;
@@ -31,8 +29,8 @@ export default function BingoEditor({ value, onChange }) {
 
   const selectedHoles = safe.selectedHoles;
   const specialZones = safe.specialZones;
-  const scoreHoleCount = normalizeBingoScoreHoleCount(safe.scoreHoleCount);
   const [openKey, setOpenKey] = useState('');
+  const scoreHoleCount = normalizeBingoScoreHoleCount(safe.scoreHoleCount);
 
   const emit = (next) => {
     if (typeof onChange === 'function') onChange(next);
@@ -60,22 +58,21 @@ export default function BingoEditor({ value, onChange }) {
     <div style={box}>
       <AccordionBox
         title="사용 홀 선택"
-        summary={getSummary(selectedHoles, scoreHoleCount)}
+        summary={getSummary(selectedHoles)}
         open={openKey === 'holes'}
         onToggle={() => setOpenKey((prev) => (prev === 'holes' ? '' : 'holes'))}
       >
-        <div style={modeWrap}>
-          <span style={countText}>입력 홀수</span>
-          <div style={modeSegment}>
-            <button type="button" onClick={() => emit({ ...safe, scoreHoleCount: 16 })} style={{ ...modeBtn, ...(scoreHoleCount === 16 ? modeBtnActive : modeBtnIdle) }}>16홀</button>
-            <button type="button" onClick={() => emit({ ...safe, scoreHoleCount: 18 })} style={{ ...modeBtn, ...(scoreHoleCount === 18 ? modeBtnActive : modeBtnIdle) }}>18홀</button>
+        <div style={{ ...countTextWrap, alignItems: 'flex-start' }}>
+          <div style={{ display:'grid', gap:4 }}>
+            <span style={countText}>{selectedHoles.length}/18 선택</span>
+            <span style={{ ...countText, color: scoreHoleCount === 18 ? '#177a45' : (isValidBingoSelectedHoles(selectedHoles) ? '#177a45' : '#5b6f95') }}>
+              {scoreHoleCount === 18 ? '18홀 입력 · 빙고 반영은 선택된 16홀만 적용' : (isValidBingoSelectedHoles(selectedHoles) ? '완료' : '2개를 해제해 16홀로 맞춰주세요')}
+            </span>
           </div>
-        </div>
-        <div style={countTextWrap}>
-          <span style={countText}>{selectedHoles.length}/18 선택</span>
-          <span style={{ ...countText, color: selectedHoles.length === 16 ? '#177a45' : '#5b6f95' }}>
-            {scoreHoleCount === 18 ? '18홀 모두 입력, 빙고는 선택된 16홀만 반영' : (selectedHoles.length === 16 ? '완료' : '2개를 해제해 16홀로 맞춰주세요')}
-          </span>
+          <div style={modeSwitchWrap}>
+            <button type="button" onClick={() => emit({ ...safe, scoreHoleCount: 16 })} style={{ ...modeSwitchBtn, ...(scoreHoleCount===16 ? modeSwitchBtnActive : modeSwitchBtnIdle) }}>16홀</button>
+            <button type="button" onClick={() => emit({ ...safe, scoreHoleCount: 18 })} style={{ ...modeSwitchBtn, ...(scoreHoleCount===18 ? modeSwitchBtnActive : modeSwitchBtnIdle) }}>18홀</button>
+          </div>
         </div>
         <div style={chipWrap}>
           {HOLES.map((holeNo) => {
@@ -189,42 +186,6 @@ const countText = {
   fontWeight: 700,
   color: '#16376c',
 };
-
-const modeWrap = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 10,
-  marginBottom: 10,
-  flexWrap: 'wrap',
-};
-const modeSegment = {
-  display: 'inline-flex',
-  border: '1px solid #cfd8ea',
-  borderRadius: 999,
-  background: '#f5f8ff',
-  padding: 3,
-  gap: 4,
-};
-const modeBtn = {
-  minWidth: 72,
-  minHeight: 34,
-  borderRadius: 999,
-  border: 0,
-  fontWeight: 800,
-  fontSize: 14,
-  cursor: 'pointer',
-};
-const modeBtnActive = {
-  background: '#2457d6',
-  color: '#fff',
-  boxShadow: '0 1px 3px rgba(36,87,214,.25)',
-};
-const modeBtnIdle = {
-  background: 'transparent',
-  color: '#2457d6',
-};
-
 const chipWrap = {
   display: 'grid',
   gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
@@ -252,3 +213,8 @@ const chipInactive = {
   background: '#f5f6f8',
   color: '#8a94a5',
 };
+
+const modeSwitchWrap = { display:'inline-flex', alignItems:'center', gap:8, padding:'4px', border:'1px solid #d5deeb', borderRadius: 999, background:'#f6f8fb' };
+const modeSwitchBtn = { minWidth:64, height:34, borderRadius:999, fontWeight:800, fontSize:14, cursor:'pointer', border:'1px solid transparent', padding:'0 14px' };
+const modeSwitchBtnActive = { background:'#2f6cf5', color:'#fff', boxShadow:'0 1px 3px rgba(0,0,0,.12)' };
+const modeSwitchBtnIdle = { background:'transparent', color:'#49618b' };

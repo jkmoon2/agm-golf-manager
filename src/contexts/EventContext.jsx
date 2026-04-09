@@ -253,7 +253,6 @@ export function EventProvider({ children }) {
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
-  const eventInputsDocsRef = useRef({});
 
   // ✅ scores 서브컬렉션 SSOT: Admin↔Player 공용 점수 맵(읽기 전용, 루트 문서에 미러링하지 않음)
   const [scoresMap, setScoresMap] = useState({});
@@ -268,6 +267,7 @@ export function EventProvider({ children }) {
   const lastScoresSnapshotAtRef = useRef(0);
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
+  const eventInputsOverlayRef = useRef({});
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -367,13 +367,6 @@ export function EventProvider({ children }) {
     return { ...d, playerGate: { steps: normSteps, step1 } };
   };
 
-  const mergeEventInputsRootAndDocs = useCallback((rootInputs, docInputs) => {
-    const root = (rootInputs && typeof rootInputs === 'object') ? rootInputs : {};
-    const sub = (docInputs && typeof docInputs === 'object') ? docInputs : {};
-    return { ...root, ...sub };
-  }, []);
-
-
   // 전체 이벤트 구독
   useEffect(() => {
     let unsub = null,
@@ -397,6 +390,12 @@ export function EventProvider({ children }) {
     const withGate = normalizePlayerGate(withPV);
 
     try {
+      const baseInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
+      const overlayInputs = (eventInputsOverlayRef.current && typeof eventInputsOverlayRef.current === 'object') ? eventInputsOverlayRef.current : {};
+      withGate.eventInputs = { ...baseInputs, ...overlayInputs };
+    } catch {}
+
+    try {
       const modeNow = normalizeMode(withGate?.mode || 'stroke');
       const field = participantsFieldByMode(modeNow);
       const primaryArr = Array.isArray(withGate?.[field]) ? normalizeParticipantsRoomFields(withGate[field]) : [];
@@ -406,14 +405,10 @@ export function EventProvider({ children }) {
       withGate.participants = mergedArr;
     } catch {}
 
-    const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? withGate.eventInputs : {};
-    withGate._eventInputsRoot = rootInputs;
-    withGate.eventInputs = mergeEventInputsRootAndDocs(rootInputs, eventInputsDocsRef.current || {});
-
     setEventData(withGate);
     lastEventDataRef.current = withGate;
     return withGate;
-  }, [mergeEventInputsRootAndDocs]);
+  }, []);
 
   const refreshEventNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
@@ -506,7 +501,7 @@ export function EventProvider({ children }) {
 
   useEffect(() => {
     if (!eventId) {
-      eventInputsDocsRef.current = {};
+      eventInputsOverlayRef.current = {};
       return;
     }
     let unsub = null;
@@ -515,28 +510,25 @@ export function EventProvider({ children }) {
       if (cancelled) return;
       const colRef = collection(db, 'events', eventId, 'eventInputs');
       unsub = onSnapshot(colRef, (snap) => {
-        const nextInputs = {};
+        const overlay = {};
         snap.forEach((d) => {
-          const data = d.data() || {};
-          nextInputs[String(d.id)] = data && typeof data === 'object' ? data : {};
+          const raw = d.data() || {};
+          const evKey = String(raw?.evId || d.id || '').trim();
+          if (!evKey) return;
+          const { evId, updatedAt, ...rest } = raw;
+          overlay[evKey] = rest;
         });
-        eventInputsDocsRef.current = nextInputs;
-        setEventData((prev) => {
-          const base = prev || lastEventDataRef.current || {};
-          const rootInputs = (base?._eventInputsRoot && typeof base._eventInputsRoot === 'object')
-            ? base._eventInputsRoot
-            : ((base?.eventInputs && typeof base.eventInputs === 'object') ? base.eventInputs : {});
-          const next = { ...base, _eventInputsRoot: rootInputs, eventInputs: mergeEventInputsRootAndDocs(rootInputs, nextInputs) };
-          lastEventDataRef.current = next;
-          return next;
-        });
+        eventInputsOverlayRef.current = overlay;
+        if (lastEventDataRef.current) {
+          applyIncomingEventData(lastEventDataRef.current);
+        }
       });
     });
     return () => {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, mergeEventInputsRootAndDocs]);
+  }, [eventId, applyIncomingEventData]);
 
   useEffect(() => {
     if (!eventId) return;

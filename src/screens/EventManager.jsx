@@ -26,7 +26,7 @@ import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import { computeHoleRankForce } from '../events/holeRankForce';
-import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
+import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 
 
@@ -148,15 +148,17 @@ const fmt2 = (x) => {
 };
 
 function isValidBingoParams(params) {
-  return normalizeBingoSelectedHoles(params?.selectedHoles).length === 16;
+  const scoreHoleCount = normalizeBingoScoreHoleCount(params?.scoreHoleCount);
+  const holesLen = normalizeBingoSelectedHoles(params?.selectedHoles).length;
+  return scoreHoleCount === 18 ? holesLen === 16 : holesLen === 16;
 }
 
 function getBingoCountText(params) {
   const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
   const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
-  const scoreHoleCount = Number(params?.scoreHoleCount) === 16 ? 16 : 18;
-  const prefix = scoreHoleCount === 18 ? '18홀 입력' : '16홀 입력';
-  return zoneCount ? `${prefix} · ${holeCount}홀 · SZ ${zoneCount}` : `${prefix} · ${holeCount}홀`;
+  const scoreHoleCount = normalizeBingoScoreHoleCount(params?.scoreHoleCount);
+  const left = scoreHoleCount === 18 ? `18홀 입력 · 빙고 ${holeCount}홀` : `${holeCount}홀`;
+  return zoneCount ? `${left} · SZ ${zoneCount}` : left;
 }
 
 
@@ -738,29 +740,39 @@ if (form.template === 'group-battle') {
   // ★ 입력 초기화(해당 이벤트의 person/room/team 입력을 비움)
   const clearInputs = async (ev) => {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
-    const evId = String(ev?.id || '');
     const all = { ...(eventData?.eventInputs || {}) };
-    delete all[evId];
-    const resetToken = Date.now();
+    delete all[ev.id];
+    const nextResetToken = Date.now();
 
     try {
       if (eventId) {
         await updateDoc(doc(db, 'events', eventId), {
-          [`eventInputs.${evId}`]: deleteField(),
-          [`eventInputResets.${evId}`]: resetToken,
+          [`eventInputs.${ev.id}`]: deleteField(),
+          [`eventInputResets.${ev.id}`]: nextResetToken,
           inputsUpdatedAt: serverTimestamp(),
         });
+
         try {
-          await deleteDoc(doc(db, 'events', eventId, 'eventInputs', evId));
+          await deleteDoc(doc(db, 'events', eventId, 'eventInputs', String(ev.id)));
         } catch (subErr) {
-          console.warn('[clearInputs] subcollection cleanup failed:', subErr);
+          try {
+            const qs = await getDocs(collection(db, 'events', eventId, 'eventInputs'));
+            const jobs = [];
+            qs.forEach((d) => {
+              const row = d.data() || {};
+              if (String(row?.evId || '').trim() === String(ev.id)) jobs.push(deleteDoc(d.ref));
+            });
+            if (jobs.length) await Promise.all(jobs);
+          } catch (subErr2) {
+            console.warn('[clearInputs] subcollection cleanup failed:', subErr2);
+          }
         }
       }
     } catch (e) {
       console.warn('[clearInputs] remote patch failed:', e);
     }
 
-    await updateEventImmediate({ eventInputs: all, eventInputResets: { ...((eventData?.eventInputResets)||{}), [evId]: resetToken }, inputsUpdatedAt: Date.now() }, false);
+    await updateEventImmediate({ eventInputs: all, eventInputResets: { ...((eventData?.eventInputResets) || {}), [ev.id]: nextResetToken }, inputsUpdatedAt: Date.now() }, false);
     try { broadcastEventSync(eventId, { reason: 'clearInputs' }); } catch {}
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));

@@ -7,10 +7,10 @@ import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { ALL_HOLES, computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
@@ -690,61 +690,79 @@ export default function PlayerEventInput(){
     }
   };
 
+  const sortDeep = (value) => {
+    if (Array.isArray(value)) return value.map(sortDeep);
+    if (value && typeof value === 'object') {
+      const out = {};
+      Object.keys(value).sort().forEach((key) => {
+        out[key] = sortDeep(value[key]);
+      });
+      return out;
+    }
+    return value;
+  };
+
   const stringifyEventInputs = (value) => {
     try {
-      return JSON.stringify(value || {});
+      return JSON.stringify(sortDeep(value || {}));
     } catch {
       return '';
     }
   };
 
-  const hasMeaningfulEventInputs = (value) => {
-    try {
-      const all = (value && typeof value === 'object') ? value : {};
-      return Object.values(all).some((slot) => {
-        if (!slot || typeof slot !== 'object') return false;
-        const person = (slot.person && typeof slot.person === 'object') ? slot.person : {};
-        const hasPersonData = Object.values(person).some((entry) => {
-          if (entry == null || entry === '') return false;
-          if (typeof entry !== 'object') return String(entry).trim() !== '';
-          if (Array.isArray(entry.values) && entry.values.some((x) => String(x ?? '').trim() !== '')) return true;
-          if (Array.isArray(entry.board) && entry.board.some((x) => String(x ?? '').trim() !== '')) return true;
-          if (Array.isArray(entry.memberIds) && entry.memberIds.some((x) => String(x || '').trim() !== '')) return true;
-          if (entry.roomShared) return true;
-          return false;
-        });
-        if (hasPersonData) return true;
-        const shared = slot.shared;
-        return !!(shared && typeof shared === 'object' && Object.keys(shared).length);
-      });
-    } catch {
-      return false;
-    }
+  const hasAnyEventInputData = (value) => {
+    if (!value || typeof value !== 'object') return false;
+    return Object.keys(value).some((evId) => {
+      const slot = value?.[evId];
+      if (!slot || typeof slot !== 'object') return false;
+      const person = slot.person && typeof slot.person === 'object' ? slot.person : {};
+      if (Object.keys(person).length > 0) return true;
+      return !!(slot.shared && typeof slot.shared === 'object' && Object.keys(slot.shared).length > 0);
+    });
   };
 
   useEffect(() => {
     const serverSig = stringifyEventInputs(inputsByEventServer);
     const draftSig = stringifyEventInputs(draft);
-    const serverHasData = hasMeaningfulEventInputs(inputsByEventServer);
-    const draftHasData = hasMeaningfulEventInputs(draft);
-    const shouldHydrateEmptyDraft = serverHasData && !draftHasData;
-
+    const hasServer = hasAnyEventInputData(inputsByEventServer);
+    const hasDraft = hasAnyEventInputData(draft);
     if (pendingSavedInputsSigRef.current) {
-      if (serverSig !== pendingSavedInputsSigRef.current && !shouldHydrateEmptyDraft) return;
-      pendingSavedInputsSigRef.current = '';
+      if (serverSig === pendingSavedInputsSigRef.current) {
+        pendingSavedInputsSigRef.current = '';
+      } else if (dirty && hasDraft) {
+        return;
+      }
     }
-
-    if (dirty && !shouldHydrateEmptyDraft) return;
-    if (draftSig === serverSig) {
-      if (dirty) setDirty(false);
-      return;
+    if (dirty && hasDraft && draftSig !== serverSig) return;
+    if (!hasDraft || draftSig !== serverSig) {
+      setDraft(cloneEventInputs(inputsByEventServer));
     }
-
-    setDraft(cloneEventInputs(inputsByEventServer));
-    if (dirty || shouldHydrateEmptyDraft) setDirty(false);
-  }, [inputsByEventServer, draft, dirty]);
+    if (draftSig === serverSig) setDirty(false);
+  }, [inputsByEventServer, dirty]);
 
   const inputsByEvent = draft || {};
+
+  useEffect(() => {
+    const resetMap = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+    const changedIds = Object.keys(resetMap).filter((evId) => {
+      const nextToken = String(resetMap?.[evId] ?? '');
+      return nextToken && String(eventInputRefs.current?.[`reset:${evId}`] || '') !== nextToken;
+    });
+    if (!changedIds.length) return;
+    setDraft((prev) => {
+      const all = { ...(prev || {}) };
+      changedIds.forEach((evId) => { delete all[evId]; });
+      return all;
+    });
+    setBingoUiState((prev) => {
+      const next = { ...(prev || {}) };
+      changedIds.forEach((evId) => { delete next[evId]; });
+      return next;
+    });
+    changedIds.forEach((evId) => { eventInputRefs.current[`reset:${evId}`] = String(resetMap?.[evId] ?? ''); });
+    pendingSavedInputsSigRef.current = '';
+    setDirty(false);
+  }, [eventData?.eventInputResets]);
 
   const getBingoRoomMemberIds = () => roomMembers.filter(Boolean).map((p) => String(p.id));
 
@@ -1202,22 +1220,29 @@ export default function PlayerEventInput(){
           if (val === '' || val == null || isEmptyPick || isEmptyBingo || isEmptyBattleScore || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
             delete mPerson[pid];
           } else {
-            mPerson[pid] = val;
+            mPerson[pid] = JSON.parse(JSON.stringify(val));
           }
         });
 
         mSlot.person = mPerson;
         if (slot?.shared && typeof slot.shared === 'object') {
           mSlot.shared = JSON.parse(JSON.stringify(slot.shared));
+        } else {
+          delete mSlot.shared;
         }
         merged[evId] = mSlot;
       });
 
-
-      if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged }, false);
+      const targetDocId = String(events?.[0]?.id || '');
+      if (!targetDocId) throw new Error('저장 대상 이벤트를 찾을 수 없습니다.');
+      const saveSlot = merged[targetDocId] && typeof merged[targetDocId] === 'object' ? merged[targetDocId] : {};
+      const hasPerson = !!(saveSlot.person && Object.keys(saveSlot.person || {}).length);
+      const hasShared = !!(saveSlot.shared && Object.keys(saveSlot.shared || {}).length);
+      const subRef = doc(db, 'events', eventId || ctxId, 'eventInputs', targetDocId);
+      if (!hasPerson && !hasShared) {
+        try { await deleteDoc(subRef); } catch {}
       } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
+        await setDoc(subRef, { evId: targetDocId, ...JSON.parse(JSON.stringify(saveSlot)), updatedAt: Date.now() }, { merge: false });
       }
 
       const savedClone = cloneEventInputs(merged);
@@ -1352,6 +1377,8 @@ export default function PlayerEventInput(){
           const isBingo = ev.template === 'bingo';
           const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
           const bingoSelectedHoles = isBingo ? normalizeBingoSelectedHoles(ev?.params?.selectedHoles) : [];
+          const bingoScoreHoleCount = isBingo ? normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount) : 16;
+          const bingoScoreHoles = isBingo ? (bingoScoreHoleCount === 18 ? ALL_HOLES : bingoSelectedHoles) : [];
           const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
           const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
@@ -1781,9 +1808,9 @@ export default function PlayerEventInput(){
 
           if (isBingo) {
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
+            const bingoOnePct = 44;
             const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoTableMinWidthPx = 112 + bingoScoreHoles.length * bingoOnePct + 64;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1794,7 +1821,7 @@ export default function PlayerEventInput(){
             const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
             const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
             const bingoCanEditBoard = !!bingoSharedMode || bingoOwnSelected;
-            const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
+            const bingoRawSubtotal = bingoScoreHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
@@ -1832,22 +1859,22 @@ export default function PlayerEventInput(){
                 {bingoLocked && <div className={tCss.lockNotice}>빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                  <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
+                  <table className={tCss.table} style={{ width: 'max-content', minWidth: `${bingoTableMinWidthPx}px` }}>
                     <colgroup>
-                      <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
-                      <col style={{ width: `${bingoTotalPct}%` }} />
+                      <col style={{ width: '112px' }} />
+                      {bingoScoreHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}px` }} />)}
+                      <col style={{ width: '64px' }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
-                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        {bingoScoreHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
                         <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoScoreHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
@@ -1858,7 +1885,7 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={`bingo-row-${rIdx}`}>
                             <td>{p ? p.nickname : ''}</td>
-                            {bingoSelectedHoles.map((holeNo) => {
+                            {bingoScoreHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
@@ -2262,7 +2289,7 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern={isHoleRankForce ? "[0-9.+-]*" : "[0-9.]*"}
+                                    pattern={isHoleRankForce ? "[-+0-9.]*" : "[0-9.]*"}
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
