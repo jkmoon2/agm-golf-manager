@@ -10,7 +10,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
@@ -33,6 +33,9 @@ const LONG_PRESS_MS = 450;
 const BINGO_MODE_BUTTON_FONT_SIZE = 16;
 const BINGO_COUNT_NUMBER_FONT_SIZE = 24;
 const BINGO_COUNT_LABEL_FONT_SIZE = 14;
+const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
+const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
+const BINGO_ALL_HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -131,7 +134,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
           />
         </svg>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: holeNo ? BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE : BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
@@ -776,9 +779,10 @@ export default function PlayerEventInput(){
 
     const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
 
-    // ★ patch
-    // 마운트/재진입 직후 첫 스냅샷은 기준값으로만 등록한다.
-    // 서버에 과거 reset 토큰이 남아 있어도 이번에 새 reset이 발생한 것으로 오인하면 안 된다.
+    // ★ 핵심 패치
+    // 마운트/재진입 직후에는 서버에 "과거 reset 토큰"이 남아 있어도
+    // 이를 "방금 발생한 reset"으로 오인하면 안 됨.
+    // 첫 스냅샷은 기준값으로만 저장하고, 그 다음 실제 변경분만 반영한다.
     if (!resetTokensReadyRef.current) {
       resetTokensReadyRef.current = true;
       resetTokenRef.current = { ...nextTokens };
@@ -812,7 +816,7 @@ export default function PlayerEventInput(){
       });
     }
     resetTokenRef.current = { ...nextTokens };
-  }, [eventData?.eventInputResets, eventId, ctxId]);
+  }, [eventId, ctxId, eventData?.eventInputResets]);
 
   const inputsByEvent = draft || {};
 
@@ -1856,10 +1860,12 @@ export default function PlayerEventInput(){
           }
 
           if (isBingo) {
+            const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
+            const bingoInputHoles = bingoScoreHoleCount === 18 ? BINGO_ALL_HOLES : bingoSelectedHoles;
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
+            const bingoOnePct = Math.max(8.5, 54 / Math.max(bingoInputHoles.length || 1, 1));
             const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoTableWidthPct = bingoNickPct + bingoInputHoles.length * bingoOnePct + bingoTotalPct;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1911,19 +1917,19 @@ export default function PlayerEventInput(){
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
                     <colgroup>
                       <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
+                      {bingoInputHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
                       <col style={{ width: `${bingoTotalPct}%` }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
-                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        {bingoInputHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
                         <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
@@ -1934,7 +1940,7 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={`bingo-row-${rIdx}`}>
                             <td>{p ? p.nickname : ''}</td>
-                            {bingoSelectedHoles.map((holeNo) => {
+                            {bingoInputHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
@@ -1987,11 +1993,14 @@ export default function PlayerEventInput(){
                       })}
                       <tr className={tCss.subtotalRow}>
                         <td className={tCss.subtotalLabel}>합계</td>
-                        {bingoRawSubtotal.map((item) => (
+                        {bingoInputHoles.map((holeNo) => {
+                          const item = bingoRawSubtotal.find((entry) => Number(entry?.holeNo) === Number(holeNo)) || { holeNo, sum: '', hasAny: false };
+                          return (
                           <td key={`bingo-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
                             {item.hasAny ? formatDisplayNumber(item.sum) : ''}
                           </td>
-                        ))}
+                          );
+                        })}
                         <td className={tCss.subtotalRed}>{bingoRawGrandHasAny ? formatDisplayNumber(bingoRawGrandTotal) : ''}</td>
                       </tr>
                     </tbody>
@@ -2261,7 +2270,8 @@ export default function PlayerEventInput(){
                               </td>
                               <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{row.handicapSum !== '' ? row.handicapSum : ''}</td>
                             </tr>
-                          ))}
+                            );
+                        })}
                         </tbody>
                       </table>
                     </div>
@@ -2405,7 +2415,8 @@ export default function PlayerEventInput(){
                           <td key={`raw-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
                             {item.hasAny ? formatDisplayNumber(item.sum) : ''}
                           </td>
-                        ))}
+                          );
+                        })}
                         <td className={tCss.subtotalRed}>
                           {rawGrandHasAny ? formatDisplayNumber(rawGrandTotal) : ''}
                         </td>
@@ -2462,7 +2473,8 @@ export default function PlayerEventInput(){
                             <td key={`forced-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
                               {item.hasAny ? formatDisplayNumber(item.sum) : ''}
                             </td>
-                          ))}
+                            );
+                        })}
                           <td className={tCss.subtotalRed}>
                             {forcedGrandHasAny ? formatDisplayNumber(forcedGrandTotal) : ''}
                           </td>
