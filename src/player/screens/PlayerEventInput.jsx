@@ -28,6 +28,52 @@ function getPlayerTabId(){
 function playerStorageKey(eventId, key){
   return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
 }
+function readPlayerScopedJson(eventId, key, fallback = null){
+  try {
+    const raw = localStorage.getItem(playerStorageKey(eventId, key));
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePlayerScopedJson(eventId, key, value){
+  try {
+    localStorage.setItem(playerStorageKey(eventId, key), JSON.stringify(value));
+  } catch {}
+}
+function removePlayerScoped(eventId, key){
+  try {
+    localStorage.removeItem(playerStorageKey(eventId, key));
+  } catch {}
+}
+function hasMeaningfulEventInputsRoot(root){
+  if (!root || typeof root !== 'object') return false;
+  return Object.values(root).some((slot) => {
+    if (!slot || typeof slot !== 'object') return false;
+    if (slot.shared && typeof slot.shared === 'object' && Object.keys(slot.shared).length) return true;
+    const person = slot.person && typeof slot.person === 'object' ? slot.person : {};
+    return Object.values(person).some((val) => {
+      if (val == null || val === '') return false;
+      if (typeof val !== 'object') return String(val).trim() !== '';
+      if (Array.isArray(val.values) && val.values.some((x) => String(x ?? '').trim() !== '')) return true;
+      if (Array.isArray(val.board) && val.board.some((x) => String(x ?? '').trim() !== '')) return true;
+      if (Array.isArray(val.memberIds) && val.memberIds.some(Boolean)) return true;
+      if (val.roomShared) return true;
+      return Object.keys(val).length > 0;
+    });
+  });
+}
+function filterCachedEventInputsByResetTokens(inputs, cachedTokens, liveTokens){
+  const srcInputs = (inputs && typeof inputs === 'object') ? inputs : {};
+  const srcCachedTokens = (cachedTokens && typeof cachedTokens === 'object') ? cachedTokens : {};
+  const srcLiveTokens = (liveTokens && typeof liveTokens === 'object') ? liveTokens : {};
+  const out = {};
+  Object.entries(srcInputs).forEach(([evId, slot]) => {
+    if (String(srcCachedTokens?.[evId] || '') !== String(srcLiveTokens?.[evId] || '')) return;
+    out[evId] = slot;
+  });
+  return out;
+}
 
 const LONG_PRESS_MS = 450;
 const BINGO_MODE_BUTTON_FONT_SIZE = 16;
@@ -641,7 +687,20 @@ export default function PlayerEventInput(){
     return orderSlotsByPairs(inRoom, participants);
   }, [participants, roomIdx]);
 
-  const inputsByEventServer = eventData?.eventInputs || {};
+  const activeEventStorageId = eventId || ctxId || '';
+  const rawInputsByEventServer = (eventData?.eventInputs && typeof eventData.eventInputs === 'object') ? eventData.eventInputs : {};
+  const liveEventInputResetTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+  const [serverInputsCachePack, setServerInputsCachePack] = useState(() => (
+    readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} }
+  ));
+  const cachedInputsByEventServer = useMemo(
+    () => filterCachedEventInputsByResetTokens(serverInputsCachePack?.inputs, serverInputsCachePack?.resetTokens, liveEventInputResetTokens),
+    [serverInputsCachePack, liveEventInputResetTokens]
+  );
+  const inputsByEventServer = useMemo(
+    () => (hasMeaningfulEventInputsRoot(rawInputsByEventServer) ? rawInputsByEventServer : cachedInputsByEventServer),
+    [rawInputsByEventServer, cachedInputsByEventServer]
+  );
 
   const [draft, setDraft] = useState(() => inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
   const [dirty, setDirty] = useState(false);
@@ -712,23 +771,7 @@ export default function PlayerEventInput(){
     }
   };
 
-  const hasMeaningfulEventInputs = (root) => {
-    if (!root || typeof root !== 'object') return false;
-    return Object.values(root).some((slot) => {
-      if (!slot || typeof slot !== 'object') return false;
-      if (slot.shared && typeof slot.shared === 'object' && Object.keys(slot.shared).length) return true;
-      const person = slot.person && typeof slot.person === 'object' ? slot.person : {};
-      return Object.values(person).some((val) => {
-        if (val == null || val === '') return false;
-        if (typeof val !== 'object') return String(val).trim() !== '';
-        if (Array.isArray(val.values) && val.values.some((x) => String(x ?? '').trim() !== '')) return true;
-        if (Array.isArray(val.board) && val.board.some((x) => String(x ?? '').trim() !== '')) return true;
-        if (Array.isArray(val.memberIds) && val.memberIds.some(Boolean)) return true;
-        if (val.roomShared) return true;
-        return Object.keys(val).length > 0;
-      });
-    });
-  };
+  const hasMeaningfulEventInputs = hasMeaningfulEventInputsRoot;
 
   const hydrateDraftFromServer = (source) => {
     const cloned = cloneEventInputs(source);
@@ -767,6 +810,29 @@ export default function PlayerEventInput(){
     }
   }, [inputsByEventServer]);
 
+
+  useEffect(() => {
+    if (!activeEventStorageId) return;
+    const nextPack = readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} };
+    setServerInputsCachePack(nextPack);
+  }, [activeEventStorageId]);
+
+  useEffect(() => {
+    if (!activeEventStorageId || !eventData) return;
+    const nextPack = {
+      inputs: cloneEventInputs(rawInputsByEventServer),
+      resetTokens: { ...liveEventInputResetTokens },
+    };
+    setServerInputsCachePack(nextPack);
+    writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+  }, [activeEventStorageId, eventData, rawInputsByEventServer, liveEventInputResetTokens]);
+
+  useEffect(() => {
+    if (!activeEventStorageId) return;
+    if (!hasMeaningfulEventInputs(draft)) return;
+    writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', cloneEventInputs(draft || {}));
+  }, [activeEventStorageId, draft, hasMeaningfulEventInputs]);
+
   useEffect(() => {
     const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
     const prevTokens = resetTokenRef.current || {};
@@ -788,9 +854,34 @@ export default function PlayerEventInput(){
         });
         return out;
       });
+      if (activeEventStorageId) {
+        const prevPack = readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} };
+        const nextPack = {
+          inputs: filterCachedEventInputsByResetTokens(prevPack?.inputs, prevPack?.resetTokens, nextTokens),
+          resetTokens: { ...nextTokens },
+        };
+        setServerInputsCachePack(nextPack);
+        writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+        if (hasMeaningfulEventInputs(nextDraft)) {
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', nextDraft);
+        } else {
+          removePlayerScoped(activeEventStorageId, 'eventInputsDraftCache');
+        }
+      }
     }
     resetTokenRef.current = { ...nextTokens };
-  }, [eventData?.eventInputResets, inputsByEventServer]);
+  }, [activeEventStorageId, eventData?.eventInputResets, inputsByEventServer]);
+
+  useEffect(() => {
+    if (!activeEventStorageId) return;
+    const draftEmpty = !hasMeaningfulEventInputs(draft);
+    if (!draftEmpty) return;
+    const cachedDraft = readPlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', {});
+    if (!hasMeaningfulEventInputs(cachedDraft)) return;
+    draftTouchedRef.current = false;
+    lastHydratedServerSigRef.current = stringifyEventInputs(cachedDraft);
+    setDraft(cloneEventInputs(cachedDraft));
+  }, [activeEventStorageId]);
 
   const inputsByEvent = draft || {};
 
@@ -1271,6 +1362,19 @@ export default function PlayerEventInput(){
       const savedClone = cloneEventInputs(merged);
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
       hydrateDraftFromServer(savedClone);
+      if (activeEventStorageId) {
+        const nextPack = {
+          inputs: savedClone,
+          resetTokens: { ...liveEventInputResetTokens },
+        };
+        setServerInputsCachePack(nextPack);
+        writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+        if (hasMeaningfulEventInputs(savedClone)) {
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', savedClone);
+        } else {
+          removePlayerScoped(activeEventStorageId, 'eventInputsDraftCache');
+        }
+      }
       setDirty(false);
       alert('저장되었습니다.');
     }catch(e){
