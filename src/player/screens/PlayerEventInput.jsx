@@ -651,6 +651,8 @@ export default function PlayerEventInput(){
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
   const resetTokenRef = useRef({});
+  const resetTokensReadyRef = useRef(false);
+  const resetTokensEventIdRef = useRef('');
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -765,7 +767,25 @@ export default function PlayerEventInput(){
   }, [inputsByEventServer]);
 
   useEffect(() => {
+    const ownerEventId = String(eventId || ctxId || '');
+    if (resetTokensEventIdRef.current !== ownerEventId) {
+      resetTokensEventIdRef.current = ownerEventId;
+      resetTokensReadyRef.current = false;
+      resetTokenRef.current = {};
+    }
+
     const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+
+    // ★ 핵심 패치
+    // 마운트/재진입 직후에는 서버에 "과거 reset 토큰"이 남아 있어도
+    // 이를 "방금 발생한 reset"으로 오인하면 안 됨.
+    // 첫 스냅샷은 기준값으로만 저장하고, 그 다음 실제 변경분만 반영한다.
+    if (!resetTokensReadyRef.current) {
+      resetTokensReadyRef.current = true;
+      resetTokenRef.current = { ...nextTokens };
+      return;
+    }
+
     const prevTokens = resetTokenRef.current || {};
     const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] || '') !== String(prevTokens[evId] || ''));
     if (changedEvIds.length) {
@@ -793,7 +813,7 @@ export default function PlayerEventInput(){
       });
     }
     resetTokenRef.current = { ...nextTokens };
-  }, [eventData?.eventInputResets]);
+  }, [eventId, ctxId, eventData?.eventInputResets]);
 
   const inputsByEvent = draft || {};
 
