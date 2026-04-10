@@ -33,9 +33,7 @@ const LONG_PRESS_MS = 450;
 const BINGO_MODE_BUTTON_FONT_SIZE = 16;
 const BINGO_COUNT_NUMBER_FONT_SIZE = 24;
 const BINGO_COUNT_LABEL_FONT_SIZE = 14;
-const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
-const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
-const BINGO_ALL_HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
+const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 20;
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -134,7 +132,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
           />
         </svg>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: holeNo ? BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE : BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
@@ -1861,9 +1859,11 @@ export default function PlayerEventInput(){
 
           if (isBingo) {
             const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
-            const bingoInputHoles = bingoScoreHoleCount === 18 ? BINGO_ALL_HOLES : bingoSelectedHoles;
+            const bingoInputHoles = bingoScoreHoleCount === 18
+              ? Array.from({ length: 18 }, (_, i) => i + 1)
+              : bingoSelectedHoles;
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(8.5, 54 / Math.max(bingoInputHoles.length || 1, 1));
+            const bingoOnePct = Math.max(8.4, 54 / Math.max(bingoInputHoles.length || 1, 1));
             const bingoTotalPct = 12;
             const bingoTableWidthPct = bingoNickPct + bingoInputHoles.length * bingoOnePct + bingoTotalPct;
             const bingoSharedMode = getBingoRoomShared(ev.id);
@@ -1993,14 +1993,11 @@ export default function PlayerEventInput(){
                       })}
                       <tr className={tCss.subtotalRow}>
                         <td className={tCss.subtotalLabel}>합계</td>
-                        {bingoInputHoles.map((holeNo) => {
-                          const item = bingoRawSubtotal.find((entry) => Number(entry?.holeNo) === Number(holeNo)) || { holeNo, sum: '', hasAny: false };
-                          return (
+                        {bingoRawSubtotal.map((item) => (
                           <td key={`bingo-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
                             {item.hasAny ? formatDisplayNumber(item.sum) : ''}
                           </td>
-                          );
-                        })}
+                        ))}
                         <td className={tCss.subtotalRed}>{bingoRawGrandHasAny ? formatDisplayNumber(bingoRawGrandTotal) : ''}</td>
                       </tr>
                     </tbody>
@@ -2270,8 +2267,7 @@ export default function PlayerEventInput(){
                               </td>
                               <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{row.handicapSum !== '' ? row.handicapSum : ''}</td>
                             </tr>
-                            );
-                        })}
+                          ))}
                         </tbody>
                       </table>
                     </div>
@@ -2415,8 +2411,7 @@ export default function PlayerEventInput(){
                           <td key={`raw-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
                             {item.hasAny ? formatDisplayNumber(item.sum) : ''}
                           </td>
-                          );
-                        })}
+                        ))}
                         <td className={tCss.subtotalRed}>
                           {rawGrandHasAny ? formatDisplayNumber(rawGrandTotal) : ''}
                         </td>
@@ -2473,8 +2468,7 @@ export default function PlayerEventInput(){
                             <td key={`forced-sub-${item.holeNo}`} className={tCss.subtotalBlue}>
                               {item.hasAny ? formatDisplayNumber(item.sum) : ''}
                             </td>
-                            );
-                        })}
+                          ))}
                           <td className={tCss.subtotalRed}>
                             {forcedGrandHasAny ? formatDisplayNumber(forcedGrandTotal) : ''}
                           </td>
