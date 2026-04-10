@@ -10,7 +10,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
@@ -33,8 +33,6 @@ const LONG_PRESS_MS = 450;
 const BINGO_MODE_BUTTON_FONT_SIZE = 16;
 const BINGO_COUNT_NUMBER_FONT_SIZE = 24;
 const BINGO_COUNT_LABEL_FONT_SIZE = 14;
-const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 19;
-const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 16;
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -133,7 +131,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
           />
         </svg>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: holeNo ? BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE : BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
@@ -259,7 +257,6 @@ function readRoomFromLocal(eventId){
 }
 
 const MAX_PER_ROOM = 4;
-const BINGO_ALL_INPUT_HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
 
 function orderSlotsByPairs(roomArr = [], allParticipants = []) {
   const N    = Array.isArray(allParticipants) ? allParticipants.length : 0;
@@ -770,16 +767,19 @@ export default function PlayerEventInput(){
   }, [inputsByEventServer]);
 
   useEffect(() => {
-    const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
-    const currentEventKey = String(eventId || ctxId || '');
-
-    if (resetTokensEventIdRef.current !== currentEventKey) {
-      resetTokensEventIdRef.current = currentEventKey;
+    const ownerEventId = String(eventId || ctxId || '');
+    if (resetTokensEventIdRef.current !== ownerEventId) {
+      resetTokensEventIdRef.current = ownerEventId;
       resetTokensReadyRef.current = false;
-      resetTokenRef.current = { ...nextTokens };
-      return;
+      resetTokenRef.current = {};
     }
 
+    const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+
+    // ★ 핵심 패치
+    // 마운트/재진입 직후에는 서버에 "과거 reset 토큰"이 남아 있어도
+    // 이를 "방금 발생한 reset"으로 오인하면 안 됨.
+    // 첫 스냅샷은 기준값으로만 저장하고, 그 다음 실제 변경분만 반영한다.
     if (!resetTokensReadyRef.current) {
       resetTokensReadyRef.current = true;
       resetTokenRef.current = { ...nextTokens };
@@ -791,9 +791,14 @@ export default function PlayerEventInput(){
     if (changedEvIds.length) {
       setDraft((prevDraft) => {
         const nextDraft = cloneEventInputs(prevDraft);
+        let changed = false;
         changedEvIds.forEach((evId) => {
-          if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) delete nextDraft[evId];
+          if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) {
+            delete nextDraft[evId];
+            changed = true;
+          }
         });
+        if (!changed) return prevDraft;
         draftTouchedRef.current = false;
         pendingSavedInputsSigRef.current = '';
         lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
@@ -808,7 +813,7 @@ export default function PlayerEventInput(){
       });
     }
     resetTokenRef.current = { ...nextTokens };
-  }, [ctxId, eventData?.eventInputResets, eventId]);
+  }, [eventId, ctxId, eventData?.eventInputResets]);
 
   const inputsByEvent = draft || {};
 
@@ -1852,12 +1857,10 @@ export default function PlayerEventInput(){
           }
 
           if (isBingo) {
-            const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
-            const bingoInputHoles = bingoScoreHoleCount === 18 ? BINGO_ALL_INPUT_HOLES : bingoSelectedHoles;
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoInputHoles.length || 1, 1));
+            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
             const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoInputHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1868,7 +1871,7 @@ export default function PlayerEventInput(){
             const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
             const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
             const bingoCanEditBoard = !!bingoSharedMode || bingoOwnSelected;
-            const bingoRawSubtotal = bingoInputHoles.map((holeNo) => {
+            const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
@@ -1909,19 +1912,19 @@ export default function PlayerEventInput(){
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
                     <colgroup>
                       <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoInputHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
+                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
                       <col style={{ width: `${bingoTotalPct}%` }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
-                        {bingoInputHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
                         <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
@@ -1932,7 +1935,7 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={`bingo-row-${rIdx}`}>
                             <td>{p ? p.nickname : ''}</td>
-                            {bingoInputHoles.map((holeNo) => {
+                            {bingoSelectedHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
@@ -1952,13 +1955,13 @@ export default function PlayerEventInput(){
                                     className={tCss.cellInput}
                                     value={cellValue}
                                     disabled={!p}
-                                    onChange={e => p && patchAccum(ev.id, p.id, valueIndex, e.target.value, bingoInputHoles.length)}
-                                    onBlur={e => p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, bingoInputHoles.length)}
+                                    onChange={e => p && patchAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
+                                    onBlur={e => p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, 18)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
                                       if (p) {
                                         e.stopPropagation();
-                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, bingoInputHoles.length);
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
                                     }}
                                     onPointerUp={() => cancelEventLongPress(inputKey)}
@@ -1967,7 +1970,7 @@ export default function PlayerEventInput(){
                                     onTouchStart={(e) => {
                                       if (p) {
                                         e.stopPropagation();
-                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, bingoInputHoles.length);
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
                                     }}
                                     onTouchEnd={() => cancelEventLongPress(inputKey)}
@@ -2347,7 +2350,7 @@ export default function PlayerEventInput(){
                                     onPointerDown={(e) => {
                                       if (isHoleRankForce && p) {
                                         e.stopPropagation();
-                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, bingoInputHoles.length);
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
                                     }}
                                     onPointerUp={() => cancelEventLongPress(inputKey)}
@@ -2356,7 +2359,7 @@ export default function PlayerEventInput(){
                                     onTouchStart={(e) => {
                                       if (isHoleRankForce && p) {
                                         e.stopPropagation();
-                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, bingoInputHoles.length);
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
                                       }
                                     }}
                                     onTouchEnd={() => cancelEventLongPress(inputKey)}

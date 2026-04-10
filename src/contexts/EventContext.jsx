@@ -402,12 +402,25 @@ export function EventProvider({ children }) {
     try {
       const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
       const subInputs = eventInputsSubRef.current || {};
-      const resetMap = (withGate?.eventInputResets && typeof withGate.eventInputResets === 'object') ? withGate.eventInputResets : {};
+      const resetTokens =
+        (withGate?.eventInputResets && typeof withGate.eventInputResets === 'object')
+          ? withGate.eventInputResets
+          : {};
+
       Object.entries(subInputs).forEach(([evId, slot]) => {
         if (!evId) return;
-        const hasRootSlot = Object.prototype.hasOwnProperty.call(rootInputs, evId);
-        const hasResetToken = !!String(resetMap?.[evId] || '').trim();
-        if (!hasRootSlot && hasResetToken) return;
+
+        // ★ patch:
+        // 운영자 입력초기화 후 root eventInputs[evId]가 이미 비워졌고
+        // eventInputResets[evId] 토큰이 찍혀 있으면,
+        // 늦게 도착한 subcollection eventInputs 값을 다시 합치지 않음.
+        const hasRootValue = Object.prototype.hasOwnProperty.call(rootInputs, evId);
+        const hasResetToken = Object.prototype.hasOwnProperty.call(resetTokens, evId)
+          && resetTokens[evId] != null
+          && String(resetTokens[evId]) !== '';
+
+        if (!hasRootValue && hasResetToken) return;
+
         const prev = (rootInputs[evId] && typeof rootInputs[evId] === 'object') ? rootInputs[evId] : {};
         const next = { ...prev, ...(slot || {}) };
         if (prev.person || slot?.person) next.person = { ...(prev.person || {}), ...((slot && slot.person) || {}) };
