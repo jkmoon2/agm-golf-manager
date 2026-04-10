@@ -401,20 +401,13 @@ export function EventProvider({ children }) {
 
     try {
       const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
-      const resetTokens = (withGate?.eventInputResets && typeof withGate.eventInputResets === 'object') ? withGate.eventInputResets : {};
       const subInputs = eventInputsSubRef.current || {};
+      const resetMap = (withGate?.eventInputResets && typeof withGate.eventInputResets === 'object') ? withGate.eventInputResets : {};
       Object.entries(subInputs).forEach(([evId, slot]) => {
         if (!evId) return;
-
-        // ★ patch
-        // 운영자 '입력초기화' 직후에는 루트 eventInputs[evId]가 삭제된다.
-        // 이때 예전 eventInputs 서브컬렉션 스냅샷이 잠깐 늦게 도착하면
-        // stale subcollection 값이 다시 합쳐지면서 Player STEP3가 초기화되지 않은 것처럼 보일 수 있다.
-        // reset 토큰이 있고 루트 슬롯이 비어 있으면, 서브컬렉션의 오래된 값을 다시 합치지 않는다.
         const hasRootSlot = Object.prototype.hasOwnProperty.call(rootInputs, evId);
-        const hasResetToken = String(resetTokens?.[evId] || '').trim() !== '';
+        const hasResetToken = !!String(resetMap?.[evId] || '').trim();
         if (!hasRootSlot && hasResetToken) return;
-
         const prev = (rootInputs[evId] && typeof rootInputs[evId] === 'object') ? rootInputs[evId] : {};
         const next = { ...prev, ...(slot || {}) };
         if (prev.person || slot?.person) next.person = { ...(prev.person || {}), ...((slot && slot.person) || {}) };
