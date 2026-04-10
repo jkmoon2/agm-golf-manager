@@ -857,6 +857,7 @@ export default function PlayerEventInput(){
     const prevTokens = resetTokenRef.current || {};
     const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] || '') !== String(prevTokens[evId] || ''));
     if (changedEvIds.length) {
+      let nextDraftForCache = null;
       setDraft((prevDraft) => {
         const nextDraft = cloneEventInputs(prevDraft);
         let changed = false;
@@ -870,6 +871,7 @@ export default function PlayerEventInput(){
         draftTouchedRef.current = false;
         pendingSavedInputsSigRef.current = '';
         lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
+        nextDraftForCache = nextDraft;
         return nextDraft;
       });
       setBingoUiState((prev) => {
@@ -879,7 +881,9 @@ export default function PlayerEventInput(){
         });
         return out;
       });
-      writeStep3FastCache(activeEventStorageId, nextDraft);
+      if (nextDraftForCache) {
+        writeStep3FastCache(activeEventStorageId, nextDraftForCache);
+      }
     }
     resetTokenRef.current = { ...nextTokens };
   }, [activeEventStorageId, eventId, ctxId, eventData?.eventInputResets]);
