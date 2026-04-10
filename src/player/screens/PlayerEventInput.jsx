@@ -6,11 +6,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
-import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
+import { PlayerContext } from '../../contexts/PlayerContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
@@ -28,11 +28,60 @@ function getPlayerTabId(){
 function playerStorageKey(eventId, key){
   return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
 }
+function readPlayerScopedJson(eventId, key, fallback = null){
+  try {
+    const raw = localStorage.getItem(playerStorageKey(eventId, key));
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePlayerScopedJson(eventId, key, value){
+  try {
+    localStorage.setItem(playerStorageKey(eventId, key), JSON.stringify(value));
+  } catch {}
+}
+function removePlayerScoped(eventId, key){
+  try {
+    localStorage.removeItem(playerStorageKey(eventId, key));
+  } catch {}
+}
+function hasMeaningfulEventInputsRoot(root){
+  if (!root || typeof root !== 'object') return false;
+  return Object.values(root).some((slot) => {
+    if (!slot || typeof slot !== 'object') return false;
+    if (slot.shared && typeof slot.shared === 'object' && Object.keys(slot.shared).length) return true;
+    const person = slot.person && typeof slot.person === 'object' ? slot.person : {};
+    return Object.values(person).some((val) => {
+      if (val == null || val === '') return false;
+      if (typeof val !== 'object') return String(val).trim() !== '';
+      if (Array.isArray(val.values) && val.values.some((x) => String(x ?? '').trim() !== '')) return true;
+      if (Array.isArray(val.board) && val.board.some((x) => String(x ?? '').trim() !== '')) return true;
+      if (Array.isArray(val.memberIds) && val.memberIds.some(Boolean)) return true;
+      if (val.roomShared) return true;
+      return Object.keys(val).length > 0;
+    });
+  });
+}
+function filterCachedEventInputsByResetTokens(inputs, cachedTokens, liveTokens){
+  const srcInputs = (inputs && typeof inputs === 'object') ? inputs : {};
+  const srcCachedTokens = (cachedTokens && typeof cachedTokens === 'object') ? cachedTokens : {};
+  const srcLiveTokens = (liveTokens && typeof liveTokens === 'object') ? liveTokens : {};
+  const out = {};
+  Object.entries(srcInputs).forEach(([evId, slot]) => {
+    if (String(srcCachedTokens?.[evId] || '') !== String(srcLiveTokens?.[evId] || '')) return;
+    out[evId] = slot;
+  });
+  return out;
+}
 
 const LONG_PRESS_MS = 450;
 const BINGO_MODE_BUTTON_FONT_SIZE = 16;
 const BINGO_COUNT_NUMBER_FONT_SIZE = 24;
 const BINGO_COUNT_LABEL_FONT_SIZE = 14;
+const BINGO_PREVIEW_NAME_FONT_SIZE = 20;
+const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
+const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -55,6 +104,17 @@ function formatDisplayNumber(value){
 
 function makeEmptyBingoBoard(){
   return Array.from({ length: 16 }, () => '');
+}
+
+function shuffleArray(arr = []) {
+  const next = [...arr];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = next[i];
+    next[i] = next[j];
+    next[j] = tmp;
+  }
+  return next;
 }
 
 function getBingoBoardNextState(board, selectedHoles, cellIndex, moveIndex) {
@@ -120,7 +180,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
           />
         </svg>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: holeNo ? BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE : BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
@@ -130,7 +190,7 @@ function BingoPreviewCard({ name, bingoCount, board, holeValues, specialZones = 
   return (
     <div style={{ border: '2px solid #4a8cff', borderRadius: 16, background: '#fff', padding: 12, width: '100%', boxSizing: 'border-box', boxShadow: '0 0 0 3px rgba(74,140,255,.12)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 18, fontWeight: 900, color: '#16376c' }}>{name || ''}</div>
+        <div style={{ fontSize: BINGO_PREVIEW_NAME_FONT_SIZE, fontWeight: 900, color: '#16376c' }}>{name || ''}</div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, color: '#d11a2a', lineHeight: 1 }}>
           <span style={{ fontSize: BINGO_COUNT_NUMBER_FONT_SIZE, fontWeight: 900 }}>{Number(bingoCount || 0)}</span>
           <span style={{ fontSize: BINGO_COUNT_LABEL_FONT_SIZE, fontWeight: 400 }}>빙고</span>
@@ -287,20 +347,25 @@ function orderSlotsByPairs(roomArr = [], allParticipants = []) {
   return slot.slice(0, MAX_PER_ROOM);
 }
 
-function inferRoomFromSelf(participants = [], eventData = {}) {
+function inferRoomFromSelf(participants = [], eventData = {}, opt = {}) {
+  const hintId = String(opt?.participant?.id ?? opt?.participant?.uid ?? '').trim();
+  const hintNick = String(opt?.participant?.nickname ?? '').trim().toLowerCase();
   const ids = [
+    hintId,
     eventData?.auth?.uid, eventData?.player?.uid, eventData?.me?.uid,
     eventData?.auth?.id,  eventData?.player?.id,  eventData?.me?.id,
-  ].filter(Boolean);
+  ].filter(Boolean).map((v) => String(v));
 
   for (const p of participants) {
-    if (ids.includes(p?.uid) || ids.includes(p?.id)) {
+    const pid = String(p?.id ?? '');
+    const puid = String(p?.uid ?? '');
+    if ((pid && ids.includes(pid)) || (puid && ids.includes(puid))) {
       const r = Number(p?.room);
       if (Number.isFinite(r) && r >= 1) return r;
     }
   }
 
-  const myNick = (eventData?.auth?.nickname || eventData?.player?.nickname || eventData?.me?.nickname || '').trim().toLowerCase();
+  const myNick = (hintNick || eventData?.auth?.nickname || eventData?.player?.nickname || eventData?.me?.nickname || '').trim().toLowerCase();
   if (myNick) {
     for (const p of participants) {
       const pn = String(p?.nickname || '').trim().toLowerCase();
@@ -351,9 +416,12 @@ function readStoredPlayerHints(eventId) {
   return { ids: Array.from(ids), nicks: Array.from(nicks) };
 }
 
-function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN, eventId = '') {
+function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN, eventId = '', opt = {}) {
   const storedHints = readStoredPlayerHints(eventId);
+  const hintId = String(opt?.participant?.id ?? opt?.participant?.uid ?? '').trim();
+  const hintNick = String(opt?.participant?.nickname ?? '').trim().toLowerCase();
   const ids = [
+    hintId,
     eventData?.auth?.uid, eventData?.player?.uid, eventData?.me?.uid,
     eventData?.auth?.id, eventData?.player?.id, eventData?.me?.id,
     ...storedHints.ids,
@@ -372,7 +440,7 @@ function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN, e
     }
   }
 
-  const myNickCandidates = [eventData?.auth?.nickname, eventData?.player?.nickname, eventData?.me?.nickname, ...storedHints.nicks].filter(Boolean);
+  const myNickCandidates = [hintNick, eventData?.auth?.nickname, eventData?.player?.nickname, eventData?.me?.nickname, ...storedHints.nicks].filter(Boolean);
   const myNick = String(myNickCandidates[0] || '').trim().toLowerCase();
   if (myNick) {
     for (const participant of Array.isArray(participants) ? participants : []) {
@@ -398,8 +466,8 @@ async function ensureMembership(eventId, myRoom) {
 export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
-  const { eventId: ctxId, loadEvent, updateEventImmediate } = useContext(EventContext) || {};
-  const eventData = useEffectivePlayerEventData();
+  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
+  const { participant: ctxParticipant, participants: ctxParticipants } = useContext(PlayerContext) || {};
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
@@ -497,10 +565,11 @@ export default function PlayerEventInput(){
 
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
-  const participants = useMemo(
-    () => getEffectiveParticipants(eventData),
-    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
-  );
+  const participants = useMemo(() => {
+    const fromEvent = getEffectiveParticipants(eventData);
+    if (Array.isArray(fromEvent) && fromEvent.length) return fromEvent;
+    return Array.isArray(ctxParticipants) ? ctxParticipants : [];
+  }, [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball, ctxParticipants]);
   const events = useMemo(
     () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
     [eventData]
@@ -528,30 +597,44 @@ export default function PlayerEventInput(){
   }, [eventData]);
 
   const roomFromSelf = useMemo(
-    () => inferRoomFromSelf(participants, eventData),
-    [participants, eventData]
+    () => inferRoomFromSelf(participants, eventData, { participant: ctxParticipant }),
+    [participants, eventData, ctxParticipant]
   );
 
-  const roomIdx = useMemo(() => {
-    const ls  = readRoomFromLocal(eventId);
-    const pick = [roomFromCtx, ls, roomFromSelf].find(
-      n => Number.isFinite(n) && allRoomNos.includes(n)
-    );
-    return pick || allRoomNos[0] || 1;
-  }, [roomFromCtx, roomFromSelf, eventId, allRoomNos]);
+  const roomFromParticipantCtx = useMemo(() => {
+    const pid = String(ctxParticipant?.id ?? ctxParticipant?.uid ?? '').trim();
+    const pnick = String(ctxParticipant?.nickname ?? '').trim().toLowerCase();
+    const match = participants.find((p) => (pid && (String(p?.id ?? '') === pid || String(p?.uid ?? '') === pid)) || (pnick && String(p?.nickname || '').trim().toLowerCase() === pnick));
+    const n = Number(match?.room ?? match?.roomNumber);
+    return Number.isFinite(n) && n >= 1 ? n : NaN;
+  }, [ctxParticipant, participants]);
 
-  useEffect(() => {
-    if (Number.isFinite(roomIdx) && roomIdx >= 1) {
-      try { localStorage.setItem(playerStorageKey(eventId, 'currentRoom'), String(roomIdx)); } catch {}
-    }
-  }, [roomIdx, eventId]);
+  const roomIdx = useMemo(() => {
+    const ls = readRoomFromLocal(eventId);
+    const resolved = [roomFromParticipantCtx, roomFromCtx, roomFromSelf].find(
+      (n) => Number.isFinite(n) && allRoomNos.includes(n)
+    );
+    if (Number.isFinite(resolved)) return resolved;
+    const hasCurrentIdentity = !!String(ctxParticipant?.id ?? ctxParticipant?.nickname ?? '').trim();
+    if (hasCurrentIdentity) return NaN;
+    if (Number.isFinite(ls) && allRoomNos.includes(ls)) return ls;
+    return allRoomNos[0] || 1;
+  }, [roomFromParticipantCtx, roomFromCtx, roomFromSelf, eventId, allRoomNos, ctxParticipant]);
 
   const selfParticipant = useMemo(
-    () => inferSelfParticipant(participants, eventData, roomIdx, eventId || ctxId),
-    [participants, eventData, roomIdx, eventId, ctxId]
+    () => inferSelfParticipant(participants, eventData, roomIdx, eventId || ctxId, { participant: ctxParticipant }),
+    [participants, eventData, roomIdx, eventId, ctxId, ctxParticipant]
   );
   const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
   const selfParticipantNickname = useMemo(() => String(selfParticipant?.nickname || '').trim().toLowerCase(), [selfParticipant]);
+
+  useEffect(() => {
+    if (Number.isFinite(roomIdx) && roomIdx >= 1 && selfParticipant && Number(selfParticipant?.room ?? selfParticipant?.roomNumber) === Number(roomIdx)) {
+      try { localStorage.setItem(playerStorageKey(eventId, 'currentRoom'), String(roomIdx)); } catch {}
+      try { sessionStorage.setItem(`player.currentRoom:${eventId}`, String(roomIdx)); } catch {}
+      try { localStorage.setItem(`player.currentRoom:${eventId}`, String(roomIdx)); } catch {}
+    }
+  }, [roomIdx, eventId, selfParticipant]);
 
   const openPickMenuAt = (evId, pid, idx, options = [], buttonEl = null) => {
     const rect = buttonEl?.getBoundingClientRect?.();
@@ -604,9 +687,30 @@ export default function PlayerEventInput(){
     return orderSlotsByPairs(inRoom, participants);
   }, [participants, roomIdx]);
 
-  const inputsByEventServer = eventData?.eventInputs || {};
+  const activeEventStorageId = eventId || ctxId || '';
+  const rawInputsByEventServer = (eventData?.eventInputs && typeof eventData.eventInputs === 'object') ? eventData.eventInputs : {};
+  const liveEventInputResetTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+  const eventSnapshotReady = !!eventData;
+  const [serverInputsCachePack, setServerInputsCachePack] = useState(() => (
+    readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} }
+  ));
+  const cachedInputsByEventServer = useMemo(() => {
+    const cachedInputs = (serverInputsCachePack?.inputs && typeof serverInputsCachePack.inputs === 'object') ? serverInputsCachePack.inputs : {};
+    if (!eventSnapshotReady) return cachedInputs;
+    return filterCachedEventInputsByResetTokens(cachedInputs, serverInputsCachePack?.resetTokens, liveEventInputResetTokens);
+  }, [serverInputsCachePack, liveEventInputResetTokens, eventSnapshotReady]);
+  const inputsByEventServer = useMemo(
+    () => (hasMeaningfulEventInputsRoot(rawInputsByEventServer) ? rawInputsByEventServer : cachedInputsByEventServer),
+    [rawInputsByEventServer, cachedInputsByEventServer]
+  );
 
-  const [draft, setDraft] = useState(() => inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
+  const [draft, setDraft] = useState(() => {
+    const cachedDraft = readPlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', {});
+    if (hasMeaningfulEventInputsRoot(cachedDraft)) {
+      try { return JSON.parse(JSON.stringify(cachedDraft)); } catch { return cachedDraft; }
+    }
+    return inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {};
+  });
   const [dirty, setDirty] = useState(false);
   const eventInputRefs = useRef({});
   const longPressTimersRef = useRef({});
@@ -614,6 +718,11 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
+  const draftTouchedRef = useRef(false);
+  const lastHydratedServerSigRef = useRef('');
+  const resetTokenRef = useRef({});
+  const resetTokensReadyRef = useRef(false);
+  const resetTokensEventIdRef = useRef(activeEventStorageId || '');
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -656,23 +765,148 @@ export default function PlayerEventInput(){
     }
   };
 
+  const stableNormalize = (v) => {
+    if (v === null || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map(stableNormalize);
+    const out = {};
+    Object.keys(v).sort().forEach((k) => { out[k] = stableNormalize(v[k]); });
+    return out;
+  };
+
   const stringifyEventInputs = (value) => {
     try {
-      return JSON.stringify(value || {});
+      return JSON.stringify(stableNormalize(value || {}));
     } catch {
-      return '';
+      try { return JSON.stringify(value || {}); } catch { return ''; }
     }
   };
 
+  const hasMeaningfulEventInputs = hasMeaningfulEventInputsRoot;
+
+  const hydrateDraftFromServer = (source) => {
+    const cloned = cloneEventInputs(source);
+    draftTouchedRef.current = false;
+    pendingSavedInputsSigRef.current = '';
+    lastHydratedServerSigRef.current = stringifyEventInputs(cloned);
+    setDraft(cloned);
+  };
+
+  const applyDraft = (next, touched = true) => {
+    draftTouchedRef.current = !!touched;
+    setDraft(next);
+  };
+
   useEffect(() => {
-    if (dirty) return;
     const serverSig = stringifyEventInputs(inputsByEventServer);
+    const draftSig = stringifyEventInputs(draft);
+    const draftEmpty = !hasMeaningfulEventInputs(draft);
+    const prevHydratedSig = lastHydratedServerSigRef.current || '';
+
     if (pendingSavedInputsSigRef.current) {
-      if (serverSig !== pendingSavedInputsSigRef.current) return;
-      pendingSavedInputsSigRef.current = '';
+      if (serverSig === pendingSavedInputsSigRef.current) {
+        hydrateDraftFromServer(inputsByEventServer);
+        return;
+      }
     }
-    setDraft(cloneEventInputs(inputsByEventServer));
-  }, [inputsByEventServer, dirty]);
+
+    const canHydrate = !draftTouchedRef.current || draftEmpty || draftSig === prevHydratedSig;
+    if (canHydrate && serverSig !== draftSig) {
+      hydrateDraftFromServer(inputsByEventServer);
+      return;
+    }
+
+    if (lastHydratedServerSigRef.current === '' && !draftTouchedRef.current) {
+      lastHydratedServerSigRef.current = serverSig;
+    }
+  }, [inputsByEventServer]);
+
+
+  useEffect(() => {
+    if (!activeEventStorageId) return;
+    const nextPack = readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} };
+    setServerInputsCachePack(nextPack);
+  }, [activeEventStorageId]);
+
+  useEffect(() => {
+    if (!activeEventStorageId || !eventData) return;
+    const nextPack = {
+      inputs: cloneEventInputs(rawInputsByEventServer),
+      resetTokens: { ...liveEventInputResetTokens },
+    };
+    setServerInputsCachePack(nextPack);
+    writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+  }, [activeEventStorageId, eventData, rawInputsByEventServer, liveEventInputResetTokens]);
+
+  useEffect(() => {
+    if (!activeEventStorageId) return;
+    if (!hasMeaningfulEventInputs(draft)) return;
+    writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', cloneEventInputs(draft || {}));
+  }, [activeEventStorageId, draft, hasMeaningfulEventInputs]);
+
+  useEffect(() => {
+    const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+    const currentEventKey = String(activeEventStorageId || '');
+
+    if (resetTokensEventIdRef.current !== currentEventKey) {
+      resetTokensEventIdRef.current = currentEventKey;
+      resetTokensReadyRef.current = false;
+      resetTokenRef.current = { ...nextTokens };
+      return;
+    }
+
+    if (!resetTokensReadyRef.current) {
+      resetTokensReadyRef.current = true;
+      resetTokenRef.current = { ...nextTokens };
+      return;
+    }
+
+    const prevTokens = resetTokenRef.current || {};
+    const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] || '') !== String(prevTokens[evId] || ''));
+    if (changedEvIds.length) {
+      const nextDraft = cloneEventInputs(inputsByEventServer);
+      changedEvIds.forEach((evId) => {
+        if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) delete nextDraft[evId];
+      });
+      draftTouchedRef.current = false;
+      pendingSavedInputsSigRef.current = '';
+      lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
+      setDraft(nextDraft);
+      setDirty(false);
+      setBingoUiState((prev) => {
+        const out = { ...(prev || {}) };
+        changedEvIds.forEach((evId) => {
+          if (out[evId]) out[evId] = { ...(out[evId] || {}), moveIndex: null };
+        });
+        return out;
+      });
+      if (activeEventStorageId) {
+        const prevPack = readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} };
+        const nextPack = {
+          inputs: filterCachedEventInputsByResetTokens(prevPack?.inputs, prevPack?.resetTokens, nextTokens),
+          resetTokens: { ...nextTokens },
+        };
+        setServerInputsCachePack(nextPack);
+        writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+        if (hasMeaningfulEventInputs(nextDraft)) {
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', nextDraft);
+        } else {
+          removePlayerScoped(activeEventStorageId, 'eventInputsDraftCache');
+        }
+      }
+    }
+    resetTokenRef.current = { ...nextTokens };
+  }, [activeEventStorageId, eventData?.eventInputResets, inputsByEventServer]);
+
+  useEffect(() => {
+    if (!activeEventStorageId) return;
+    const draftEmpty = !hasMeaningfulEventInputs(draft);
+    if (!draftEmpty) return;
+    const cachedDraft = readPlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', {});
+    if (!hasMeaningfulEventInputs(cachedDraft)) return;
+    draftTouchedRef.current = false;
+    lastHydratedServerSigRef.current = stringifyEventInputs(cachedDraft);
+    setDraft(cloneEventInputs(cachedDraft));
+  }, [activeEventStorageId]);
 
   const inputsByEvent = draft || {};
 
@@ -697,11 +931,15 @@ export default function PlayerEventInput(){
   const getBingoRoomShared = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEvent?.[evId]?.person?.[pid]?.roomShared);
 
   const getBingoPersonState = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles);
+  const getBingoPersonStateSaved = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles);
+  const getBingoRoomSharedSaved = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEventServer?.[evId]?.person?.[pid]?.roomShared);
 
   const getBingoEditorPid = (evId, selectedHoles) => {
     const roomIds = getBingoRoomMemberIds();
     const ui = getBingoUiForEvent(evId);
+    const mine = String(selfParticipantId || ctxParticipant?.id || '');
     if (roomIds.includes(String(ui?.pid || ''))) return String(ui.pid);
+    if (mine && roomIds.includes(mine)) return mine;
     const withBoard = roomIds.find((pid) => getBingoPersonState(evId, pid, selectedHoles).board.some(Boolean));
     return withBoard || roomIds[0] || '';
   };
@@ -725,7 +963,7 @@ export default function PlayerEventInput(){
     });
     slot.person = person;
     all[evId] = slot;
-    setDraft(all);
+    applyDraft(all);
   };
 
   const setBingoRoomShared = (evId, selectedHoles, sharedMode) => {
@@ -734,6 +972,19 @@ export default function PlayerEventInput(){
     const basePid = getBingoEditorPid(evId, selectedHoles);
     const baseState = getBingoPersonState(evId, basePid || roomIds[0], selectedHoles);
     const sourceBoard = normalizeBingoBoard(baseState.board, selectedHoles);
+    const currentShared = getBingoRoomShared(evId);
+    if (currentShared === !!sharedMode) return;
+
+    const hasAnyBoard = roomIds.some((pid) => getBingoPersonState(evId, pid, selectedHoles).board.some(Boolean));
+    const owner = String((roomMembers.find((p) => String(p?.id) === String(basePid || ''))?.nickname) || selfParticipant?.nickname || ctxParticipant?.nickname || '현재 닉네임');
+    const message = sharedMode
+      ? (hasAnyBoard
+          ? `${owner}의 빙고판 기준으로 공통입력으로 전환합니다. 계속하시겠습니까?`
+          : '공통입력으로 전환합니다. 계속하시겠습니까?')
+      : '각자입력으로 전환합니다. 계속하시겠습니까?';
+    const ok = window.confirm(message);
+    if (!ok) return;
+
     const all = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
@@ -748,34 +999,61 @@ export default function PlayerEventInput(){
     });
     slot.person = person;
     all[evId] = slot;
-    setDraft(all);
+    applyDraft(all);
+    setDirty(true);
     setBingoUiState((prev) => ({
       ...prev,
       [evId]: { ...(prev?.[evId] || {}), pid: String(basePid || roomIds[0] || ''), moveIndex: null },
     }));
   };
 
-  const resetBingoBoard = (evId, selectedHoles) => {
-    const basePid = getBingoEditorPid(evId, selectedHoles);
-    const sharedMode = getBingoRoomShared(evId);
-    patchBingoBoard(evId, selectedHoles, basePid, selectedHoles.slice(0, 16), sharedMode);
+  const randomizeBingoBoard = (evId, selectedHoles) => {
+    const basePid = String(getBingoEditorPid(evId, selectedHoles) || '');
+    if (!basePid) return;
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!mine || String(basePid) !== String(mine)) {
+      window.alert('본인 빙고판만 무작위 배치할 수 있습니다.');
+      return;
+    }
+    const ok = window.confirm('본인 빙고판을 순서 없이 무작위로 배치합니다. 진행하시겠습니까?');
+    if (!ok) return;
+    patchBingoBoard(evId, selectedHoles, basePid, shuffleArray(selectedHoles.slice(0, 16)), false);
+    setDirty(true);
     clearBingoMoveIndex(evId);
   };
 
   const clearBingoBoard = (evId, selectedHoles) => {
-    const basePid = getBingoEditorPid(evId, selectedHoles);
-    const sharedMode = getBingoRoomShared(evId);
-    patchBingoBoard(evId, selectedHoles, basePid, makeEmptyBingoBoard(), sharedMode);
+    const basePid = String(getBingoEditorPid(evId, selectedHoles) || '');
+    if (!basePid) return;
+
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!mine || String(basePid) !== String(mine)) {
+      window.alert('본인 빙고판만 초기화할 수 있습니다.');
+      return;
+    }
+
+    const ok = window.confirm('현재 본인 빙고판을 초기화합니다. 정말 진행하시겠습니까?');
+    if (!ok) return;
+
+    patchBingoBoard(evId, selectedHoles, basePid, makeEmptyBingoBoard(), false);
+    setDirty(true);
     clearBingoMoveIndex(evId);
   };
 
   const applyBingoBoardCell = (evId, selectedHoles, cellIndex) => {
-    const basePid = getBingoEditorPid(evId, selectedHoles);
+    const basePid = String(getBingoEditorPid(evId, selectedHoles) || '');
     const sharedMode = getBingoRoomShared(evId);
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!basePid) return;
+    if (!sharedMode && (!mine || String(basePid) !== String(mine))) {
+      window.alert('본인 빙고판만 입력/수정할 수 있습니다.');
+      return;
+    }
     const ui = getBingoUiForEvent(evId);
     const current = getBingoPersonState(evId, basePid, selectedHoles);
     const nextBoard = getBingoBoardNextState(current.board, selectedHoles, cellIndex, ui?.moveIndex);
     patchBingoBoard(evId, selectedHoles, basePid, nextBoard, sharedMode);
+    setDirty(true);
     clearBingoMoveIndex(evId);
   };
 
@@ -846,7 +1124,7 @@ export default function PlayerEventInput(){
     if (prev === next) return;
     person[pid] = next;
     slot.person = person; all[evId] = slot;
-    setDraft(all);
+    applyDraft(all);
   };
 
   const patchAccum = (evId, pid, idx, value, attemptsOverride) => {
@@ -862,7 +1140,7 @@ export default function PlayerEventInput(){
     if (prev === next) return;
     obj.values[idx] = next;
     person[pid]=obj; slot.person=person; all[evId]=slot;
-    setDraft(all);
+    applyDraft(all);
   };
 
   const patchPickMember = (evId, pid, idx, value, requiredCount) => {
@@ -888,7 +1166,7 @@ export default function PlayerEventInput(){
     }
 
     slot.person = person; all[evId] = slot;
-    setDraft(all);
+    applyDraft(all);
   };
 
   const finalizeValue = (evId, pid, raw) => {
@@ -903,7 +1181,7 @@ export default function PlayerEventInput(){
     else person[pid] = num;
 
     slot.person = person; all[evId] = slot;
-    setDraft(all);
+    applyDraft(all);
   };
   const finalizeAccum = (evId, pid, idx, raw, attemptsOverride) => {
     const v = String(raw ?? '').trim();
@@ -922,7 +1200,7 @@ export default function PlayerEventInput(){
     else person[pid] = obj;
 
     slot.person = person; all[evId] = slot;
-    setDraft(all);
+    applyDraft(all);
   };
 
   const patchBonus = (evId, pid, idxOrVal, value, isAccum, attemptsOverride) => {
@@ -947,7 +1225,7 @@ export default function PlayerEventInput(){
       if (prev !== next) obj.bonus = next;
     }
     person[pid] = obj; slot.person = person; all[evId] = slot;
-    setDraft(all);
+    applyDraft(all);
   };
 
   const calcPopupWidth = (evId) => {
@@ -1054,7 +1332,7 @@ export default function PlayerEventInput(){
     rows[row.key] = rowEntry;
     slot.shared = { ...shared, rows };
     all[ev.id] = slot;
-    setDraft(all);
+    applyDraft(all);
   };
 
   const saveDraft = async () => {
@@ -1108,7 +1386,20 @@ export default function PlayerEventInput(){
 
       const savedClone = cloneEventInputs(merged);
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
-      setDraft(savedClone);
+      hydrateDraftFromServer(savedClone);
+      if (activeEventStorageId) {
+        const nextPack = {
+          inputs: savedClone,
+          resetTokens: { ...liveEventInputResetTokens },
+        };
+        setServerInputsCachePack(nextPack);
+        writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+        if (hasMeaningfulEventInputs(savedClone)) {
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', savedClone);
+        } else {
+          removePlayerScoped(activeEventStorageId, 'eventInputsDraftCache');
+        }
+      }
       setDirty(false);
       alert('저장되었습니다.');
     }catch(e){
@@ -1119,6 +1410,13 @@ export default function PlayerEventInput(){
 
   useEffect(() => {
     const roomPids = new Set(roomMembers.filter(Boolean).map(p => String(p.id)));
+
+    const draftEmpty = !hasMeaningfulEventInputs(draft);
+    const serverHasData = hasMeaningfulEventInputs(inputsByEventServer);
+    if (!draftTouchedRef.current && draftEmpty && serverHasData) {
+      setDirty(false);
+      return;
+    }
 
     const eq = (a, b) => a === b;
     const toNumOrNull = (x) => {
@@ -1258,7 +1556,7 @@ export default function PlayerEventInput(){
                 let sum = 0;
                 let hasAny = false;
                 orderedRoomRows.forEach((p) => {
-                  const raw = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
+                  const raw = p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
                   const n = Number(raw);
                   if (Number.isFinite(n)) {
                     sum += n;
@@ -1559,7 +1857,6 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+-]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -1666,10 +1963,14 @@ export default function PlayerEventInput(){
           }
 
           if (isBingo) {
+            const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
+            const bingoInputHoles = bingoScoreHoleCount === 18
+              ? Array.from({ length: 18 }, (_, i) => i + 1)
+              : bingoSelectedHoles;
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
+            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoInputHoles.length || 1, 1));
             const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoTableWidthPct = bingoNickPct + bingoInputHoles.length * bingoOnePct + bingoTotalPct;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1677,11 +1978,14 @@ export default function PlayerEventInput(){
             const bingoEditorBoard = normalizeBingoBoard(bingoEditorState.board, bingoSelectedHoles);
             const bingoSpecialZones = normalizeBingoSpecialZones(ev?.params?.specialZones);
             const bingoLocked = !!ev?.params?.inputLocked;
-            const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
+            const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+            const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
+            const bingoCanEditBoard = !!bingoSharedMode || bingoOwnSelected;
+            const bingoRawSubtotal = bingoInputHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
-                const raw = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
+                const raw = p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
                 const n = Number(raw);
                 if (Number.isFinite(n)) {
                   sum += n;
@@ -1693,8 +1997,9 @@ export default function PlayerEventInput(){
             const bingoRawGrandTotal = bingoRawSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
             const bingoRawGrandHasAny = bingoRawSubtotal.some((item) => item.hasAny);
             const bingoPreviewRows = roomMembers.filter(Boolean).map((p) => {
-              const rowState = getBingoPersonState(ev.id, p.id, bingoSelectedHoles);
-              const board = bingoSharedMode ? bingoEditorBoard : normalizeBingoBoard(rowState.board, bingoSelectedHoles);
+              const rowState = getBingoPersonStateSaved(ev.id, p.id, bingoSelectedHoles);
+              const sharedState = getBingoPersonStateSaved(ev.id, bingoEditorPid, bingoSelectedHoles);
+              const board = bingoSharedMode ? normalizeBingoBoard(sharedState.board, bingoSelectedHoles) : normalizeBingoBoard(rowState.board, bingoSelectedHoles);
               const holeValues = getBingoHoleValues(rowState.values, bingoSelectedHoles);
               return {
                 pid: String(p.id),
@@ -1717,19 +2022,19 @@ export default function PlayerEventInput(){
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
                     <colgroup>
                       <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
+                      {bingoInputHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
                       <col style={{ width: `${bingoTotalPct}%` }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
-                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        {bingoInputHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
                         <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
@@ -1740,7 +2045,7 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={`bingo-row-${rIdx}`}>
                             <td>{p ? p.nickname : ''}</td>
-                            {bingoSelectedHoles.map((holeNo) => {
+                            {bingoInputHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
@@ -1753,7 +2058,6 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern="[0-9.+-]*"
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -1813,10 +2117,10 @@ export default function PlayerEventInput(){
                         <button
                           type="button"
                           disabled={bingoLocked}
-                          onClick={() => resetBingoBoard(ev.id, bingoSelectedHoles)}
+                          onClick={() => randomizeBingoBoard(ev.id, bingoSelectedHoles)}
                           style={{ border: '1px solid #cbd8ea', background: '#f8fbff', color: '#213a6b', fontWeight: 700, borderRadius: 10, padding: '8px 12px', opacity: bingoLocked ? 0.55 : 1 }}
                         >
-                          기본배치
+                          무작위배치
                         </button>
                         <button
                           type="button"
@@ -1847,6 +2151,12 @@ export default function PlayerEventInput(){
                         공통입력
                       </button>
                     </div>
+
+                    {!bingoCanEditBoard && (
+                      <div style={{ marginBottom: 10, fontSize: 12, fontWeight: 700, color: '#b94a48' }}>
+                        본인 빙고판만 입력/수정할 수 있습니다.
+                      </div>
+                    )}
 
                     {!bingoSharedMode && (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
@@ -2138,7 +2448,6 @@ export default function PlayerEventInput(){
                                     }}
                                     type="text"
                                     inputMode="decimal"
-                                    pattern={isHoleRankForce ? "[0-9.+-]*" : "[0-9.]*"}
                                     autoComplete="off"
                                     autoCorrect="off"
                                     autoCapitalize="off"
@@ -2180,7 +2489,6 @@ export default function PlayerEventInput(){
                               <input
                                 type="text"
                                 inputMode="decimal"
-                                pattern="[0-9.]*"
                                 autoComplete="off"
                                 autoCorrect="off"
                                 autoCapitalize="off"

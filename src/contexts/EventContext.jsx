@@ -259,6 +259,7 @@ export function EventProvider({ children }) {
   const scoresMapRef = useRef({});
   const [scoresReady, setScoresReady] = useState(false);
   const scoresReadyRef = useRef(false);
+  const eventInputsSubRef = useRef({});
 
   const lastEventDataRef = useRef(null);
   const queuedUpdatesRef = useRef(null);
@@ -398,6 +399,17 @@ export function EventProvider({ children }) {
       withGate.participants = mergedArr;
     } catch {}
 
+    try {
+      const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
+      const subInputs = eventInputsSubRef.current || {};
+      // ★ SSOT: STEP3 입력 원본은 항상 root eventInputs 만 사용한다.
+      // legacy subcollection(eventInputs)은 참고용 별도 필드로만 노출하여,
+      // root 삭제 후 오래된 subcollection 값이 다시 합쳐져 되살아나는 현상을 막는다.
+      withGate.eventInputs = rootInputs;
+      withGate.eventInputsRoot = rootInputs;
+      withGate.eventInputsSub = { ...subInputs };
+    } catch {}
+
     setEventData(withGate);
     lastEventDataRef.current = withGate;
     return withGate;
@@ -491,6 +503,35 @@ export function EventProvider({ children }) {
       if (unsub) unsub();
     };
   }, [eventId, applyIncomingEventData, clearCurrentEventSelection]);
+  useEffect(() => {
+    if (!eventId) {
+      eventInputsSubRef.current = {};
+      return;
+    }
+    let unsub = null, cancelled = false;
+    ensureAuthed().then(() => {
+      if (cancelled) return;
+      const colRef = collection(db, 'events', eventId, 'eventInputs');
+      unsub = onSnapshot(colRef, (snap) => {
+        const next = {};
+        snap.forEach((d) => {
+          const row = d.data() || {};
+          const key = String(row?.evId || d.id || '').trim();
+          if (!key) return;
+          next[key] = row;
+        });
+        eventInputsSubRef.current = next;
+        if (lastEventDataRef.current) {
+          applyIncomingEventData(lastEventDataRef.current);
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [eventId, applyIncomingEventData]);
+
 
   useEffect(() => {
     if (!eventId) return;
@@ -537,6 +578,62 @@ export function EventProvider({ children }) {
       window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('visibilitychange', onVisible);
       try { unsubSync(); } catch {}
+    };
+  }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
+
+  // ★ Player route 보강: 일부 단말/브라우저에서 실시간 스냅샷이 늦거나 누락되는 경우를 대비해
+  // visible 상태에서는 서버 최신 문서를 강제로 재조회해 16/18홀 변경 및 입력초기화를 강하게 반영한다.
+  useEffect(() => {
+    if (!eventId) return;
+    if (!isPlayerRoute) return;
+
+    let raf = 0;
+    let intervalId = 0;
+    let lastScheduleAt = 0;
+    const scheduleRefresh = (plan = { event: true, scores: true, force: true }) => {
+      const now = Date.now();
+      if (!plan?.force && now - lastScheduleAt < MANUAL_SYNC_RAF_MS) return;
+      lastScheduleAt = now;
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (plan?.event) refreshEventNow({ force: !!plan?.force });
+        if (plan?.scores) refreshScoresNow({ force: !!plan?.force });
+      });
+    };
+
+    const onFocus = () => scheduleRefresh({ event: true, scores: true, force: true });
+    const onPageShow = () => scheduleRefresh({ event: true, scores: true, force: true });
+    const onVisible = () => {
+      try {
+        if (document.visibilityState === 'visible') {
+          scheduleRefresh({ event: true, scores: true, force: true });
+        }
+      } catch {
+        scheduleRefresh({ event: true, scores: true, force: true });
+      }
+    };
+
+    scheduleRefresh({ event: true, scores: true, force: true });
+    intervalId = window.setInterval(() => {
+      try {
+        if (document.visibilityState === 'visible') {
+          scheduleRefresh({ event: true, scores: true, force: true });
+        }
+      } catch {
+        scheduleRefresh({ event: true, scores: true, force: true });
+      }
+    }, 2000);
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (intervalId) clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onPageShow);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
 

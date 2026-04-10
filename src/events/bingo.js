@@ -42,7 +42,12 @@ export function defaultBingoParams() {
     selectedHoles: [...ALL_HOLES],
     specialZones: [],
     inputLocked: false,
+    scoreHoleCount: 18,
   };
+}
+
+export function normalizeBingoScoreHoleCount(raw) {
+  return Number(raw) === 16 ? 16 : 18;
 }
 
 export function normalizeBingoSelectedHoles(raw) {

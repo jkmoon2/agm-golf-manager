@@ -1,7 +1,7 @@
 // /src/eventTemplates/bingo/BingoEditor.jsx
 
 import React, { useMemo, useState } from 'react';
-import { defaultBingoParams, isValidBingoSelectedHoles, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { defaultBingoParams, isValidBingoSelectedHoles, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
 
 const HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
 const POSITIONS = Array.from({ length: 16 }, (_, i) => i + 1);
@@ -9,7 +9,7 @@ const POSITIONS = Array.from({ length: 16 }, (_, i) => i + 1);
 function getSummary(selectedHoles) {
   const count = selectedHoles.length;
   if (count === 16) return '16개 선택 완료';
-  if (count > 16) return `${count}개 선택 · ${count - 16}개 더 해제`; 
+  if (count > 16) return `${count}개 선택 · ${count - 16}개 더 해제`;
   return `${count}개 선택`;
 }
 
@@ -23,11 +23,13 @@ export default function BingoEditor({ value, onChange }) {
       selectedHoles: normalizeBingoSelectedHoles(src.selectedHoles),
       specialZones: normalizeBingoSpecialZones(src.specialZones),
       inputLocked: !!src.inputLocked,
+      scoreHoleCount: normalizeBingoScoreHoleCount(src.scoreHoleCount),
     };
   }, [value]);
 
   const selectedHoles = safe.selectedHoles;
   const specialZones = safe.specialZones;
+  const scoreHoleCount = normalizeBingoScoreHoleCount(safe.scoreHoleCount);
   const [openKey, setOpenKey] = useState('');
 
   const emit = (next) => {
@@ -60,12 +62,30 @@ export default function BingoEditor({ value, onChange }) {
         open={openKey === 'holes'}
         onToggle={() => setOpenKey((prev) => (prev === 'holes' ? '' : 'holes'))}
       >
-        <div style={countTextWrap}>
+
+        <div style={modeWrap}>
+          <button
+            type="button"
+            onClick={() => emit({ ...safe, scoreHoleCount: 16 })}
+            style={{ ...modeChip, ...(scoreHoleCount === 16 ? modeChipActive : modeChipInactive) }}
+          >
+            16홀
+          </button>
+          <button
+            type="button"
+            onClick={() => emit({ ...safe, scoreHoleCount: 18 })}
+            style={{ ...modeChip, ...(scoreHoleCount === 18 ? modeChipActive : modeChipInactive) }}
+          >
+            18홀
+          </button>
+        </div>
+        <div style={{ ...countTextWrap, marginTop: -4 }}>
           <span style={countText}>{selectedHoles.length}/18 선택</span>
-          <span style={{ ...countText, color: isValidBingoSelectedHoles(selectedHoles) ? '#177a45' : '#5b6f95' }}>
-            {isValidBingoSelectedHoles(selectedHoles) ? '완료' : '2개를 해제해 16홀로 맞춰주세요'}
+          <span style={{ ...countText, color: '#177a45' }}>
+            {scoreHoleCount === 18 ? '18홀 입력 · 빙고 반영은 선택된 16홀만 적용' : '2개를 해제해 16홀로 맞춰주세요'}
           </span>
         </div>
+
         <div style={chipWrap}>
           {HOLES.map((holeNo) => {
             const active = selectedHoles.includes(holeNo);
@@ -205,3 +225,25 @@ const chipInactive = {
   background: '#f5f6f8',
   color: '#8a94a5',
 };
+
+const modeWrap = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: 4,
+  borderRadius: 999,
+  background: '#eef2f7',
+  border: '1px solid #d7dfeb',
+  marginBottom: 10,
+};
+const modeChip = {
+  minWidth: 68,
+  height: 34,
+  borderRadius: 999,
+  fontWeight: 800,
+  fontSize: 14,
+  border: '1px solid transparent',
+  cursor: 'pointer',
+};
+const modeChipActive = { background: '#2d6df6', color: '#fff', borderColor: '#2d6df6' };
+const modeChipInactive = { background: '#fff', color: '#5b6f95', borderColor: '#d0d8e7' };

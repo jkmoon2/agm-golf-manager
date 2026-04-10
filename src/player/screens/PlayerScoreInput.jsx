@@ -7,7 +7,7 @@ import { db, auth } from '../../firebase';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerScoreInput.module.css';
-import { getEffectiveParticipantsFromEvent } from '../utils/playerState';
+import { getEffectiveParticipantsFromEvent, readPlayerParticipant, readPlayerRoom, readPlayerAuthCode } from '../utils/playerState';
 import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
 
 function normalizeGate(raw){
@@ -114,18 +114,38 @@ export default function PlayerScoreInput() {
 
 
   const viewParticipant = useMemo(() => {
-    if (!participant) return null;
-    const pid = participant?.id;
-    if (pid != null) {
-      const found = effectiveParticipants.find((p) => String(p.id) === String(pid));
-      if (found) return { ...participant, ...found };
+    const matchBy = (seed) => {
+      if (!seed) return null;
+      const pid = seed?.id;
+      if (pid != null) {
+        const found = effectiveParticipants.find((p) => String(p.id) === String(pid));
+        if (found) return { ...seed, ...found };
+      }
+      if (seed?.authCode) {
+        const found = effectiveParticipants.find((p) => String(p?.authCode || '') === String(seed.authCode));
+        if (found) return { ...seed, ...found };
+      }
+      if (seed?.nickname) {
+        const found = effectiveParticipants.find((p) => String(p?.nickname || '') === String(seed.nickname));
+        if (found) return { ...seed, ...found };
+      }
+      return seed;
+    };
+
+    const primary = matchBy(participant);
+    if (primary?.room != null) return primary;
+
+    const cached = matchBy(readPlayerParticipant(eventId, true));
+    if (cached?.room != null) return cached;
+
+    const cachedCode = String(readPlayerAuthCode(eventId, true) || '').trim();
+    if (cachedCode) {
+      const found = effectiveParticipants.find((p) => String(p?.authCode || '').trim() === cachedCode);
+      if (found) return { ...(primary || cached || {}), ...found };
     }
-    if (participant?.authCode) {
-      const found = effectiveParticipants.find((p) => String(p?.authCode || '') === String(participant.authCode));
-      if (found) return { ...participant, ...found };
-    }
-    return participant;
-  }, [participant, effectiveParticipants]);
+
+    return primary || cached || participant || null;
+  }, [participant, effectiveParticipants, eventId]);
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
@@ -155,7 +175,13 @@ export default function PlayerScoreInput() {
 
   const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
-  const myRoom = viewParticipant?.room ?? null;
+  const myRoom = useMemo(() => {
+    const direct = Number(viewParticipant?.room ?? null);
+    if (Number.isFinite(direct) && direct >= 1) return direct;
+    const cached = Number(readPlayerRoom(eventId, true));
+    if (Number.isFinite(cached) && cached >= 1) return cached;
+    return null;
+  }, [viewParticipant?.room, eventId]);
 
   useEffect(() => {
     if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
