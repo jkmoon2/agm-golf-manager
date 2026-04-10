@@ -10,7 +10,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
@@ -28,25 +28,18 @@ function getPlayerTabId(){
 function playerStorageKey(eventId, key){
   return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
 }
-function readPlayerScopedJson(eventId, key, fallback = null){
+
+const STEP3_EVENT_INPUT_MEMORY_CACHE = new Map();
+
+function cloneFastCachePayload(value){
   try {
-    const raw = localStorage.getItem(playerStorageKey(eventId, key));
-    return raw ? JSON.parse(raw) : fallback;
+    return value ? JSON.parse(JSON.stringify(value)) : {};
   } catch {
-    return fallback;
+    return {};
   }
 }
-function writePlayerScopedJson(eventId, key, value){
-  try {
-    localStorage.setItem(playerStorageKey(eventId, key), JSON.stringify(value));
-  } catch {}
-}
-function removePlayerScoped(eventId, key){
-  try {
-    localStorage.removeItem(playerStorageKey(eventId, key));
-  } catch {}
-}
-function hasMeaningfulEventInputsRoot(root){
+
+function hasFastEventInputPayload(root){
   if (!root || typeof root !== 'object') return false;
   return Object.values(root).some((slot) => {
     if (!slot || typeof slot !== 'object') return false;
@@ -63,25 +56,41 @@ function hasMeaningfulEventInputsRoot(root){
     });
   });
 }
-function filterCachedEventInputsByResetTokens(inputs, cachedTokens, liveTokens){
-  const srcInputs = (inputs && typeof inputs === 'object') ? inputs : {};
-  const srcCachedTokens = (cachedTokens && typeof cachedTokens === 'object') ? cachedTokens : {};
-  const srcLiveTokens = (liveTokens && typeof liveTokens === 'object') ? liveTokens : {};
-  const out = {};
-  Object.entries(srcInputs).forEach(([evId, slot]) => {
-    if (String(srcCachedTokens?.[evId] || '') !== String(srcLiveTokens?.[evId] || '')) return;
-    out[evId] = slot;
-  });
-  return out;
+
+function readStep3FastCache(eventId){
+  const key = String(eventId || '');
+  if (!key) return {};
+  const mem = STEP3_EVENT_INPUT_MEMORY_CACHE.get(key);
+  if (hasFastEventInputPayload(mem)) return cloneFastCachePayload(mem);
+  try {
+    const raw = sessionStorage.getItem(playerStorageKey(key, 'step3FastDraft'));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (hasFastEventInputPayload(parsed)) {
+      STEP3_EVENT_INPUT_MEMORY_CACHE.set(key, cloneFastCachePayload(parsed));
+      return cloneFastCachePayload(parsed);
+    }
+  } catch {}
+  return {};
+}
+
+function writeStep3FastCache(eventId, value){
+  const key = String(eventId || '');
+  if (!key) return;
+  const cloned = cloneFastCachePayload(value);
+  if (hasFastEventInputPayload(cloned)) {
+    STEP3_EVENT_INPUT_MEMORY_CACHE.set(key, cloned);
+    try { sessionStorage.setItem(playerStorageKey(key, 'step3FastDraft'), JSON.stringify(cloned)); } catch {}
+    return;
+  }
+  STEP3_EVENT_INPUT_MEMORY_CACHE.delete(key);
+  try { sessionStorage.removeItem(playerStorageKey(key, 'step3FastDraft')); } catch {}
 }
 
 const LONG_PRESS_MS = 450;
 const BINGO_MODE_BUTTON_FONT_SIZE = 16;
 const BINGO_COUNT_NUMBER_FONT_SIZE = 24;
 const BINGO_COUNT_LABEL_FONT_SIZE = 14;
-const BINGO_PREVIEW_NAME_FONT_SIZE = 20;
-const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
-const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -180,7 +189,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
           />
         </svg>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: holeNo ? BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE : BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
@@ -190,7 +199,7 @@ function BingoPreviewCard({ name, bingoCount, board, holeValues, specialZones = 
   return (
     <div style={{ border: '2px solid #4a8cff', borderRadius: 16, background: '#fff', padding: 12, width: '100%', boxSizing: 'border-box', boxShadow: '0 0 0 3px rgba(74,140,255,.12)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: BINGO_PREVIEW_NAME_FONT_SIZE, fontWeight: 900, color: '#16376c' }}>{name || ''}</div>
+        <div style={{ fontSize: 18, fontWeight: 900, color: '#16376c' }}>{name || ''}</div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, color: '#d11a2a', lineHeight: 1 }}>
           <span style={{ fontSize: BINGO_COUNT_NUMBER_FONT_SIZE, fontWeight: 900 }}>{Number(bingoCount || 0)}</span>
           <span style={{ fontSize: BINGO_COUNT_LABEL_FONT_SIZE, fontWeight: 400 }}>빙고</span>
@@ -687,22 +696,14 @@ export default function PlayerEventInput(){
     return orderSlotsByPairs(inRoom, participants);
   }, [participants, roomIdx]);
 
-  const activeEventStorageId = eventId || ctxId || '';
-  const rawInputsByEventServer = (eventData?.eventInputs && typeof eventData.eventInputs === 'object') ? eventData.eventInputs : {};
-  const liveEventInputResetTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
-  const [serverInputsCachePack, setServerInputsCachePack] = useState(() => (
-    readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} }
-  ));
-  const cachedInputsByEventServer = useMemo(
-    () => filterCachedEventInputsByResetTokens(serverInputsCachePack?.inputs, serverInputsCachePack?.resetTokens, liveEventInputResetTokens),
-    [serverInputsCachePack, liveEventInputResetTokens]
-  );
-  const inputsByEventServer = useMemo(
-    () => (hasMeaningfulEventInputsRoot(rawInputsByEventServer) ? rawInputsByEventServer : cachedInputsByEventServer),
-    [rawInputsByEventServer, cachedInputsByEventServer]
-  );
+  const inputsByEventServer = eventData?.eventInputs || {};
+  const activeEventStorageId = String(eventId || ctxId || '');
 
-  const [draft, setDraft] = useState(() => inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {});
+  const [draft, setDraft] = useState(() => {
+    const cachedDraft = readStep3FastCache(activeEventStorageId);
+    if (hasFastEventInputPayload(cachedDraft)) return cachedDraft;
+    return inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {};
+  });
   const [dirty, setDirty] = useState(false);
   const eventInputRefs = useRef({});
   const longPressTimersRef = useRef({});
@@ -713,6 +714,8 @@ export default function PlayerEventInput(){
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
   const resetTokenRef = useRef({});
+  const resetTokensReadyRef = useRef(false);
+  const resetTokensEventIdRef = useRef('');
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -771,7 +774,23 @@ export default function PlayerEventInput(){
     }
   };
 
-  const hasMeaningfulEventInputs = hasMeaningfulEventInputsRoot;
+  const hasMeaningfulEventInputs = (root) => {
+    if (!root || typeof root !== 'object') return false;
+    return Object.values(root).some((slot) => {
+      if (!slot || typeof slot !== 'object') return false;
+      if (slot.shared && typeof slot.shared === 'object' && Object.keys(slot.shared).length) return true;
+      const person = slot.person && typeof slot.person === 'object' ? slot.person : {};
+      return Object.values(person).some((val) => {
+        if (val == null || val === '') return false;
+        if (typeof val !== 'object') return String(val).trim() !== '';
+        if (Array.isArray(val.values) && val.values.some((x) => String(x ?? '').trim() !== '')) return true;
+        if (Array.isArray(val.board) && val.board.some((x) => String(x ?? '').trim() !== '')) return true;
+        if (Array.isArray(val.memberIds) && val.memberIds.some(Boolean)) return true;
+        if (val.roomShared) return true;
+        return Object.keys(val).length > 0;
+      });
+    });
+  };
 
   const hydrateDraftFromServer = (source) => {
     const cloned = cloneEventInputs(source);
@@ -810,43 +829,49 @@ export default function PlayerEventInput(){
     }
   }, [inputsByEventServer]);
 
-
   useEffect(() => {
     if (!activeEventStorageId) return;
-    const nextPack = readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} };
-    setServerInputsCachePack(nextPack);
-  }, [activeEventStorageId]);
+    writeStep3FastCache(activeEventStorageId, draft || {});
+  }, [activeEventStorageId, draft]);
 
   useEffect(() => {
-    if (!activeEventStorageId || !eventData) return;
-    const nextPack = {
-      inputs: cloneEventInputs(rawInputsByEventServer),
-      resetTokens: { ...liveEventInputResetTokens },
-    };
-    setServerInputsCachePack(nextPack);
-    writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
-  }, [activeEventStorageId, eventData, rawInputsByEventServer, liveEventInputResetTokens]);
+    const ownerEventId = String(eventId || ctxId || '');
+    if (resetTokensEventIdRef.current !== ownerEventId) {
+      resetTokensEventIdRef.current = ownerEventId;
+      resetTokensReadyRef.current = false;
+      resetTokenRef.current = {};
+    }
 
-  useEffect(() => {
-    if (!activeEventStorageId) return;
-    if (!hasMeaningfulEventInputs(draft)) return;
-    writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', cloneEventInputs(draft || {}));
-  }, [activeEventStorageId, draft, hasMeaningfulEventInputs]);
-
-  useEffect(() => {
     const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
+
+    // ★ 핵심 패치
+    // 마운트/재진입 직후에는 서버에 "과거 reset 토큰"이 남아 있어도
+    // 이를 "방금 발생한 reset"으로 오인하면 안 됨.
+    // 첫 스냅샷은 기준값으로만 저장하고, 그 다음 실제 변경분만 반영한다.
+    if (!resetTokensReadyRef.current) {
+      resetTokensReadyRef.current = true;
+      resetTokenRef.current = { ...nextTokens };
+      return;
+    }
+
     const prevTokens = resetTokenRef.current || {};
     const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] || '') !== String(prevTokens[evId] || ''));
     if (changedEvIds.length) {
-      const nextDraft = cloneEventInputs(inputsByEventServer);
-      changedEvIds.forEach((evId) => {
-        if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) delete nextDraft[evId];
+      setDraft((prevDraft) => {
+        const nextDraft = cloneEventInputs(prevDraft);
+        let changed = false;
+        changedEvIds.forEach((evId) => {
+          if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) {
+            delete nextDraft[evId];
+            changed = true;
+          }
+        });
+        if (!changed) return prevDraft;
+        draftTouchedRef.current = false;
+        pendingSavedInputsSigRef.current = '';
+        lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
+        return nextDraft;
       });
-      draftTouchedRef.current = false;
-      pendingSavedInputsSigRef.current = '';
-      lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
-      setDraft(nextDraft);
-      setDirty(false);
       setBingoUiState((prev) => {
         const out = { ...(prev || {}) };
         changedEvIds.forEach((evId) => {
@@ -854,34 +879,10 @@ export default function PlayerEventInput(){
         });
         return out;
       });
-      if (activeEventStorageId) {
-        const prevPack = readPlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', { inputs: {}, resetTokens: {} }) || { inputs: {}, resetTokens: {} };
-        const nextPack = {
-          inputs: filterCachedEventInputsByResetTokens(prevPack?.inputs, prevPack?.resetTokens, nextTokens),
-          resetTokens: { ...nextTokens },
-        };
-        setServerInputsCachePack(nextPack);
-        writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
-        if (hasMeaningfulEventInputs(nextDraft)) {
-          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', nextDraft);
-        } else {
-          removePlayerScoped(activeEventStorageId, 'eventInputsDraftCache');
-        }
-      }
+      writeStep3FastCache(activeEventStorageId, nextDraft);
     }
     resetTokenRef.current = { ...nextTokens };
-  }, [activeEventStorageId, eventData?.eventInputResets, inputsByEventServer]);
-
-  useEffect(() => {
-    if (!activeEventStorageId) return;
-    const draftEmpty = !hasMeaningfulEventInputs(draft);
-    if (!draftEmpty) return;
-    const cachedDraft = readPlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', {});
-    if (!hasMeaningfulEventInputs(cachedDraft)) return;
-    draftTouchedRef.current = false;
-    lastHydratedServerSigRef.current = stringifyEventInputs(cachedDraft);
-    setDraft(cloneEventInputs(cachedDraft));
-  }, [activeEventStorageId]);
+  }, [activeEventStorageId, eventId, ctxId, eventData?.eventInputResets]);
 
   const inputsByEvent = draft || {};
 
@@ -1362,19 +1363,7 @@ export default function PlayerEventInput(){
       const savedClone = cloneEventInputs(merged);
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
       hydrateDraftFromServer(savedClone);
-      if (activeEventStorageId) {
-        const nextPack = {
-          inputs: savedClone,
-          resetTokens: { ...liveEventInputResetTokens },
-        };
-        setServerInputsCachePack(nextPack);
-        writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
-        if (hasMeaningfulEventInputs(savedClone)) {
-          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', savedClone);
-        } else {
-          removePlayerScoped(activeEventStorageId, 'eventInputsDraftCache');
-        }
-      }
+      writeStep3FastCache(activeEventStorageId, savedClone);
       setDirty(false);
       alert('저장되었습니다.');
     }catch(e){
@@ -1938,14 +1927,10 @@ export default function PlayerEventInput(){
           }
 
           if (isBingo) {
-            const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
-            const bingoInputHoles = bingoScoreHoleCount === 18
-              ? Array.from({ length: 18 }, (_, i) => i + 1)
-              : bingoSelectedHoles;
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoInputHoles.length || 1, 1));
+            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
             const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoInputHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1956,7 +1941,7 @@ export default function PlayerEventInput(){
             const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
             const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
             const bingoCanEditBoard = !!bingoSharedMode || bingoOwnSelected;
-            const bingoRawSubtotal = bingoInputHoles.map((holeNo) => {
+            const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
@@ -1997,19 +1982,19 @@ export default function PlayerEventInput(){
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
                     <colgroup>
                       <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoInputHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
+                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
                       <col style={{ width: `${bingoTotalPct}%` }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
-                        {bingoInputHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
                         <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
@@ -2020,7 +2005,7 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={`bingo-row-${rIdx}`}>
                             <td>{p ? p.nickname : ''}</td>
-                            {bingoInputHoles.map((holeNo) => {
+                            {bingoSelectedHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
