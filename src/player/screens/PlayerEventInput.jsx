@@ -10,7 +10,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
@@ -33,8 +33,6 @@ const LONG_PRESS_MS = 450;
 const BINGO_MODE_BUTTON_FONT_SIZE = 16;
 const BINGO_COUNT_NUMBER_FONT_SIZE = 24;
 const BINGO_COUNT_LABEL_FONT_SIZE = 14;
-const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
-const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -133,7 +131,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
           />
         </svg>
       )}
-      <span style={{ position: 'relative', zIndex: 2, fontSize: holeNo ? BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE : BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE, fontWeight: 900, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
+      <span style={{ position: 'relative', zIndex: 2, fontSize: 15, fontWeight: 800, color: '#16376c', lineHeight: 1 }}>{holeNo || ''}</span>
     </div>
   );
 }
@@ -778,10 +776,9 @@ export default function PlayerEventInput(){
 
     const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
 
-    // ★ 핵심 패치
-    // 마운트/재진입 직후에는 서버에 "과거 reset 토큰"이 남아 있어도
-    // 이를 "방금 발생한 reset"으로 오인하면 안 됨.
-    // 첫 스냅샷은 기준값으로만 저장하고, 그 다음 실제 변경분만 반영한다.
+    // ★ patch
+    // 마운트/재진입 직후 첫 스냅샷은 기준값으로만 등록한다.
+    // 서버에 과거 reset 토큰이 남아 있어도 이번에 새 reset이 발생한 것으로 오인하면 안 된다.
     if (!resetTokensReadyRef.current) {
       resetTokensReadyRef.current = true;
       resetTokenRef.current = { ...nextTokens };
@@ -815,7 +812,7 @@ export default function PlayerEventInput(){
       });
     }
     resetTokenRef.current = { ...nextTokens };
-  }, [eventId, ctxId, eventData?.eventInputResets]);
+  }, [eventData?.eventInputResets, eventId, ctxId]);
 
   const inputsByEvent = draft || {};
 
@@ -1432,12 +1429,6 @@ export default function PlayerEventInput(){
           const isBingo = ev.template === 'bingo';
           const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
           const bingoSelectedHoles = isBingo ? normalizeBingoSelectedHoles(ev?.params?.selectedHoles) : [];
-          const bingoScoreHoleCount = isBingo ? normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount) : 18;
-          const bingoInputHoles = isBingo
-            ? (bingoScoreHoleCount === 18
-                ? Array.from({ length: 18 }, (_, idx) => idx + 1)
-                : bingoSelectedHoles)
-            : [];
           const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
           const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
@@ -1866,9 +1857,9 @@ export default function PlayerEventInput(){
 
           if (isBingo) {
             const bingoNickPct = 34;
-            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoInputHoles.length || 1, 1));
+            const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoSelectedHoles.length || 1, 1));
             const bingoTotalPct = 12;
-            const bingoTableWidthPct = bingoNickPct + bingoInputHoles.length * bingoOnePct + bingoTotalPct;
+            const bingoTableWidthPct = bingoNickPct + bingoSelectedHoles.length * bingoOnePct + bingoTotalPct;
             const bingoSharedMode = getBingoRoomShared(ev.id);
             const bingoEditorPid = getBingoEditorPid(ev.id, bingoSelectedHoles);
             const bingoUi = getBingoUiForEvent(ev.id);
@@ -1879,7 +1870,7 @@ export default function PlayerEventInput(){
             const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
             const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
             const bingoCanEditBoard = !!bingoSharedMode || bingoOwnSelected;
-            const bingoRawSubtotal = bingoInputHoles.map((holeNo) => {
+            const bingoRawSubtotal = bingoSelectedHoles.map((holeNo) => {
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
@@ -1916,29 +1907,23 @@ export default function PlayerEventInput(){
 
                 {bingoLocked && <div className={tCss.lockNotice}>빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
 
-                <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
-                  {bingoScoreHoleCount === 18
-                    ? `점수 입력: 1~18홀 전체 입력 · 빙고 반영: 선택된 ${bingoSelectedHoles.length}홀만 적용`
-                    : `점수 입력/빙고 반영: 선택된 ${bingoSelectedHoles.length}홀만 적용`}
-                </div>
-
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
                     <colgroup>
                       <col style={{ width: `${bingoNickPct}%` }} />
-                      {bingoInputHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
+                      {bingoSelectedHoles.map((holeNo) => <col key={`bingo-col-${holeNo}`} style={{ width: `${bingoOnePct}%` }} />)}
                       <col style={{ width: `${bingoTotalPct}%` }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th>닉네임</th>
-                        {bingoInputHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
+                        {bingoSelectedHoles.map((holeNo) => (<th key={`bingo-head-${holeNo}`}>{holeNo}</th>))}
                         <th>합계</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoSelectedHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
@@ -1949,7 +1934,7 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={`bingo-row-${rIdx}`}>
                             <td>{p ? p.nickname : ''}</td>
-                            {bingoInputHoles.map((holeNo) => {
+                            {bingoSelectedHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
