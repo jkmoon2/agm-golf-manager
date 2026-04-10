@@ -402,29 +402,26 @@ export function EventProvider({ children }) {
     try {
       const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
       const subInputs = eventInputsSubRef.current || {};
-      const resetTokens =
-        (withGate?.eventInputResets && typeof withGate.eventInputResets === 'object')
-          ? withGate.eventInputResets
-          : {};
-
+      const resetTokens = (withGate?.eventInputResets && typeof withGate.eventInputResets === 'object') ? withGate.eventInputResets : {};
       Object.entries(subInputs).forEach(([evId, slot]) => {
         if (!evId) return;
 
-        // ★ patch:
-        // 운영자 입력초기화 후 root eventInputs[evId]가 이미 비워졌고
-        // eventInputResets[evId] 토큰이 찍혀 있으면,
-        // 늦게 도착한 subcollection eventInputs 값을 다시 합치지 않음.
-        const hasRootValue = Object.prototype.hasOwnProperty.call(rootInputs, evId);
-        const hasResetToken = Object.prototype.hasOwnProperty.call(resetTokens, evId)
-          && resetTokens[evId] != null
-          && String(resetTokens[evId]) !== '';
+        const hasRootSlot = Object.prototype.hasOwnProperty.call(rootInputs, evId);
+        const hasResetToken = String(resetTokens?.[evId] || '').trim() !== '';
 
-        if (!hasRootValue && hasResetToken) return;
+        // ✅ STEP3/eventInputs SSOT는 root(events/{eventId}.eventInputs) 기준으로 유지
+        // - root에 슬롯이 있으면 절대 subcollection 값으로 덮어쓰지 않음
+        // - 운영자 입력초기화 후 reset token이 찍힌 이벤트는, root에 슬롯이 없으면
+        //   subcollection의 예전 입력이 다시 살아나지 않도록 병합을 차단
+        if (hasRootSlot) return;
+        if (hasResetToken) return;
 
-        const prev = (rootInputs[evId] && typeof rootInputs[evId] === 'object') ? rootInputs[evId] : {};
-        const next = { ...prev, ...(slot || {}) };
-        if (prev.person || slot?.person) next.person = { ...(prev.person || {}), ...((slot && slot.person) || {}) };
-        rootInputs[evId] = next;
+        if (slot && typeof slot === 'object') {
+          const fallback = { ...(slot || {}) };
+          if (slot?.person && typeof slot.person === 'object') fallback.person = { ...slot.person };
+          if (slot?.shared && typeof slot.shared === 'object') fallback.shared = { ...slot.shared };
+          rootInputs[evId] = fallback;
+        }
       });
       withGate.eventInputs = rootInputs;
     } catch {}
