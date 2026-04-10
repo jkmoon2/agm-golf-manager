@@ -402,28 +402,8 @@ export function EventProvider({ children }) {
     try {
       const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
       const subInputs = eventInputsSubRef.current || {};
-      const resetTokens = (withGate?.eventInputResets && typeof withGate.eventInputResets === 'object') ? withGate.eventInputResets : {};
-      Object.entries(subInputs).forEach(([evId, slot]) => {
-        if (!evId) return;
-
-        const hasRootSlot = Object.prototype.hasOwnProperty.call(rootInputs, evId);
-        const hasResetToken = String(resetTokens?.[evId] || '').trim() !== '';
-
-        // ✅ STEP3/eventInputs SSOT는 root(events/{eventId}.eventInputs) 기준으로 유지
-        // - root에 슬롯이 있으면 절대 subcollection 값으로 덮어쓰지 않음
-        // - 운영자 입력초기화 후 reset token이 찍힌 이벤트는, root에 슬롯이 없으면
-        //   subcollection의 예전 입력이 다시 살아나지 않도록 병합을 차단
-        if (hasRootSlot) return;
-        if (hasResetToken) return;
-
-        if (slot && typeof slot === 'object') {
-          const fallback = { ...(slot || {}) };
-          if (slot?.person && typeof slot.person === 'object') fallback.person = { ...slot.person };
-          if (slot?.shared && typeof slot.shared === 'object') fallback.shared = { ...slot.shared };
-          rootInputs[evId] = fallback;
-        }
-      });
       withGate.eventInputs = rootInputs;
+      withGate.eventInputsSub = subInputs;
     } catch {}
 
     setEventData(withGate);

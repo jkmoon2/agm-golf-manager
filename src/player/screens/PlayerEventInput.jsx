@@ -36,7 +36,7 @@ const BINGO_COUNT_LABEL_FONT_SIZE = 14;
 const BINGO_PREVIEW_NAME_FONT_SIZE = 20;
 const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
 const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
-const ALL_BINGO_INPUT_HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
+const BINGO_ALL_INPUT_HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -656,7 +656,7 @@ export default function PlayerEventInput(){
   const lastHydratedServerSigRef = useRef('');
   const resetTokenRef = useRef({});
   const resetTokensReadyRef = useRef(false);
-  const resetTokensEventKeyRef = useRef('');
+  const resetTokensEventIdRef = useRef('');
 
   const focusEventInput = (evId, pid, idx) => {
     try {
@@ -771,43 +771,44 @@ export default function PlayerEventInput(){
   }, [inputsByEventServer]);
 
   useEffect(() => {
-    const currentEventKey = String(eventId || ctxId || '');
-    if (resetTokensEventKeyRef.current !== currentEventKey) {
-      resetTokensEventKeyRef.current = currentEventKey;
-      resetTokensReadyRef.current = false;
-      resetTokenRef.current = {};
-    }
+    const scopeEventId = String(eventId || ctxId || '');
+    resetTokensEventIdRef.current = scopeEventId;
+    resetTokensReadyRef.current = false;
+    resetTokenRef.current = {};
+  }, [eventId, ctxId]);
 
+  useEffect(() => {
+    const scopeEventId = String(eventId || ctxId || '');
     const nextTokens = (eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {};
-    if (!resetTokensReadyRef.current) {
-      resetTokenRef.current = { ...nextTokens };
+    if (!resetTokensReadyRef.current || resetTokensEventIdRef.current !== scopeEventId) {
+      resetTokensEventIdRef.current = scopeEventId;
       resetTokensReadyRef.current = true;
+      resetTokenRef.current = { ...nextTokens };
       return;
     }
-
     const prevTokens = resetTokenRef.current || {};
-    const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] || '') !== String(prevTokens[evId] || ''));
+    const allEvIds = Array.from(new Set([...Object.keys(prevTokens), ...Object.keys(nextTokens)]));
+    const changedEvIds = allEvIds.filter((evId) => String(nextTokens[evId] || '') !== String(prevTokens[evId] || ''));
     if (changedEvIds.length) {
-      setDraft(() => {
-        const nextDraft = cloneEventInputs(inputsByEventServer);
-        changedEvIds.forEach((evId) => {
-          if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) delete nextDraft[evId];
-        });
-        draftTouchedRef.current = false;
-        pendingSavedInputsSigRef.current = '';
-        lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
-        return nextDraft;
+      const nextDraft = cloneEventInputs(inputsByEventServer || {});
+      changedEvIds.forEach((evId) => {
+        if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) delete nextDraft[evId];
       });
+      draftTouchedRef.current = false;
+      pendingSavedInputsSigRef.current = '';
+      lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
+      setDraft(nextDraft);
+      setDirty(false);
       setBingoUiState((prev) => {
         const out = { ...(prev || {}) };
         changedEvIds.forEach((evId) => {
-          if (out[evId]) out[evId] = { ...(out[evId] || {}), moveIndex: null };
+          if (Object.prototype.hasOwnProperty.call(out, evId)) delete out[evId];
         });
         return out;
       });
     }
     resetTokenRef.current = { ...nextTokens };
-  }, [eventData?.eventInputResets, eventId, ctxId, inputsByEventServer]);
+  }, [eventId, ctxId, eventData?.eventInputResets, inputsByEventServer]);
 
   const inputsByEvent = draft || {};
 
@@ -1424,6 +1425,8 @@ export default function PlayerEventInput(){
           const isBingo = ev.template === 'bingo';
           const selectedHoles = isHoleRankForce ? normalizeSelectedHoles(ev?.params?.selectedHoles) : [];
           const bingoSelectedHoles = isBingo ? normalizeBingoSelectedHoles(ev?.params?.selectedHoles) : [];
+          const bingoScoreHoleCount = isBingo ? normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount) : 18;
+          const bingoInputHoles = isBingo ? (bingoScoreHoleCount === 18 ? BINGO_ALL_INPUT_HOLES : bingoSelectedHoles) : [];
           const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
           const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
           const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
@@ -1851,8 +1854,6 @@ export default function PlayerEventInput(){
           }
 
           if (isBingo) {
-            const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
-            const bingoInputHoles = bingoScoreHoleCount === 18 ? ALL_BINGO_INPUT_HOLES : bingoSelectedHoles;
             const bingoNickPct = 34;
             const bingoOnePct = Math.max(9.5, 54 / Math.max(bingoInputHoles.length || 1, 1));
             const bingoTotalPct = 12;
@@ -1903,6 +1904,11 @@ export default function PlayerEventInput(){
                 </div>
 
                 {bingoLocked && <div className={tCss.lockNotice}>빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
+                {bingoScoreHoleCount === 18 && (
+                  <div className={tCss.lockNotice} style={{ background: '#eef6ff', color: '#2457d6', borderColor: '#cfe0ff' }}>
+                    18홀 입력 모드 · 빙고 반영은 선택된 16홀만 적용
+                  </div>
+                )}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
