@@ -249,6 +249,8 @@ const MANUAL_SYNC_RAF_MS = 180;
 export function EventProvider({ children }) {
   const location = useLocation();
   const isPlayerRoute = !!location?.pathname?.startsWith('/player');
+  const isPlayerEventListRoute = !!location?.pathname?.startsWith('/player/events');
+  const shouldLiveAllEvents = !isPlayerRoute || isPlayerEventListRoute;
 
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
@@ -368,7 +370,11 @@ export function EventProvider({ children }) {
   };
 
   // 전체 이벤트 구독
+  // - 운영자 화면은 기존처럼 live 유지
+  // - 참가자 화면은 이벤트 선택 목록(/player/events)에서만 live 유지
+  //   그 외 player step에서는 불필요한 전체 이벤트 구독을 붙이지 않음
   useEffect(() => {
+    if (!shouldLiveAllEvents) return undefined;
     let unsub = null,
       cancelled = false;
     ensureAuthed().then(() => {
@@ -383,7 +389,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, []);
+  }, [shouldLiveAllEvents]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -402,12 +408,14 @@ export function EventProvider({ children }) {
     try {
       const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
       const subInputs = eventInputsSubRef.current || {};
-      // ★ SSOT: STEP3 입력 원본은 항상 root eventInputs 만 사용한다.
-      // legacy subcollection(eventInputs)은 참고용 별도 필드로만 노출하여,
-      // root 삭제 후 오래된 subcollection 값이 다시 합쳐져 되살아나는 현상을 막는다.
+      Object.entries(subInputs).forEach(([evId, slot]) => {
+        if (!evId) return;
+        const prev = (rootInputs[evId] && typeof rootInputs[evId] === 'object') ? rootInputs[evId] : {};
+        const next = { ...prev, ...(slot || {}) };
+        if (prev.person || slot?.person) next.person = { ...(prev.person || {}), ...((slot && slot.person) || {}) };
+        rootInputs[evId] = next;
+      });
       withGate.eventInputs = rootInputs;
-      withGate.eventInputsRoot = rootInputs;
-      withGate.eventInputsSub = { ...subInputs };
     } catch {}
 
     setEventData(withGate);
@@ -508,6 +516,20 @@ export function EventProvider({ children }) {
       eventInputsSubRef.current = {};
       return;
     }
+
+    // ✅ 3-1 1차 정리
+    // Player 라우트에서는 STEP3 입력 SSOT를 root eventInputs로 유지하므로
+    // eventInputs 서브컬렉션 live listener를 붙이지 않습니다.
+    // (운영자 화면에서는 기존과 동일하게 유지)
+    if (isPlayerRoute) {
+      const hadSubInputs = Object.keys(eventInputsSubRef.current || {}).length > 0;
+      eventInputsSubRef.current = {};
+      if (hadSubInputs && lastEventDataRef.current) {
+        applyIncomingEventData(lastEventDataRef.current);
+      }
+      return undefined;
+    }
+
     let unsub = null, cancelled = false;
     ensureAuthed().then(() => {
       if (cancelled) return;
@@ -530,7 +552,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, applyIncomingEventData]);
+  }, [eventId, applyIncomingEventData, isPlayerRoute]);
 
 
   useEffect(() => {
@@ -578,62 +600,6 @@ export function EventProvider({ children }) {
       window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('visibilitychange', onVisible);
       try { unsubSync(); } catch {}
-    };
-  }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
-
-  // ★ Player route 보강: 일부 단말/브라우저에서 실시간 스냅샷이 늦거나 누락되는 경우를 대비해
-  // visible 상태에서는 서버 최신 문서를 강제로 재조회해 16/18홀 변경 및 입력초기화를 강하게 반영한다.
-  useEffect(() => {
-    if (!eventId) return;
-    if (!isPlayerRoute) return;
-
-    let raf = 0;
-    let intervalId = 0;
-    let lastScheduleAt = 0;
-    const scheduleRefresh = (plan = { event: true, scores: true, force: true }) => {
-      const now = Date.now();
-      if (!plan?.force && now - lastScheduleAt < MANUAL_SYNC_RAF_MS) return;
-      lastScheduleAt = now;
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        if (plan?.event) refreshEventNow({ force: !!plan?.force });
-        if (plan?.scores) refreshScoresNow({ force: !!plan?.force });
-      });
-    };
-
-    const onFocus = () => scheduleRefresh({ event: true, scores: true, force: true });
-    const onPageShow = () => scheduleRefresh({ event: true, scores: true, force: true });
-    const onVisible = () => {
-      try {
-        if (document.visibilityState === 'visible') {
-          scheduleRefresh({ event: true, scores: true, force: true });
-        }
-      } catch {
-        scheduleRefresh({ event: true, scores: true, force: true });
-      }
-    };
-
-    scheduleRefresh({ event: true, scores: true, force: true });
-    intervalId = window.setInterval(() => {
-      try {
-        if (document.visibilityState === 'visible') {
-          scheduleRefresh({ event: true, scores: true, force: true });
-        }
-      } catch {
-        scheduleRefresh({ event: true, scores: true, force: true });
-      }
-    }, 2000);
-
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('pageshow', onPageShow);
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      if (intervalId) clearInterval(intervalId);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('pageshow', onPageShow);
-      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
 

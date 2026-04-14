@@ -45,6 +45,7 @@ const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
 const PLAYER_MANUAL_REFRESH_COOLDOWN_MS = 1200;
 const PLAYER_SYNC_RAF_MS = 180;
+const PLAYER_STALE_REFRESH_MS = 3500;
 
 const FOURBALL_USE_TRANSACTION = (() => {
   try {
@@ -468,6 +469,7 @@ if (!idCached) {
       try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
       if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
       if (now - (lastPlayerRefreshAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
+      if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_STALE_REFRESH_MS) return;
     }
     lastPlayerRefreshAtRef.current = now;
     try {
@@ -513,6 +515,7 @@ if (!idCached) {
         try { if (typeof document !== 'undefined' && document.hidden) return; } catch {}
         try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
         if (now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
+        if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_STALE_REFRESH_MS) return;
       }
       lastScheduleAt = now;
       if (raf) cancelAnimationFrame(raf);
