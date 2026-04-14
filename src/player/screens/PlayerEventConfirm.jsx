@@ -21,6 +21,96 @@ import { computeHoleRankForce } from '../../events/holeRankForce';
 import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
 import { buildBingoRoomRowsFromPersonRows, computeBingo } from '../../events/bingo';
 
+function getPreviewGroupNo(p) {
+  const cand = p?.group ?? p?.groupNo ?? p?.groupNumber ?? p?.jo ?? p?.joNo ?? p?.groupIndex;
+  const n = Number(cand);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function buildJoRoomRows(personRowsBase = [], participants = [], roomCount = 0, roomNames = [], rankOrder = 'desc') {
+  const byId = new Map((participants || []).map((p) => [String(p?.id), p]));
+  const groupBuckets = new Map();
+
+  (personRowsBase || []).forEach((row) => {
+    const src = byId.get(String(row?.id)) || {};
+    const groupNo = getPreviewGroupNo(src);
+    const roomNo = Number(src?.room ?? row?.room ?? NaN);
+    if (!Number.isFinite(groupNo) || !Number.isFinite(roomNo) || roomNo < 1) return;
+    const safe = {
+      id: row?.id,
+      name: String(row?.name ?? src?.nickname ?? ''),
+      room: roomNo,
+      group: groupNo,
+      score: Number(row?.score ?? 0),
+      handicap: Number(src?.handicap ?? 0),
+    };
+    if (!groupBuckets.has(groupNo)) groupBuckets.set(groupNo, []);
+    groupBuckets.get(groupNo).push(safe);
+  });
+
+  const roomMap = new Map(
+    Array.from({ length: Math.max(0, Number(roomCount) || 0) }, (_, i) => {
+      const roomNo = i + 1;
+      return [roomNo, {
+        room: roomNo,
+        name: roomNames[roomNo - 1]?.trim() || `${roomNo}번방`,
+        score: 0,
+        detail: [],
+      }];
+    })
+  );
+
+  const sortDir = rankOrder === 'asc' ? 1 : -1;
+
+  Array.from(groupBuckets.entries())
+    .sort((a, b) => a[0] - b[0])
+    .forEach(([groupNo, rows]) => {
+      const ordered = [...rows].sort((a, b) => {
+        if (a.score !== b.score) return sortDir * (a.score - b.score);
+        if (a.handicap !== b.handicap) return a.handicap - b.handicap;
+        if (a.room !== b.room) return a.room - b.room;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+      });
+
+      const maxPoint = ordered.length;
+      let prevScore = null;
+      let currentRank = 0;
+      ordered.forEach((row, idx) => {
+        if (idx === 0) {
+          currentRank = 1;
+          prevScore = row.score;
+        } else if (row.score !== prevScore) {
+          currentRank = idx + 1;
+          prevScore = row.score;
+        }
+        const converted = Math.max(1, maxPoint - currentRank + 1);
+        const bucket = roomMap.get(row.room);
+        if (!bucket) return;
+        bucket.score += converted;
+        bucket.detail.push({
+          id: row.id,
+          name: row.name,
+          group: groupNo,
+          rawScore: row.score,
+          rank: currentRank,
+          converted,
+        });
+      });
+    });
+
+  const rows = Array.from(roomMap.values());
+  rows.forEach((row) => {
+    row.detail.sort((a, b) => {
+      if (a.group !== b.group) return a.group - b.group;
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (b.converted !== a.converted) return b.converted - a.converted;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+    });
+  });
+  rows.sort((a, b) => b.score - a.score || a.room - b.room);
+  return rows;
+}
+
 const asNum = (v) => (v === '' || v == null ? NaN : Number(v));
 const isFiniteNum = (n) => Number.isFinite(n);
 
@@ -112,6 +202,75 @@ function foldAccum(obj, aggregator='sum'){
   return aggregate(vals, aggregator);
 }
 
+function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, roomNames = [], roomCount = 0) {
+  if (!ev) return [];
+  const evId = ev?.id;
+  const template = ev?.template || 'raw-number';
+  const params = ev?.params || {};
+  const agg = params?.aggregator || 'sum';
+
+  if (template === 'hole-rank-force') {
+    const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames, roomCount });
+    return Array.isArray(data?.personRows)
+      ? data.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
+      : [];
+  }
+
+  if (template === 'bingo') {
+    const data = computeBingo(ev, participants, inputsByEvent, { roomNames, roomCount });
+    return Array.isArray(data?.personRows)
+      ? data.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
+      : [];
+  }
+
+  const scoreOfParticipant = (participant) => {
+    const slot = inputsByEvent?.[evId]?.person?.[participant?.id];
+    if (template === 'group-battle') {
+      const data = computeGroupBattle(ev, participants, { roomNames });
+      if (data?.kind !== 'person') return NaN;
+      const hit = (data?.rows || []).find((row) => String(row?.id) === String(participant?.id));
+      return Number(hit?.value);
+    }
+
+    if (template === 'group-room-hole-battle') {
+      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
+      if (data?.kind !== 'person') return NaN;
+      const hit = (data?.rows || []).find((row) => String(row?.participantId || row?.id) === String(participant?.id));
+      return Number(hit?.value);
+    }
+
+    let val;
+    if (typeof slot === 'object' && slot && Array.isArray(slot.values)) {
+      if (template === 'range-convert-bonus') {
+        const map = bonusMapFromParams(params);
+        const vals = Array.isArray(slot.values) ? slot.values : [];
+        const bons = Array.isArray(slot.bonus) ? slot.bonus : [];
+        let total = 0;
+        for (let i = 0; i < vals.length; i += 1) {
+          const base = evaluateValue('range-convert', params, vals[i]);
+          total += (Number.isFinite(base) ? base : 0) + (map[String(bons[i] || '')] || 0);
+        }
+        val = total;
+      } else {
+        const folded = foldAccum(slot, agg);
+        val = evaluateValue(template === 'range-convert-bonus' ? 'raw-number' : template, params, folded);
+      }
+    } else if (template === 'range-convert-bonus' && typeof slot === 'object' && slot) {
+      const base = evaluateValue('range-convert', params, slot?.values ? slot.values[0] : slot);
+      const map = bonusMapFromParams(params);
+      const b = (Array.isArray(slot.bonus) ? slot.bonus[0] : slot.bonus);
+      val = (Number.isFinite(base) ? base : 0) + (map[String(b || '')] || 0);
+    } else {
+      val = evaluateValue(template, params, slot);
+    }
+    return asNum(val);
+  };
+
+  return (participants || [])
+    .map((p) => ({ id: p.id, name: p.nickname, room: p.room, score: scoreOfParticipant(p) }))
+    .filter((row) => isFiniteNum(row.score));
+}
+
 export default function PlayerEventConfirm() {
   const nav = useNavigate();
   const { eventId: urlEventId } = useParams();
@@ -151,7 +310,19 @@ const events = useMemo(
     const { id: evId, target = 'person', template='raw-number', params={}, rankOrder='asc' } = ev || {};
     const agg = params?.aggregator || 'sum';
 
-
+    if (target === 'jo') {
+      const baseRows = buildPersonRowsForJoPreview(ev, participants, inputsByEvent, roomNames, roomCount);
+      const rows = buildJoRoomRows(baseRows, participants, roomCount, roomNames, rankOrder).map((row, i) => ({
+        key: String(row?.room || i),
+        rank: i + 1,
+        label: row.name,
+        value: row.score,
+        detailText: Array.isArray(row.detail)
+          ? row.detail.map((item) => `${item.group}조:${fmtScore(item.converted)}점(${item.rank}위/${fmtScore(item.rawScore)}개)`).join(' · ')
+          : '',
+      }));
+      return { kind: 'jo', metricLabel: '배점', rows };
+    }
 
     // ── hole-rank-force(홀별 강제 순위 점수) ─────────────────────
     if (template === 'hole-rank-force') {
@@ -399,7 +570,7 @@ const events = useMemo(
 
           {results.map(({ ev, res }) => {
             const title = ev?.title || '이벤트';
-            const unit  = res.kind === 'person' ? '개인' : (res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : '방'));
+            const unit  = res.kind === 'person' ? '개인' : (res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '조' : '방')));
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
                 <div className={baseCss.cardHeader}>
@@ -420,7 +591,7 @@ const events = useMemo(
                       <tr>
                         <th className={tCss.cell}>순위</th>
                         {res.kind === 'person' && <th className={tCss.cell}>닉네임</th>}
-                        <th className={tCss.cell}>{res.kind === 'room' ? '방' : res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : '방')}</th>
+                        <th className={tCss.cell}>{res.kind === 'room' ? '방' : res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '방' : '방'))}</th>
                         <th className={tCss.cell}>{res.metricLabel || '점수'}</th>
                       </tr>
                     </thead>
