@@ -45,7 +45,8 @@ const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
 const PLAYER_MANUAL_REFRESH_COOLDOWN_MS = 1200;
 const PLAYER_SYNC_RAF_MS = 180;
-const PLAYER_STALE_REFRESH_MS = 3500;
+const PLAYER_DIRECT_ENTRY_STALE_MS = 3500;
+const PLAYER_DIRECT_ENTRY_INITIAL_DELAY_MS = 900;
 
 const FOURBALL_USE_TRANSACTION = (() => {
   try {
@@ -298,6 +299,7 @@ export function PlayerProvider({ children }) {
   const [authCode, setAuthCode]           = useState('');
   const lastPlayerSnapshotAtRef           = useRef(0);
   const lastPlayerRefreshAtRef            = useRef(0);
+  const authCodeRef                       = useRef('');
 
   const { pathname } = useLocation();
 
@@ -331,6 +333,10 @@ export function PlayerProvider({ children }) {
   useEffect(() => {
     try { if (eventId) localStorage.setItem('player.eventId', eventId); } catch {}
   }, [eventId]);
+
+  useEffect(() => {
+    authCodeRef.current = authCode;
+  }, [authCode]);
 
   useEffect(() => {
   if (!eventId) return;
@@ -394,8 +400,9 @@ const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legac
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
       let me = null;
-      if (authCode && authCode.trim()) {
-        me = partArr.find((p) => String(p.authCode) === String(authCode)) || null;
+      const liveAuthCode = String(authCodeRef.current || '').trim();
+      if (liveAuthCode) {
+        me = partArr.find((p) => String(p.authCode) === liveAuthCode) || null;
       } else {
         let authedThisEvent = false;
         try { authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true'; } catch {}
@@ -458,7 +465,7 @@ if (!idCached) {
       }
     });
     return () => unsub();
-  }, [eventId, authCode]);
+  }, [eventId, overlayScoresToParticipants]);
 
   async function refreshPlayerStateNow(opts = {}) {
     if (!eventId) return;
@@ -469,7 +476,6 @@ if (!idCached) {
       try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
       if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
       if (now - (lastPlayerRefreshAtRef.current || 0) < PLAYER_MANUAL_REFRESH_COOLDOWN_MS) return;
-      if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_STALE_REFRESH_MS) return;
     }
     lastPlayerRefreshAtRef.current = now;
     try {
@@ -508,24 +514,36 @@ if (!idCached) {
   useEffect(() => {
     if (!eventId) return;
     let raf = 0;
+    let initialTimer = 0;
     let lastScheduleAt = 0;
+    const isVisibleNow = () => {
+      try { return document.visibilityState === 'visible'; } catch { return true; }
+    };
+    const isOnlineNow = () => {
+      try { return navigator.onLine !== false; } catch { return true; }
+    };
+    const isSnapshotStale = () => {
+      const now = Date.now();
+      const last = Number(lastPlayerSnapshotAtRef.current || 0);
+      return !last || (now - last) >= PLAYER_DIRECT_ENTRY_STALE_MS;
+    };
     const scheduleRefresh = (opts = { force: false }) => {
       const now = Date.now();
-      if (!opts?.force) {
-        try { if (typeof document !== 'undefined' && document.hidden) return; } catch {}
-        try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
-        if (now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
-        if (now - (lastPlayerSnapshotAtRef.current || 0) < PLAYER_STALE_REFRESH_MS) return;
-      }
+      if (!isVisibleNow() || !isOnlineNow()) return;
+      if (!opts?.force && now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
+      if (!isSnapshotStale()) return;
       lastScheduleAt = now;
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => { refreshPlayerStateNow({ force: !!opts?.force }); });
     };
-    const onFocus = () => scheduleRefresh();
-    const onPageShow = () => scheduleRefresh();
+    const onFocus = () => scheduleRefresh({ force: false });
+    const onPageShow = () => scheduleRefresh({ force: false });
     const onVisible = () => {
-      try { if (document.visibilityState === 'visible') scheduleRefresh(); } catch { scheduleRefresh(); }
+      if (isVisibleNow()) scheduleRefresh({ force: false });
     };
+    initialTimer = window.setTimeout(() => {
+      scheduleRefresh({ force: true });
+    }, PLAYER_DIRECT_ENTRY_INITIAL_DELAY_MS);
     window.addEventListener('focus', onFocus);
     window.addEventListener('pageshow', onPageShow);
     document.addEventListener('visibilitychange', onVisible);
@@ -536,6 +554,7 @@ if (!idCached) {
     });
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      if (initialTimer) clearTimeout(initialTimer);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('visibilitychange', onVisible);

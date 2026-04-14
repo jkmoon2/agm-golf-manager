@@ -245,12 +245,13 @@ const ensureAuthed = (() => {
 
 const MANUAL_REFRESH_COOLDOWN_MS = 1200;
 const MANUAL_SYNC_RAF_MS = 180;
+const PLAYER_ROUTE_REFRESH_STALE_MS = 3500;
+const PLAYER_ROUTE_REFRESH_INTERVAL_MS = 8000;
+const PLAYER_ROUTE_INITIAL_REFRESH_DELAY_MS = 900;
 
 export function EventProvider({ children }) {
   const location = useLocation();
   const isPlayerRoute = !!location?.pathname?.startsWith('/player');
-  const isPlayerEventListRoute = !!location?.pathname?.startsWith('/player/events');
-  const shouldLiveAllEvents = !isPlayerRoute || isPlayerEventListRoute;
 
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
@@ -370,11 +371,7 @@ export function EventProvider({ children }) {
   };
 
   // 전체 이벤트 구독
-  // - 운영자 화면은 기존처럼 live 유지
-  // - 참가자 화면은 이벤트 선택 목록(/player/events)에서만 live 유지
-  //   그 외 player step에서는 불필요한 전체 이벤트 구독을 붙이지 않음
   useEffect(() => {
-    if (!shouldLiveAllEvents) return undefined;
     let unsub = null,
       cancelled = false;
     ensureAuthed().then(() => {
@@ -389,7 +386,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [shouldLiveAllEvents]);
+  }, []);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -408,14 +405,12 @@ export function EventProvider({ children }) {
     try {
       const rootInputs = (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? { ...withGate.eventInputs } : {};
       const subInputs = eventInputsSubRef.current || {};
-      Object.entries(subInputs).forEach(([evId, slot]) => {
-        if (!evId) return;
-        const prev = (rootInputs[evId] && typeof rootInputs[evId] === 'object') ? rootInputs[evId] : {};
-        const next = { ...prev, ...(slot || {}) };
-        if (prev.person || slot?.person) next.person = { ...(prev.person || {}), ...((slot && slot.person) || {}) };
-        rootInputs[evId] = next;
-      });
+      // ★ SSOT: STEP3 입력 원본은 항상 root eventInputs 만 사용한다.
+      // legacy subcollection(eventInputs)은 참고용 별도 필드로만 노출하여,
+      // root 삭제 후 오래된 subcollection 값이 다시 합쳐져 되살아나는 현상을 막는다.
       withGate.eventInputs = rootInputs;
+      withGate.eventInputsRoot = rootInputs;
+      withGate.eventInputsSub = { ...subInputs };
     } catch {}
 
     setEventData(withGate);
@@ -516,20 +511,13 @@ export function EventProvider({ children }) {
       eventInputsSubRef.current = {};
       return;
     }
-
-    // ✅ 3-1 1차 정리
-    // Player 라우트에서는 STEP3 입력 SSOT를 root eventInputs로 유지하므로
-    // eventInputs 서브컬렉션 live listener를 붙이지 않습니다.
-    // (운영자 화면에서는 기존과 동일하게 유지)
     if (isPlayerRoute) {
-      const hadSubInputs = Object.keys(eventInputsSubRef.current || {}).length > 0;
-      eventInputsSubRef.current = {};
-      if (hadSubInputs && lastEventDataRef.current) {
-        applyIncomingEventData(lastEventDataRef.current);
+      if (Object.keys(eventInputsSubRef.current || {}).length) {
+        eventInputsSubRef.current = {};
+        if (lastEventDataRef.current) applyIncomingEventData(lastEventDataRef.current);
       }
-      return undefined;
+      return;
     }
-
     let unsub = null, cancelled = false;
     ensureAuthed().then(() => {
       if (cancelled) return;
@@ -552,7 +540,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, applyIncomingEventData, isPlayerRoute]);
+  }, [eventId, isPlayerRoute, applyIncomingEventData]);
 
 
   useEffect(() => {
@@ -600,6 +588,77 @@ export function EventProvider({ children }) {
       window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('visibilitychange', onVisible);
       try { unsubSync(); } catch {}
+    };
+  }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
+
+  // ★ Player route 보강: direct-entry 직후에는 실시간 onSnapshot을 우선 믿고,
+  // 스냅샷이 오래 멈췄을 때만 보강 refresh를 걸어 hydrate/refresh 중복을 줄인다.
+  useEffect(() => {
+    if (!eventId) return;
+    if (!isPlayerRoute) return;
+
+    let raf = 0;
+    let intervalId = 0;
+    let initialTimer = 0;
+    let lastScheduleAt = 0;
+
+    const isVisibleNow = () => {
+      try { return document.visibilityState === 'visible'; } catch { return true; }
+    };
+    const isOnlineNow = () => {
+      try { return navigator.onLine !== false; } catch { return true; }
+    };
+    const isPlanStale = (plan = { event: true, scores: true }) => {
+      const now = Date.now();
+      if (plan?.event) {
+        const lastEventAt = Number(lastEventSnapshotAtRef.current || 0);
+        if (!lastEventAt || (now - lastEventAt) >= PLAYER_ROUTE_REFRESH_STALE_MS) return true;
+      }
+      if (plan?.scores) {
+        const lastScoresAt = Number(lastScoresSnapshotAtRef.current || 0);
+        if (!lastScoresAt || (now - lastScoresAt) >= PLAYER_ROUTE_REFRESH_STALE_MS) return true;
+      }
+      return false;
+    };
+
+    const scheduleRefresh = (plan = { event: true, scores: true, force: false }) => {
+      if (!isVisibleNow() || !isOnlineNow()) return;
+      const now = Date.now();
+      if (!plan?.force && now - lastScheduleAt < MANUAL_SYNC_RAF_MS) return;
+      if (!isPlanStale(plan)) return;
+      lastScheduleAt = now;
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (plan?.event) refreshEventNow({ force: !!plan?.force });
+        if (plan?.scores) refreshScoresNow({ force: !!plan?.force });
+      });
+    };
+
+    const onFocus = () => scheduleRefresh({ event: true, scores: true, force: false });
+    const onPageShow = () => scheduleRefresh({ event: true, scores: true, force: false });
+    const onVisible = () => {
+      if (isVisibleNow()) scheduleRefresh({ event: true, scores: true, force: false });
+    };
+
+    initialTimer = window.setTimeout(() => {
+      scheduleRefresh({ event: true, scores: true, force: true });
+    }, PLAYER_ROUTE_INITIAL_REFRESH_DELAY_MS);
+
+    intervalId = window.setInterval(() => {
+      scheduleRefresh({ event: true, scores: true, force: false });
+    }, PLAYER_ROUTE_REFRESH_INTERVAL_MS);
+
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (initialTimer) clearTimeout(initialTimer);
+      if (intervalId) clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onPageShow);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
 
