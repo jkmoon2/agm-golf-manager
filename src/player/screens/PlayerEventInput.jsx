@@ -12,6 +12,7 @@ import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 
 
@@ -468,6 +469,7 @@ export default function PlayerEventInput(){
   const { eventId } = useParams();
   const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
   const { participant: ctxParticipant, participants: ctxParticipants } = useContext(PlayerContext) || {};
+  const effectiveEventData = useEffectivePlayerEventData();
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
@@ -530,13 +532,13 @@ export default function PlayerEventInput(){
   }, [eventId, ctxId]);
 
   const latestGate = useMemo(() => {
-    const mode = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
-    const ctxG = pickGateByMode(eventData?.playerGate || {}, mode);
-    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const mode = (effectiveEventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const ctxG = pickGateByMode(effectiveEventData?.playerGate || {}, mode);
+    const ctxAt = tsToMillis(effectiveEventData?.gateUpdatedAt);
     const fbG  = pickGateByMode(fallbackGate || {}, mode);
     const fbAt = fallbackAt;
     return (ctxAt >= fbAt) ? ctxG : fbG;
-  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
+  }, [effectiveEventData?.playerGate, effectiveEventData?.gateUpdatedAt, effectiveEventData?.mode, fallbackGate, fallbackAt]);
 
   const nextDisabled = useMemo(() => (latestGate?.steps?.[4] !== 'enabled'), [latestGate]);
 
@@ -566,24 +568,24 @@ export default function PlayerEventInput(){
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
   const participants = useMemo(() => {
-    const fromEvent = getEffectiveParticipants(eventData);
+    const fromEvent = getEffectiveParticipants(effectiveEventData);
     if (Array.isArray(fromEvent) && fromEvent.length) return fromEvent;
     return Array.isArray(ctxParticipants) ? ctxParticipants : [];
-  }, [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball, ctxParticipants]);
+  }, [effectiveEventData?.mode, effectiveEventData?.participants, effectiveEventData?.participantsStroke, effectiveEventData?.participantsFourball, ctxParticipants]);
   const events = useMemo(
-    () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
-    [eventData]
+    () => Array.isArray(effectiveEventData?.events) ? effectiveEventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
+    [effectiveEventData?.events]
   );
 
   const roomNames = useMemo(() => {
-    if (Array.isArray(eventData?.roomNames) && eventData.roomNames.length) {
-      return eventData.roomNames.map(v => String(v ?? ''));
+    if (Array.isArray(effectiveEventData?.roomNames) && effectiveEventData.roomNames.length) {
+      return effectiveEventData.roomNames.map(v => String(v ?? ''));
     }
-    const cnt = Number(eventData?.roomCount || 0);
+    const cnt = Number(effectiveEventData?.roomCount || 0);
     return Number.isFinite(cnt) && cnt > 0
       ? Array.from({ length: cnt }, (_, i) => `${i + 1}번방`)
       : [];
-  }, [eventData]);
+  }, [effectiveEventData?.roomNames, effectiveEventData?.roomCount]);
 
   const allRoomNos = useMemo(() => {
     const s = new Set();
@@ -592,13 +594,13 @@ export default function PlayerEventInput(){
   }, [participants]);
 
   const roomFromCtx = useMemo(() => {
-    const cands = [ eventData?.myRoom, eventData?.player?.room, eventData?.auth?.room, eventData?.currentRoom ];
+    const cands = [ effectiveEventData?.myRoom, effectiveEventData?.player?.room, effectiveEventData?.auth?.room, effectiveEventData?.currentRoom ];
     return cands.map(Number).find(n => Number.isFinite(n) && n >= 1);
-  }, [eventData]);
+  }, [effectiveEventData?.myRoom, effectiveEventData?.player?.room, effectiveEventData?.auth?.room, effectiveEventData?.currentRoom]);
 
   const roomFromSelf = useMemo(
-    () => inferRoomFromSelf(participants, eventData, { participant: ctxParticipant }),
-    [participants, eventData, ctxParticipant]
+    () => inferRoomFromSelf(participants, effectiveEventData, { participant: ctxParticipant }),
+    [participants, effectiveEventData, ctxParticipant]
   );
 
   const roomFromParticipantCtx = useMemo(() => {
@@ -622,8 +624,8 @@ export default function PlayerEventInput(){
   }, [roomFromParticipantCtx, roomFromCtx, roomFromSelf, eventId, allRoomNos, ctxParticipant]);
 
   const selfParticipant = useMemo(
-    () => inferSelfParticipant(participants, eventData, roomIdx, eventId || ctxId, { participant: ctxParticipant }),
-    [participants, eventData, roomIdx, eventId, ctxId, ctxParticipant]
+    () => inferSelfParticipant(participants, effectiveEventData, roomIdx, eventId || ctxId, { participant: ctxParticipant }),
+    [participants, effectiveEventData, roomIdx, eventId, ctxId, ctxParticipant]
   );
   const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
   const selfParticipantNickname = useMemo(() => String(selfParticipant?.nickname || '').trim().toLowerCase(), [selfParticipant]);

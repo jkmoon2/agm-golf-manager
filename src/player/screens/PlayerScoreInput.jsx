@@ -9,6 +9,7 @@ import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerScoreInput.module.css';
 import { getEffectiveParticipantsFromEvent, readPlayerParticipant, readPlayerRoom, readPlayerAuthCode } from '../utils/playerState';
 import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -97,8 +98,6 @@ export default function PlayerScoreInput() {
     eventId: ctxEventId,
     participants = [],
     participant,
-    currentRoom: ctxCurrentRoom = null,
-    participantReady = false,
     roomNames = [],
   } = useContext(PlayerContext);
 
@@ -106,13 +105,21 @@ export default function PlayerScoreInput() {
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;   // ← 오타 제거(the:)
   const eventId = ctxEventId || routeEventId;
+  const effectiveEventData = useEffectivePlayerEventData();
 
 
-  // ✅ SSOT: STEP4 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
+  // ✅ SSOT: STEP4 화면에서 보여줄 participants/participant는 공통 훅이 정리한 eventData를 우선 사용
   // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
   const effectiveParticipants = useMemo(() => {
-    return getEffectiveParticipantsFromEvent(eventData, participants, eventData?.mode);
-  }, [participants, eventData]);
+    return getEffectiveParticipantsFromEvent(effectiveEventData, participants, effectiveEventData?.mode);
+  }, [participants, effectiveEventData]);
+
+  const effectiveRoomNames = useMemo(() => {
+    if (Array.isArray(effectiveEventData?.roomNames) && effectiveEventData.roomNames.length) {
+      return effectiveEventData.roomNames.map((v) => String(v ?? ''));
+    }
+    return Array.isArray(roomNames) ? roomNames.map((v) => String(v ?? '')) : [];
+  }, [effectiveEventData?.roomNames, roomNames]);
 
 
   const viewParticipant = useMemo(() => {
@@ -178,20 +185,20 @@ export default function PlayerScoreInput() {
   const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
   const myRoom = useMemo(() => {
-    const direct = Number(viewParticipant?.room ?? ctxCurrentRoom ?? null);
+    const direct = Number(viewParticipant?.room ?? null);
     if (Number.isFinite(direct) && direct >= 1) return direct;
     const cached = Number(readPlayerRoom(eventId, true));
     if (Number.isFinite(cached) && cached >= 1) return cached;
     return null;
-  }, [viewParticipant?.room, ctxCurrentRoom, eventId]);
+  }, [viewParticipant?.room, eventId]);
 
   useEffect(() => {
     if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
   }, [eventId, myRoom]);
 
   const roomLabel =
-    myRoom && roomNames[myRoom - 1]?.trim()
-      ? roomNames[myRoom - 1].trim()
+    myRoom && effectiveRoomNames[myRoom - 1]?.trim()
+      ? effectiveRoomNames[myRoom - 1].trim()
       : myRoom
       ? `${myRoom}번방`
       : '';
