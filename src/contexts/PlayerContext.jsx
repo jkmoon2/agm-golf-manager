@@ -253,71 +253,96 @@ function markEventAuthed(id, code, meObj) {
   } catch {}
 }
 
-function resolveParticipantForEvent(partArr = [], eventId = '', authCode = '') {
-  try {
-    const list = Array.isArray(partArr) ? partArr : [];
-    const code = String(authCode || '').trim();
-    if (code) {
-      const foundByCode = list.find((p) => String(p?.authCode || '').trim() === code);
-      if (foundByCode) return foundByCode;
-    }
-
-    let authedThisEvent = false;
-    try { authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true'; } catch {}
-    if (!authedThisEvent) { try { authedThisEvent = (localStorage.getItem(playerStorageKey(eventId, 'auth')) === 'true'); } catch {} }
-    if (!authedThisEvent) return null;
-
-    let idCached = '';
-    let nickCache = '';
-    try {
-      idCached = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
-      nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
-    } catch {}
-    if (!idCached)  { try { idCached  = normId(localStorage.getItem(playerStorageKey(eventId, 'myId')) || ''); } catch {} }
-    if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
-    if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
-    if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
-
-    if (!idCached) {
-      try {
-        const cachedP = localStorage.getItem(playerStorageKey(eventId, 'participant')) || '';
-        if (cachedP) {
-          const p = JSON.parse(cachedP);
-          idCached = normId(p?.id || '');
-          if (!nickCache) nickCache = normName(p?.nickname || '');
-        }
-      } catch {}
-    }
-
-    if (idCached) {
-      const foundById = list.find((p) => normId(p?.id) === idCached);
-      if (foundById) return foundById;
-    }
-    if (nickCache) {
-      const foundByNick = list.find((p) => normName(p?.nickname) === nickCache);
-      if (foundByNick) return foundByNick;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+function readCachedParticipantForEvent(eventId) {
+  if (!eventId) return null;
+  const parse = (raw) => {
+    try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+  };
+  let found = null;
+  try { found = parse(sessionStorage.getItem(`participant_${eventId}`)); } catch {}
+  if (found) return found;
+  try { found = parse(localStorage.getItem(playerStorageKey(eventId, 'participant'))); } catch {}
+  if (found) return found;
+  return null;
 }
 
-function participantStillExists(list = [], target) {
-  if (!target) return false;
-  const tid = normId(target?.id);
-  const tcode = String(target?.authCode || '').trim();
-  const tnick = normName(target?.nickname || '');
-  return (Array.isArray(list) ? list : []).some((p) => {
-    if (tid && normId(p?.id) === tid) return true;
-    if (tcode && String(p?.authCode || '').trim() === tcode) return true;
-    if (tnick && normName(p?.nickname) === tnick) return true;
-    return false;
-  });
+function readCachedIdentityHintsForEvent(eventId) {
+  let idCached = '';
+  let nickCache = '';
+  try {
+    idCached = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
+    nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
+  } catch {}
+  if (!idCached)  { try { idCached  = normId(localStorage.getItem(playerStorageKey(eventId, 'myId')) || ''); } catch {} }
+  if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+  if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
+  if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+  const cachedP = readCachedParticipantForEvent(eventId);
+  if (!idCached && cachedP) idCached = normId(cachedP?.id || '');
+  if (!nickCache && cachedP) nickCache = normName(cachedP?.nickname || '');
+  return { idCached, nickCache, cachedParticipant: cachedP };
+}
+
+function resolveParticipantForEvent(partArr = [], eventId = '', authCode = '', seed = null) {
+  const list = Array.isArray(partArr) ? partArr : [];
+  const code = String(authCode || '').trim();
+  const seedId = normId(seed?.id || seed?.uid || '');
+  const seedNick = normName(seed?.nickname || '');
+  if (code) {
+    const byCode = list.find((p) => String(p?.authCode || '').trim() === code);
+    if (byCode) return byCode;
+  }
+  if (seedId) {
+    const bySeedId = list.find((p) => normId(p?.id) === seedId || normId(p?.uid) === seedId);
+    if (bySeedId) return bySeedId;
+  }
+  if (seedNick) {
+    const bySeedNick = list.find((p) => normName(p?.nickname) === seedNick);
+    if (bySeedNick) return bySeedNick;
+  }
+  const { idCached, nickCache, cachedParticipant } = readCachedIdentityHintsForEvent(eventId);
+  if (idCached) {
+    const byCachedId = list.find((p) => normId(p?.id) === idCached || normId(p?.uid) === idCached);
+    if (byCachedId) return byCachedId;
+  }
+  if (nickCache) {
+    const byNick = list.find((p) => normName(p?.nickname) === nickCache);
+    if (byNick) return byNick;
+  }
+  if (cachedParticipant?.authCode) {
+    const byCachedCode = list.find((p) => String(p?.authCode || '').trim() === String(cachedParticipant.authCode).trim());
+    if (byCachedCode) return byCachedCode;
+  }
+  return null;
+}
+
+function persistResolvedParticipantForEvent(eventId, me) {
+  if (!eventId || !me) return;
+  try {
+    localStorage.setItem(playerStorageKey(eventId, 'myId'), normId(me.id));
+    localStorage.setItem(playerStorageKey(eventId, 'nickname'), normName(me.nickname));
+    localStorage.setItem(playerStorageKey(eventId, 'participant'), JSON.stringify(me));
+    localStorage.setItem(playerStorageKey(eventId, 'auth'), 'true');
+    if (me.authCode) localStorage.setItem(playerStorageKey(eventId, 'authcode'), String(me.authCode));
+    const roomNo = Number(me?.room ?? me?.roomNumber ?? NaN);
+    if (Number.isFinite(roomNo) && roomNo >= 1) {
+      localStorage.setItem(playerStorageKey(eventId, 'room'), String(roomNo));
+      sessionStorage.setItem(playerStorageKey(eventId, 'room'), String(roomNo));
+      localStorage.setItem(`player.currentRoom:${eventId}`, String(roomNo));
+    }
+  } catch {}
+  try {
+    localStorage.setItem('myId', normId(me.id));
+    localStorage.setItem('nickname', normName(me.nickname));
+    sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
+    sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
+  } catch {}
+  markEventAuthed(eventId, me.authCode, me);
 }
 
 // ✅ 모든 쓰기 전에 인증 보장 + 콘솔 점검용 노출
 async function ensureAuthReady() {
+
   const auth = getAuth();
   if (!auth.currentUser) {
     const cred = await signInAnonymously(auth);
@@ -391,6 +416,18 @@ export function PlayerProvider({ children }) {
   }, [eventId]);
 
   useEffect(() => {
+    if (!eventId) return;
+    const cached = readCachedParticipantForEvent(eventId);
+    if (!cached) return;
+    setParticipant((prev) => {
+      if (prev && normId(prev?.id) === normId(cached?.id) && normName(prev?.nickname) === normName(cached?.nickname)) {
+        return prev;
+      }
+      return { ...cached };
+    });
+  }, [eventId]);
+
+  useEffect(() => {
     try { if (eventId) localStorage.setItem('player.eventId', eventId); } catch {}
   }, [eventId]);
 
@@ -455,31 +492,11 @@ const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legac
       setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
-      const me = resolveParticipantForEvent(partArr, eventId, authCode);
+      const me = resolveParticipantForEvent(partArr, eventId, authCode, participant);
 
       if (me) {
         setParticipant(me);
-
-        // ✅ iOS(운영자모드>참가자탭)에서 sessionStorage가 날아가도 "방배정/리스트"가 풀리지 않도록
-        //    탭 스코프(localStorage + window.name)로 최소 백업
-        try {
-          localStorage.setItem(playerStorageKey(eventId, 'myId'), normId(me.id));
-          localStorage.setItem(playerStorageKey(eventId, 'nickname'), normName(me.nickname));
-          localStorage.setItem(playerStorageKey(eventId, 'participant'), JSON.stringify(me));
-          localStorage.setItem(playerStorageKey(eventId, 'auth'), 'true');
-          if (me.authCode) localStorage.setItem(playerStorageKey(eventId, 'authcode'), String(me.authCode));
-        } catch {}
-
-        // (호환) 기존 저장 방식은 유지
-        localStorage.setItem('myId', normId(me.id));
-        localStorage.setItem('nickname', normName(me.nickname));
-        try {
-          sessionStorage.setItem(`myId_${eventId}`, normId(me.id));
-          sessionStorage.setItem(`nickname_${eventId}`, normName(me.nickname));
-        } catch {}
-
-        // 먼저 저장 → authCode useEffect에서 "초기화"가 걸리지 않도록
-        markEventAuthed(eventId, me.authCode, me);
+        persistResolvedParticipantForEvent(eventId, me);
         if (me.authCode) setAuthCode(me.authCode);
       } else {
         setParticipant(null);
@@ -523,14 +540,13 @@ const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legac
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
-      const resolvedMe = resolveParticipantForEvent(partArr, eventId, authCode);
-      setParticipant(resolvedMe || null);
-      if (resolvedMe) {
-        try {
-          localStorage.setItem(playerStorageKey(eventId, 'participant'), JSON.stringify(resolvedMe));
-          localStorage.setItem(playerStorageKey(eventId, 'myId'), normId(resolvedMe.id));
-          localStorage.setItem(playerStorageKey(eventId, 'nickname'), normName(resolvedMe.nickname));
-        } catch {}
+      const me = resolveParticipantForEvent(partArr, eventId, authCode, participant);
+      if (me) {
+        setParticipant(me);
+        persistResolvedParticipantForEvent(eventId, me);
+        if (me.authCode) setAuthCode(me.authCode);
+      } else {
+        setParticipant(null);
       }
       lastPlayerSnapshotAtRef.current = Date.now();
     } catch {}
@@ -912,6 +928,8 @@ const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legac
         eventId, setEventId,
         mode, roomCount, roomNames, roomCapacities, rooms,
         participants, participant,
+        currentRoom: (() => { const n = Number(participant?.room ?? participant?.roomNumber ?? NaN); return Number.isFinite(n) && n >= 1 ? n : null; })(),
+        participantReady: !!participant,
         setParticipant,
         authCode, setAuthCode,
         allowTeamView, setAllowTeamView,

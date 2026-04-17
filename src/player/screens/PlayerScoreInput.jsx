@@ -97,6 +97,8 @@ export default function PlayerScoreInput() {
     eventId: ctxEventId,
     participants = [],
     participant,
+    currentRoom: ctxCurrentRoom = null,
+    participantReady = false,
     roomNames = [],
   } = useContext(PlayerContext);
 
@@ -176,12 +178,12 @@ export default function PlayerScoreInput() {
   const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
   const myRoom = useMemo(() => {
-    const direct = Number(viewParticipant?.room ?? null);
+    const direct = Number(viewParticipant?.room ?? ctxCurrentRoom ?? null);
     if (Number.isFinite(direct) && direct >= 1) return direct;
     const cached = Number(readPlayerRoom(eventId, true));
     if (Number.isFinite(cached) && cached >= 1) return cached;
     return null;
-  }, [viewParticipant?.room, eventId]);
+  }, [viewParticipant?.room, ctxCurrentRoom, eventId]);
 
   useEffect(() => {
     if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
