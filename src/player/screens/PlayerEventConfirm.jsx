@@ -247,14 +247,14 @@ function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, 
   const agg = params?.aggregator || 'sum';
 
   if (template === 'hole-rank-force') {
-    const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
+    const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames, roomCount });
     return Array.isArray(data?.personRows)
       ? data.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
       : [];
   }
 
   if (template === 'bingo') {
-    const data = computeBingo(ev, participants, inputsByEvent, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
+    const data = computeBingo(ev, participants, inputsByEvent, { roomNames, roomCount });
     return Array.isArray(data?.personRows)
       ? data.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
       : [];
@@ -263,14 +263,14 @@ function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, 
   const scoreOfParticipant = (participant) => {
     const slot = inputsByEvent?.[evId]?.person?.[participant?.id];
     if (template === 'group-battle') {
-      const data = computeGroupBattle(ev, participants, { roomNames: effectiveRoomNames });
+      const data = computeGroupBattle(ev, participants, { roomNames });
       if (data?.kind !== 'person') return NaN;
       const hit = (data?.rows || []).find((row) => String(row?.id) === String(participant?.id));
       return Number(hit?.value);
     }
 
     if (template === 'group-room-hole-battle') {
-      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
+      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
       if (data?.kind !== 'person') return NaN;
       const hit = (data?.rows || []).find((row) => String(row?.participantId || row?.id) === String(participant?.id));
       return Number(hit?.value);
