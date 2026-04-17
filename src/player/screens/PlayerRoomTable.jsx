@@ -260,21 +260,6 @@ export default function PlayerRoomTable() {
     }
   }, [paramId, ctxId, loadEvent]);
 
-  // myRoom을 항상 로컬스토리지에 반영
-  useEffect(() => {
-    const candidates = [
-      resolvedCurrentRoom,
-      eventData?.myRoom,
-      eventData?.player?.room,
-      eventData?.auth?.room,
-      eventData?.currentRoom,
-    ];
-    const roomNo = candidates.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
-    if (Number.isFinite(roomNo)) {
-      try { localStorage.setItem(playerStorageKey(paramId, 'currentRoom'), String(roomNo)); } catch {}
-    }
-  }, [resolvedCurrentRoom, eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
-
   const roomNames = useMemo(() => {
     if (Array.isArray(eventData?.roomNames) && eventData.roomNames.length) {
       return eventData.roomNames.map((v) => String(v ?? ''));
@@ -296,6 +281,21 @@ export default function PlayerRoomTable() {
     if (Number.isFinite(direct) && direct >= 1) return direct;
     return resolveRoomNo(eventData, viewParticipant, paramId || ctxId || '') || null;
   }, [eventData, viewParticipant, ctxCurrentRoom, paramId, ctxId]);
+
+  // myRoom을 항상 로컬스토리지에 반영
+  useEffect(() => {
+    const candidates = [
+      resolvedCurrentRoom,
+      eventData?.myRoom,
+      eventData?.player?.room,
+      eventData?.auth?.room,
+      eventData?.currentRoom,
+    ];
+    const roomNo = candidates.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1);
+    if (Number.isFinite(roomNo)) {
+      try { localStorage.setItem(playerStorageKey(paramId, 'currentRoom'), String(roomNo)); } catch {}
+    }
+  }, [resolvedCurrentRoom, eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
 
   useEffect(() => {
     const eid = paramId || ctxId || '';
