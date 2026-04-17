@@ -322,8 +322,10 @@ export default function PlayerEventConfirm() {
     }
   }, [urlEventId, eventId, loadEvent]);
   const participantsBase = useMemo(
-    () => getEffectiveParticipants(eventData),
-    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+    () => (Array.isArray(eventData?.participants) && eventData.participants.length
+      ? eventData.participants
+      : getEffectiveParticipants(eventData)),
+    [eventData?.participants, eventData?.mode, eventData?.participantsStroke, eventData?.participantsFourball]
   );
   const participants = useMemo(
     () => (typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(participantsBase) : participantsBase),

@@ -271,8 +271,10 @@ export default function PlayerRoomTable() {
   }, [eventData]);
 
   const participants = useMemo(
-    () => getEffectiveParticipants(eventData),
-    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+    () => (Array.isArray(eventData?.participants) && eventData.participants.length
+      ? eventData.participants
+      : getEffectiveParticipants(eventData)),
+    [eventData?.participants, eventData?.mode, eventData?.participantsStroke, eventData?.participantsFourball]
   );
 
   const viewParticipant = useMemo(() => resolveViewParticipant(participants, paramId || ctxId || '', ctxParticipant, authCode), [participants, paramId, ctxId, ctxParticipant, authCode]);
