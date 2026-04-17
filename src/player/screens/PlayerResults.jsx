@@ -12,6 +12,7 @@ import { EventContext } from '../../contexts/EventContext';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
@@ -140,9 +141,10 @@ function orderRoomFourball(roomArr = []) {
 export default function PlayerResults() {
   const { goPrev, goNext } = useContext(PlayerStepContext) || {};
   const { eventData, scoresMap: ctxScoresMap, scoresReady: ctxScoresReady } = useContext(EventContext) || {};
+  const effectiveEventData = useEffectivePlayerEventData();
   const params = useParams();
   const routeEventId = params?.eventId || params?.id;
-  const eventId = eventData?.id || eventData?.eventId || routeEventId || '';
+  const eventId = effectiveEventData?.id || effectiveEventData?.eventId || eventData?.id || eventData?.eventId || routeEventId || '';
 
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
@@ -165,31 +167,35 @@ export default function PlayerResults() {
 
   // 게이트 정규화 + nextDisabled
   const nextDisabled = useMemo(() => {
-    const modeKey = (eventData?.mode === 'fourball' ? 'fourball' : 'stroke');
-    const ctxAt = tsToMillis(eventData?.gateUpdatedAt);
+    const sourceEventData = effectiveEventData || eventData;
+    const modeKey = (sourceEventData?.mode === 'fourball' ? 'fourball' : 'stroke');
+    const ctxAt = tsToMillis(sourceEventData?.gateUpdatedAt);
     const fbAt  = fallbackAt;
-    const ctxGate = pickGateByMode(eventData?.playerGate || {}, modeKey);
+    const ctxGate = pickGateByMode(sourceEventData?.playerGate || {}, modeKey);
     const fbGate  = pickGateByMode(fallbackGate || {}, modeKey);
     const gate = (ctxAt >= fbAt ? ctxGate : fbGate);
     return (gate?.steps?.[6] !== 'enabled');
-  }, [eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
+  }, [effectiveEventData?.playerGate, effectiveEventData?.gateUpdatedAt, effectiveEventData?.mode, eventData?.playerGate, eventData?.gateUpdatedAt, eventData?.mode, fallbackGate, fallbackAt]);
 
-  const mode         = eventData?.mode === 'fourball' ? 'fourball' : 'stroke';
-  const roomCount    = eventData?.roomCount || 0;
-  const roomNames    = eventData?.roomNames || [];
+  const sourceEventData = effectiveEventData || eventData;
+  const mode         = sourceEventData?.mode === 'fourball' ? 'fourball' : 'stroke';
+  const roomCount    = sourceEventData?.roomCount || 0;
+  const roomNames    = sourceEventData?.roomNames || [];
   const participants = useMemo(
-    () => getEffectiveParticipants(eventData),
-    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
+    () => (Array.isArray(sourceEventData?.participants) && sourceEventData.participants.length
+      ? sourceEventData.participants
+      : getEffectiveParticipants(sourceEventData)),
+    [sourceEventData?.participants, sourceEventData?.mode, sourceEventData?.participantsStroke, sourceEventData?.participantsFourball]
   );
 
   const [hiddenRooms, setHiddenRooms] = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
 
   useEffect(() => {
-    const pv = eventData?.publicView || {};
+    const pv = sourceEventData?.publicView || {};
     setHiddenRooms(normalizeHiddenRooms(pv, roomCount, mode));
     setVisibleMetrics(readVisibleMetrics(pv, mode));
-  }, [eventData?.publicView, roomCount, mode]);
+  }, [sourceEventData?.publicView, roomCount, mode]);
 
   const headers = useMemo(() =>
     Array.from({ length: roomCount }, (_, i) => (roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`))

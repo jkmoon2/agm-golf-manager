@@ -10,6 +10,7 @@ import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { writePlayerRoom } from '../utils/playerState';
+import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 
 
 function getPlayerTabId(){
@@ -132,18 +133,32 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const navigate = useNavigate();
   const { eventId: playerEventId, setEventId, isEventClosed } = useContext(PlayerContext);
   const { eventId: ctxEventId, eventData, loadEvent } = useContext(EventContext);
+  const effectiveEventData = useEffectivePlayerEventData();
   const { eventId: urlEventId } = useParams();
+
+  const effectiveRoomNames = useMemo(() => (
+    Array.isArray(effectiveEventData?.roomNames) && effectiveEventData.roomNames.length
+      ? effectiveEventData.roomNames
+      : roomNames
+  ), [effectiveEventData?.roomNames, roomNames]);
+
+  const effectiveRoomCapacities = useMemo(() => (
+    Array.isArray(effectiveEventData?.roomCapacities) && effectiveEventData.roomCapacities.length
+      ? effectiveEventData.roomCapacities
+      : roomCapacities
+  ), [effectiveEventData?.roomCapacities, roomCapacities]);
 
   // ✅ SSOT: STEP1 화면에서 보여줄 participants/participant는 EventContext(eventData)의 참가자 배열을 우선 사용
   // - iOS(운영자모드>참가자탭)에서 PlayerContext 참가자 state가 늦게/초기화되어 보이는 문제 방지
   const effectiveParticipants = useMemo(() => {
     const safeArr = (v) => (Array.isArray(v) ? v : []);
-    const modeFromEvent = (eventData?.mode === 'fourball' || eventData?.mode === 'agm') ? 'fourball' : 'stroke';
+    const sourceEventData = effectiveEventData || eventData;
+    const modeFromEvent = (sourceEventData?.mode === 'fourball' || sourceEventData?.mode === 'agm') ? 'fourball' : 'stroke';
     const md = (variant === 'fourball' || variant === 'stroke') ? variant : modeFromEvent;
     const field = (md === 'fourball') ? 'participantsFourball' : 'participantsStroke';
 
-    const primary = safeArr(eventData?.[field]);
-    const legacy  = safeArr(eventData?.participants);
+    const primary = safeArr(sourceEventData?.[field]);
+    const legacy  = safeArr(sourceEventData?.participants);
 
     // 모드별 필드가 있으면 legacy와 id 기준으로 병합(호환)
     const mergedRaw = primary.length
@@ -174,6 +189,10 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   }, [
     variant,
     participants,
+    effectiveEventData?.mode,
+    effectiveEventData?.participants,
+    effectiveEventData?.participantsStroke,
+    effectiveEventData?.participantsFourball,
     eventData?.mode,
     eventData?.participants,
     eventData?.participantsStroke,
@@ -222,7 +241,8 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   useEffect(() => {
     const id = urlEventId || ctxEventId || playerEventId;
     if (!id) return;
-    if (eventData?.playerGate) { setFallbackGate(null); return; }
+    const sourceEventData = effectiveEventData || eventData;
+    if (sourceEventData?.playerGate) { setFallbackGate(null); return; }
     const ref = doc(db, 'events', id);
     const unsub = onSnapshot(ref, (snap) => {
       const d = snap.data();
@@ -230,9 +250,10 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       else setFallbackGate(null);
     });
     return unsub;
-  }, [urlEventId, ctxEventId, playerEventId, eventData?.playerGate]);
+  }, [urlEventId, ctxEventId, playerEventId, effectiveEventData?.playerGate, eventData?.playerGate]);
 
-  const gate = eventData?.playerGate ? normalizeGate(eventData.playerGate) : (fallbackGate || {});
+  const sourceEventDataForGate = effectiveEventData || eventData;
+  const gate = sourceEventDataForGate?.playerGate ? normalizeGate(sourceEventDataForGate.playerGate) : (fallbackGate || {});
   const step2Enabled = (gate?.steps?.[2] || 'enabled') === 'enabled';
   const teamConfirmEnabled = !!(gate?.step1?.teamConfirmEnabled ?? true);
 
@@ -284,8 +305,8 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   }, [viewParticipant?.room, flowStep]);
 
   const getLabel = (num) =>
-    Array.isArray(roomNames) && roomNames[num - 1]?.trim()
-      ? roomNames[num - 1].trim()
+    Array.isArray(effectiveRoomNames) && effectiveRoomNames[num - 1]?.trim()
+      ? effectiveRoomNames[num - 1].trim()
       : `${num}번방`;
 
   const compactMembers = useMemo(() => {
@@ -347,7 +368,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     return arr.slice(0, 4);
   }, [teamMembers]);
 
-  const roomCount = useMemo(() => (Array.isArray(roomNames) ? roomNames.length : 0), [roomNames]);
+  const roomCount = useMemo(() => (Array.isArray(effectiveRoomNames) ? effectiveRoomNames.length : 0), [effectiveRoomNames]);
   const isValidStrokeRoom = (roomNo) => {
     if (variant !== 'stroke') return true;
     if (!roomNo) return false;
@@ -359,7 +380,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
         String(p.id) !== String(viewParticipant?.id)
     );
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
-    const isFull = currentCount >= roomCapacityAt(roomCapacities, roomNo);
+    const isFull = currentCount >= roomCapacityAt(effectiveRoomCapacities, roomNo);
     return !sameGroupExists && !isFull;
   };
 
@@ -367,7 +388,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     if (variant !== 'fourball') return true;
     if (!roomNo) return false;
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
-    return currentCount <= roomCapacityAt(roomCapacities, roomNo) - 2;
+    return currentCount <= roomCapacityAt(effectiveRoomCapacities, roomNo) - 2;
   };
 
   const saveMyRoom = (roomNo) => {
