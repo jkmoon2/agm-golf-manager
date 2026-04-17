@@ -8,7 +8,9 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './PlayerRoomTable.module.css';
 import { EventContext } from '../../contexts/EventContext';
+import { PlayerContext } from '../../contexts/PlayerContext';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
+import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../utils/playerState';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -28,6 +30,42 @@ function playerStorageKey(eventId, key){
   return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
 }
 
+
+function resolveViewParticipant(participants = [], eventId = '', seed = null, authCode = '') {
+  const list = Array.isArray(participants) ? participants : [];
+  const byId = (id) => list.find((p) => String(p?.id ?? '') === String(id ?? '')) || null;
+  const byCode = (code) => list.find((p) => String(p?.authCode || '').trim() === String(code || '').trim()) || null;
+  const byNick = (nickname) => list.find((p) => String(p?.nickname || '').trim() === String(nickname || '').trim()) || null;
+  const cached = readPlayerParticipant(eventId, true);
+  const cachedCode = readPlayerAuthCode(eventId, true);
+  return (
+    byId(seed?.id) ||
+    byCode(seed?.authCode) ||
+    byNick(seed?.nickname) ||
+    byId(cached?.id) ||
+    byCode(cached?.authCode) ||
+    byNick(cached?.nickname) ||
+    byCode(authCode) ||
+    byCode(cachedCode) ||
+    seed || cached || null
+  );
+}
+
+function resolveRoomNo(eventData, participant, eventId) {
+  const cands = [
+    participant?.room,
+    participant?.roomNumber,
+    eventData?.myRoom,
+    eventData?.player?.room,
+    eventData?.auth?.room,
+    eventData?.currentRoom,
+    readPlayerParticipant(eventId, true)?.room,
+    readPlayerParticipant(eventId, true)?.roomNumber,
+    readPlayerRoom(eventId, true),
+    (() => { try { return localStorage.getItem(playerStorageKey(eventId, 'currentRoom')); } catch { return ''; } })(),
+  ];
+  return cands.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1) || null;
+}
 
 function getEffectiveParticipants(eventData){
   const safeArr = (v) => (Array.isArray(v) ? v : []);
@@ -183,6 +221,7 @@ export default function PlayerRoomTable() {
   const navigate = useNavigate();
   const { eventId: paramId } = useParams();
   const { eventId: ctxId, loadEvent } = useContext(EventContext) || {};
+  const { participant: ctxParticipant, currentRoom: ctxCurrentRoom = null, participantReady = false, authCode = '' } = useContext(PlayerContext) || {};
   const eventData = useEffectivePlayerEventData();
 
   // ★ patch: 실시간 게이트 구독 + 최신판 선택
@@ -224,6 +263,7 @@ export default function PlayerRoomTable() {
   // myRoom을 항상 로컬스토리지에 반영
   useEffect(() => {
     const candidates = [
+      resolvedCurrentRoom,
       eventData?.myRoom,
       eventData?.player?.room,
       eventData?.auth?.room,
@@ -233,7 +273,7 @@ export default function PlayerRoomTable() {
     if (Number.isFinite(roomNo)) {
       try { localStorage.setItem(playerStorageKey(paramId, 'currentRoom'), String(roomNo)); } catch {}
     }
-  }, [eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
+  }, [resolvedCurrentRoom, eventData?.myRoom, eventData?.player, eventData?.auth, eventData?.currentRoom, paramId]);
 
   const roomNames = useMemo(() => {
     if (Array.isArray(eventData?.roomNames) && eventData.roomNames.length) {
@@ -249,6 +289,25 @@ export default function PlayerRoomTable() {
     () => getEffectiveParticipants(eventData),
     [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
   );
+
+  const viewParticipant = useMemo(() => resolveViewParticipant(participants, paramId || ctxId || '', ctxParticipant, authCode), [participants, paramId, ctxId, ctxParticipant, authCode]);
+  const resolvedCurrentRoom = useMemo(() => {
+    const direct = Number(viewParticipant?.room ?? viewParticipant?.roomNumber ?? ctxCurrentRoom ?? NaN);
+    if (Number.isFinite(direct) && direct >= 1) return direct;
+    return resolveRoomNo(eventData, viewParticipant, paramId || ctxId || '') || null;
+  }, [eventData, viewParticipant, ctxCurrentRoom, paramId, ctxId]);
+
+  useEffect(() => {
+    const eid = paramId || ctxId || '';
+    if (!eid) return;
+    if (viewParticipant && participantReady) {
+      try { writePlayerParticipant(eid, viewParticipant); } catch {}
+    }
+    if (Number.isFinite(Number(resolvedCurrentRoom)) && Number(resolvedCurrentRoom) >= 1) {
+      try { writePlayerRoom(eid, resolvedCurrentRoom); } catch {}
+      try { localStorage.setItem(playerStorageKey(eid, 'currentRoom'), String(resolvedCurrentRoom)); } catch {}
+    }
+  }, [paramId, ctxId, viewParticipant, participantReady, resolvedCurrentRoom]);
 
   // Admin의 선택(숨김 방) 복원 – 루트/모드별/0·1기반 혼용 모두 흡수
   const hiddenRooms = useMemo(() => {
@@ -457,6 +516,7 @@ export default function PlayerRoomTable() {
           onClick={() => {
             try {
               const cands = [
+                resolvedCurrentRoom,
                 eventData?.myRoom,
                 localStorage.getItem(playerStorageKey(paramId, 'currentRoom')),
               ];

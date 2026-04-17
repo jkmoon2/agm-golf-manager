@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext }   from '../../contexts/EventContext';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
+import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../utils/playerState';
 import StickyNavBar       from '../components/StickyNavBar';
 
 import baseCss from './PlayerRoomTable.module.css';
@@ -20,6 +21,42 @@ import { computePickLineup } from '../../events/pickLineup';
 import { computeHoleRankForce } from '../../events/holeRankForce';
 import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
 import { buildBingoRoomRowsFromPersonRows, computeBingo } from '../../events/bingo';
+
+function resolveConfirmParticipant(participants = [], eventId = '', seed = null, authCode = '') {
+  const list = Array.isArray(participants) ? participants : [];
+  const byId = (id) => list.find((p) => String(p?.id ?? '') === String(id ?? '')) || null;
+  const byCode = (code) => list.find((p) => String(p?.authCode || '').trim() === String(code || '').trim()) || null;
+  const byNick = (nickname) => list.find((p) => String(p?.nickname || '').trim() === String(nickname || '').trim()) || null;
+  const cached = readPlayerParticipant(eventId, true);
+  const cachedCode = readPlayerAuthCode(eventId, true);
+  return (
+    byId(seed?.id) ||
+    byCode(seed?.authCode) ||
+    byNick(seed?.nickname) ||
+    byId(cached?.id) ||
+    byCode(cached?.authCode) ||
+    byNick(cached?.nickname) ||
+    byCode(authCode) ||
+    byCode(cachedCode) ||
+    seed || cached || null
+  );
+}
+
+function resolveConfirmRoom(participant, eventData, eventId, currentRoom) {
+  const candidates = [
+    participant?.room,
+    participant?.roomNumber,
+    currentRoom,
+    eventData?.myRoom,
+    eventData?.player?.room,
+    eventData?.auth?.room,
+    eventData?.currentRoom,
+    readPlayerParticipant(eventId, true)?.room,
+    readPlayerParticipant(eventId, true)?.roomNumber,
+    readPlayerRoom(eventId, true),
+  ];
+  return candidates.map((v) => Number(v)).find((n) => Number.isFinite(n) && n >= 1) || null;
+}
 
 function getPreviewGroupNo(p) {
   const cand = p?.group ?? p?.groupNo ?? p?.groupNumber ?? p?.jo ?? p?.joNo ?? p?.groupIndex;
@@ -210,14 +247,14 @@ function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, 
   const agg = params?.aggregator || 'sum';
 
   if (template === 'hole-rank-force') {
-    const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames, roomCount });
+    const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
     return Array.isArray(data?.personRows)
       ? data.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
       : [];
   }
 
   if (template === 'bingo') {
-    const data = computeBingo(ev, participants, inputsByEvent, { roomNames, roomCount });
+    const data = computeBingo(ev, participants, inputsByEvent, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
     return Array.isArray(data?.personRows)
       ? data.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
       : [];
@@ -226,14 +263,14 @@ function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, 
   const scoreOfParticipant = (participant) => {
     const slot = inputsByEvent?.[evId]?.person?.[participant?.id];
     if (template === 'group-battle') {
-      const data = computeGroupBattle(ev, participants, { roomNames });
+      const data = computeGroupBattle(ev, participants, { roomNames: effectiveRoomNames });
       if (data?.kind !== 'person') return NaN;
       const hit = (data?.rows || []).find((row) => String(row?.id) === String(participant?.id));
       return Number(hit?.value);
     }
 
     if (template === 'group-room-hole-battle') {
-      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
+      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
       if (data?.kind !== 'person') return NaN;
       const hit = (data?.rows || []).find((row) => String(row?.participantId || row?.id) === String(participant?.id));
       return Number(hit?.value);
@@ -275,7 +312,7 @@ export default function PlayerEventConfirm() {
   const nav = useNavigate();
   const { eventId: urlEventId } = useParams();
 
-  const { roomCount, roomNames } = useContext(PlayerContext) || {};
+  const { roomCount, roomNames, participant: ctxParticipant, currentRoom: ctxCurrentRoom = null, participantReady = false, authCode = '' } = useContext(PlayerContext) || {};
   const { eventId, loadEvent, overlayScoresToParticipants } = useContext(EventContext) || {};
   const eventData = useEffectivePlayerEventData();
 
@@ -298,10 +335,33 @@ const events = useMemo(
   );
   const inputsByEvent = eventData?.eventInputs || {};
 
+  const effectiveRoomNames = useMemo(() => (Array.isArray(roomNames) && roomNames.length ? roomNames : (Array.isArray(eventData?.roomNames) ? eventData.roomNames : [])), [roomNames, eventData?.roomNames]);
+  const effectiveRoomCount = useMemo(() => {
+    const direct = Number(roomCount);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const fromNames = Array.isArray(effectiveRoomNames) ? effectiveRoomNames.length : 0;
+    const fromEvent = Number(eventData?.roomCount);
+    return (Number.isFinite(fromEvent) && fromEvent > 0) ? fromEvent : fromNames;
+  }, [roomCount, effectiveRoomNames, eventData?.roomCount]);
+
+  const viewParticipant = useMemo(() => resolveConfirmParticipant(participants, eventId || urlEventId || '', ctxParticipant, authCode), [participants, eventId, urlEventId, ctxParticipant, authCode]);
+  const resolvedCurrentRoom = useMemo(() => resolveConfirmRoom(viewParticipant, eventData, eventId || urlEventId || '', ctxCurrentRoom), [viewParticipant, eventData, eventId, urlEventId, ctxCurrentRoom]);
+
+  useEffect(() => {
+    const eid = eventId || urlEventId || '';
+    if (!eid) return;
+    if (viewParticipant && participantReady) {
+      try { writePlayerParticipant(eid, viewParticipant); } catch {}
+    }
+    if (Number.isFinite(Number(resolvedCurrentRoom)) && Number(resolvedCurrentRoom) >= 1) {
+      try { writePlayerRoom(eid, resolvedCurrentRoom); } catch {}
+    }
+  }, [eventId, urlEventId, viewParticipant, participantReady, resolvedCurrentRoom]);
+
   const getRoomLabel = (idx1) => {
     const i = Number(idx1) - 1;
-    if (Array.isArray(roomNames) && roomNames[i] && String(roomNames[i]).trim()) {
-      return String(roomNames[i]).trim();
+    if (Array.isArray(effectiveRoomNames) && effectiveRoomNames[i] && String(effectiveRoomNames[i]).trim()) {
+      return String(effectiveRoomNames[i]).trim();
     }
     return `${idx1}번방`;
   };
@@ -311,8 +371,8 @@ const events = useMemo(
     const agg = params?.aggregator || 'sum';
 
     if (target === 'jo') {
-      const baseRows = buildPersonRowsForJoPreview(ev, participants, inputsByEvent, roomNames, roomCount);
-      const rows = buildJoRoomRows(baseRows, participants, roomCount, roomNames, rankOrder).map((row, i) => ({
+      const baseRows = buildPersonRowsForJoPreview(ev, participants, inputsByEvent, effectiveRoomNames, effectiveRoomCount);
+      const rows = buildJoRoomRows(baseRows, participants, effectiveRoomCount, effectiveRoomNames, rankOrder).map((row, i) => ({
         key: String(row?.room || i),
         rank: i + 1,
         label: row.name,
@@ -326,7 +386,7 @@ const events = useMemo(
 
     // ── hole-rank-force(홀별 강제 순위 점수) ─────────────────────
     if (template === 'hole-rank-force') {
-      const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames, roomCount });
+      const data = computeHoleRankForce(ev, participants, inputsByEvent, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
       if (target === 'room') {
         const rows = (data.roomRows || []).map((r, i) => ({
           key: r.key || String(i),
@@ -357,7 +417,7 @@ const events = useMemo(
 
     // ── pick-lineup(개인/조 선택 대결) ──────────────────────────
     if (template === 'pick-lineup') {
-      const data = computePickLineup(ev, participants, inputsByEvent?.[evId] || {}, { roomNames });
+      const data = computePickLineup(ev, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames });
       const rows = (data?.rows || []).map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
@@ -370,7 +430,7 @@ const events = useMemo(
 
     // ── bingo(빙고) ───────────────────────────────────────────────
     if (template === 'bingo') {
-      const data = computeBingo(ev, participants, inputsByEvent, { roomNames, roomCount });
+      const data = computeBingo(ev, participants, inputsByEvent, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
       if (target === 'team') {
         const rows = (data.teamRows || []).map((r, i) => ({
           key: r.key || String(i),
@@ -390,7 +450,7 @@ const events = useMemo(
         }));
         return { kind: 'person', metricLabel: '빙고', rows };
       }
-      const roomRows = buildBingoRoomRowsFromPersonRows(data.personRows || [], roomCount, roomNames);
+      const roomRows = buildBingoRoomRowsFromPersonRows(data.personRows || [], effectiveRoomCount, effectiveRoomNames);
       const rows = roomRows.map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
@@ -402,7 +462,7 @@ const events = useMemo(
 
     // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
     if (template === 'group-room-hole-battle') {
-      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames, roomCount });
+      const data = computeGroupRoomHoleBattle(ev, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
       const metricLabel = data?.metric === 'match' ? '결과' : '합계';
       const rows = (data.rows || []).map((row, i) => ({
         key: row.key || String(i),
@@ -417,7 +477,7 @@ const events = useMemo(
     // - 입력 이벤트가 아니므로 inputsByEvent를 사용하지 않음
     // - metric=result 인 경우: (점수 - (이벤트 전용 오버라이드 G핸디)) 합산
     if (template === 'group-battle') {
-      const data = computeGroupBattle(ev, participants, { roomNames });
+      const data = computeGroupBattle(ev, participants, { roomNames: effectiveRoomNames });
       const metricLabel = (data?.metric === 'score') ? '점수' : '결과';
 
       if (data?.kind === 'group') {
@@ -479,7 +539,7 @@ const events = useMemo(
     }
 
     if (target === 'room') {
-      const roomTotal = Number(roomCount || 0);
+      const roomTotal = Number(effectiveRoomCount || 0);
       const byRoom = Array.from({ length: roomTotal }, (_,i)=>i+1).map(idx1 => {
         const inRoom = participants.filter(p => Number(p?.room) === idx1);
         const vals = inRoom.map(p => {
@@ -555,7 +615,7 @@ const events = useMemo(
   const results = useMemo(() => {
     return events.map(ev => ({ ev, res: buildScores(ev) }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(events), JSON.stringify(inputsByEvent), JSON.stringify(participants), roomCount, JSON.stringify(roomNames)]);
+  }, [JSON.stringify(events), JSON.stringify(inputsByEvent), JSON.stringify(participants), effectiveRoomCount, JSON.stringify(effectiveRoomNames)]);
 
   return (
     <div className={styles.container} style={{ paddingBottom: 160 }}>
