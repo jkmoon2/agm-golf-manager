@@ -45,8 +45,6 @@ const ASSIGN_STRATEGY_STROKE   = 'uniform';
 const ASSIGN_STRATEGY_FOURBALL = 'uniform';
 const PLAYER_MANUAL_REFRESH_COOLDOWN_MS = 1200;
 const PLAYER_SYNC_RAF_MS = 180;
-const PLAYER_DIRECT_ENTRY_STALE_MS = 3500;
-const PLAYER_DIRECT_ENTRY_INITIAL_DELAY_MS = 900;
 
 const FOURBALL_USE_TRANSACTION = (() => {
   try {
@@ -255,6 +253,69 @@ function markEventAuthed(id, code, meObj) {
   } catch {}
 }
 
+function resolveParticipantForEvent(partArr = [], eventId = '', authCode = '') {
+  try {
+    const list = Array.isArray(partArr) ? partArr : [];
+    const code = String(authCode || '').trim();
+    if (code) {
+      const foundByCode = list.find((p) => String(p?.authCode || '').trim() === code);
+      if (foundByCode) return foundByCode;
+    }
+
+    let authedThisEvent = false;
+    try { authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true'; } catch {}
+    if (!authedThisEvent) { try { authedThisEvent = (localStorage.getItem(playerStorageKey(eventId, 'auth')) === 'true'); } catch {} }
+    if (!authedThisEvent) return null;
+
+    let idCached = '';
+    let nickCache = '';
+    try {
+      idCached = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
+      nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
+    } catch {}
+    if (!idCached)  { try { idCached  = normId(localStorage.getItem(playerStorageKey(eventId, 'myId')) || ''); } catch {} }
+    if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
+    if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
+    if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
+
+    if (!idCached) {
+      try {
+        const cachedP = localStorage.getItem(playerStorageKey(eventId, 'participant')) || '';
+        if (cachedP) {
+          const p = JSON.parse(cachedP);
+          idCached = normId(p?.id || '');
+          if (!nickCache) nickCache = normName(p?.nickname || '');
+        }
+      } catch {}
+    }
+
+    if (idCached) {
+      const foundById = list.find((p) => normId(p?.id) === idCached);
+      if (foundById) return foundById;
+    }
+    if (nickCache) {
+      const foundByNick = list.find((p) => normName(p?.nickname) === nickCache);
+      if (foundByNick) return foundByNick;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function participantStillExists(list = [], target) {
+  if (!target) return false;
+  const tid = normId(target?.id);
+  const tcode = String(target?.authCode || '').trim();
+  const tnick = normName(target?.nickname || '');
+  return (Array.isArray(list) ? list : []).some((p) => {
+    if (tid && normId(p?.id) === tid) return true;
+    if (tcode && String(p?.authCode || '').trim() === tcode) return true;
+    if (tnick && normName(p?.nickname) === tnick) return true;
+    return false;
+  });
+}
+
 // ✅ 모든 쓰기 전에 인증 보장 + 콘솔 점검용 노출
 async function ensureAuthReady() {
   const auth = getAuth();
@@ -299,7 +360,6 @@ export function PlayerProvider({ children }) {
   const [authCode, setAuthCode]           = useState('');
   const lastPlayerSnapshotAtRef           = useRef(0);
   const lastPlayerRefreshAtRef            = useRef(0);
-  const authCodeRef                       = useRef('');
 
   const { pathname } = useLocation();
 
@@ -333,10 +393,6 @@ export function PlayerProvider({ children }) {
   useEffect(() => {
     try { if (eventId) localStorage.setItem('player.eventId', eventId); } catch {}
   }, [eventId]);
-
-  useEffect(() => {
-    authCodeRef.current = authCode;
-  }, [authCode]);
 
   useEffect(() => {
   if (!eventId) return;
@@ -399,42 +455,7 @@ const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legac
       setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
 
-      let me = null;
-      const liveAuthCode = String(authCodeRef.current || '').trim();
-      if (liveAuthCode) {
-        me = partArr.find((p) => String(p.authCode) === liveAuthCode) || null;
-      } else {
-        let authedThisEvent = false;
-        try { authedThisEvent = sessionStorage.getItem(`auth_${eventId}`) === 'true'; } catch {}
-        if (!authedThisEvent) { try { authedThisEvent = (localStorage.getItem(playerStorageKey(eventId, 'auth')) === 'true'); } catch {} }
-
-        if (authedThisEvent) {
-          let idCached  = '';
-          let nickCache = '';
-          try {
-            idCached  = normId(sessionStorage.getItem(`myId_${eventId}`) || '');
-            nickCache = normName(sessionStorage.getItem(`nickname_${eventId}`) || '');
-          } catch {}
-          if (!idCached)  { try { idCached  = normId(localStorage.getItem(playerStorageKey(eventId, 'myId')) || ''); } catch {} }
-          if (!idCached)  { try { idCached  = normId(localStorage.getItem(`myId_${eventId}`) || ''); } catch {} }
-          if (!nickCache) { try { nickCache = normName(localStorage.getItem(playerStorageKey(eventId, 'nickname')) || ''); } catch {} }
-          if (!nickCache) { try { nickCache = normName(localStorage.getItem(`nickname_${eventId}`) || ''); } catch {} }
-
-// (추가) participant 캐시(탭 스코프)에서 id/nickname 복원 (sessionStorage가 초기화된 iOS 대비)
-if (!idCached) {
-  try {
-    const cachedP = localStorage.getItem(playerStorageKey(eventId, 'participant')) || '';
-    if (cachedP) {
-      const p = JSON.parse(cachedP);
-      idCached = normId(p?.id || '');
-      if (!nickCache) nickCache = normName(p?.nickname || '');
-    }
-  } catch {}
-}
-          if (idCached)         me = partArr.find((p) => normId(p.id) === idCached) || null;
-          if (!me && nickCache) me = partArr.find((p) => normName(p.nickname) === nickCache) || null;
-        }
-      }
+      const me = resolveParticipantForEvent(partArr, eventId, authCode);
 
       if (me) {
         setParticipant(me);
@@ -465,7 +486,7 @@ if (!idCached) {
       }
     });
     return () => unsub();
-  }, [eventId, overlayScoresToParticipants]);
+  }, [eventId, authCode]);
 
   async function refreshPlayerStateNow(opts = {}) {
     if (!eventId) return;
@@ -502,11 +523,15 @@ if (!idCached) {
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
-      setParticipant((prev) => {
-        if (!prev) return prev;
-        const latest = partArr.find((p) => normId(p.id) === normId(prev.id));
-        return latest || prev;
-      });
+      const resolvedMe = resolveParticipantForEvent(partArr, eventId, authCode);
+      setParticipant(resolvedMe || null);
+      if (resolvedMe) {
+        try {
+          localStorage.setItem(playerStorageKey(eventId, 'participant'), JSON.stringify(resolvedMe));
+          localStorage.setItem(playerStorageKey(eventId, 'myId'), normId(resolvedMe.id));
+          localStorage.setItem(playerStorageKey(eventId, 'nickname'), normName(resolvedMe.nickname));
+        } catch {}
+      }
       lastPlayerSnapshotAtRef.current = Date.now();
     } catch {}
   }
@@ -514,36 +539,23 @@ if (!idCached) {
   useEffect(() => {
     if (!eventId) return;
     let raf = 0;
-    let initialTimer = 0;
     let lastScheduleAt = 0;
-    const isVisibleNow = () => {
-      try { return document.visibilityState === 'visible'; } catch { return true; }
-    };
-    const isOnlineNow = () => {
-      try { return navigator.onLine !== false; } catch { return true; }
-    };
-    const isSnapshotStale = () => {
-      const now = Date.now();
-      const last = Number(lastPlayerSnapshotAtRef.current || 0);
-      return !last || (now - last) >= PLAYER_DIRECT_ENTRY_STALE_MS;
-    };
     const scheduleRefresh = (opts = { force: false }) => {
       const now = Date.now();
-      if (!isVisibleNow() || !isOnlineNow()) return;
-      if (!opts?.force && now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
-      if (!isSnapshotStale()) return;
+      if (!opts?.force) {
+        try { if (typeof document !== 'undefined' && document.hidden) return; } catch {}
+        try { if (typeof navigator !== 'undefined' && navigator.onLine === false) return; } catch {}
+        if (now - lastScheduleAt < PLAYER_SYNC_RAF_MS) return;
+      }
       lastScheduleAt = now;
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => { refreshPlayerStateNow({ force: !!opts?.force }); });
     };
-    const onFocus = () => scheduleRefresh({ force: false });
-    const onPageShow = () => scheduleRefresh({ force: false });
+    const onFocus = () => scheduleRefresh();
+    const onPageShow = () => scheduleRefresh();
     const onVisible = () => {
-      if (isVisibleNow()) scheduleRefresh({ force: false });
+      try { if (document.visibilityState === 'visible') scheduleRefresh(); } catch { scheduleRefresh(); }
     };
-    initialTimer = window.setTimeout(() => {
-      scheduleRefresh({ force: true });
-    }, PLAYER_DIRECT_ENTRY_INITIAL_DELAY_MS);
     window.addEventListener('focus', onFocus);
     window.addEventListener('pageshow', onPageShow);
     document.addEventListener('visibilitychange', onVisible);
@@ -554,7 +566,6 @@ if (!idCached) {
     });
     return () => {
       if (raf) cancelAnimationFrame(raf);
-      if (initialTimer) clearTimeout(initialTimer);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('visibilitychange', onVisible);

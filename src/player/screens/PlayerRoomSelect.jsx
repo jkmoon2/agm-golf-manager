@@ -200,27 +200,6 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
   const viewParticipant = effectiveParticipant || participant;
 
-  const syncedParticipant = useMemo(() => {
-    if (!viewParticipant) return null;
-
-    const findById = (pid) => effectiveParticipants.find((p) => String(p?.id) === String(pid));
-    const findByAuthCode = (code) => effectiveParticipants.find((p) => String(p?.authCode || '') === String(code || ''));
-    const findByNickname = (nickname) => effectiveParticipants.find((p) => String(p?.nickname || '').trim().toLowerCase() === String(nickname || '').trim().toLowerCase());
-
-    const byId = viewParticipant?.id != null ? findById(viewParticipant.id) : null;
-    if (byId) return { ...viewParticipant, ...byId };
-
-    const byCode = viewParticipant?.authCode ? findByAuthCode(viewParticipant.authCode) : null;
-    if (byCode) return { ...viewParticipant, ...byCode };
-
-    const byNick = viewParticipant?.nickname ? findByNickname(viewParticipant.nickname) : null;
-    if (byNick) return { ...viewParticipant, ...byNick };
-
-    return null;
-  }, [viewParticipant, effectiveParticipants]);
-
-  const activeParticipant = syncedParticipant || viewParticipant || participant;
-
   // ✅ URL의 eventId가 PlayerContext의 eventId보다 우선 (이전 대회 localStorage 잔상/오배정 방지)
   useEffect(() => {
     if (!urlEventId) return;
@@ -265,17 +244,17 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
     useEffect(() => {
-    const r = Number(activeParticipant?.room);
+    const r = Number(viewParticipant?.room);
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [activeParticipant?.room]);
+  }, [viewParticipant?.room]);
   const isValidRoom = (v) => {
     const n = Number(v);
     return Number.isFinite(n) && n >= 1;
   };
 
-  const done = isValidRoom(activeParticipant?.room) || isValidRoom(optimisticRoom);
-  const assignedRoom = isValidRoom(activeParticipant?.room)
-    ? Number(activeParticipant?.room)
+  const done = isValidRoom(viewParticipant?.room) || isValidRoom(optimisticRoom);
+  const assignedRoom = isValidRoom(viewParticipant?.room)
+    ? Number(viewParticipant?.room)
     : (isValidRoom(optimisticRoom) ? Number(optimisticRoom) : null);
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
@@ -291,17 +270,18 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
   const participantsLoaded = Array.isArray(effectiveParticipants) && effectiveParticipants.length > 0;
   const isMeReady = useMemo(() => {
+    if (!viewParticipant?.id) return false;
     if (!participantsLoaded) return false;
-    return !!syncedParticipant?.id;
-  }, [participantsLoaded, syncedParticipant?.id]);
-  const isSyncing = participantsLoaded && !isMeReady && !done;
+    return effectiveParticipants.some((p) => String(p.id) === String(viewParticipant.id));
+  }, [participantsLoaded, effectiveParticipants, viewParticipant?.id]);
+  const isSyncing = participantsLoaded && !isMeReady;
 
   useEffect(() => {
-    if (activeParticipant?.room != null && flowStep === 'idle') {
+    if (viewParticipant?.room != null && flowStep === 'idle') {
       setShowTeam(false);
       setFlowStep('show');
     }
-  }, [activeParticipant?.room, flowStep]);
+  }, [viewParticipant?.room, flowStep]);
 
   const getLabel = (num) =>
     Array.isArray(roomNames) && roomNames[num - 1]?.trim()
@@ -309,17 +289,17 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       : `${num}번방`;
 
   const compactMembers = useMemo(() => {
-    if (!done || assignedRoom == null || !activeParticipant) return [];
+    if (!done || assignedRoom == null || !viewParticipant) return [];
     if (variant === 'fourball') {
-      const mine = effectiveParticipants.find((p) => String(p.id) === String(activeParticipant.id));
+      const mine = effectiveParticipants.find((p) => String(p.id) === String(viewParticipant.id));
       const mate = effectiveParticipants.find((p) => String(mine?.partner || '') === String(p.id));
       const pair = [mine, mate].filter(Boolean);
       pair.sort((a, b) => (Number(a?.group || 99) - Number(b?.group || 99)));
       return pair;
     }
-    const me = effectiveParticipants.find((p) => String(p.id) === String(activeParticipant.id));
+    const me = effectiveParticipants.find((p) => String(p.id) === String(viewParticipant.id));
     return [me].filter(Boolean);
-  }, [done, assignedRoom, effectiveParticipants, activeParticipant?.id, variant]);
+  }, [done, assignedRoom, effectiveParticipants, viewParticipant?.id, variant]);
 
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
@@ -371,12 +351,12 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const isValidStrokeRoom = (roomNo) => {
     if (variant !== 'stroke') return true;
     if (!roomNo) return false;
-    const myGroup = Number(activeParticipant?.group) || 0;
+    const myGroup = Number(viewParticipant?.group) || 0;
     const sameGroupExists = effectiveParticipants.some(
       (p) =>
         Number(p.room) === Number(roomNo) &&
         Number(p.group) === myGroup &&
-        String(p.id) !== String(activeParticipant?.id)
+        String(p.id) !== String(viewParticipant?.id)
     );
     const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
     const isFull = currentCount >= roomCapacityAt(roomCapacities, roomNo);
@@ -402,10 +382,10 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   };
 
   useEffect(() => {
-    if (Number.isFinite(Number(activeParticipant?.room))) {
-      saveMyRoom(Number(activeParticipant.room));
+    if (Number.isFinite(Number(viewParticipant?.room))) {
+      saveMyRoom(Number(viewParticipant.room));
     }
-  }, [activeParticipant?.room]);
+  }, [viewParticipant?.room]);
 
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
     try {
@@ -417,7 +397,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   };
 
   const handleAssign = async () => {
-    if (!activeParticipant?.id) return;
+    if (!viewParticipant?.id) return;
     if (done || isAssigning) return;
 
     if (!isMeReady) {
@@ -432,16 +412,16 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       return;
     }
 
-    if (variant === 'fourball' && Number(activeParticipant?.group) === 2) {
+    if (variant === 'fourball' && Number(viewParticipant?.group) === 2) {
       setIsAssigning(true);
       await sleep(500);
       setIsAssigning(false);
-      if (activeParticipant?.room != null) {
-        const roomLabel = getLabel(activeParticipant.room);
-        saveMyRoom(Number(activeParticipant.room));
+      if (viewParticipant?.room != null) {
+        const roomLabel = getLabel(viewParticipant.room);
+        saveMyRoom(Number(viewParticipant.room));
         setShowTeam(false);
         setFlowStep('show');
-        alert(`${activeParticipant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
+        alert(`${viewParticipant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);
       } else {
         alert('아직 방배정이 진행되지 않았습니다.\n1조 참가자가 방/팀원을 선택하면 확인 가능합니다.');
       }
@@ -462,7 +442,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       let partnerNickname = null;
 
       while (attempt < 3) {
-        const res = await onAssign(activeParticipant.id);
+        const res = await onAssign(viewParticipant.id);
         roomNumber = res?.roomNumber ?? null;
         partnerNickname = res?.partnerNickname ?? null;
 
@@ -499,15 +479,15 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
       const roomLabel = getLabel(roomNumber);
       if (variant === 'fourball') {
-        alert(`${activeParticipant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
+        alert(`${viewParticipant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
         if (partnerNickname) {
           setIsAssigning(true);
           await sleep(TIMINGS.spinDuringPartnerPick);
           setIsAssigning(false);
-          alert(`${activeParticipant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+          alert(`${viewParticipant.nickname}님은 ${partnerNickname}님을 선택했습니다.`);
         }
       } else {
-        alert(`${activeParticipant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
+        alert(`${viewParticipant.nickname}님은 ${roomLabel}에 배정되었습니다.`);
       }
 
       setShowTeam(false);
@@ -572,10 +552,10 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       contentEditable={false}
       suppressContentEditableWarning
     >
-      {activeParticipant?.nickname && (
+      {viewParticipant?.nickname && (
         <p className={styles.greeting}>
           <span className={styles.nickname} translate="no" contentEditable={false} style={guard}>
-            {activeParticipant.nickname}
+            {viewParticipant.nickname}
           </span>
           <span translate="no" contentEditable={false} style={guard}>님, 안녕하세요!</span>
         </p>
