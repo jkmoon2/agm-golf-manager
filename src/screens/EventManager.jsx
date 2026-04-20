@@ -25,9 +25,27 @@ import GroupRoomHoleBattleMonitor from '../eventTemplates/groupRoomHoleBattle/Gr
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
+import { getPickLineupConfig } from '../events/pickLineup';
 import { computeHoleRankForce } from '../events/holeRankForce';
-import { buildBingoRoomRowsFromPersonRows, computeBingo, normalizeBingoSelectedHoles } from '../events/bingo';
-import { normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
+import {
+  defaultHoleRankForceParams,
+  normalizeSelectedHoles as normalizeHoleRankSelectedHoles,
+  normalizeSelectedSlots,
+  normalizeForcedRanks,
+} from '../events/holeRankForce';
+import {
+  buildBingoRoomRowsFromPersonRows,
+  computeBingo,
+  defaultBingoParams,
+  normalizeBingoSelectedHoles,
+  normalizeBingoSpecialZones,
+  normalizeBingoScoreHoleCount,
+} from '../events/bingo';
+import {
+  defaultGroupRoomHoleBattleParams,
+  normalizeBattleType,
+  normalizeGroupRoomHoleBattleParams,
+} from '../events/groupRoomHoleBattle';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
