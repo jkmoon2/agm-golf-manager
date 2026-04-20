@@ -25,27 +25,10 @@ import GroupRoomHoleBattleMonitor from '../eventTemplates/groupRoomHoleBattle/Gr
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
+import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../events/holeRankForce';
+import { buildBingoRoomRowsFromPersonRows, computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
+import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
-import { computeHoleRankForce } from '../events/holeRankForce';
-import {
-  defaultHoleRankForceParams,
-  normalizeSelectedHoles as normalizeHoleRankSelectedHoles,
-  normalizeSelectedSlots,
-  normalizeForcedRanks,
-} from '../events/holeRankForce';
-import {
-  buildBingoRoomRowsFromPersonRows,
-  computeBingo,
-  defaultBingoParams,
-  normalizeBingoSelectedHoles,
-  normalizeBingoSpecialZones,
-  normalizeBingoScoreHoleCount,
-} from '../events/bingo';
-import {
-  defaultGroupRoomHoleBattleParams,
-  normalizeBattleType,
-  normalizeGroupRoomHoleBattleParams,
-} from '../events/groupRoomHoleBattle';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -210,6 +193,51 @@ function getGroupRoomHoleBattleMetaText(params) {
 }
 
 
+
+function normalizeEventParamsForAdmin(template, params) {
+  const raw = (params && typeof params === 'object') ? params : {};
+  if (template === 'hole-rank-force') {
+    const base = defaultHoleRankForceParams();
+    return {
+      ...base,
+      ...raw,
+      selectedHoles: normalizeHoleRankSelectedHoles(raw.selectedHoles),
+      selectedSlots: normalizeSelectedSlots(raw.selectedSlots),
+      forcedRanks: normalizeForcedRanks(raw.forcedRanks),
+    };
+  }
+  if (template === 'bingo') {
+    const base = defaultBingoParams();
+    return {
+      ...base,
+      ...raw,
+      selectedHoles: normalizeBingoSelectedHoles(raw.selectedHoles),
+      specialZones: normalizeBingoSpecialZones(raw.specialZones),
+      scoreHoleCount: normalizeBingoScoreHoleCount(raw.scoreHoleCount),
+      inputLocked: !!raw.inputLocked,
+    };
+  }
+  if (template === 'group-room-hole-battle') {
+    return normalizeGroupRoomHoleBattleParams({
+      ...defaultGroupRoomHoleBattleParams(),
+      ...raw,
+    });
+  }
+  if (template === 'pick-lineup') {
+    const cfg = getPickLineupConfig({ template, params: raw });
+    return { ...raw, ...cfg };
+  }
+  return raw;
+}
+
+function normalizeEventDefForAdmin(ev) {
+  if (!ev || typeof ev !== 'object') return ev;
+  return {
+    ...ev,
+    params: normalizeEventParamsForAdmin(ev.template, ev.params),
+  };
+}
+
 function getClientPoint(evt){
   const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
   if (touch) return { clientX: Number(touch.clientX || 0), clientY: Number(touch.clientY || 0) };
@@ -233,7 +261,8 @@ export default function EventManager() {
   };
 
   /* ── 새 이벤트 만들기 ─────────────────────────────────── */
-  const eventsOfSelected = useMemo(() => (Array.isArray(eventData?.events) ? eventData.events : []).map((ev) => normalizeEventDefForAdmin(ev)), [eventData?.events]);
+  const eventsOfSelected = useMemo(() => Array.isArray(eventData?.events) ? eventData.events : [], [eventData?.events]);
+  const normalizedEventsOfSelected = useMemo(() => eventsOfSelected.map(normalizeEventDefForAdmin), [eventsOfSelected]);
 
   const [dragEvents, setDragEvents] = useState(null);
   const [dragEventId, setDragEventId] = useState('');
@@ -392,8 +421,7 @@ if (form.template === 'group-battle') {
   alert('이벤트가 생성되었습니다.');
   return;
 }
-      const parsedRaw = JSON.parse(form.paramsJson || '{}');
-      const parsed = normalizeEventParamsForAdmin(form.template, parsedRaw);
+      const parsed = JSON.parse(form.paramsJson || '{}');
       if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
         alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
@@ -755,7 +783,7 @@ if (form.template === 'group-battle') {
   // ★ 입력 초기화(해당 이벤트의 person/room/team 입력을 비움)
   const clearInputs = async (ev) => {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
-    const all = { ...(eventData?.eventInputs || {}) };
+    const all = { ...(inputsAll || {}) };
     delete all[ev.id];
     const nextResetToken = Date.now();
     const nextResets = { ...((eventData?.eventInputResets && typeof eventData.eventInputResets === 'object') ? eventData.eventInputResets : {}) };
@@ -830,7 +858,7 @@ const resetEditGroupBattle = (params) => {
       template: ev.template,
       inputMode: ev.inputMode || 'refresh',
       attempts: Number(ev.attempts || 4),
-      paramsJson: JSON.stringify(normalizeEventParamsForAdmin(ev.template, ev.params), null, 2),
+      paramsJson: JSON.stringify(ev.params || {}, null, 2),
     });
     setEditParamOpen(false);
 
@@ -899,8 +927,7 @@ if (editForm?.template === 'group-battle') {
   alert('저장되었습니다.');
   return;
 }
-      const parsedRaw = JSON.parse(editForm.paramsJson || '{}');
-      const parsed = normalizeEventParamsForAdmin(editForm.template, parsedRaw);
+      const parsed = JSON.parse(editForm.paramsJson || '{}');
       if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
         alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
@@ -976,11 +1003,12 @@ if (editForm?.template === 'group-battle') {
   const roomCount    = Number(eventData?.roomCount || 0);
   const roomNames    = (Array.isArray(eventData?.roomNames) && eventData.roomNames.length)
     ? eventData.roomNames : Array.from({ length: roomCount }, (_, i) => `${i + 1}번방`);
-  const inputsAll    = eventData?.eventInputs || {};
+  const inputsAll    = useMemo(() => ((eventData?.eventInputs && typeof eventData.eventInputs === 'object') ? eventData.eventInputs : {}), [eventData?.eventInputs]);
+  const getInputsSlot = useCallback((evId) => ((inputsAll?.[evId] && typeof inputsAll[evId] === 'object') ? inputsAll[evId] : {}), [inputsAll]);
 
-  const [previewId, setPreviewId] = useState(eventsOfSelected[0]?.id || '');
-  useEffect(() => { if (eventsOfSelected.length && !previewId) setPreviewId(eventsOfSelected[0].id); }, [eventsOfSelected, previewId]);
-  const previewDef = useMemo(() => eventsOfSelected.find(e => e.id === previewId) || null, [eventsOfSelected, previewId]);
+  const [previewId, setPreviewId] = useState(normalizedEventsOfSelected[0]?.id || '');
+  useEffect(() => { if (normalizedEventsOfSelected.length && !previewId) setPreviewId(normalizedEventsOfSelected[0].id); }, [normalizedEventsOfSelected, previewId]);
+  const previewDef = useMemo(() => normalizedEventsOfSelected.find(e => e.id === previewId) || null, [normalizedEventsOfSelected, previewId]);
 
   // ★ 미리보기 컨트롤 값 ↔ 이벤트 설정 양방향 동기화
   useEffect(() => {
@@ -1188,23 +1216,23 @@ if (editForm?.template === 'group-battle') {
 
   const handicapEditEvent = useMemo(() => {
     if (!handicapEditId) return null;
-    return (eventsOfSelected || []).find(e => e.id === handicapEditId) || null;
-  }, [eventsOfSelected, handicapEditId]);
+    return (normalizedEventsOfSelected || []).find(e => e.id === handicapEditId) || null;
+  }, [normalizedEventsOfSelected, handicapEditId]);
 
   const pickLineupMonitorEvent = useMemo(() => {
     if (!monitorId) return null;
-    return (eventsOfSelected || []).find((e) => e.id === monitorId) || null;
-  }, [eventsOfSelected, monitorId]);
+    return (normalizedEventsOfSelected || []).find((e) => e.id === monitorId) || null;
+  }, [normalizedEventsOfSelected, monitorId]);
 
   const bingoMonitorEvent = useMemo(() => {
     if (!bingoMonitorId) return null;
-    return (eventsOfSelected || []).find((e) => e.id === bingoMonitorId) || null;
-  }, [eventsOfSelected, bingoMonitorId]);
+    return (normalizedEventsOfSelected || []).find((e) => e.id === bingoMonitorId) || null;
+  }, [normalizedEventsOfSelected, bingoMonitorId]);
 
   const groupRoomHoleMonitorEvent = useMemo(() => {
     if (!groupRoomHoleMonitorId) return null;
-    return (eventsOfSelected || []).find((e) => e.id === groupRoomHoleMonitorId) || null;
-  }, [eventsOfSelected, groupRoomHoleMonitorId]);
+    return (normalizedEventsOfSelected || []).find((e) => e.id === groupRoomHoleMonitorId) || null;
+  }, [normalizedEventsOfSelected, groupRoomHoleMonitorId]);
 
   const saveHandicapOverrides = async (overridesMap) => {
     if (!handicapEditEvent) return;
@@ -1260,7 +1288,7 @@ if (editForm?.template === 'group-battle') {
     const ev = eventsOfSelected.find(e=>e.id===quickId);
     if (!ev) return;
     const N = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
-    const slotAll = (eventData?.eventInputs || {})[ev.id] || {};
+    const slotAll = getInputsSlot(ev.id);
     if (quickTarget === 'person') {
       const rec = (slotAll.person || {})[quickKey];
       if (ev.inputMode === 'accumulate') {
@@ -1305,7 +1333,7 @@ if (editForm?.template === 'group-battle') {
   };
   const applyQuick = async (ev) => {
     if (!quickKey) { alert('대상을 선택하세요.'); return; }
-    const all = { ...(eventData?.eventInputs || {}) };
+    const all = { ...(inputsAll || {}) };
     const slot = { ...(all[ev.id] || {}) };
 
     if (quickTarget === 'person') {
@@ -2139,7 +2167,7 @@ if (editForm?.template === 'group-battle') {
           <PickLineupSelectionMonitor
             eventDef={pickLineupMonitorEvent}
             participants={participants}
-            inputsByEvent={(eventData?.eventInputs || {})[pickLineupMonitorEvent.id] || {}}
+            inputsByEvent={getInputsSlot(pickLineupMonitorEvent.id)}
             roomNames={roomNames}
             onClose={() => setMonitorId(null)}
             onToggleLock={togglePickLineupLock}
@@ -2150,7 +2178,7 @@ if (editForm?.template === 'group-battle') {
           <BingoSelectionMonitor
             eventDef={bingoMonitorEvent}
             participants={participants}
-            inputsByEvent={(eventData?.eventInputs || {})[bingoMonitorEvent.id] || {}}
+            inputsByEvent={getInputsSlot(bingoMonitorEvent.id)}
             roomNames={roomNames}
             onClose={() => setBingoMonitorId(null)}
             onToggleLock={toggleBingoInputLock}
@@ -2163,7 +2191,7 @@ if (editForm?.template === 'group-battle') {
           <GroupRoomHoleBattleMonitor
             eventDef={groupRoomHoleMonitorEvent}
             participants={participants}
-            inputsByEvent={(eventData?.eventInputs || {})[groupRoomHoleMonitorEvent.id] || {}}
+            inputsByEvent={getInputsSlot(groupRoomHoleMonitorEvent.id)}
             roomNames={roomNames}
             roomCount={roomCount}
             onClose={() => setGroupRoomHoleMonitorId(null)}
@@ -2176,51 +2204,3 @@ if (editForm?.template === 'group-battle') {
     </div>
   );
 }
-function normalizeEventParamsForAdmin(template, params) {
-  const src = (params && typeof params === 'object') ? params : {};
-  if (template === 'hole-rank-force') {
-    const base = defaultHoleRankForceParams();
-    return {
-      ...base,
-      ...src,
-      selectedHoles: normalizeHoleRankSelectedHoles(src.selectedHoles),
-      selectedSlots: normalizeSelectedSlots(src.selectedSlots),
-      forcedRanks: normalizeForcedRanks(src.forcedRanks),
-    };
-  }
-  if (template === 'bingo') {
-    const base = defaultBingoParams();
-    return {
-      ...base,
-      ...src,
-      selectedHoles: normalizeBingoSelectedHoles(src.selectedHoles),
-      specialZones: normalizeBingoSpecialZones(src.specialZones),
-      inputLocked: !!src.inputLocked,
-      scoreHoleCount: normalizeBingoScoreHoleCount(src.scoreHoleCount),
-    };
-  }
-  if (template === 'group-room-hole-battle') {
-    return normalizeGroupRoomHoleBattleParams({ ...defaultGroupRoomHoleBattleParams(), ...src });
-  }
-  if (template === 'pick-lineup') {
-    const cfg = getPickLineupConfig({ params: src });
-    return {
-      ...src,
-      mode: cfg.mode,
-      pickCount: cfg.pickCount,
-      openGroups: cfg.openGroups,
-      lastPlaceHalf: !!cfg.lastPlaceHalf,
-    };
-  }
-  return src;
-}
-
-function normalizeEventDefForAdmin(ev) {
-  const src = (ev && typeof ev === 'object') ? ev : {};
-  return {
-    ...src,
-    params: normalizeEventParamsForAdmin(src.template, src.params),
-  };
-}
-
-
