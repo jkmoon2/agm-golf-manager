@@ -239,6 +239,25 @@ function foldAccum(obj, aggregator='sum'){
   return aggregate(vals, aggregator);
 }
 
+
+function normalizeResultEventDef(ev) {
+  const src = (ev && typeof ev === 'object') ? ev : {};
+  const template = String(src?.template || 'raw-number');
+  const params = (src?.params && typeof src.params === 'object') ? src.params : {};
+  if (template === 'group-battle') {
+    const mode = params?.mode === 'group' ? 'group' : 'single';
+    const metric = params?.metric === 'score' ? 'score' : 'result';
+    return {
+      ...src,
+      template: 'group-battle',
+      enabled: src?.enabled !== false,
+      target: mode === 'group' ? 'group' : 'person',
+      params: { ...params, mode, metric },
+    };
+  }
+  return { ...src, enabled: src?.enabled !== false };
+}
+
 function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, roomNames = [], roomCount = 0) {
   if (!ev) return [];
   const evId = ev?.id;
@@ -322,18 +341,18 @@ export default function PlayerEventConfirm() {
     }
   }, [urlEventId, eventId, loadEvent]);
   const participantsBase = useMemo(
-    () => (Array.isArray(eventData?.participants) && eventData.participants.length
-      ? eventData.participants
-      : getEffectiveParticipants(eventData)),
-    [eventData?.participants, eventData?.mode, eventData?.participantsStroke, eventData?.participantsFourball]
+    () => getEffectiveParticipants(eventData),
+    [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
   );
   const participants = useMemo(
     () => (typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(participantsBase) : participantsBase),
     [participantsBase, overlayScoresToParticipants]
   );
 const events = useMemo(
-    () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false) : [],
-    [eventData]
+    () => Array.isArray(eventData?.events)
+      ? eventData.events.map(normalizeResultEventDef).filter(e => e?.enabled !== false)
+      : [],
+    [eventData?.events]
   );
   const inputsByEvent = eventData?.eventInputs || {};
 
@@ -452,8 +471,7 @@ const events = useMemo(
         }));
         return { kind: 'person', metricLabel: '빙고', rows };
       }
-      const roomRows = buildBingoRoomRowsFromPersonRows(data.personRows || [], effectiveRoomCount, effectiveRoomNames);
-      const rows = roomRows.map((r, i) => ({
+      const rows = (data.roomRows || []).map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
         label: r.name,
