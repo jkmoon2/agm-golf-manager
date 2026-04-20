@@ -17,10 +17,60 @@ import tCss    from './PlayerEventConfirm.module.css';
 
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
-import { computePickLineup } from '../../events/pickLineup';
-import { computeHoleRankForce } from '../../events/holeRankForce';
-import { computeGroupRoomHoleBattle } from '../../events/groupRoomHoleBattle';
-import { buildBingoRoomRowsFromPersonRows, computeBingo } from '../../events/bingo';
+import { computePickLineup, getPickLineupConfig } from '../../events/pickLineup';
+import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../../events/holeRankForce';
+import { computeGroupRoomHoleBattle, defaultGroupRoomHoleBattleParams, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
+import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
+
+
+function normalizeResultEventParams(template, params, eventDef = null) {
+  const src = (params && typeof params === 'object') ? params : {};
+  if (template === 'hole-rank-force') {
+    const base = { ...defaultHoleRankForceParams(), ...src };
+    return {
+      ...base,
+      selectedHoles: normalizeHoleRankSelectedHoles(base.selectedHoles),
+      selectedSlots: normalizeSelectedSlots(base.selectedSlots),
+      forcedRanks: normalizeForcedRanks(base.forcedRanks),
+    };
+  }
+  if (template === 'bingo') {
+    const base = { ...defaultBingoParams(), ...src };
+    return {
+      ...base,
+      selectedHoles: normalizeBingoSelectedHoles(base.selectedHoles),
+      specialZones: normalizeBingoSpecialZones(base.specialZones),
+      scoreHoleCount: normalizeBingoScoreHoleCount(base.scoreHoleCount),
+    };
+  }
+  if (template === 'group-room-hole-battle') {
+    const base = { ...defaultGroupRoomHoleBattleParams(), ...src };
+    return normalizeGroupRoomHoleBattleParams(base);
+  }
+  if (template === 'pick-lineup') {
+    const cfg = getPickLineupConfig(eventDef || { template, params: src });
+    return { ...src, ...cfg };
+  }
+  if (template === 'group-battle') {
+    return {
+      ...src,
+      mode: src?.mode || (Array.isArray(src?.groups) && src.groups.length ? 'group' : 'normal'),
+      metric: src?.metric || 'result',
+    };
+  }
+  return src;
+}
+
+function normalizeResultEventDef(ev) {
+  if (!ev || typeof ev !== 'object') return ev;
+  return {
+    ...ev,
+    enabled: ev?.enabled !== false,
+    target: ev?.target || (ev?.template === 'group-battle' ? ((ev?.params?.mode || 'group') === 'group' ? 'group' : 'person') : 'person'),
+    rankOrder: ev?.rankOrder || 'asc',
+    params: normalizeResultEventParams(ev?.template, ev?.params, ev),
+  };
+}
 
 function resolveConfirmParticipant(participants = [], eventId = '', seed = null, authCode = '') {
   const list = Array.isArray(participants) ? participants : [];
@@ -330,8 +380,8 @@ export default function PlayerEventConfirm() {
     [participantsBase, overlayScoresToParticipants]
   );
 const events = useMemo(
-    () => Array.isArray(eventData?.events) ? eventData.events.filter(e => e?.enabled !== false) : [],
-    [eventData]
+    () => Array.isArray(eventData?.events) ? eventData.events.map(normalizeResultEventDef).filter(e => e?.enabled !== false) : [],
+    [eventData?.events]
   );
   const inputsByEvent = eventData?.eventInputs || {};
 
@@ -450,8 +500,7 @@ const events = useMemo(
         }));
         return { kind: 'person', metricLabel: '빙고', rows };
       }
-      const roomRows = buildBingoRoomRowsFromPersonRows(data.personRows || [], effectiveRoomCount, effectiveRoomNames);
-      const rows = roomRows.map((r, i) => ({
+      const rows = (data.roomRows || []).map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
         label: r.name,

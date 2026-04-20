@@ -26,7 +26,7 @@ import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../events/holeRankForce';
-import { buildBingoRoomRowsFromPersonRows, computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
+import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
 
@@ -1073,11 +1073,9 @@ if (editForm?.template === 'group-battle') {
       return arr;
     }
     if (previewDef.template === 'bingo') {
-      const baseRows = Array.isArray(bingoPreview?.personRows)
-        ? bingoPreview.personRows.map((r) => ({ id: r.id, room: r.room, value: r.value, name: r.name }))
+      const arr = Array.isArray(bingoPreview?.roomRows)
+        ? bingoPreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
         : [];
-      const arr = buildBingoRoomRowsFromPersonRows(baseRows, roomCount, roomNames)
-        .map((r) => ({ room: r.room, name: r.name, score: r.value }));
       arr.sort((a, b) => sign * (a.score - b.score));
       return arr;
     }
