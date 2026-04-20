@@ -215,7 +215,7 @@ export default function EventManager() {
   };
 
   /* ── 새 이벤트 만들기 ─────────────────────────────────── */
-  const eventsOfSelected = useMemo(() => Array.isArray(eventData?.events) ? eventData.events : [], [eventData]);
+  const eventsOfSelected = useMemo(() => (Array.isArray(eventData?.events) ? eventData.events : []).map((ev) => normalizeEventDefForAdmin(ev)), [eventData?.events]);
 
   const [dragEvents, setDragEvents] = useState(null);
   const [dragEventId, setDragEventId] = useState('');
@@ -374,7 +374,8 @@ if (form.template === 'group-battle') {
   alert('이벤트가 생성되었습니다.');
   return;
 }
-      const parsed = JSON.parse(form.paramsJson || '{}');
+      const parsedRaw = JSON.parse(form.paramsJson || '{}');
+      const parsed = normalizeEventParamsForAdmin(form.template, parsedRaw);
       if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
         alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
@@ -811,7 +812,7 @@ const resetEditGroupBattle = (params) => {
       template: ev.template,
       inputMode: ev.inputMode || 'refresh',
       attempts: Number(ev.attempts || 4),
-      paramsJson: JSON.stringify(ev.params || {}, null, 2),
+      paramsJson: JSON.stringify(normalizeEventParamsForAdmin(ev.template, ev.params), null, 2),
     });
     setEditParamOpen(false);
 
@@ -880,7 +881,8 @@ if (editForm?.template === 'group-battle') {
   alert('저장되었습니다.');
   return;
 }
-      const parsed = JSON.parse(editForm.paramsJson || '{}');
+      const parsedRaw = JSON.parse(editForm.paramsJson || '{}');
+      const parsed = normalizeEventParamsForAdmin(editForm.template, parsedRaw);
       if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
         alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
         return;
@@ -2156,3 +2158,51 @@ if (editForm?.template === 'group-battle') {
     </div>
   );
 }
+function normalizeEventParamsForAdmin(template, params) {
+  const src = (params && typeof params === 'object') ? params : {};
+  if (template === 'hole-rank-force') {
+    const base = defaultHoleRankForceParams();
+    return {
+      ...base,
+      ...src,
+      selectedHoles: normalizeHoleRankSelectedHoles(src.selectedHoles),
+      selectedSlots: normalizeSelectedSlots(src.selectedSlots),
+      forcedRanks: normalizeForcedRanks(src.forcedRanks),
+    };
+  }
+  if (template === 'bingo') {
+    const base = defaultBingoParams();
+    return {
+      ...base,
+      ...src,
+      selectedHoles: normalizeBingoSelectedHoles(src.selectedHoles),
+      specialZones: normalizeBingoSpecialZones(src.specialZones),
+      inputLocked: !!src.inputLocked,
+      scoreHoleCount: normalizeBingoScoreHoleCount(src.scoreHoleCount),
+    };
+  }
+  if (template === 'group-room-hole-battle') {
+    return normalizeGroupRoomHoleBattleParams({ ...defaultGroupRoomHoleBattleParams(), ...src });
+  }
+  if (template === 'pick-lineup') {
+    const cfg = getPickLineupConfig({ params: src });
+    return {
+      ...src,
+      mode: cfg.mode,
+      pickCount: cfg.pickCount,
+      openGroups: cfg.openGroups,
+      lastPlaceHalf: !!cfg.lastPlaceHalf,
+    };
+  }
+  return src;
+}
+
+function normalizeEventDefForAdmin(ev) {
+  const src = (ev && typeof ev === 'object') ? ev : {};
+  return {
+    ...src,
+    params: normalizeEventParamsForAdmin(src.template, src.params),
+  };
+}
+
+
