@@ -25,6 +25,7 @@ import {
 } from '../player/logic/assignFourball';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
+import { diagMerge, diagPush, diagSummaryParticipant } from '../utils/agmDiag';
 
 export const PlayerContext = createContext(null);
 
@@ -37,6 +38,7 @@ function exposeDiag(part) {
   try {
     const prev = (window.__AGM_DIAG || {});
     window.__AGM_DIAG = { ...prev, ...part };
+    try { diagMerge('playerContext', part); } catch {}
     if (DEBUG) console.log('[AGM][diag]', window.__AGM_DIAG);
   } catch {}
 }
@@ -465,6 +467,10 @@ if (!idCached) {
 
       if (me) {
         setParticipant(me);
+        try {
+          diagMerge('playerContext', { lastResolveAt: Date.now(), eventId, participant: diagSummaryParticipant(me) });
+          diagPush('timeline', { type: 'player.resolveSnapshot:success', eventId, participantId: normId(me?.id), room: Number(me?.room ?? me?.roomNumber ?? 0) || null });
+        } catch {}
 
         // ✅ iOS(운영자모드>참가자탭)에서 sessionStorage가 날아가도 "방배정/리스트"가 풀리지 않도록
         //    탭 스코프(localStorage + window.name)로 최소 백업
@@ -489,6 +495,10 @@ if (!idCached) {
         if (me.authCode) setAuthCode(me.authCode);
       } else {
         setParticipant(null);
+        try {
+          diagMerge('playerContext', { lastResolveAt: Date.now(), eventId, participant: null, authCode: authCode || '' });
+          diagPush('timeline', { type: 'player.resolveSnapshot:miss', eventId, participantsCount: partArr.length, hasAuthCode: !!String(authCode || '').trim() });
+        } catch {}
       }
     });
     return () => unsub();
@@ -496,6 +506,7 @@ if (!idCached) {
 
   async function refreshPlayerStateNow(opts = {}) {
     if (!eventId) return;
+    try { diagPush('timeline', { type: 'player.refreshPlayerStateNow:start', eventId, force: !!opts?.force }); } catch {}
     const force = !!opts?.force;
     const now = Date.now();
     if (!force) {
@@ -529,13 +540,20 @@ if (!idCached) {
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
+      const resolvedForDiag = resolveParticipantForDirectEntry(partArr, eventId, participant, authCode);
       setParticipant((prev) => {
         if (!prev) return prev;
         const latest = partArr.find((p) => normId(p.id) === normId(prev.id));
         return latest || prev;
       });
       lastPlayerSnapshotAtRef.current = Date.now();
-    } catch {}
+      try {
+        diagMerge('playerContext', { lastRefreshAt: Date.now(), eventId, participant: diagSummaryParticipant(resolvedForDiag || participant) });
+        diagPush('timeline', { type: 'player.refreshPlayerStateNow:success', eventId, participantsCount: partArr.length, resolved: !!resolvedForDiag });
+      } catch {}
+    } catch (e) {
+      try { diagPush('timeline', { type: 'player.refreshPlayerStateNow:fail', eventId, error: String(e?.message || e || '') }); } catch {}
+    }
   }
 
   useEffect(() => {
@@ -580,8 +598,12 @@ if (!idCached) {
     if (participant) return;
     if (!Array.isArray(participants) || !participants.length) return;
     const resolved = resolveParticipantForDirectEntry(participants, eventId, null, authCode);
+    try {
+      diagPush('timeline', { type: 'player.directEntryResolve', eventId, participantsCount: participants.length, resolved: !!resolved, hasAuthCode: !!String(authCode || '').trim() });
+    } catch {}
     if (!resolved) return;
     setParticipant(resolved);
+    try { diagMerge('playerContext', { lastDirectEntryResolveAt: Date.now(), eventId, participant: diagSummaryParticipant(resolved) }); } catch {}
   }, [eventId, participants, participant, authCode]);
 
   const currentRoom = useMemo(() => resolveCurrentRoomForDirectEntry(participant, eventId), [participant, eventId]);

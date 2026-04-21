@@ -10,6 +10,7 @@ import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, serverTimestamp, deleteField, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { broadcastEventSync } from '../utils/crossTabEventSync';
+import { diagMerge, diagPush } from '../utils/agmDiag';
 import css from './EventManager.module.css';
 import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } from '../eventTemplates/registry';
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
@@ -783,6 +784,7 @@ if (form.template === 'group-battle') {
   // ★ 입력 초기화(해당 이벤트의 person/room/team 입력을 비움)
   const clearInputs = async (ev) => {
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
+    try { diagPush('timeline', { type: 'adminEventManager.clearInputs:start', eventId: eventId || '', evId: String(ev?.id || ''), existingEventInputsCount: Object.keys(inputsAll || {}).length }); } catch {}
     const all = { ...(inputsAll || {}) };
     delete all[ev.id];
     const nextResetToken = Date.now();
@@ -811,9 +813,14 @@ if (form.template === 'group-battle') {
       }
     } catch (e) {
       console.warn('[clearInputs] remote patch failed:', e);
+      try { diagPush('timeline', { type: 'adminEventManager.clearInputs:remoteFail', eventId: eventId || '', evId: String(ev?.id || ''), error: String(e?.message || e || '') }); } catch {}
     }
 
     await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false);
+    try {
+      diagMerge('adminEventManager', { lastClearInputsAt: Date.now(), eventId: eventId || '', evId: String(ev?.id || ''), resetToken: nextResetToken });
+      diagPush('timeline', { type: 'adminEventManager.clearInputs:success', eventId: eventId || '', evId: String(ev?.id || ''), resetToken: nextResetToken });
+    } catch {}
     try { broadcastEventSync(eventId, { reason: 'clearInputs' }); } catch {}
     setOpenMenuId(null); setMenuUpId(null);
     setEditAttemptsText(String(Number(ev.attempts||4)));
@@ -1331,6 +1338,7 @@ if (editForm?.template === 'group-battle') {
   };
   const applyQuick = async (ev) => {
     if (!quickKey) { alert('대상을 선택하세요.'); return; }
+    try { diagPush('timeline', { type: 'adminEventManager.applyQuick:start', eventId: eventId || '', evId: String(ev?.id || ''), target: String(quickTarget || ''), key: String(quickKey || '') }); } catch {}
     const all = { ...(inputsAll || {}) };
     const slot = { ...(all[ev.id] || {}) };
 
@@ -1374,7 +1382,12 @@ if (editForm?.template === 'group-battle') {
       }
     } catch (e) {
       console.warn('[applyQuick] remote patch failed:', e);
+      try { diagPush('timeline', { type: 'adminEventManager.applyQuick:remoteFail', eventId: eventId || '', evId: String(ev?.id || ''), error: String(e?.message || e || '') }); } catch {}
     }
+    try {
+      diagMerge('adminEventManager', { lastApplyQuickAt: Date.now(), eventId: eventId || '', evId: String(ev?.id || ''), target: String(quickTarget || ''), key: String(quickKey || '') });
+      diagPush('timeline', { type: 'adminEventManager.applyQuick:success', eventId: eventId || '', evId: String(ev?.id || ''), target: String(quickTarget || ''), key: String(quickKey || '') });
+    } catch {}
     setQuickId(null);
   };
 

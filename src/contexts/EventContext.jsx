@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
+import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
 
 import {
   getAuth,
@@ -415,11 +416,25 @@ export function EventProvider({ children }) {
 
     setEventData(withGate);
     lastEventDataRef.current = withGate;
+    try {
+      diagMerge('eventContext', {
+        lastApplyIncomingAt: Date.now(),
+        eventId: eventId || '',
+        event: diagSummaryEvent(eventId, withGate),
+      });
+      diagPush('timeline', {
+        type: 'event.applyIncomingEventData',
+        eventId: eventId || '',
+        participantsCount: Array.isArray(withGate?.participants) ? withGate.participants.length : 0,
+        eventInputsCount: (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? Object.keys(withGate.eventInputs).length : 0,
+      });
+    } catch {}
     return withGate;
-  }, []);
+  }, [eventId]);
 
   const refreshEventNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
+    try { diagPush('timeline', { type: 'event.refreshEventNow:start', eventId, force: !!opts?.force }); } catch {}
     const force = !!opts?.force;
     const now = Date.now();
     if (!force) {
@@ -439,7 +454,12 @@ export function EventProvider({ children }) {
         const snap = await getDoc(doc(db, 'events', eventId));
         if (snap.exists()) {
           lastEventSnapshotAtRef.current = Date.now();
-          applyIncomingEventData(snap.data() || {});
+          const nextData = snap.data() || {};
+          applyIncomingEventData(nextData);
+          try {
+            diagMerge('eventContext', { lastRefreshEventAt: Date.now(), eventId, event: diagSummaryEvent(eventId, nextData) });
+            diagPush('timeline', { type: 'event.refreshEventNow:success', eventId, source: 'server' });
+          } catch {}
         }
       } catch {}
     }
@@ -447,6 +467,7 @@ export function EventProvider({ children }) {
 
   const refreshScoresNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
+    try { diagPush('timeline', { type: 'event.refreshScoresNow:start', eventId, force: !!opts?.force }); } catch {}
     if (document?.hidden) return;
     const force = !!opts?.force;
     const now = Date.now();
@@ -716,6 +737,7 @@ export function EventProvider({ children }) {
   // 즉시 업데이트
   const updateEventImmediate = async (updates, ifChanged = true) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
+    try { diagPush('timeline', { type: 'event.updateEventImmediate:start', eventId, keys: Object.keys(updates || {}) }); } catch {}
     await ensureAuthed();
 
     const enriched = enrichParticipantsDerived(updates);
@@ -748,6 +770,10 @@ export function EventProvider({ children }) {
 
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...enriched };
       setEventData((prev) => (prev ? { ...prev, ...enriched } : enriched));
+      try {
+        diagMerge('eventContext', { lastUpdateEventAt: Date.now(), eventId, lastUpdateKeys: Object.keys(enriched || {}) });
+        diagPush('timeline', { type: 'event.updateEventImmediate:success', eventId, keys: Object.keys(enriched || {}) });
+      } catch {}
       try { broadcastEventSync(eventId, { reason: 'updateEventImmediate' }); } catch {}
     } catch (e) {
       if (isMissingDocError(e)) {
@@ -756,6 +782,7 @@ export function EventProvider({ children }) {
         return;
       }
       console.warn('[EventContext] updateEventImmediate failed:', e);
+      try { diagPush('timeline', { type: 'event.updateEventImmediate:fail', eventId, error: String(e?.message || e || '') }); } catch {}
       throw e;
     }
   };

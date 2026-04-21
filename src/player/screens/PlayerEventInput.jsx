@@ -14,6 +14,7 @@ import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBing
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
+import { diagMerge, diagPush } from '../../utils/agmDiag';
 
 
 function getPlayerTabId(){
@@ -859,12 +860,14 @@ export default function PlayerEventInput(){
     if (!resetTokensReadyRef.current) {
       resetTokensReadyRef.current = true;
       resetTokenRef.current = { ...nextTokens };
+      try { diagPush('timeline', { type: 'playerEventInput.resetTokens:init', eventId: activeEventStorageId || '', tokenKeys: Object.keys(nextTokens || {}).length }); } catch {}
       return;
     }
 
     const prevTokens = resetTokenRef.current || {};
     const changedEvIds = Object.keys(nextTokens).filter((evId) => String(nextTokens[evId] || '') !== String(prevTokens[evId] || ''));
     if (changedEvIds.length) {
+      try { diagPush('timeline', { type: 'playerEventInput.resetTokens:changed', eventId: activeEventStorageId || '', changedEvIds }); } catch {}
       const nextDraft = cloneEventInputs(inputsByEventServer);
       changedEvIds.forEach((evId) => {
         if (Object.prototype.hasOwnProperty.call(nextDraft, evId)) delete nextDraft[evId];
@@ -1339,6 +1342,7 @@ export default function PlayerEventInput(){
 
   const saveDraft = async () => {
     try{
+      try { diagPush('timeline', { type: 'playerEventInput.saveDraft:start', eventId: activeEventStorageId || '', dirty: !!dirty }); } catch {}
       await ensureMembership((eventId || ctxId), roomIdx);
 
       const base = inputsByEventServer || {};
@@ -1403,9 +1407,14 @@ export default function PlayerEventInput(){
         }
       }
       setDirty(false);
+      try {
+        diagMerge('playerEventInput', { lastSaveAt: Date.now(), eventId: activeEventStorageId || '', savedEventInputsCount: Object.keys(savedClone || {}).length });
+        diagPush('timeline', { type: 'playerEventInput.saveDraft:success', eventId: activeEventStorageId || '', savedEventInputsCount: Object.keys(savedClone || {}).length });
+      } catch {}
       alert('저장되었습니다.');
     }catch(e){
       console.error('saveDraft error', e);
+      try { diagPush('timeline', { type: 'playerEventInput.saveDraft:fail', eventId: activeEventStorageId || '', error: String(e?.message || e || '') }); } catch {}
       alert('저장 중 오류가 발생했습니다.');
     }
   };
