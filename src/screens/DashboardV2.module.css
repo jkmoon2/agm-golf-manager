@@ -1,0 +1,775 @@
+/* /src/screens/DashboardV2.module.css */
+
+.page {
+  min-height: 100%;
+  background: #f5f7fb;
+}
+
+.shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 14px 14px 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.section {
+  background: #fff;
+  border: 1px solid #e3e8f2;
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
+}
+
+.headerCard {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #dbe4f2;
+  border-radius: 24px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.06);
+}
+
+.headerTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.headerLeft {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.headerTitleBlock {
+  min-width: 0;
+}
+
+.headerTitle {
+  font-size: 22px;
+  font-weight: 900;
+  color: #13274b;
+  line-height: 1.2;
+}
+
+.headerSub {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.metaPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: #2457d6;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.modeStroke {
+  background: #eef8ef;
+  color: #167a45;
+}
+
+.modeFourball {
+  background: #fff3e6;
+  color: #c76d00;
+}
+
+.headerControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.select {
+  min-height: 40px;
+  min-width: 240px;
+  max-width: 360px;
+  border-radius: 14px;
+  border: 1px solid #d7e0ee;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #12325b;
+  background: #fff;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.select:hover {
+  border-color: #b8c6da;
+  background: #fbfdff;
+}
+
+.select:focus,
+.select:active {
+  outline: none;
+  border-color: #2457d6;
+  box-shadow: 0 0 0 3px rgba(75, 126, 240, 0.16);
+}
+
+.select:focus {
+  outline: none;
+}
+
+.select:focus:not(:focus-visible) {
+  border-color: #d7e0ee;
+  box-shadow: none;
+}
+
+.alertBtn,
+.eventActionBtn {
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid #d7e0ee;
+  background: #fff;
+  color: #1b4ca1;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.alertBtn:hover,
+.eventActionBtn:hover {
+  background: #f4f8ff;
+}
+
+.liveStateWrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.liveBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.liveLive {
+  background: #e9f9ef;
+  color: #11753f;
+}
+
+.liveStale {
+  background: #fff4e7;
+  color: #c26b00;
+}
+
+.liveOffline {
+  background: #fff0f0;
+  color: #bf1e2e;
+}
+
+.lastUpdated {
+  font-size: 12px;
+  font-weight: 700;
+  color: #59657a;
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.statusCard {
+  background: #fff;
+  border: 1px solid #e3e8f2;
+  border-radius: 18px;
+  padding: 12px;
+  box-shadow: 0 8px 18px rgba(16, 24, 40, 0.04);
+  min-height: 104px;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.statusLabel {
+  font-size: 12px;
+  font-weight: 900;
+  color: #55719f;
+  line-height: 1.2;
+}
+
+.statusValueRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.statusValue {
+  font-size: 28px;
+  font-weight: 900;
+  color: #152c55;
+  line-height: 1;
+}
+
+.statusTotal {
+  font-size: 12px;
+  font-weight: 800;
+  color: #5f6d82;
+  line-height: 1.1;
+}
+
+.progressTrack {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 999px;
+  background: #eaf0f8;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4b7ef0 0%, #7da7ff 100%);
+}
+
+.statusHint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #5f6d82;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summarySectionStack {
+  display: grid;
+  gap: 10px;
+}
+
+.monitorSection {
+  background: #fff;
+  border: 1px solid #e3e8f2;
+  border-radius: 20px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
+}
+
+.summarySectionCard {
+  padding: 12px;
+}
+
+.summaryToggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  font-size: 17px;
+  font-weight: 900;
+  color: #14284d;
+}
+
+.sectionDesc {
+  font-size: 11px;
+  color: #6b778d;
+  margin-top: 2px;
+}
+
+.toggleText {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 900;
+  color: #2457d6;
+}
+
+.summaryMetaRow {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summaryMainStat {
+  font-size: 14px;
+  font-weight: 900;
+  color: #17345c;
+}
+
+.summarySubStat {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5f6d82;
+}
+
+.summaryStatsBar {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.summaryMiniStat {
+  border-radius: 14px;
+  background: #f2f6fb;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.summaryMiniStat span {
+  font-size: 11px;
+  color: #68758c;
+  font-weight: 700;
+}
+
+.summaryMiniStat strong {
+  font-size: 17px;
+  line-height: 1;
+  color: #15325b;
+}
+
+.summaryText {
+  font-size: 12px;
+  font-weight: 800;
+  color: #5f6d82;
+}
+
+.alertListCompact,
+.roomGridCompact,
+.eventGridCompact {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.alertItemCompact,
+.roomCardCompact,
+.eventCardCompact {
+  border: 1px solid #e3e8f2;
+  border-radius: 16px;
+  padding: 12px;
+  background: #fbfdff;
+}
+
+.alertItemCompact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alertLeftCompact {
+  min-width: 0;
+}
+
+.alertTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.alertTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: #122849;
+}
+
+.alertDesc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #5f6d82;
+}
+
+.severityChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.severityInfo {
+  background: #edf4ff;
+  color: #2457d6;
+}
+
+.severityWarn {
+  background: #fff5e8;
+  color: #ca7300;
+}
+
+.severityCritical {
+  background: #ffeef0;
+  color: #cc2033;
+}
+
+.cardTopCompact {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cardTitle {
+  font-size: 15px;
+  font-weight: 900;
+  color: #13274b;
+}
+
+.cardMeta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.smallPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #eef4fb;
+  color: #47658d;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.memberListCompact {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memberRowCompact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memberNameCompact {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 900;
+  color: #18345f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memberBadgesCompact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.memberBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #eef4fb;
+  color: #5f6d82;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cardStatsInlineCompact {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.statBlockCompact {
+  border-radius: 14px;
+  background: #f2f6fb;
+  padding: 10px 8px;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: #68758c;
+  font-weight: 700;
+}
+
+.statValueCompact {
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 900;
+  color: #17345c;
+}
+
+.flagRowCompact,
+.eventActionsCompact {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.flagChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.flagNormal {
+  background: #eef8ef;
+  color: #177a45;
+}
+
+.flagWarn {
+  background: #fff4e8;
+  color: #c76d00;
+}
+
+.flagCritical {
+  background: #ffeef0;
+  color: #c82131;
+}
+
+.quickDock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 56px;
+  z-index: 24;
+  padding: 4px 12px calc(env(safe-area-inset-bottom, 0px) + 4px);
+  background: #f5f7fb;
+  border-top: 1px solid #dfe6f1;
+  pointer-events: none;
+}
+
+.quickDockInner {
+  max-width: 1280px;
+  margin: 0 auto;
+  background: #f7f9fd;
+  border: 1px solid #dbe4f2;
+  border-radius: 18px;
+  box-shadow: 0 6px 16px rgba(16, 24, 40, 0.08);
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.quickDockBtn {
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid #d7e0ee;
+  background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+  color: #15325b;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0 4px;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.quickDockBtn:hover {
+  background: #f4f8ff;
+}
+
+.loadingBox,
+.emptyBox {
+  border-radius: 18px;
+  padding: 24px;
+  text-align: center;
+  background: #fff;
+  border: 1px dashed #d7e0ee;
+  color: #5f6d82;
+}
+
+.emptyTitle {
+  font-size: 17px;
+  font-weight: 900;
+  color: #15325b;
+}
+
+.emptyDesc {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+@media (max-width: 1080px) {
+  .summaryStatsBar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 12px 12px 124px;
+    gap: 10px;
+  }
+
+  .headerTop {
+    align-items: flex-start;
+  }
+
+  .headerTitle {
+    font-size: 18px;
+  }
+
+  .select {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+  }
+
+  .headerControls {
+    width: 100%;
+  }
+
+  .statusGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .statusCard {
+    min-height: 88px;
+    padding: 6px;
+    aspect-ratio: 1 / 1;
+  }
+
+  .statusLabel {
+    font-size: 11px;
+  }
+
+  .statusValue {
+    font-size: 17px;
+  }
+
+  .statusTotal {
+    font-size: 10px;
+  }
+
+  .progressTrack {
+    margin-top: 4px;
+    height: 5px;
+  }
+
+  .statusHint {
+    font-size: 10px;
+    margin-top: 4px;
+  }
+
+  .summaryStatsBar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .summaryMiniStat {
+    padding: 8px 6px;
+  }
+
+  .summaryMiniStat strong {
+    font-size: 16px;
+  }
+
+  .alertItemCompact {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .alertBtn {
+    min-height: 38px;
+    font-size: 14px;
+  }
+
+  .cardTitle {
+    font-size: 14px;
+  }
+
+  .memberNameCompact {
+    font-size: 14px;
+  }
+
+  .cardStatsInlineCompact {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .statBlockCompact {
+    padding: 8px 6px;
+  }
+
+  .statLabel {
+    font-size: 10px;
+  }
+
+  .statValueCompact {
+    font-size: 17px;
+  }
+
+  .quickDock {
+    bottom: 56px;
+    padding: 4px 12px calc(env(safe-area-inset-bottom, 0px) + 4px);
+  }
+
+  .quickDockInner {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .quickDockBtn {
+    min-height: 40px;
+    font-size: 14px;
+    padding: 0 2px;
+  }
+}
