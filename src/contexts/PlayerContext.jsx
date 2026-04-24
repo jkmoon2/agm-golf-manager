@@ -26,6 +26,7 @@ import {
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
 import { diagMerge, diagPush, diagSummaryParticipant } from '../utils/agmDiag';
+import { startPlayerPresence } from '../utils/playerPresence';
 
 export const PlayerContext = createContext(null);
 
@@ -616,6 +617,35 @@ if (!idCached) {
       try { writePlayerRoom(eventId, currentRoom); } catch {}
     }
   }, [eventId, participant, participantReady, currentRoom]);
+
+  // ✅ Presence는 PlayerApp(초기 복원 단계)보다 PlayerContext(참가자/방 SSOT 확정 단계)에서 시작하는 것이 안전합니다.
+  // - participant / authCode / currentRoom 이 안정된 뒤에만 heartbeat를 시작합니다.
+  // - 방배정/점수/이벤트 계산 로직에는 관여하지 않는 부가 side-effect 입니다.
+  useEffect(() => {
+    if (!eventId) return undefined;
+    if (!participantReady && !String(authCode || '').trim()) return undefined;
+
+    return startPlayerPresence({
+      eventId,
+      page: pathname || '',
+      authCode: String(authCode || '').trim(),
+      participant: participant ? {
+        id: participant?.id ?? null,
+        nickname: participant?.nickname || '',
+        room: participant?.room ?? null,
+      } : null,
+      currentRoom: currentRoom ?? participant?.room ?? null,
+    });
+  }, [
+    eventId,
+    participantReady,
+    authCode,
+    currentRoom,
+    pathname,
+    participant?.id,
+    participant?.nickname,
+    participant?.room,
+  ]);
 
   // participants 저장 (최신 서버 기준 patch merge)
   async function writeParticipants(next) {
