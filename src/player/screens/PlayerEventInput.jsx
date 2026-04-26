@@ -84,6 +84,9 @@ const BINGO_COUNT_LABEL_FONT_SIZE = 14;
 const BINGO_PREVIEW_NAME_FONT_SIZE = 20;
 const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
 const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
+const BINGO_COMMON_REQUIRED_PRESS_COUNT = 3;
+const BINGO_COMMON_PRESS_WINDOW_MS = 5000;
+const BINGO_COMMON_MARKER = '__agmCommonBingoBoardApply';
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -718,8 +721,10 @@ export default function PlayerEventInput(){
   const eventInputRefs = useRef({});
   const longPressTimersRef = useRef({});
   const [bingoUiState, setBingoUiState] = useState({});
+  const [bingoCommonPressState, setBingoCommonPressState] = useState({});
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
+  const bingoCommonPressTimersRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
@@ -798,6 +803,14 @@ export default function PlayerEventInput(){
     draftTouchedRef.current = !!touched;
     setDraft(next);
   };
+
+  useEffect(() => () => {
+    try {
+      Object.values(bingoCommonPressTimersRef.current || {}).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const serverSig = stringifyEventInputs(inputsByEventServer);
@@ -933,11 +946,11 @@ export default function PlayerEventInput(){
     }));
   };
 
-  const getBingoRoomShared = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEvent?.[evId]?.person?.[pid]?.roomShared);
+  const getBingoRoomShared = () => false;
 
   const getBingoPersonState = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles);
   const getBingoPersonStateSaved = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles);
-  const getBingoRoomSharedSaved = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEventServer?.[evId]?.person?.[pid]?.roomShared);
+  const getBingoRoomSharedSaved = () => false;
 
   const getBingoEditorPid = (evId, selectedHoles) => {
     const roomIds = getBingoRoomMemberIds();
@@ -1010,6 +1023,94 @@ export default function PlayerEventInput(){
       ...prev,
       [evId]: { ...(prev?.[evId] || {}), pid: String(basePid || roomIds[0] || ''), moveIndex: null },
     }));
+  };
+
+  const applyBingoCommonPlacement = (evId, selectedHoles) => {
+    const roomIds = getBingoRoomMemberIds();
+    if (!roomIds.length) return;
+
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!mine || !roomIds.includes(mine)) {
+      window.alert('본인 빙고판을 기준으로만 공통배치를 실행할 수 있습니다.');
+      return;
+    }
+
+    const baseState = getBingoPersonState(evId, mine, selectedHoles);
+    const sourceBoard = normalizeBingoBoard(baseState.board, selectedHoles);
+    const hasFullBoard = sourceBoard.filter(Boolean).length >= Math.min(16, normalizeBingoSelectedHoles(selectedHoles).length);
+    if (!hasFullBoard) {
+      window.alert('본인 빙고판을 먼저 모두 입력한 뒤 공통배치를 실행해 주세요.');
+      return;
+    }
+
+    const owner = String((roomMembers.find((p) => String(p?.id) === mine)?.nickname) || selfParticipant?.nickname || ctxParticipant?.nickname || '현재 닉네임');
+    const ok = window.confirm(`${owner}의 빙고판을 같은 방 참가자 전체에게 공통배치합니다. 계속하시겠습니까?`);
+    if (!ok) return;
+
+    const all = { ...(draft || {}) };
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    roomIds.forEach((pid) => {
+      const prevState = extractBingoPersonInput(person?.[pid], selectedHoles);
+      person[pid] = {
+        ...prevState,
+        values: [...prevState.values],
+        board: [...sourceBoard],
+        roomShared: false,
+        [BINGO_COMMON_MARKER]: true,
+      };
+    });
+    slot.person = person;
+    all[evId] = slot;
+    applyDraft(all);
+    setDirty(true);
+    clearBingoMoveIndex(evId);
+    setBingoUiState((prev) => ({
+      ...prev,
+      [evId]: { ...(prev?.[evId] || {}), pid: mine, moveIndex: null },
+    }));
+  };
+
+  const requestBingoCommonPlacement = (evId, selectedHoles) => {
+    const key = String(evId || '');
+    if (!key) return;
+    const now = Date.now();
+    const prevState = bingoCommonPressState?.[key] || {};
+    const prevCount = Number(prevState?.count || 0);
+    const stillActive = Number(prevState?.expiresAt || 0) > now;
+    const nextCount = stillActive ? Math.min(BINGO_COMMON_REQUIRED_PRESS_COUNT, prevCount + 1) : 1;
+    const expiresAt = now + BINGO_COMMON_PRESS_WINDOW_MS;
+
+    setBingoCommonPressState((prev) => ({
+      ...prev,
+      [key]: { count: nextCount, expiresAt },
+    }));
+
+    try {
+      const oldTimer = bingoCommonPressTimersRef.current?.[key];
+      if (oldTimer) clearTimeout(oldTimer);
+      bingoCommonPressTimersRef.current[key] = setTimeout(() => {
+        setBingoCommonPressState((prev) => {
+          const next = { ...(prev || {}) };
+          delete next[key];
+          return next;
+        });
+      }, BINGO_COMMON_PRESS_WINDOW_MS);
+    } catch {}
+
+    if (nextCount < BINGO_COMMON_REQUIRED_PRESS_COUNT) return;
+
+    try {
+      const oldTimer = bingoCommonPressTimersRef.current?.[key];
+      if (oldTimer) clearTimeout(oldTimer);
+      delete bingoCommonPressTimersRef.current[key];
+    } catch {}
+    setBingoCommonPressState((prev) => {
+      const next = { ...(prev || {}) };
+      delete next[key];
+      return next;
+    });
+    applyBingoCommonPlacement(evId, selectedHoles);
   };
 
   const randomizeBingoBoard = (evId, selectedHoles) => {
@@ -1362,6 +1463,49 @@ export default function PlayerEventInput(){
 
         Object.entries(sPerson).forEach(([pid, val])=>{
           if (!allowedPids.has(String(pid))) return;
+          const selfPidForBingo = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+          const isBingoValue = evDef?.template === 'bingo' && typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board);
+
+          if (isBingoValue) {
+            const selectedHoles = normalizeBingoSelectedHoles(evDef?.params?.selectedHoles);
+            const prevObj = (mPerson[pid] && typeof mPerson[pid] === 'object') ? { ...mPerson[pid] } : {};
+            const prevState = extractBingoPersonInput(prevObj, selectedHoles);
+            const nextState = extractBingoPersonInput(val, selectedHoles);
+            const incomingValues = Array.isArray(val.values) ? [...val.values] : [];
+            while (incomingValues.length < 18) incomingValues.push('');
+
+            const hasIncomingValues = incomingValues.some((x) => String(x ?? '').trim() !== '');
+            const isSelfBoard = selfPidForBingo && String(pid) === selfPidForBingo;
+            const isCommonBoardApply = !!val?.[BINGO_COMMON_MARKER];
+            const shouldWriteBoard = isSelfBoard || isCommonBoardApply;
+            const shouldWriteValues = hasIncomingValues;
+
+            // 다른 참가자의 빈 빙고 상태가 늦게 저장되면서 이미 저장된 빙고판을 삭제하는 것을 차단
+            if (!shouldWriteBoard && !shouldWriteValues) return;
+
+            const cleanObj = { ...prevObj };
+            delete cleanObj[BINGO_COMMON_MARKER];
+
+            if (shouldWriteValues) cleanObj.values = incomingValues;
+            if (shouldWriteBoard) {
+              cleanObj.board = [...nextState.board];
+              cleanObj.roomShared = false;
+            } else {
+              cleanObj.board = [...prevState.board];
+              cleanObj.roomShared = false;
+            }
+
+            const hasCleanValues = Array.isArray(cleanObj.values) && cleanObj.values.some((x) => String(x ?? '').trim() !== '');
+            const hasCleanBoard = Array.isArray(cleanObj.board) && cleanObj.board.some((x) => String(x ?? '').trim() !== '');
+            if (!hasCleanValues && !hasCleanBoard && !cleanObj.roomShared) {
+              if (isSelfBoard) delete mPerson[pid];
+              return;
+            }
+
+            mPerson[pid] = cleanObj;
+            return;
+          }
+
           const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
           const isEmptyBingo = typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)
             && !val.values.some((x) => String(x ?? '').trim() !== '')
@@ -2124,44 +2268,46 @@ export default function PlayerEventInput(){
                   <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
                       <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>빙고판 배치</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <button
                           type="button"
                           disabled={bingoLocked}
                           onClick={() => randomizeBingoBoard(ev.id, bingoSelectedHoles)}
-                          style={{ border: '1px solid #cbd8ea', background: '#f8fbff', color: '#213a6b', fontWeight: 700, borderRadius: 10, padding: '8px 12px', opacity: bingoLocked ? 0.55 : 1 }}
+                          style={{ border: '1px solid #80a7ff', background: '#edf4ff', color: '#2457d6', fontWeight: 800, borderRadius: 8, padding: '7px 9px', fontSize: 12, opacity: bingoLocked ? 0.55 : 1 }}
                         >
-                          무작위배치
+                          랜덤배치
+                        </button>
+                        <button
+                          type="button"
+                          disabled={bingoLocked}
+                          onClick={() => requestBingoCommonPlacement(ev.id, bingoSelectedHoles)}
+                          style={{ border: '1px solid #f0a35a', background: '#fff4e6', color: '#b45309', fontWeight: 800, borderRadius: 8, padding: '7px 9px', fontSize: 12, opacity: bingoLocked ? 0.55 : 1 }}
+                        >
+                          공통배치
                         </button>
                         <button
                           type="button"
                           disabled={bingoLocked}
                           onClick={() => clearBingoBoard(ev.id, bingoSelectedHoles)}
-                          style={{ border: '1px solid #cbd8ea', background: '#fff', color: '#213a6b', fontWeight: 700, borderRadius: 10, padding: '8px 12px', opacity: bingoLocked ? 0.55 : 1 }}
+                          style={{ border: '1px solid #f0a0a0', background: '#fff1f2', color: '#be123c', fontWeight: 800, borderRadius: 8, padding: '7px 9px', fontSize: 12, opacity: bingoLocked ? 0.55 : 1 }}
                         >
                           초기화
                         </button>
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                      <button
-                        type="button"
-                        disabled={bingoLocked}
-                        onClick={() => setBingoRoomShared(ev.id, bingoSelectedHoles, false)}
-                        style={{ minHeight: 46, borderRadius: 12, fontWeight: 800, fontSize: BINGO_MODE_BUTTON_FONT_SIZE, border: bingoSharedMode ? '1px solid #d5dbe7' : '1.5px solid #58b273', background: bingoSharedMode ? '#f8fafc' : '#e8f7ee', color: bingoSharedMode ? '#697487' : '#177a45', opacity: bingoLocked ? 0.55 : 1 }}
-                      >
-                        각자 입력
-                      </button>
-                      <button
-                        type="button"
-                        disabled={bingoLocked}
-                        onClick={() => setBingoRoomShared(ev.id, bingoSelectedHoles, true)}
-                        style={{ minHeight: 46, borderRadius: 12, fontWeight: 800, fontSize: BINGO_MODE_BUTTON_FONT_SIZE, border: bingoSharedMode ? '1.5px solid #58b273' : '1px solid #d5dbe7', background: bingoSharedMode ? '#e8f7ee' : '#f8fafc', color: bingoSharedMode ? '#177a45' : '#697487', opacity: bingoLocked ? 0.55 : 1 }}
-                      >
-                        공통입력
-                      </button>
-                    </div>
+                    {(() => {
+                      const commonState = bingoCommonPressState?.[ev.id] || {};
+                      const commonCount = Number(commonState?.count || 0);
+                      if (!commonCount || bingoLocked) return null;
+                      const remain = Math.max(0, BINGO_COMMON_REQUIRED_PRESS_COUNT - commonCount);
+                      return (
+                        <div style={{ marginBottom: 10, border: '1px solid #fecaca', background: '#fff1f2', color: '#b91c1c', borderRadius: 10, padding: '8px 10px', fontSize: 12, fontWeight: 800, lineHeight: 1.45 }}>
+                          이 메뉴는 다른 참가자가 입력한 모든 빙고판이 변경될 수 있습니다.
+                          {remain > 0 ? ` 계속 진행하려면 공통배치를 ${remain}번 더 눌러주세요.` : ''}
+                        </div>
+                      );
+                    })()}
 
                     {!bingoCanEditBoard && (
                       <div style={{ marginBottom: 10, fontSize: 12, fontWeight: 700, color: '#b94a48' }}>
