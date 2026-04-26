@@ -86,7 +86,6 @@ const BINGO_PREVIEW_CELL_NUMBER_FONT_SIZE = 24;
 const BINGO_PREVIEW_CELL_EMPTY_FONT_SIZE = 18;
 const BINGO_COMMON_REQUIRED_PRESS_COUNT = 3;
 const BINGO_COMMON_PRESS_WINDOW_MS = 5000;
-const BINGO_COMMON_MARKER = '__agmCommonBingoBoardApply';
 
 const FORCED_PREVIEW_LAYOUT = 'balanced'; // 'tight' | 'balanced' | 'roomy'
 
@@ -725,6 +724,7 @@ export default function PlayerEventInput(){
   const bingoLongPressTimersRef = useRef({});
   const bingoLongPressDoneRef = useRef({});
   const bingoCommonPressTimersRef = useRef({});
+  const bingoBoardDraftRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
@@ -796,6 +796,17 @@ export default function PlayerEventInput(){
     draftTouchedRef.current = false;
     pendingSavedInputsSigRef.current = '';
     lastHydratedServerSigRef.current = stringifyEventInputs(cloned);
+    try {
+      Object.entries(cloned || {}).forEach(([evId, slot]) => {
+        const evDef = getBingoEventDef(evId);
+        if (evDef?.template !== 'bingo') return;
+        const selectedHoles = normalizeBingoSelectedHoles(evDef?.params?.selectedHoles);
+        Object.entries(slot?.person || {}).forEach(([pid, val]) => {
+          const state = extractBingoPersonInput(val, selectedHoles);
+          rememberBingoBoardDraft(evId, pid, state.board, selectedHoles, !!state.roomShared);
+        });
+      });
+    } catch {}
     setDraft(cloned);
   };
 
@@ -946,11 +957,42 @@ export default function PlayerEventInput(){
     }));
   };
 
-  const getBingoRoomShared = () => false;
+  const getBingoRoomShared = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEvent?.[evId]?.person?.[pid]?.roomShared);
 
   const getBingoPersonState = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles);
   const getBingoPersonStateSaved = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles);
-  const getBingoRoomSharedSaved = () => false;
+  const getBingoRoomSharedSaved = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEventServer?.[evId]?.person?.[pid]?.roomShared);
+
+  const getBingoEventDef = (evId) => events.find((item) => String(item?.id) === String(evId));
+
+  const rememberBingoBoardDraft = (evId, pid, board, selectedHoles, roomShared = false) => {
+    const key = `${evId}:${pid}`;
+    const safeBoard = normalizeBingoBoard(board, selectedHoles);
+    bingoBoardDraftRef.current[key] = { board: safeBoard, roomShared: !!roomShared };
+  };
+
+  const restoreBingoBoardToValue = (evId, pid, obj, selectedHoles) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const key = `${evId}:${pid}`;
+    const safeBoard = normalizeBingoBoard(obj.board, selectedHoles);
+    if (safeBoard.some(Boolean)) {
+      rememberBingoBoardDraft(evId, pid, safeBoard, selectedHoles, !!obj.roomShared);
+      return { ...obj, board: safeBoard };
+    }
+
+    const cached = bingoBoardDraftRef.current?.[key];
+    if (cached) {
+      return { ...obj, board: [...(cached.board || [])], roomShared: !!cached.roomShared };
+    }
+
+    const serverState = extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles);
+    if (serverState.board.some(Boolean)) {
+      rememberBingoBoardDraft(evId, pid, serverState.board, selectedHoles, !!serverState.roomShared);
+      return { ...obj, board: [...serverState.board], roomShared: !!serverState.roomShared };
+    }
+
+    return obj;
+  };
 
   const getBingoEditorPid = (evId, selectedHoles) => {
     const roomIds = getBingoRoomMemberIds();
@@ -978,6 +1020,7 @@ export default function PlayerEventInput(){
         board: [...normalizedBoard],
         roomShared: !!sharedMode,
       };
+      rememberBingoBoardDraft(evId, pid, normalizedBoard, selectedHoles, !!sharedMode);
     });
     slot.person = person;
     all[evId] = slot;
@@ -1057,8 +1100,8 @@ export default function PlayerEventInput(){
         values: [...prevState.values],
         board: [...sourceBoard],
         roomShared: false,
-        [BINGO_COMMON_MARKER]: true,
       };
+      rememberBingoBoardDraft(evId, pid, sourceBoard, selectedHoles, false);
     });
     slot.person = person;
     all[evId] = slot;
@@ -1237,8 +1280,13 @@ export default function PlayerEventInput(){
     const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
-    const obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
+    let obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
       ? { ...person[pid], values:[...person[pid].values] } : { values:[] };
+    const bingoDef = getBingoEventDef(evId);
+    if (bingoDef?.template === 'bingo') {
+      const selectedHoles = normalizeBingoSelectedHoles(bingoDef?.params?.selectedHoles);
+      obj = restoreBingoBoardToValue(evId, pid, obj, selectedHoles);
+    }
     const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (idx+1);
     while (obj.values.length < atts) obj.values.push('');
     const prev = String(obj.values[idx] ?? '');
@@ -1296,13 +1344,22 @@ export default function PlayerEventInput(){
     const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
-    const obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
+    let obj = person[pid] && typeof person[pid]==='object' && Array.isArray(person[pid].values)
       ? { ...person[pid], values:[...person[pid].values] } : { values:[] };
+    const bingoDef = getBingoEventDef(evId);
+    let bingoSelectedHolesForSave = null;
+    if (bingoDef?.template === 'bingo') {
+      bingoSelectedHolesForSave = normalizeBingoSelectedHoles(bingoDef?.params?.selectedHoles);
+      obj = restoreBingoBoardToValue(evId, pid, obj, bingoSelectedHolesForSave);
+    }
     const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (idx+1);
     while (obj.values.length < atts) obj.values.push('');
 
     obj.values[idx] = Number.isNaN(num) ? '' : num;
-    if (!obj.values.some(s => String(s).trim() !== '')) delete person[pid];
+    const hasBingoBoardForSave = bingoSelectedHolesForSave
+      ? normalizeBingoBoard(obj.board, bingoSelectedHolesForSave).some(Boolean)
+      : false;
+    if (!obj.values.some(s => String(s).trim() !== '') && !hasBingoBoardForSave) delete person[pid];
     else person[pid] = obj;
 
     slot.person = person; all[evId] = slot;
@@ -1461,51 +1518,18 @@ export default function PlayerEventInput(){
         const mSlot = { ...(merged[evId]||{}) };
         const mPerson = { ...(mSlot.person||{}) };
 
-        Object.entries(sPerson).forEach(([pid, val])=>{
+        Object.entries(sPerson).forEach(([pid, rawVal])=>{
           if (!allowedPids.has(String(pid))) return;
-          const selfPidForBingo = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
-          const isBingoValue = evDef?.template === 'bingo' && typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board);
-
-          if (isBingoValue) {
+          let val = rawVal;
+          if (evDef?.template === 'bingo' && typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)) {
             const selectedHoles = normalizeBingoSelectedHoles(evDef?.params?.selectedHoles);
-            const prevObj = (mPerson[pid] && typeof mPerson[pid] === 'object') ? { ...mPerson[pid] } : {};
-            const prevState = extractBingoPersonInput(prevObj, selectedHoles);
+            val = restoreBingoBoardToValue(evId, pid, { ...val, values: [...val.values], board: [...val.board] }, selectedHoles);
+            const prevState = extractBingoPersonInput(mPerson?.[pid], selectedHoles);
             const nextState = extractBingoPersonInput(val, selectedHoles);
-            const incomingValues = Array.isArray(val.values) ? [...val.values] : [];
-            while (incomingValues.length < 18) incomingValues.push('');
-
-            const hasIncomingValues = incomingValues.some((x) => String(x ?? '').trim() !== '');
-            const isSelfBoard = selfPidForBingo && String(pid) === selfPidForBingo;
-            const isCommonBoardApply = !!val?.[BINGO_COMMON_MARKER];
-            const shouldWriteBoard = isSelfBoard || isCommonBoardApply;
-            const shouldWriteValues = hasIncomingValues;
-
-            // 다른 참가자의 빈 빙고 상태가 늦게 저장되면서 이미 저장된 빙고판을 삭제하는 것을 차단
-            if (!shouldWriteBoard && !shouldWriteValues) return;
-
-            const cleanObj = { ...prevObj };
-            delete cleanObj[BINGO_COMMON_MARKER];
-
-            if (shouldWriteValues) cleanObj.values = incomingValues;
-            if (shouldWriteBoard) {
-              cleanObj.board = [...nextState.board];
-              cleanObj.roomShared = false;
-            } else {
-              cleanObj.board = [...prevState.board];
-              cleanObj.roomShared = false;
+            if (!nextState.board.some(Boolean) && prevState.board.some(Boolean)) {
+              val = { ...val, board: [...prevState.board], roomShared: !!prevState.roomShared };
             }
-
-            const hasCleanValues = Array.isArray(cleanObj.values) && cleanObj.values.some((x) => String(x ?? '').trim() !== '');
-            const hasCleanBoard = Array.isArray(cleanObj.board) && cleanObj.board.some((x) => String(x ?? '').trim() !== '');
-            if (!hasCleanValues && !hasCleanBoard && !cleanObj.roomShared) {
-              if (isSelfBoard) delete mPerson[pid];
-              return;
-            }
-
-            mPerson[pid] = cleanObj;
-            return;
           }
-
           const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
           const isEmptyBingo = typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)
             && !val.values.some((x) => String(x ?? '').trim() !== '')
