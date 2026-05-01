@@ -6,13 +6,15 @@ import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
 import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
 import styles from './EventSelectScreen.module.css';
-import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장 + 이메일 로그인 감지
 import { markPlayerAuthed, writePlayerTicket } from '../utils/playerState';
 
 export default function PlayerEventList() {
   const nav = useNavigate();
   const { allEvents = [], loadEvent, setEventId } = useContext(EventContext) || {};
   const [cache, setCache] = useState([]);
+  const [authReady, setAuthReady] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
   const events = useMemo(() => (allEvents?.length ? allEvents : cache), [allEvents, cache]);
 
   // ✅ 숨김 처리: 참가자 화면에서 숨긴 대회(isHidden) 제외
@@ -31,18 +33,29 @@ export default function PlayerEventList() {
     })();
   }, [allEvents]);
 
-  // /player/events로 바로 들어온 경우: 코드도 없고 이전 인증도 없으면 로그인으로
   useEffect(() => {
+    const auth = getAuth();
+    const off = onAuthStateChanged(auth, (u) => {
+      setAuthUser(u || null);
+      setAuthReady(true);
+    });
+    return () => off();
+  }, []);
+
+  // /player/events로 바로 들어온 경우: 코드도 없고 이전 인증도 없고 이메일 로그인도 아니면 로그인으로
+  useEffect(() => {
+    if (!authReady) return;
     try {
       const hasPending = !!sessionStorage.getItem('pending_code');
       const authedSome = Object.keys(sessionStorage).some(
         k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true'
       );
-      if (!hasPending && !authedSome) {
+      const emailUser = !!(authUser && !authUser.isAnonymous);
+      if (!hasPending && !authedSome && !emailUser) {
         nav('/player/login-or-code', { replace: true });
       }
     } catch {}
-  }, [nav]);
+  }, [nav, authReady, authUser]);
 
   const fmt = (s) =>
     (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s))
@@ -77,6 +90,79 @@ export default function PlayerEventList() {
   const isEnded = (ev) => {
     const { endAt } = getStartEnd(ev);
     return !!(endAt && Date.now() > endAt);
+  };
+
+  const normEmail = (v) => String(v || '').trim().toLowerCase();
+  const normText = (v) => String(v || '').normalize('NFC').trim();
+  const getParticipantEmail = (p) => normEmail(
+    p?.email ?? p?.playerEmail ?? p?.loginEmail ?? p?.userEmail ?? p?.memberEmail ?? p?.accountEmail ?? ''
+  );
+  const getParticipantName = (p) => normText(p?.nickname ?? p?.name ?? p?.displayName ?? '');
+
+  const collectParticipantsFromEvent = async (eventId, ev = {}) => {
+    const merged = [];
+    const push = (arr) => {
+      if (!Array.isArray(arr)) return;
+      arr.forEach((p, i) => {
+        if (!p) return;
+        merged.push({ id: p?.id ?? p?.uid ?? `${merged.length || i}`, ...p });
+      });
+    };
+    push(ev.participants);
+    push(ev.participantsStroke);
+    push(ev.participantsFourball);
+    try {
+      const snap = await getDoc(doc(db, 'events', eventId));
+      const ed = snap.exists() ? (snap.data() || {}) : {};
+      push(ed.participants);
+      push(ed.participantsStroke);
+      push(ed.participantsFourball);
+    } catch {}
+    try {
+      const qs = await getDocs(collection(db, 'events', eventId, 'participants'));
+      qs.forEach(d => merged.push({ id: d.id, ...(d.data() || {}) }));
+    } catch {}
+    const map = new Map();
+    merged.forEach((p, i) => {
+      const key = String(p?.id ?? p?.authCode ?? p?.nickname ?? i);
+      if (!map.has(key)) map.set(key, p);
+    });
+    return Array.from(map.values());
+  };
+
+  const findParticipantByEmailUser = async (eventId, ev, user) => {
+    const email = normEmail(user?.email);
+    if (!eventId || !email) return null;
+    const list = await collectParticipantsFromEvent(eventId, ev);
+
+    // 1순위: 참가자 명단에 이메일 컬럼이 있으면 이메일로 정확히 매칭
+    let found = list.find(p => getParticipantEmail(p) === email) || null;
+    if (found) return found;
+
+    // 2순위: preMembers의 nickname/name을 이용해 참가자 명단과 연결
+    let pre = null;
+    try {
+      const preSnap = await getDoc(doc(db, 'events', eventId, 'preMembers', email));
+      if (preSnap.exists()) pre = preSnap.data() || {};
+    } catch {}
+    const preNames = [pre?.nickname, pre?.name, pre?.nameCell].map(normText).filter(Boolean);
+    for (const nm of preNames) {
+      const matches = list.filter(p => getParticipantName(p) === nm || normText(p?.name) === nm);
+      if (matches.length === 1) return matches[0];
+    }
+
+    // 3순위: users/{uid}.name 또는 Firebase displayName이 참가자 닉네임과 정확히 1명만 일치할 때만 허용
+    let userName = normText(user?.displayName || '');
+    try {
+      const uSnap = await getDoc(doc(db, 'users', user.uid));
+      if (uSnap.exists()) userName = normText(uSnap.data()?.name || userName);
+    } catch {}
+    if (userName) {
+      const matches = list.filter(p => getParticipantName(p) === userName || normText(p?.name) === userName);
+      if (matches.length === 1) return matches[0];
+    }
+
+    return null;
   };
 
   const verifyPendingCode = async (eventId) => {
@@ -119,8 +205,10 @@ export default function PlayerEventList() {
     }
   };
 
-  // ✅ 변경: 익명 로그인 보장 + (옵션) membership 문서 생성
-  const ensureAnonymousAndMembership = async (eventId) => {
+  // ✅ 변경: 인증 보장 + (옵션) membership 문서 생성
+  // - 인증코드 입장은 비로그인 상태일 때만 익명 로그인
+  // - 이메일 로그인 사용자는 이메일 계정을 그대로 유지
+  const ensureAnonymousAndMembership = async (eventId, via = 'code', participant = null) => {
     const auth = getAuth();
     if (!auth.currentUser) {
       await signInAnonymously(auth);
@@ -128,7 +216,14 @@ export default function PlayerEventList() {
     try {
       await setDoc(
         doc(db, 'events', eventId, 'memberships', auth.currentUser.uid),
-        { uid: auth.currentUser.uid, via: 'code', updatedAt: new Date().toISOString() },
+        {
+          uid: auth.currentUser.uid,
+          email: auth.currentUser.email || null,
+          via,
+          participantId: participant?.id ?? null,
+          nickname: participant?.nickname || null,
+          updatedAt: new Date().toISOString()
+        },
         { merge: true }
       );
     } catch {}
@@ -139,10 +234,36 @@ export default function PlayerEventList() {
     setEventId?.(ev.id);
     try { localStorage.setItem('eventId', ev.id); } catch {}
 
+    const auth = getAuth();
+    const emailUser = (auth.currentUser && !auth.currentUser.isAnonymous)
+      ? auth.currentUser
+      : ((authUser && !authUser.isAnonymous) ? authUser : null);
+
+    // 이메일 로그인 사용자는 먼저 해당 대회의 참가자와 매칭한 뒤 입장
+    if (emailUser) {
+      const participant = await findParticipantByEmailUser(ev.id, ev, emailUser);
+      if (!participant) {
+        alert(
+          '이 이메일 계정과 연결된 참가자를 찾지 못했습니다.\n\n' +
+          '확인할 내용:\n' +
+          '1) 운영자 STEP4 엑셀에 이메일 컬럼이 있는지 확인\n' +
+          '2) 또는 preMembers에 이메일/이름이 등록되어 있는지 확인\n' +
+          '3) 회원가입 이름과 참가자 닉네임이 정확히 일치하는지 확인'
+        );
+        return;
+      }
+      markPlayerAuthed(ev.id, participant?.authCode || '', participant);
+      writePlayerTicket(ev.id, { via: 'email', email: emailUser.email || '', participantId: participant?.id ?? null, ts: Date.now() });
+      await ensureAnonymousAndMembership(ev.id, 'email', participant);
+      if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
+      nav(`/player/home/${ev.id}`, { replace: true });
+      return;
+    }
+
     // 이미 인증된 대회면 코드 없이 바로 입장
     try {
       if (sessionStorage.getItem(`auth_${ev.id}`) === 'true') {
-        await ensureAnonymousAndMembership(ev.id); // ✅ 변경
+        await ensureAnonymousAndMembership(ev.id, 'code'); // ✅ 변경
         if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
         nav(`/player/home/${ev.id}`, { replace: true });
         return;
@@ -157,9 +278,9 @@ export default function PlayerEventList() {
       return;
     }
 
-    const { ok } = await verifyPendingCode(ev.id);
+    const { ok, participant } = await verifyPendingCode(ev.id);
     if (ok) {
-      await ensureAnonymousAndMembership(ev.id); // ✅ 변경
+      await ensureAnonymousAndMembership(ev.id, 'code', participant); // ✅ 변경
       if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
       nav(`/player/home/${ev.id}`, { replace: true });
     } else {

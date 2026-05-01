@@ -8,6 +8,8 @@ import {
   signInAnonymously,
   signOut
 } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const AuthContext = createContext({
   firebaseUser: null,
@@ -16,6 +18,9 @@ const AuthContext = createContext({
   loginPlayer:  async () => {},
   logout:       async () => {}
 });
+
+const ADMIN_EMAILS = ['a@a.com'];
+const isAdminEmail = (email) => ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase());
 
 export function AuthProvider({ children }) {
   const auth = getAuth();
@@ -28,7 +33,9 @@ export function AuthProvider({ children }) {
 
   // ▶ Firebase Auth 상태 구독
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, user => {
+    let alive = true;
+    const unsub = onAuthStateChanged(auth, async user => {
+      if (!alive) return;
       setFirebaseUser(user);
       // [PATCH] role은 "현재 auth 사용자" 기준으로 결정(새로고침/리로드/토큰갱신에도 유지)
       if (!user) {
@@ -36,23 +43,41 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      // 익명(참가자) / 비익명(운영자) 구분
+      // 익명은 참가자
       if (user.isAnonymous) {
         // 운영자(admin)였다가 익명으로 바뀌는 경우는 경고(같은 브라우저에서 참가자 로그인 등)
         if (appRoleRef.current === 'admin') {
           console.warn('[Auth] admin session switched to anonymous. (same browser session)');
         }
         setAppRole('player');
-      } else {
-        setAppRole('admin');
+        return;
       }
+
+      // 이메일 로그인은 더 이상 무조건 운영자로 보지 않음
+      // 1) 관리자 이메일, 2) users/{uid}.role === 'admin', 3) 현재 세션에서 운영자 로그인으로 들어온 uid만 admin
+      let nextRole = isAdminEmail(user.email) ? 'admin' : 'player';
+      try {
+        const roleSnap = await getDoc(doc(db, 'users', user.uid));
+        const role = String(roleSnap.exists() ? (roleSnap.data()?.role || '') : '').toLowerCase();
+        if (role === 'admin') nextRole = 'admin';
+        if (role === 'player') nextRole = 'player';
+      } catch {}
+      try {
+        const adminUid = sessionStorage.getItem('agm.adminLoginUid') || '';
+        if (adminUid && adminUid === user.uid) nextRole = 'admin';
+      } catch {}
+      if (alive) setAppRole(nextRole);
     });
-    return unsub;
+    return () => { alive = false; unsub(); };
   }, [auth]);
 
   // ▶ 운영자 로그인
   const loginAdmin = async (email, password) => {
     const cred = await signInWithEmailAndPassword(auth, email, password);
+    try {
+      sessionStorage.setItem('agm.adminLoginUid', cred.user.uid);
+      sessionStorage.setItem('agm.authRole', 'admin');
+    } catch {}
     setAppRole('admin');
     return cred.user;
   };
@@ -70,12 +95,20 @@ export function AuthProvider({ children }) {
     }
 
 const cred = await signInAnonymously(auth);
+    try {
+      sessionStorage.removeItem('agm.adminLoginUid');
+      sessionStorage.setItem('agm.authRole', 'player');
+    } catch {}
     setAppRole('player');
     return cred.user;
   };
 
   // ▶ 로그아웃
   const logout = async () => {
+    try {
+      sessionStorage.removeItem('agm.adminLoginUid');
+      sessionStorage.removeItem('agm.authRole');
+    } catch {}
     await signOut(auth);
     setAppRole(null);
   };

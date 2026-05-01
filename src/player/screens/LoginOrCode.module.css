@@ -111,3 +111,20 @@
   color: #334155;
   cursor: pointer;
 }
+
+
+.rememberRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  user-select: none;
+}
+.rememberRow input {
+  width: 16px;
+  height: 16px;
+  accent-color: #1d4ed8;
+}
