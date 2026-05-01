@@ -3,8 +3,9 @@
 // 변경 요약
 // - (삭제) 진입 시 auth_* 존재하면 바로 홈으로 가던 자동 이동 로직
 // - (변경) 코드 입력 시 언제나 pending_code 저장 → /player/events 로 이동(즉시 검증/입장 X)
+// - (보완) 이메일 회원가입/로그인 안정화 + 이메일 저장 체크박스
 
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
@@ -14,17 +15,22 @@ import PlayerAuthProvider, { usePlayerAuth } from '../../contexts/PlayerAuthCont
 import styles from './LoginOrCode.module.css';
 import SignupModal from '../components/SignupModal';
 import ResetPasswordModal from '../components/ResetPasswordModal';
-import { getAuth } from 'firebase/auth';
 import { writePlayerTicket } from '../utils/playerState';
 
 function InnerLoginOrCode({ onEnter }) {
   const navigate = useNavigate();
   const { eventId, eventData } = useContext(EventContext) || {};
-  const { ready, ensureAnonymous, signUpEmail, signInEmail, resetPassword } = usePlayerAuth();
+  const { ready, signUpEmail, signInEmail, resetPassword } = usePlayerAuth();
   const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext) || {};
 
+  const SAVED_EMAIL_KEY = 'agm.player.savedEmail';
   const [tab, setTab]   = useState('login');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    try { return localStorage.getItem(SAVED_EMAIL_KEY) || ''; } catch { return ''; }
+  });
+  const [rememberEmail, setRememberEmail] = useState(() => {
+    try { return !!localStorage.getItem(SAVED_EMAIL_KEY); } catch { return false; }
+  });
   const [pw, setPw]       = useState('');
   const [code, setCode]   = useState('');
   const [busy, setBusy]   = useState(false);
@@ -32,24 +38,31 @@ function InnerLoginOrCode({ onEnter }) {
   const [showReset,  setShowReset]  = useState(false);
 
   const membersOnly = !!eventData?.membersOnly;
-  const goHome = (id) => navigate(`/player/home/${id}`, { replace: true });
 
   // ❌ (삭제) auth_* 존재 시 자동 이동 → 리스트 먼저 보여야 하므로 제거
   // useEffect(() => { ... }, []);
 
-  const ensureUserDoc = async (u) => {
+  const ensureUserDoc = async (u, extra = {}) => {
     try {
       if (!u?.uid) return;
       const ref = doc(db, 'users', u.uid);
       const snap = await getDoc(ref);
-      if (!snap.exists()) {
-        await setDoc(ref, {
-          uid: u.uid,
-          email: u.email || null,
-          name: u.displayName || '',
-          createdAt: new Date().toISOString(),
-        }, { merge: true });
-      }
+      const old = snap.exists() ? (snap.data() || {}) : {};
+      await setDoc(ref, {
+        uid: u.uid,
+        email: u.email || extra.email || old.email || null,
+        name: extra.name ?? old.name ?? u.displayName ?? '',
+        role: old.role || 'player',
+        createdAt: old.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    } catch {}
+  };
+
+  const rememberCurrentEmail = (em) => {
+    try {
+      if (rememberEmail) localStorage.setItem(SAVED_EMAIL_KEY, em || '');
+      else localStorage.removeItem(SAVED_EMAIL_KEY);
     } catch {}
   };
 
@@ -99,16 +112,18 @@ function InnerLoginOrCode({ onEnter }) {
   };
 
   const handleLogin = async () => {
-    if (!email.trim()) { alert('이메일을 입력해 주세요.'); return; }
+    const em = email.trim();
+    if (!em) { alert('이메일을 입력해 주세요.'); return; }
     if (!pw.trim())    { alert('비밀번호를 입력해 주세요.'); return; }
     setBusy(true);
     try {
-      const cred = await signInEmail(email.trim(), pw);
-      await ensureUserDoc(cred?.user);
-      try { writePlayerTicket(eventId || 'global', { via:'login', ts:Date.now() }); } catch {}
-      // 이벤트가 지정되지 않은 일반 로그인은 리스트로
-      if (eventId) goHome(eventId);
-      else navigate('/player/events', { replace: true });
+      const cred = await signInEmail(em, pw);
+      await ensureUserDoc(cred?.user, { email: em });
+      rememberCurrentEmail(em);
+      try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
+      try { writePlayerTicket('global', { via:'email-login', email: em, ts:Date.now() }); } catch {}
+      // 이메일 로그인은 특정 대회/참가자 확정 전 단계이므로 항상 대회 목록으로 이동
+      navigate('/player/events', { replace: true });
     } catch (err) {
       alert(`로그인 실패: ${err?.message || err}`);
     } finally { setBusy(false); }
@@ -139,6 +154,21 @@ function InnerLoginOrCode({ onEnter }) {
               <div className={styles.form}>
                 <input className={`${styles.input} selectable`} placeholder="이메일" value={email} onChange={(e)=>setEmail(e.target.value)} />
                 <input className={`${styles.input} selectable`} placeholder="비밀번호" type="password" value={pw} onChange={(e)=>setPw(e.target.value)} />
+                <label className={styles.rememberRow}>
+                  <input
+                    type="checkbox"
+                    checked={rememberEmail}
+                    onChange={(e)=>{
+                      const checked = e.target.checked;
+                      setRememberEmail(checked);
+                      try {
+                        if (checked) localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
+                        else localStorage.removeItem(SAVED_EMAIL_KEY);
+                      } catch {}
+                    }}
+                  />
+                  <span>이메일 저장</span>
+                </label>
                 <div className={styles.actions}>
                   <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={busy}>로그인</button>
                   <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
@@ -163,13 +193,23 @@ function InnerLoginOrCode({ onEnter }) {
               onComplete={async ({ email: em, password, name })=>{
                 try {
                   const cred = await signUpEmail(em, password);
-                  await setDoc(doc(db, 'users', cred?.user?.uid), {
-                    uid: cred?.user?.uid,
-                    email: cred?.user?.email || em,
+                  const u = cred?.user || cred;
+                  if (!u?.uid) throw new Error('회원가입 계정 정보를 확인할 수 없습니다.');
+                  await setDoc(doc(db, 'users', u.uid), {
+                    uid: u.uid,
+                    email: u.email || em,
                     name,
+                    role: 'player',
                     createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
                   }, { merge: true });
-                  alert('회원가입이 완료되었습니다.');
+                  setEmail(em);
+                  try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
+                  try {
+                    if (rememberEmail) localStorage.setItem(SAVED_EMAIL_KEY, em);
+                  } catch {}
+                  alert('회원가입이 완료되었습니다. 대회 목록에서 참가할 대회를 선택해 주세요.');
+                  navigate('/player/events', { replace: true });
                 } catch (err) {
                   alert(`회원가입 실패: ${err?.message || err}`);
                 }

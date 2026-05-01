@@ -28,14 +28,13 @@ export default function PlayerAuthProvider({ children }) {
 
   const signUpEmail = async (email, password) => {
     // 익명사용자였다면 링크(데이터 유지), 아니면 신규생성
+    // LoginOrCode.jsx에서 cred.user 형태로 안정적으로 처리할 수 있도록 반환값 통일
     const anon = auth.currentUser && auth.currentUser.isAnonymous;
     if (anon) {
       const cred = EmailAuthProvider.credential(email, password);
-      await linkWithCredential(auth.currentUser, cred);
-      return auth.currentUser;
+      return await linkWithCredential(auth.currentUser, cred);
     }
-    const { user } = await createUserWithEmailAndPassword(auth, email, password);
-    return user;
+    return await createUserWithEmailAndPassword(auth, email, password);
   };
 
   const signInEmail = (email, password) =>
