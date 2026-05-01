@@ -79,7 +79,15 @@ export default function PreMembers(){
 
   const remove = async (key) => {
     if (!window.confirm('삭제하시겠어요?')) return;
-    try { await deleteDoc(doc(db, 'events', eventId, 'preMembers', key)); }
+    try {
+      await deleteDoc(doc(db, 'events', eventId, 'preMembers', key));
+      // ✅ 삭제 버튼 클릭 후 행 클릭/롱프레스 수정창이 남아 삭제 문서가 되살아나는 것 방지
+      cancelLongEdit();
+      setShowModal(false);
+      setMEmail('');
+      setMName('');
+      setEditingKey(null);
+    }
     catch (e) { alert('삭제 실패: ' + (e?.message || '')); }
   };
 
@@ -261,7 +269,9 @@ export default function PreMembers(){
                       <td className={styles.mColDate}  style={tdStyle}>{ymd(created)}</td>
                       <td className={styles.mColCtrl}  style={tdStyle}>
                         <button
-                          onClick={()=>remove(r.email)}
+                          onClick={(e)=>{ e.stopPropagation(); cancelLongEdit(); remove(r.email); }}
+                          onMouseDown={(e)=>e.stopPropagation()}
+                          onTouchStart={(e)=>e.stopPropagation()}
                           disabled={busy}
                           className={`${styles.dangerGhostBtn} ${styles.blueFocus} ${styles.mDeleteBtn}`}
                           style={{ height:UI.delBtnH, padding:`0 ${UI.delBtnPadX}px`, borderRadius:UI.delBtnRadius, fontSize:UI.delBtnFont }}
