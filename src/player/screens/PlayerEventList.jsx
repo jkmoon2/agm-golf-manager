@@ -125,7 +125,9 @@ export default function PlayerEventList() {
     const map = new Map();
     merged.forEach((p, i) => {
       const key = String(p?.id ?? p?.authCode ?? p?.nickname ?? i);
-      if (!map.has(key)) map.set(key, p);
+      // ✅ 같은 id가 여러 저장소(participants / participantsStroke / participantsFourball)에 있을 때
+      //    뒤쪽 데이터의 email/name 보강값을 병합해서 이메일 매칭이 누락되지 않도록 함
+      map.set(key, { ...(map.get(key) || {}), ...p });
     });
     return Array.from(map.values());
   };
@@ -145,9 +147,14 @@ export default function PlayerEventList() {
       const preSnap = await getDoc(doc(db, 'events', eventId, 'preMembers', email));
       if (preSnap.exists()) pre = preSnap.data() || {};
     } catch {}
-    const preNames = [pre?.nickname, pre?.name, pre?.nameCell].map(normText).filter(Boolean);
+    const preNames = [pre?.nickname, pre?.name, pre?.nameCell, pre?.displayName].map(normText).filter(Boolean);
+    const preGroup = Number(pre?.group || 0);
     for (const nm of preNames) {
-      const matches = list.filter(p => getParticipantName(p) === nm || normText(p?.name) === nm);
+      let matches = list.filter(p => getParticipantName(p) === nm || normText(p?.name) === nm || normText(p?.displayName) === nm);
+      if (preGroup) {
+        const groupMatches = matches.filter(p => Number(p?.group || 0) === preGroup);
+        if (groupMatches.length === 1) return groupMatches[0];
+      }
       if (matches.length === 1) return matches[0];
     }
 
@@ -246,9 +253,9 @@ export default function PlayerEventList() {
         alert(
           '이 이메일 계정과 연결된 참가자를 찾지 못했습니다.\n\n' +
           '확인할 내용:\n' +
-          '1) 운영자 STEP4 엑셀에 이메일 컬럼이 있는지 확인\n' +
-          '2) 또는 preMembers에 이메일/이름이 등록되어 있는지 확인\n' +
-          '3) 회원가입 이름과 참가자 닉네임이 정확히 일치하는지 확인'
+          '1) 운영자 STEP4 엑셀 참가자 행에 이메일이 입력되어 있는지 확인\n' +
+          '2) 엑셀 업로드 후 참가자 목록이 다시 저장되었는지 확인\n' +
+          '3) preMembers에 이메일/닉네임/이름이 등록되어 있는지 확인'
         );
         return;
       }
