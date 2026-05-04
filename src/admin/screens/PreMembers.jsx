@@ -80,9 +80,8 @@ export default function PreMembers(){
   const remove = async (key) => {
     if (!window.confirm('삭제하시겠어요?')) return;
     try {
-      await deleteDoc(doc(db, 'events', eventId, 'preMembers', key));
-      // ✅ 삭제 버튼 클릭 후 행 클릭/롱프레스 수정창이 남아 삭제 문서가 되살아나는 것 방지
       cancelLongEdit();
+      await deleteDoc(doc(db, 'events', eventId, 'preMembers', key));
       setShowModal(false);
       setMEmail('');
       setMName('');

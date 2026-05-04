@@ -118,14 +118,15 @@ export default function MembersList(){
   const onForceDelete=async(uid)=>{
     if(!ENABLE_ADMIN_DELETE){
       const authUrl=PROJECT_ID?`https://console.firebase.google.com/project/${PROJECT_ID}/authentication/users`:'https://console.firebase.google.com/';
-      if(!window.confirm('무료 모드에서는 Firebase Auth 계정은 앱에서 직접 삭제할 수 없습니다.\n\n앱의 회원목록(users 문서)에서만 삭제할까요?')) return;
+      if(!window.confirm('무료 모드에서는 앱에서 Firebase Auth 계정까지 완전 삭제할 수 없습니다.\n\n앱의 회원 목록(users 문서)에서는 삭제하고, Auth 계정은 Firebase Console에서 별도로 삭제해야 합니다.\n\n회원 목록에서만 삭제할까요?')) return;
       setBusy(true);
       try{
         await deleteDoc(doc(db,'users',uid));
         setRows(rs=>rs.filter(r=>r.uid!==uid));
-        alert(`회원목록(users 문서)에서 삭제했습니다.\n\n단, Firebase Auth 계정 완전 삭제는 콘솔에서 별도로 진행해야 합니다.\n${authUrl}`);
+        alert(`회원 목록에서 삭제했습니다.\n\nAuth 계정 완전 삭제가 필요하면 Firebase Console에서 같은 이메일 계정을 별도로 삭제해 주세요.\n\n${authUrl}`);
+        window.open(authUrl,'_blank','noopener');
       }catch(e){
-        alert('회원목록 삭제 실패: '+(e?.message||e));
+        alert('회원 목록 삭제 실패: '+(e?.message||e));
       }finally{ setBusy(false); }
       return;
     }
