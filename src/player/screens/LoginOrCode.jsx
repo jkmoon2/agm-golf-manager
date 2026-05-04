@@ -5,7 +5,7 @@
 // - (변경) 코드 입력 시 언제나 pending_code 저장 → /player/events 로 이동(즉시 검증/입장 X)
 // - (보완) 이메일 회원가입/로그인 안정화 + 이메일 저장 체크박스
 
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase';
@@ -20,16 +20,20 @@ import { writePlayerTicket } from '../utils/playerState';
 function InnerLoginOrCode({ onEnter }) {
   const navigate = useNavigate();
   const { eventId, eventData } = useContext(EventContext) || {};
-  const { ready, signUpEmail, signInEmail, resetPassword } = usePlayerAuth();
+  const { user, ready, signUpEmail, signInEmail, resetPassword } = usePlayerAuth();
   const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext) || {};
 
   const SAVED_EMAIL_KEY = 'agm.player.savedEmail';
+  const AUTO_LOGIN_KEY = 'agm.player.autoLogin';
   const [tab, setTab]   = useState('login');
   const [email, setEmail] = useState(() => {
     try { return localStorage.getItem(SAVED_EMAIL_KEY) || ''; } catch { return ''; }
   });
   const [rememberEmail, setRememberEmail] = useState(() => {
     try { return !!localStorage.getItem(SAVED_EMAIL_KEY); } catch { return false; }
+  });
+  const [autoLogin, setAutoLogin] = useState(() => {
+    try { return localStorage.getItem(AUTO_LOGIN_KEY) === '1'; } catch { return false; }
   });
   const [pw, setPw]       = useState('');
   const [code, setCode]   = useState('');
@@ -38,6 +42,17 @@ function InnerLoginOrCode({ onEnter }) {
   const [showReset,  setShowReset]  = useState(false);
 
   const membersOnly = !!eventData?.membersOnly;
+
+
+  // 자동 로그인은 비밀번호를 저장하지 않고 Firebase Auth의 로그인 유지 세션을 사용합니다.
+  // 브라우저에 이미 이메일 로그인 세션이 남아 있고 자동 로그인이 켜져 있으면 대회 목록으로 이동합니다.
+  useEffect(() => {
+    if (!ready) return;
+    if (!autoLogin) return;
+    if (!user || user.isAnonymous) return;
+    try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
+    navigate('/player/events', { replace: true });
+  }, [ready, autoLogin, user, navigate]);
 
   // ❌ (삭제) auth_* 존재 시 자동 이동 → 리스트 먼저 보여야 하므로 제거
   // useEffect(() => { ... }, []);
@@ -61,9 +76,27 @@ function InnerLoginOrCode({ onEnter }) {
 
   const rememberCurrentEmail = (em) => {
     try {
-      if (rememberEmail) localStorage.setItem(SAVED_EMAIL_KEY, em || '');
+      if (rememberEmail || autoLogin) localStorage.setItem(SAVED_EMAIL_KEY, em || '');
       else localStorage.removeItem(SAVED_EMAIL_KEY);
+      if (autoLogin) localStorage.setItem(AUTO_LOGIN_KEY, '1');
+      else localStorage.removeItem(AUTO_LOGIN_KEY);
     } catch {}
+  };
+
+  const normalizeText = (v) => String(v || '').trim().replace(/\s+/g, ' ');
+  const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
+
+  const findUserDocByEmail = async (em) => {
+    const target = normalizeEmail(em);
+    if (!target) return null;
+    const snap = await getDocs(collection(db, 'users'));
+    let found = null;
+    snap.forEach((d) => {
+      if (found) return;
+      const data = d.data() || {};
+      if (normalizeEmail(data.email) === target) found = { id: d.id, ...data };
+    });
+    return found;
   };
 
   const extractCode = (obj) => {
@@ -154,21 +187,43 @@ function InnerLoginOrCode({ onEnter }) {
               <div className={styles.form}>
                 <input className={`${styles.input} selectable`} placeholder="이메일" value={email} onChange={(e)=>setEmail(e.target.value)} />
                 <input className={`${styles.input} selectable`} placeholder="비밀번호" type="password" value={pw} onChange={(e)=>setPw(e.target.value)} />
-                <label className={styles.rememberRow}>
-                  <input
-                    type="checkbox"
-                    checked={rememberEmail}
-                    onChange={(e)=>{
-                      const checked = e.target.checked;
-                      setRememberEmail(checked);
-                      try {
-                        if (checked) localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
-                        else localStorage.removeItem(SAVED_EMAIL_KEY);
-                      } catch {}
-                    }}
-                  />
-                  <span>이메일 저장</span>
-                </label>
+                <div className={styles.rememberOptions}>
+                  <label className={styles.rememberRow}>
+                    <input
+                      type="checkbox"
+                      checked={rememberEmail}
+                      onChange={(e)=>{
+                        const checked = e.target.checked;
+                        setRememberEmail(checked);
+                        try {
+                          if (checked) localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
+                          else if (!autoLogin) localStorage.removeItem(SAVED_EMAIL_KEY);
+                        } catch {}
+                      }}
+                    />
+                    <span>이메일 저장</span>
+                  </label>
+                  <label className={styles.rememberRow}>
+                    <input
+                      type="checkbox"
+                      checked={autoLogin}
+                      onChange={(e)=>{
+                        const checked = e.target.checked;
+                        setAutoLogin(checked);
+                        try {
+                          if (checked) {
+                            localStorage.setItem(AUTO_LOGIN_KEY, '1');
+                            localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
+                            setRememberEmail(true);
+                          } else {
+                            localStorage.removeItem(AUTO_LOGIN_KEY);
+                          }
+                        } catch {}
+                      }}
+                    />
+                    <span>자동 로그인</span>
+                  </label>
+                </div>
                 <div className={styles.actions}>
                   <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={busy}>로그인</button>
                   <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
@@ -220,12 +275,27 @@ function InnerLoginOrCode({ onEnter }) {
             <ResetPasswordModal
               defaultEmail={email}
               onClose={()=>setShowReset(false)}
-              onComplete={async ({ email: em })=>{
+              onComplete={async ({ email: em, name })=>{
+                const resetEmail = normalizeEmail(em);
+                const resetName = normalizeText(name);
+                if (!resetEmail) { alert('이메일을 입력해 주세요.'); return false; }
+                if (!resetName) { alert('회원가입 시 입력한 이름을 입력해 주세요.'); return false; }
                 try {
-                  await resetPassword(em);
+                  const registered = await findUserDocByEmail(resetEmail);
+                  if (!registered) {
+                    alert('등록된 회원 이메일을 찾지 못했습니다.');
+                    return false;
+                  }
+                  if (normalizeText(registered.name) !== resetName) {
+                    alert('회원가입 시 입력한 이름과 일치하지 않습니다.');
+                    return false;
+                  }
+                  await resetPassword(resetEmail);
                   alert('입력한 이메일로 비밀번호 재설정 메일을 보냈습니다.');
+                  return true;
                 } catch (err) {
                   alert(`재설정 메일 전송 실패: ${err?.message || err}`);
+                  return false;
                 }
               }}
             />
