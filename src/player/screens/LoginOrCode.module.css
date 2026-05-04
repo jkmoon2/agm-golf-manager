@@ -113,6 +113,14 @@
 }
 
 
+.rememberOptions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-height: 24px;
+}
+
 .rememberRow {
   display: flex;
   align-items: center;

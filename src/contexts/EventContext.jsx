@@ -73,6 +73,7 @@ const KNOWN_EVENT_SUBCOLLECTIONS = [
   'eventInputs',
   'players',
   'playerStates',
+  'presence',
 ];
 
 async function deleteCollectionDocs(colRef, chunkSize = 50) {

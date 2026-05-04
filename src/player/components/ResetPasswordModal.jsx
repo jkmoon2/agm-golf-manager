@@ -12,7 +12,9 @@ export default function ResetPasswordModal({ defaultEmail='', onClose, onComplet
 
   const submit = async () => {
     if (!email.trim()) { alert('이메일을 입력해 주세요.'); return; }
-    await onComplete?.({ email: email.trim(), name: name.trim() });
+    if (!name.trim()) { alert('회원가입 시 입력한 이름을 입력해 주세요.'); return; }
+    const ok = await onComplete?.({ email: email.trim(), name: name.trim() });
+    if (ok === false) return;
     onClose?.();
   };
 
