@@ -572,7 +572,6 @@ export default function StepFlow() {
       nickname: String(row[1] || '').trim(),
       handicap: Number(row[2]) || 0,
       authCode: String(row[3] || '').trim(),
-      // ✅ 이메일 로그인 매칭용(엑셀 5~6열 보강, 기존 1~4열 로직 유지)
       email:    String(row[4] || '').trim().toLowerCase(),
       name:     String(row[5] || '').trim(),
       score:    null,
@@ -598,6 +597,8 @@ export default function StepFlow() {
       room:     null,
       partner:  null,
       authCode: '',
+      email:    '',
+      name:     '',
       selected: false
     }));
     setParticipants(data);

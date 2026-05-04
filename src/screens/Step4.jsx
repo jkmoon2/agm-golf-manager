@@ -291,6 +291,8 @@ export default function Step4() {
       room: null,
       partner: null,
       selected: false,
+      email: '',
+      name: '',
       updatedAt: serverTimestamp(),
     };
     await setDoc(doc(db, "events", eventId, "participants", String(newId)), newObj, {
@@ -492,7 +494,6 @@ export default function Step4() {
           nickname: String(row?.[1] || "").trim(),
           handicap: Number(row?.[2]) || 0,
           authCode: String(row?.[3] || "").trim(),
-          // ✅ 이메일 로그인 매칭용(기존 컬럼 1~4 유지 + 5~6열만 보강)
           email: String(row?.[4] || "").trim().toLowerCase(),
           name: String(row?.[5] || "").trim(),
           score: null,
@@ -575,6 +576,7 @@ export default function Step4() {
             batch.set(
               doc(db, "events", eventId, "preMembers", email),
               {
+                email,
                 name: nameCell || null,
                 nickname: nickname || null,
                 group,
@@ -594,6 +596,7 @@ export default function Step4() {
           batch.set(
             doc(db, "events", eventId, "preMembers", email),
             {
+              email,
               name: nameCell || null,
               nickname: nickname || null,
               group,

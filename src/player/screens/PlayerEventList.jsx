@@ -98,6 +98,15 @@ export default function PlayerEventList() {
     p?.email ?? p?.playerEmail ?? p?.loginEmail ?? p?.userEmail ?? p?.memberEmail ?? p?.accountEmail ?? ''
   );
   const getParticipantName = (p) => normText(p?.nickname ?? p?.name ?? p?.displayName ?? '');
+  const getParticipantRealName = (p) => normText(p?.name ?? p?.displayName ?? '');
+  const enrichEmailParticipant = (p, email, pre = null) => {
+    if (!p) return p;
+    const patch = {};
+    if (email && !getParticipantEmail(p)) patch.email = email;
+    if (pre?.name && !getParticipantRealName(p)) patch.name = pre.name;
+    if (pre?.nickname && !normText(p?.nickname)) patch.nickname = pre.nickname;
+    return Object.keys(patch).length ? { ...p, ...patch } : p;
+  };
 
   const collectParticipantsFromEvent = async (eventId, ev = {}) => {
     const merged = [];
@@ -123,11 +132,18 @@ export default function PlayerEventList() {
       qs.forEach(d => merged.push({ id: d.id, ...(d.data() || {}) }));
     } catch {}
     const map = new Map();
+    const mergeKeepFilled = (prev = {}, cur = {}) => {
+      const out = { ...prev, ...cur };
+      ['email', 'playerEmail', 'loginEmail', 'userEmail', 'memberEmail', 'accountEmail', 'name', 'nickname', 'authCode'].forEach((k) => {
+        if ((cur?.[k] === undefined || cur?.[k] === null || cur?.[k] === '') && prev?.[k] !== undefined && prev?.[k] !== null && prev?.[k] !== '') {
+          out[k] = prev[k];
+        }
+      });
+      return out;
+    };
     merged.forEach((p, i) => {
       const key = String(p?.id ?? p?.authCode ?? p?.nickname ?? i);
-      // ✅ 같은 id가 여러 저장소(participants / participantsStroke / participantsFourball)에 있을 때
-      //    뒤쪽 데이터의 email/name 보강값을 병합해서 이메일 매칭이 누락되지 않도록 함
-      map.set(key, { ...(map.get(key) || {}), ...p });
+      map.set(key, map.has(key) ? mergeKeepFilled(map.get(key), p) : p);
     });
     return Array.from(map.values());
   };
@@ -139,23 +155,24 @@ export default function PlayerEventList() {
 
     // 1순위: 참가자 명단에 이메일 컬럼이 있으면 이메일로 정확히 매칭
     let found = list.find(p => getParticipantEmail(p) === email) || null;
-    if (found) return found;
+    if (found) return enrichEmailParticipant(found, email);
 
-    // 2순위: preMembers의 nickname/name을 이용해 참가자 명단과 연결
+    // 2순위: preMembers의 nickname/name/group을 이용해 참가자 명단과 연결
     let pre = null;
     try {
       const preSnap = await getDoc(doc(db, 'events', eventId, 'preMembers', email));
       if (preSnap.exists()) pre = preSnap.data() || {};
     } catch {}
-    const preNames = [pre?.nickname, pre?.name, pre?.nameCell, pre?.displayName].map(normText).filter(Boolean);
-    const preGroup = Number(pre?.group || 0);
+    const preGroup = Number(pre?.group);
+    const hasPreGroup = Number.isFinite(preGroup);
+    const preNames = [pre?.nickname, pre?.name, pre?.nameCell].map(normText).filter(Boolean);
     for (const nm of preNames) {
-      let matches = list.filter(p => getParticipantName(p) === nm || normText(p?.name) === nm || normText(p?.displayName) === nm);
-      if (preGroup) {
-        const groupMatches = matches.filter(p => Number(p?.group || 0) === preGroup);
-        if (groupMatches.length === 1) return groupMatches[0];
+      let matches = list.filter(p => getParticipantName(p) === nm || getParticipantRealName(p) === nm);
+      if (matches.length > 1 && hasPreGroup) {
+        const groupMatches = matches.filter(p => Number(p?.group) === preGroup);
+        if (groupMatches.length === 1) matches = groupMatches;
       }
-      if (matches.length === 1) return matches[0];
+      if (matches.length === 1) return enrichEmailParticipant(matches[0], email, pre);
     }
 
     // 3순위: users/{uid}.name 또는 Firebase displayName이 참가자 닉네임과 정확히 1명만 일치할 때만 허용
@@ -165,8 +182,8 @@ export default function PlayerEventList() {
       if (uSnap.exists()) userName = normText(uSnap.data()?.name || userName);
     } catch {}
     if (userName) {
-      const matches = list.filter(p => getParticipantName(p) === userName || normText(p?.name) === userName);
-      if (matches.length === 1) return matches[0];
+      const matches = list.filter(p => getParticipantName(p) === userName || getParticipantRealName(p) === userName);
+      if (matches.length === 1) return enrichEmailParticipant(matches[0], email, { name: userName });
     }
 
     return null;
@@ -253,9 +270,9 @@ export default function PlayerEventList() {
         alert(
           '이 이메일 계정과 연결된 참가자를 찾지 못했습니다.\n\n' +
           '확인할 내용:\n' +
-          '1) 운영자 STEP4 엑셀 참가자 행에 이메일이 입력되어 있는지 확인\n' +
-          '2) 엑셀 업로드 후 참가자 목록이 다시 저장되었는지 확인\n' +
-          '3) preMembers에 이메일/닉네임/이름이 등록되어 있는지 확인'
+          '1) 운영자 STEP4 엑셀에 이메일 컬럼이 저장되어 있는지 확인\n' +
+          '2) 또는 preMembers에 이메일/닉네임/이름이 등록되어 있는지 확인\n' +
+          '3) STEP4 엑셀을 이번 패치 적용 후 다시 업로드했는지 확인'
         );
         return;
       }
