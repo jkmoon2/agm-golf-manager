@@ -25,6 +25,7 @@ function InnerLoginOrCode({ onEnter }) {
 
   const SAVED_EMAIL_KEY = 'agm.player.savedEmail';
   const AUTO_LOGIN_KEY = 'agm.player.autoLogin';
+  const AUTO_PW_MASK = '********';
   const [tab, setTab]   = useState('login');
   const [email, setEmail] = useState(() => {
     try { return localStorage.getItem(SAVED_EMAIL_KEY) || ''; } catch { return ''; }
@@ -40,19 +41,26 @@ function InnerLoginOrCode({ onEnter }) {
   const [busy, setBusy]   = useState(false);
   const [showSignup, setShowSignup] = useState(false);
   const [showReset,  setShowReset]  = useState(false);
+  const [autoSessionReady, setAutoSessionReady] = useState(false);
 
   const membersOnly = !!eventData?.membersOnly;
 
 
   // 자동 로그인은 비밀번호를 저장하지 않고 Firebase Auth의 로그인 유지 세션을 사용합니다.
-  // 브라우저에 이미 이메일 로그인 세션이 남아 있고 자동 로그인이 켜져 있으면 대회 목록으로 이동합니다.
+  // 브라우저에 이메일 로그인 세션이 남아 있으면 비밀번호 칸에 ******** 만 표시하고,
+  // 로그인 버튼을 누를 때 기존 세션으로 대회 목록에 진입합니다.
   useEffect(() => {
     if (!ready) return;
-    if (!autoLogin) return;
-    if (!user || user.isAnonymous) return;
-    try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
-    navigate('/player/events', { replace: true });
-  }, [ready, autoLogin, user, navigate]);
+    const hasEmailSession = !!(autoLogin && user && !user.isAnonymous);
+    setAutoSessionReady(hasEmailSession);
+    if (hasEmailSession) {
+      if (user?.email) setEmail(user.email);
+      setPw(AUTO_PW_MASK);
+    } else if (pw === AUTO_PW_MASK) {
+      setPw('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, autoLogin, user]);
 
   // ❌ (삭제) auth_* 존재 시 자동 이동 → 리스트 먼저 보여야 하므로 제거
   // useEffect(() => { ... }, []);
@@ -63,14 +71,17 @@ function InnerLoginOrCode({ onEnter }) {
       const ref = doc(db, 'users', u.uid);
       const snap = await getDoc(ref);
       const old = snap.exists() ? (snap.data() || {}) : {};
+      const nextName = extra.name ?? old.name ?? u.displayName ?? '';
+      const nextEmail = u.email || extra.email || old.email || null;
       await setDoc(ref, {
         uid: u.uid,
-        email: u.email || extra.email || old.email || null,
-        name: extra.name ?? old.name ?? u.displayName ?? '',
+        email: nextEmail,
+        name: nextName,
         role: old.role || 'player',
         createdAt: old.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }, { merge: true });
+      await ensurePasswordResetIndex(u, { email: nextEmail, name: nextName, createdAt: old.createdAt });
     } catch {}
   };
 
@@ -86,17 +97,30 @@ function InnerLoginOrCode({ onEnter }) {
   const normalizeText = (v) => String(v || '').trim().replace(/\s+/g, ' ');
   const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
 
-  const findUserDocByEmail = async (em) => {
+  const emailIndexKey = (em) => normalizeEmail(em);
+
+  const ensurePasswordResetIndex = async (u, extra = {}) => {
+    try {
+      const em = normalizeEmail(extra.email || u?.email || '');
+      if (!u?.uid || !em) return;
+      const name = normalizeText(extra.name ?? u?.displayName ?? '');
+      await setDoc(doc(db, 'passwordResetIndex', emailIndexKey(em)), {
+        uid: u.uid,
+        email: em,
+        name,
+        updatedAt: new Date().toISOString(),
+        createdAt: extra.createdAt || new Date().toISOString(),
+      }, { merge: true });
+    } catch (e) {
+      console.warn('[LoginOrCode] passwordResetIndex ensure failed:', e);
+    }
+  };
+
+  const findResetIndexByEmail = async (em) => {
     const target = normalizeEmail(em);
     if (!target) return null;
-    const snap = await getDocs(collection(db, 'users'));
-    let found = null;
-    snap.forEach((d) => {
-      if (found) return;
-      const data = d.data() || {};
-      if (normalizeEmail(data.email) === target) found = { id: d.id, ...data };
-    });
-    return found;
+    const snap = await getDoc(doc(db, 'passwordResetIndex', emailIndexKey(target)));
+    return snap.exists() ? { id: snap.id, ...(snap.data() || {}) } : null;
   };
 
   const extractCode = (obj) => {
@@ -147,7 +171,15 @@ function InnerLoginOrCode({ onEnter }) {
   const handleLogin = async () => {
     const em = email.trim();
     if (!em) { alert('이메일을 입력해 주세요.'); return; }
+    if (autoSessionReady && pw === AUTO_PW_MASK && user && !user.isAnonymous) {
+      rememberCurrentEmail(em);
+      try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
+      try { writePlayerTicket('global', { via:'email-auto-session', email: user.email || em, ts:Date.now() }); } catch {}
+      navigate('/player/events', { replace: true });
+      return;
+    }
     if (!pw.trim())    { alert('비밀번호를 입력해 주세요.'); return; }
+    if (pw === AUTO_PW_MASK && !autoSessionReady) { alert('자동 로그인 세션이 만료되었습니다. 비밀번호를 다시 입력해 주세요.'); setPw(''); return; }
     setBusy(true);
     try {
       const cred = await signInEmail(em, pw);
@@ -186,7 +218,20 @@ function InnerLoginOrCode({ onEnter }) {
             {tab === 'login' ? (
               <div className={styles.form}>
                 <input className={`${styles.input} selectable`} placeholder="이메일" value={email} onChange={(e)=>setEmail(e.target.value)} />
-                <input className={`${styles.input} selectable`} placeholder="비밀번호" type="password" value={pw} onChange={(e)=>setPw(e.target.value)} />
+                <input
+                  className={`${styles.input} selectable ${autoSessionReady && pw === AUTO_PW_MASK ? styles.autoPwInput : ''}`}
+                  placeholder="비밀번호"
+                  type={autoSessionReady && pw === AUTO_PW_MASK ? 'text' : 'password'}
+                  value={pw}
+                  readOnly={autoSessionReady && pw === AUTO_PW_MASK}
+                  onFocus={() => {
+                    if (autoSessionReady && pw === AUTO_PW_MASK) {
+                      setAutoSessionReady(false);
+                      setPw('');
+                    }
+                  }}
+                  onChange={(e)=>setPw(e.target.value)}
+                />
                 <div className={styles.rememberOptions}>
                   <label className={styles.rememberRow}>
                     <input
@@ -258,6 +303,7 @@ function InnerLoginOrCode({ onEnter }) {
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString(),
                   }, { merge: true });
+                  await ensurePasswordResetIndex(u, { email: u.email || em, name });
                   setEmail(em);
                   try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
                   try {
@@ -281,9 +327,9 @@ function InnerLoginOrCode({ onEnter }) {
                 if (!resetEmail) { alert('이메일을 입력해 주세요.'); return false; }
                 if (!resetName) { alert('회원가입 시 입력한 이름을 입력해 주세요.'); return false; }
                 try {
-                  const registered = await findUserDocByEmail(resetEmail);
+                  const registered = await findResetIndexByEmail(resetEmail);
                   if (!registered) {
-                    alert('등록된 회원 이메일을 찾지 못했습니다.');
+                    alert('등록된 회원 이메일을 찾지 못했습니다. 운영자 설정 > 회원 목록에서 새로고침을 한 번 실행해 주세요.');
                     return false;
                   }
                   if (normalizeText(registered.name) !== resetName) {
