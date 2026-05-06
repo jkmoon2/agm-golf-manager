@@ -223,6 +223,11 @@ if (typeof window !== 'undefined') window.auth = auth; // ← 추가
 try {
   setPersistence(auth, browserLocalPersistence).catch(() => {});
 } catch {}
+function isPlayerLoginOrCodeRoute() {
+  try { return String(window?.location?.pathname || '').startsWith('/player/login-or-code'); }
+  catch { return false; }
+}
+
 const ensureAuthed = (() => {
   let p;
   return () => {
@@ -231,13 +236,30 @@ const ensureAuthed = (() => {
       const stop = onAuthStateChanged(auth, async (user) => {
         if (user) {
           stop();
+          p = null;
           resolve(user);
           return;
         }
+
+        // 로그인 화면 진입만으로 익명 계정이 생성되지 않도록 차단합니다.
+        // 인증코드 입력 후 /player/events로 이동한 뒤에는 기존 흐름대로 익명 인증을 허용합니다.
+        if (isPlayerLoginOrCodeRoute()) {
+          stop();
+          p = null;
+          resolve(null);
+          return;
+        }
+
         try {
-          await signInAnonymously(auth);
+          const cred = await signInAnonymously(auth);
+          stop();
+          p = null;
+          resolve(cred?.user || auth.currentUser || null);
         } catch (e) {
+          stop();
+          p = null;
           console.warn('[EventContext] anonymous sign-in failed:', e);
+          resolve(null);
         }
       });
     });
@@ -376,8 +398,8 @@ export function EventProvider({ children }) {
   useEffect(() => {
     let unsub = null,
       cancelled = false;
-    ensureAuthed().then(() => {
-      if (cancelled) return;
+    ensureAuthed().then((u) => {
+      if (cancelled || !u) return;
       const colRef = collection(db, 'events');
       unsub = onSnapshot(colRef, (snap) => {
         const evts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -511,8 +533,8 @@ export function EventProvider({ children }) {
     }
     let unsub = null,
       cancelled = false;
-    ensureAuthed().then(() => {
-      if (cancelled) return;
+    ensureAuthed().then((u) => {
+      if (cancelled || !u) return;
       const docRef = doc(db, 'events', eventId);
       unsub = onSnapshot(docRef, { includeMetadataChanges: true }, (snap) => {
         if (!snap.exists()) {
@@ -541,8 +563,8 @@ export function EventProvider({ children }) {
       return;
     }
     let unsub = null, cancelled = false;
-    ensureAuthed().then(() => {
-      if (cancelled) return;
+    ensureAuthed().then((u) => {
+      if (cancelled || !u) return;
       const colRef = collection(db, 'events', eventId, 'eventInputs');
       unsub = onSnapshot(colRef, (snap) => {
         const next = {};
@@ -1090,8 +1112,8 @@ export function EventProvider({ children }) {
     scoresReadyRef.current = false;
     setScoresReady(false);
 
-    ensureAuthed().then(() => {
-      if (cancelled) return;
+    ensureAuthed().then((u) => {
+      if (cancelled || !u) return;
       const colRef = collection(db, 'events', eventId, 'scores');
       unsub = onSnapshot(colRef, (snap) => {
         const nextMap = {};

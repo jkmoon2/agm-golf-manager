@@ -136,3 +136,10 @@
   height: 16px;
   accent-color: #1d4ed8;
 }
+
+/* 자동 로그인 세션 표시용: 실제 비밀번호를 저장하지 않고 표시만 합니다. */
+.autoPwInput {
+  letter-spacing: 2px;
+  color: #334155;
+  background: #f8fafc;
+}

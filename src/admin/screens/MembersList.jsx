@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useState, useRef } from 'react';
-import { collection, getDocs, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 import html2canvas from 'html2canvas';
 import { db, auth } from '../../firebase';
@@ -88,6 +88,25 @@ function download(name, blob){
   setTimeout(()=>URL.revokeObjectURL(u),1500);
 }
 
+function normEmail(v){ return String(v || '').trim().toLowerCase(); }
+function emailIndexKey(v){ return normEmail(v); }
+async function ensurePasswordResetIndexRows(rows){
+  try{
+    const jobs = (rows || [])
+      .filter(r => normEmail(r.email))
+      .map(r => setDoc(doc(db, 'passwordResetIndex', emailIndexKey(r.email)), {
+        uid: r.uid,
+        email: normEmail(r.email),
+        name: r.name || '',
+        createdAt: r.createdAt || '',
+        updatedAt: new Date().toISOString(),
+      }, { merge: true }));
+    if(jobs.length) await Promise.all(jobs);
+  }catch(e){
+    console.warn('[MembersList] passwordResetIndex ensure failed:', e);
+  }
+}
+
 export default function MembersList(){
   const [rows,setRows]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -109,6 +128,7 @@ export default function MembersList(){
         });
         list.sort((a,b)=>(+new Date(fmtDateISO(b.createdAt)))-(+new Date(fmtDateISO(a.createdAt))));
         setRows(list); setLoading(false);
+        ensurePasswordResetIndexRows(list);
       },
       (err)=>{ console.warn('[onSnapshot error]',err); setRows([]); setLoading(false); }
     );
@@ -121,7 +141,9 @@ export default function MembersList(){
       if(!window.confirm('무료 모드에서는 앱에서 Firebase Auth 계정까지 완전 삭제할 수 없습니다.\n\n앱의 회원 목록(users 문서)에서는 삭제하고, Auth 계정은 Firebase Console에서 별도로 삭제해야 합니다.\n\n회원 목록에서만 삭제할까요?')) return;
       setBusy(true);
       try{
+        const target = rows.find(r => r.uid === uid);
         await deleteDoc(doc(db,'users',uid));
+        if(target?.email) await deleteDoc(doc(db,'passwordResetIndex',emailIndexKey(target.email))).catch(()=>{});
         setRows(rs=>rs.filter(r=>r.uid!==uid));
         alert(`회원 목록에서 삭제했습니다.\n\nAuth 계정 완전 삭제가 필요하면 Firebase Console에서 같은 이메일 계정을 별도로 삭제해 주세요.\n\n${authUrl}`);
         window.open(authUrl,'_blank','noopener');
@@ -133,7 +155,9 @@ export default function MembersList(){
     if(!window.confirm('정말 이 회원을 삭제할까요? (Auth 계정 + Firestore 문서)')) return;
     setBusy(true);
     try{
+      const target = rows.find(r => r.uid === uid);
       await deleteDoc(doc(db,'users',uid)).catch(()=>{});
+      if(target?.email) await deleteDoc(doc(db,'passwordResetIndex',emailIndexKey(target.email))).catch(()=>{});
       const fn=httpsCallable(getFunctions(),'adminDeleteUser');
       await fn({uid});
       setRows(rs=>rs.filter(r=>r.uid!==uid));
@@ -154,6 +178,7 @@ export default function MembersList(){
     const list=[]; qs.forEach(d=>{ const v=d.data()||{}; list.push({uid:d.id,email:v.email||'',name:v.name||'',createdAt:v.createdAt||''}); });
     list.sort((a,b)=>(+new Date(fmtDateISO(b.createdAt)))-(+new Date(fmtDateISO(a.createdAt))));
     setRows(list); setLoading(false);
+    ensurePasswordResetIndexRows(list);
   };
 
   // ────────────────────────────────────────────────────────────────
