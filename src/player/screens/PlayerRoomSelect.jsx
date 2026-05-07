@@ -8,7 +8,7 @@ import styles from './PlayerRoomSelect.module.css';
 
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
-import { signInAnonymously } from 'firebase/auth';
+import { signInAnonymously, setPersistence, browserSessionPersistence } from 'firebase/auth';
 import { writePlayerRoom } from '../utils/playerState';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 
@@ -44,6 +44,7 @@ const roomCapacityAt = (roomCapacities, roomNo) => {
 async function ensureAuthReady() {
   try {
     if (!auth?.currentUser) {
+      await setPersistence(auth, browserSessionPersistence).catch(() => {});
       const cred = await signInAnonymously(auth);
       await cred.user.getIdToken(true);
     } else {

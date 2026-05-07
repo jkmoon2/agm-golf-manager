@@ -1,7 +1,7 @@
 // src/player/screens/PlayerLoginScreen.jsx
 
 import React, { useState, useContext, useEffect } from 'react';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence } from 'firebase/auth';
 import { doc, getDoc }                from 'firebase/firestore';
 import { db }                          from '../../firebase';
 import { PlayerContext }              from '../../contexts/PlayerContext';
@@ -55,7 +55,10 @@ export default function PlayerLoginScreen() {
 
     // 1) 익명 로그인(필요 시)
     if (!auth.currentUser) {
-      try { await signInAnonymously(auth); }
+      try {
+        await setPersistence(auth, browserSessionPersistence).catch(() => {});
+        await signInAnonymously(auth);
+      }
       catch (err) { alert('익명 로그인 실패: ' + err.message); return; }
     }
 
