@@ -6,7 +6,7 @@ import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
 import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
 import styles from './EventSelectScreen.module.css';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장 + 이메일 로그인 감지
+import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserSessionPersistence } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장 + 이메일 로그인 감지
 import { markPlayerAuthed, writePlayerTicket } from '../utils/playerState';
 
 export default function PlayerEventList() {
@@ -235,6 +235,7 @@ export default function PlayerEventList() {
   const ensureAnonymousAndMembership = async (eventId, via = 'code', participant = null) => {
     const auth = getAuth();
     if (!auth.currentUser) {
+      await setPersistence(auth, browserSessionPersistence).catch(() => {});
       await signInAnonymously(auth);
     }
     try {

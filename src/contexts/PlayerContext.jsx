@@ -15,7 +15,7 @@ import {
 import { db } from '../firebase';
 import { EventContext } from './EventContext';
 import { useLocation } from 'react-router-dom';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence } from 'firebase/auth';
 
 // (선택) 남아 있던 import — 사용하지 않아도 빌드 가능한 상태라면 그대로 두셔도 됩니다.
 // import { pickRoomForStroke } from '../player/logic/assignStroke';
@@ -295,6 +295,7 @@ function markEventAuthed(id, code, meObj) {
 async function ensureAuthReady() {
   const auth = getAuth();
   if (!auth.currentUser) {
+    await setPersistence(auth, browserSessionPersistence).catch(() => {});
     const cred = await signInAnonymously(auth);
     await cred.user.getIdToken(true);
   } else {

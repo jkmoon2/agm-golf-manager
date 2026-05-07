@@ -13,7 +13,7 @@ import PlayerEventConfirm from './screens/PlayerEventConfirm';
 
 import { EventContext }   from '../contexts/EventContext';
 import { PlayerContext }  from '../contexts/PlayerContext';
-import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 안전망
+import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence } from 'firebase/auth'; // ✅ 변경: 안전망
 import { db } from '../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 
@@ -48,6 +48,7 @@ export default function PlayerApp() {
       try {
         const auth = getAuth();
         if (!auth.currentUser) {
+          await setPersistence(auth, browserSessionPersistence).catch(() => {});
           await signInAnonymously(auth);
         }
       } catch {}

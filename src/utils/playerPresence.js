@@ -1,7 +1,7 @@
 // /src/utils/playerPresence.js
 
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence } from 'firebase/auth';
 import { db } from '../firebase';
 
 const HEARTBEAT_MS = 25000;
@@ -30,6 +30,7 @@ export function makePresenceSessionId(eventId = '') {
 async function ensureAuthReady() {
   const auth = getAuth();
   if (!auth.currentUser) {
+    await setPersistence(auth, browserSessionPersistence).catch(() => {});
     const cred = await signInAnonymously(auth);
     try { await cred.user.getIdToken(true); } catch {}
     return cred.user || null;

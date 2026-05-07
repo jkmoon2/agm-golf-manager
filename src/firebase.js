@@ -12,6 +12,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 // [ADD] Auth 보완: 세션 지속성/익명로그인/onAuthStateChanged
 import {
   setPersistence,
+  browserLocalPersistence,
   browserSessionPersistence,
   signInAnonymously,
   onAuthStateChanged,
@@ -52,14 +53,18 @@ export function markCodeOk(eventId) { try { localStorage.setItem(`${CODE_PREFIX}
 export function clearCodeOk(eventId) { try { localStorage.removeItem(`${CODE_PREFIX}${eventId}`); } catch {} }
 export async function ensureAnonAfterCode() {
   try {
-    if (!auth.currentUser && hasAnyCodeOk()) { await signInAnonymously(auth); }
+    if (!auth.currentUser && hasAnyCodeOk()) {
+      await setPersistence(auth, browserSessionPersistence).catch(() => {});
+      await signInAnonymously(auth);
+    }
   } catch (err) {
     console.warn('[Auth] ensureAnonAfterCode failed:', err);
   }
 }
 
-// [ADD][FIX] 세션 지속성(탭 닫을 때까지 유지)
-setPersistence(auth, browserSessionPersistence).catch(err => {
+// [ADD][FIX] 기본 지속성은 이메일 회원 자동 로그인 보존을 위해 local로 둡니다.
+// 인증코드용 익명 로그인은 signInAnonymously 직전에만 session persistence를 적용합니다.
+setPersistence(auth, browserLocalPersistence).catch(err => {
   console.warn('[Auth] setPersistence failed:', err);
 });
 
@@ -97,7 +102,10 @@ async function ensureUserProfile(user){
 onAuthStateChanged(auth, (user) => {
   if (user) { ensureUserProfile(user); }
   if (!user && hasAnyCodeOk()) {
-    signInAnonymously(auth).catch(err => console.warn('[Auth] signInAnonymously failed:', err));
+    setPersistence(auth, browserSessionPersistence)
+      .catch(() => {})
+      .then(() => signInAnonymously(auth))
+      .catch(err => console.warn('[Auth] signInAnonymously failed:', err));
   }
 });
 

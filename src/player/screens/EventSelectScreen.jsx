@@ -7,7 +7,7 @@ import { EventContext } from '../../contexts/EventContext';
 import { db } from '../../firebase';
 import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅
 import styles from './EventSelectScreen.module.css';
-import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅
+import { getAuth, signInAnonymously, setPersistence, browserSessionPersistence } from 'firebase/auth'; // ✅
 
 export default function EventSelectScreen() {
   const nav = useNavigate();
@@ -67,6 +67,7 @@ export default function EventSelectScreen() {
   const ensureAnonymousAndMembership = async (eventId) => {
     const auth = getAuth();
     if (!auth.currentUser) {
+      await setPersistence(auth, browserSessionPersistence).catch(() => {});
       await signInAnonymously(auth);
     }
     try {
