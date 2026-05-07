@@ -47,15 +47,15 @@ function InnerLoginOrCode({ onEnter }) {
 
 
   // 자동 로그인은 비밀번호를 저장하지 않고 Firebase Auth의 로그인 유지 세션을 사용합니다.
-  // 브라우저에 이메일 로그인 세션이 남아 있으면 비밀번호 칸에 ******** 만 표시하고,
-  // 로그인 버튼을 누를 때 기존 세션으로 대회 목록에 진입합니다.
+  // 기존처럼 비밀번호 칸에 별표를 억지로 채우는 방식 대신,
+  // 세션 확인 여부를 별도 안내문으로 명확하게 보여줍니다.
   useEffect(() => {
     if (!ready) return;
-    const hasEmailSession = !!(autoLogin && user && !user.isAnonymous);
+    const hasEmailSession = !!(autoLogin && user && !user.isAnonymous && user.email);
     setAutoSessionReady(hasEmailSession);
     if (hasEmailSession) {
       if (user?.email) setEmail(user.email);
-      setPw(AUTO_PW_MASK);
+      setPw('');
     } else if (pw === AUTO_PW_MASK) {
       setPw('');
     }
@@ -219,17 +219,12 @@ function InnerLoginOrCode({ onEnter }) {
               <div className={styles.form}>
                 <input className={`${styles.input} selectable`} placeholder="이메일" value={email} onChange={(e)=>setEmail(e.target.value)} />
                 <input
-                  className={`${styles.input} selectable ${autoSessionReady && pw === AUTO_PW_MASK ? styles.autoPwInput : ''}`}
-                  placeholder="비밀번호"
-                  type={autoSessionReady && pw === AUTO_PW_MASK ? 'text' : 'password'}
+                  className={`${styles.input} selectable ${autoSessionReady ? styles.autoPwInput : ''}`}
+                  placeholder={autoSessionReady ? '자동 로그인 세션 확인됨' : '비밀번호'}
+                  type="password"
                   value={pw}
-                  readOnly={autoSessionReady && pw === AUTO_PW_MASK}
-                  onFocus={() => {
-                    if (autoSessionReady && pw === AUTO_PW_MASK) {
-                      setAutoSessionReady(false);
-                      setPw('');
-                    }
-                  }}
+                  readOnly={autoSessionReady}
+                  disabled={autoSessionReady}
                   onChange={(e)=>setPw(e.target.value)}
                 />
                 <div className={styles.rememberOptions}>
@@ -269,8 +264,15 @@ function InnerLoginOrCode({ onEnter }) {
                     <span>자동 로그인</span>
                   </label>
                 </div>
+                {autoLogin && (
+                  <div className={`${styles.autoLoginStatus} ${autoSessionReady ? styles.autoLoginReady : styles.autoLoginExpired}`}>
+                    {autoSessionReady
+                      ? '자동 로그인 세션이 확인되었습니다. 로그인 버튼만 누르면 입장합니다.'
+                      : '자동 로그인 체크는 유지되어 있지만 세션이 확인되지 않았습니다. 비밀번호를 다시 입력해 주세요.'}
+                  </div>
+                )}
                 <div className={styles.actions}>
-                  <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={busy}>로그인</button>
+                  <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={busy}>{autoSessionReady ? '자동 로그인' : '로그인'}</button>
                   <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
                   <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowReset(true)}  disabled={busy}>비번 재설정</button>
                 </div>

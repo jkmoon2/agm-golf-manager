@@ -112,6 +112,8 @@ export default function MembersList(){
   const [loading,setLoading]=useState(true);
   const [busy,setBusy]=useState(false);
   const [canListen,setCanListen]=useState(false);
+  const [editMember,setEditMember]=useState(null);
+  const [editName,setEditName]=useState('');
   const tableRef=useRef(null);
 
   useEffect(()=> onAuthStateChanged(auth,(u)=>setCanListen(!!u)),[]);
@@ -134,6 +136,42 @@ export default function MembersList(){
     );
     return ()=>unsub();
   },[canListen]);
+
+  const openEditMember=(row)=>{
+    setEditMember(row);
+    setEditName(row?.name || '');
+  };
+
+  const closeEditMember=()=>{
+    setEditMember(null);
+    setEditName('');
+  };
+
+  const saveEditMember=async()=>{
+    if(!editMember?.uid) return;
+    const nextName = String(editName || '').trim();
+    setBusy(true);
+    try{
+      await setDoc(doc(db,'users',editMember.uid), {
+        name: nextName,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+      if(editMember.email){
+        await setDoc(doc(db,'passwordResetIndex',emailIndexKey(editMember.email)), {
+          uid: editMember.uid,
+          email: normEmail(editMember.email),
+          name: nextName,
+          createdAt: editMember.createdAt || '',
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+      setRows(rs=>rs.map(r=>r.uid===editMember.uid ? { ...r, name: nextName } : r));
+      closeEditMember();
+      alert('수정되었습니다.');
+    }catch(e){
+      alert('수정 실패: '+(e?.message||e));
+    }finally{ setBusy(false); }
+  };
 
   const onForceDelete=async(uid)=>{
     if(!ENABLE_ADMIN_DELETE){
@@ -262,17 +300,30 @@ export default function MembersList(){
                     <td className={styles.mColName}  style={tdStyle}>{r.name}</td>
                     <td className={styles.mColDate}  style={tdStyle}>{fmtDateOnly(r.createdAt)}</td>
                     <td className={styles.mColCtrl}  style={tdStyle}>
-                      <button
-                        onClick={()=>onForceDelete(r.uid)}
-                        disabled={busy}
-                        className={`${styles.dangerGhostBtn} ${styles.blueFocus} ${styles.mDeleteBtn}`}
-                        style={{
-                          height: UI.delBtnH,
-                          padding: `0 ${UI.delBtnPadX}px`,
-                          borderRadius: UI.delBtnRadius,
-                          fontSize: UI.delBtnFont
-                        }}
-                      >삭제</button>
+                      <div style={{ display:'flex', gap:4, justifyContent:'center', alignItems:'center' }}>
+                        <button
+                          onClick={()=>openEditMember(r)}
+                          disabled={busy}
+                          className={`${styles.ghostBtn} ${styles.blueFocus}`}
+                          style={{
+                            height: UI.delBtnH,
+                            padding: `0 ${UI.delBtnPadX}px`,
+                            borderRadius: UI.delBtnRadius,
+                            fontSize: UI.delBtnFont
+                          }}
+                        >수정</button>
+                        <button
+                          onClick={()=>onForceDelete(r.uid)}
+                          disabled={busy}
+                          className={`${styles.dangerGhostBtn} ${styles.blueFocus} ${styles.mDeleteBtn}`}
+                          style={{
+                            height: UI.delBtnH,
+                            padding: `0 ${UI.delBtnPadX}px`,
+                            borderRadius: UI.delBtnRadius,
+                            fontSize: UI.delBtnFont
+                          }}
+                        >삭제</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -291,6 +342,52 @@ export default function MembersList(){
           <button onClick={downloadJPG}                        className={`${styles.ghostBtn} ${styles.blueFocus}`} style={btnStyle}>JPG로 저장</button>
         </div>
       </section>
+
+      {editMember && (
+        <div
+          style={{
+            position:'fixed', inset:0, background:'rgba(15,23,42,0.45)',
+            display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999, padding:18
+          }}
+          onClick={closeEditMember}
+        >
+          <div
+            style={{
+              width:'min(360px, 92vw)', background:'#fff', borderRadius:14, padding:18,
+              boxShadow:'0 16px 40px rgba(0,0,0,0.22)'
+            }}
+            onClick={(e)=>e.stopPropagation()}
+          >
+            <h3 style={{ margin:'0 0 14px', fontSize:17, fontWeight:800 }}>회원 정보 수정</h3>
+            <div style={{ display:'grid', gap:10 }}>
+              <label style={{ display:'grid', gap:5, fontSize:13, fontWeight:700 }}>
+                이메일
+                <input
+                  value={editMember.email || ''}
+                  readOnly
+                  style={{ height:38, border:'1px solid #d7deea', borderRadius:8, padding:'0 10px', background:'#f8fafc' }}
+                />
+              </label>
+              <label style={{ display:'grid', gap:5, fontSize:13, fontWeight:700 }}>
+                이름
+                <input
+                  value={editName}
+                  onChange={(e)=>setEditName(e.target.value)}
+                  style={{ height:38, border:'1px solid #d7deea', borderRadius:8, padding:'0 10px' }}
+                />
+              </label>
+            </div>
+            <p style={{ margin:'10px 0 0', color:'#64748b', fontSize:12, lineHeight:1.45 }}>
+              이메일은 Firebase Authentication 계정과 연결되므로 여기서는 이름만 수정합니다.
+              이름 수정 시 비밀번호 재설정용 passwordResetIndex도 함께 갱신됩니다.
+            </p>
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:14 }}>
+              <button onClick={closeEditMember} disabled={busy} className={`${styles.ghostBtn} ${styles.blueFocus}`}>취소</button>
+              <button onClick={saveEditMember} disabled={busy} className={`${styles.ghostBtn} ${styles.blueFocus}`} style={{ background:'#1d4ed8', color:'#fff', borderColor:'#1d4ed8' }}>수정</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
