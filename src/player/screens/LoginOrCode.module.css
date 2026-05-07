@@ -143,3 +143,24 @@
   color: #334155;
   background: #f8fafc;
 }
+
+/* 자동 로그인 상태 안내: 비밀번호를 저장하지 않고 Firebase 세션 여부를 명확히 표시 */
+.autoLoginStatus {
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.autoLoginReady {
+  color: #166534;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+}
+
+.autoLoginExpired {
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
