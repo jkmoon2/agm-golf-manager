@@ -17,16 +17,12 @@ import {
   getDocs,
   getDocsFromServer,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
 
 import {
   getAuth,
-  onAuthStateChanged,
-  signInAnonymously,
-  setPersistence,
-  browserLocalPersistence,
 } from 'firebase/auth';
 
 /* 저장 전에 undefined/NaN 정제 */
@@ -220,9 +216,6 @@ export const useEvent = () => useContext(EventContext);
 // ───────────────────────────────────────────────
 const auth = getAuth();
 if (typeof window !== 'undefined') window.auth = auth; // ← 추가
-try {
-  setPersistence(auth, browserLocalPersistence).catch(() => {});
-} catch {}
 function isPlayerLoginOrCodeRoute() {
   try { return String(window?.location?.pathname || '').startsWith('/player/login-or-code'); }
   catch { return false; }
@@ -232,37 +225,18 @@ const ensureAuthed = (() => {
   let p;
   return () => {
     if (p) return p;
-    p = new Promise((resolve) => {
-      const stop = onAuthStateChanged(auth, async (user) => {
-        if (user) {
-          stop();
-          p = null;
-          resolve(user);
-          return;
-        }
+    p = (async () => {
+      const restored = await waitForAuthRestored(1800);
+      if (restored) { p = null; return restored; }
 
-        // 로그인 화면 진입만으로 익명 계정이 생성되지 않도록 차단합니다.
-        // 인증코드 입력 후 /player/events로 이동한 뒤에는 기존 흐름대로 익명 인증을 허용합니다.
-        if (isPlayerLoginOrCodeRoute()) {
-          stop();
-          p = null;
-          resolve(null);
-          return;
-        }
+      // 로그인 화면 진입만으로 익명 계정이 생성되지 않도록 차단합니다.
+      // 인증코드 입력/세션이 있는 참가자 흐름에서만 익명 인증을 허용합니다.
+      if (isPlayerLoginOrCodeRoute()) { p = null; return null; }
 
-        try {
-          const cred = await signInAnonymously(auth);
-          stop();
-          p = null;
-          resolve(cred?.user || auth.currentUser || null);
-        } catch (e) {
-          stop();
-          p = null;
-          console.warn('[EventContext] anonymous sign-in failed:', e);
-          resolve(null);
-        }
-      });
-    });
+      const anon = await ensureAnonAfterCode('', { timeoutMs: 300 });
+      p = null;
+      return anon || null;
+    })();
     return p;
   };
 })();

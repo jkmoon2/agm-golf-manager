@@ -3,10 +3,10 @@
 import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
-import { db } from '../../firebase';
+import { db, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
 import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
 import styles from './EventSelectScreen.module.css';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'; // ✅ 변경: 익명 로그인 보장 + 이메일 로그인 감지
+import { getAuth, onAuthStateChanged } from 'firebase/auth'; // ✅ 이메일 로그인 감지
 import { markPlayerAuthed, writePlayerTicket } from '../utils/playerState';
 
 export default function PlayerEventList() {
@@ -234,15 +234,16 @@ export default function PlayerEventList() {
   // - 이메일 로그인 사용자는 이메일 계정을 그대로 유지
   const ensureAnonymousAndMembership = async (eventId, via = 'code', participant = null) => {
     const auth = getAuth();
-    if (!auth.currentUser) {
-      await signInAnonymously(auth);
-    }
+    const user = via === 'email'
+      ? (await waitForAuthRestored(1200))
+      : (auth.currentUser || await ensureAnonAfterCode(eventId));
+    if (!user) return;
     try {
       await setDoc(
-        doc(db, 'events', eventId, 'memberships', auth.currentUser.uid),
+        doc(db, 'events', eventId, 'memberships', user.uid),
         {
-          uid: auth.currentUser.uid,
-          email: auth.currentUser.email || null,
+          uid: user.uid,
+          email: user.email || null,
           via,
           participantId: participant?.id ?? null,
           nickname: participant?.nickname || null,
@@ -259,9 +260,12 @@ export default function PlayerEventList() {
     try { localStorage.setItem('eventId', ev.id); } catch {}
 
     const auth = getAuth();
-    const emailUser = (auth.currentUser && !auth.currentUser.isAnonymous)
-      ? auth.currentUser
-      : ((authUser && !authUser.isAnonymous) ? authUser : null);
+    const restoredUser = await waitForAuthRestored(1200);
+    const emailUser = (restoredUser && !restoredUser.isAnonymous)
+      ? restoredUser
+      : ((auth.currentUser && !auth.currentUser.isAnonymous)
+        ? auth.currentUser
+        : ((authUser && !authUser.isAnonymous) ? authUser : null));
 
     // 이메일 로그인 사용자는 먼저 해당 대회의 참가자와 매칭한 뒤 입장
     if (emailUser) {

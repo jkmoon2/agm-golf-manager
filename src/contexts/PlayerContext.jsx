@@ -12,10 +12,10 @@ import {
   getDoc,           // ✅ 이벤트 문서 존재 확인
   getDocFromServer,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 import { EventContext } from './EventContext';
 import { useLocation } from 'react-router-dom';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 
 // (선택) 남아 있던 import — 사용하지 않아도 빌드 가능한 상태라면 그대로 두셔도 됩니다.
 // import { pickRoomForStroke } from '../player/logic/assignStroke';
@@ -292,12 +292,11 @@ function markEventAuthed(id, code, meObj) {
 }
 
 // ✅ 모든 쓰기 전에 인증 보장 + 콘솔 점검용 노출
-async function ensureAuthReady() {
+async function ensureAuthReady(eventId = '') {
   const auth = getAuth();
-  if (!auth.currentUser) {
-    const cred = await signInAnonymously(auth);
-    await cred.user.getIdToken(true);
-  } else {
+  if (!auth.currentUser) await waitForAuthRestored(1200);
+  if (!auth.currentUser) await ensureAnonAfterCode(eventId);
+  if (auth.currentUser) {
     await auth.currentUser.getIdToken(true);
   }
   if (DEBUG) {
@@ -518,7 +517,7 @@ if (!idCached) {
     }
     lastPlayerRefreshAtRef.current = now;
     try {
-      await ensureAuthReady();
+      await ensureAuthReady(eventId);
       let snap = null;
       try {
         snap = await getDocFromServer(doc(db, 'events', eventId));
@@ -650,7 +649,7 @@ if (!idCached) {
   // participants 저장 (최신 서버 기준 patch merge)
   async function writeParticipants(next) {
     if (!eventId) return participants;
-    await ensureAuthReady();
+    await ensureAuthReady(eventId);
 
     const nextMap = new Map((Array.isArray(next) ? next : []).map((p) => [normId(p?.id), p]).filter(([id]) => !!id));
     const currentMap = new Map((participants || []).map((p) => [normId(p?.id), p]));
@@ -703,7 +702,7 @@ if (!idCached) {
 
   // ─ API (원본 유지) ─
   async function joinRoom(roomNumber, id) {
-    await ensureAuthReady();
+    await ensureAuthReady(eventId);
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
     const next = participants.map((p) =>
@@ -721,14 +720,14 @@ if (!idCached) {
     }
 
     try {
-      await ensureAuthReady();
+      await ensureAuthReady(eventId);
       const rref = doc(db, 'events', eventId, 'rooms', String(rid));
       await setDoc(rref, { members: arrayUnion(targetId) }, { merge: true });
     } catch (_) {}
   }
 
   async function joinFourBall(roomNumber, p1, p2) {
-    await ensureAuthReady();
+    await ensureAuthReady(eventId);
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
@@ -747,7 +746,7 @@ if (!idCached) {
     }
 
     try {
-      await ensureAuthReady();
+      await ensureAuthReady(eventId);
       const fbref = doc(db, 'events', eventId, 'fourballRooms', String(rid));
       await setDoc(fbref, { pairs: arrayUnion({ p1: a, p2: b }) }, { merge: true });
     } catch (_) {}
@@ -762,7 +761,7 @@ if (!idCached) {
   };
 
   async function assignStrokeForOne(participantId) {
-    await ensureAuthReady();
+    await ensureAuthReady(eventId);
 
     const pid = normId(participantId || participant?.id);
     const result = await runTransaction(db, async (tx) => {
@@ -821,7 +820,7 @@ if (!idCached) {
   }
 
   async function assignFourballForOneAndPartner(participantId) {
-    await ensureAuthReady();
+    await ensureAuthReady(eventId);
 
     const pid = normId(participantId || participant?.id);
     const me = participants.find((p) => normId(p.id) === pid) ||
@@ -970,7 +969,7 @@ if (!idCached) {
     }
 
     try {
-      await ensureAuthReady();
+      await ensureAuthReady(eventId);
       const fbref = doc(db, 'events', eventId, 'fourballRooms', String(roomNumber));
       if (mateId) await setDoc(fbref, { pairs: arrayUnion({ p1: pid, p2: mateId }) }, { merge: true });
       else        await setDoc(fbref, { singles: arrayUnion(pid) }, { merge: true });
