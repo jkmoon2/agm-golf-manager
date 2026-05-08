@@ -1,6 +1,6 @@
 // /src/player/PlayerApp.jsx
 
-import React, { useEffect, useContext } from 'react';
+import React, { useEffect, useContext, useState } from 'react';
 import { Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
 
 import PlayerHome        from './screens/PlayerHome';
@@ -32,37 +32,73 @@ function playerStorageKey(eventId, key){
   return `agm:player:${getPlayerTabId()}:${eventId || 'noevent'}:${key}`;
 }
 
+const EMAIL_LOGIN_CONFIRMED_KEY = 'agm.emailLoginConfirmed';
+const EMAIL_LOGIN_CONFIRMED_AT_KEY = 'agm.emailLoginConfirmedAt';
+const EMAIL_LOGIN_EMAIL_KEY = 'agm.emailLoginEmail';
+const EMAIL_LOGIN_ACTIVE_KEY = 'agm.emailLoginActiveGate';
+
+function clearPlayerEntryGateOnUnload() {
+  try { localStorage.removeItem(EMAIL_LOGIN_ACTIVE_KEY); } catch {}
+  try { sessionStorage.removeItem(EMAIL_LOGIN_CONFIRMED_KEY); } catch {}
+  try { sessionStorage.removeItem(EMAIL_LOGIN_CONFIRMED_AT_KEY); } catch {}
+  try { sessionStorage.removeItem(EMAIL_LOGIN_EMAIL_KEY); } catch {}
+  try { sessionStorage.removeItem('agm.postLoginRedirect'); } catch {}
+}
+
+function hasCurrentPageEmailEntryGate() {
+  try {
+    return sessionStorage.getItem(EMAIL_LOGIN_CONFIRMED_KEY) === 'true'
+      && localStorage.getItem(EMAIL_LOGIN_ACTIVE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export default function PlayerApp() {
   const { eventId } = useParams();
   const nav = useNavigate();
   const { loadEvent } = useContext(EventContext) || {};
   const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext) || {};
+  const [entryGateReady, setEntryGateReady] = useState(false);
+
+  // ✅ 브라우저/탭을 닫거나 새로고침하면 "이번 화면에서 로그인 버튼을 눌렀다"는 게이트만 제거합니다.
+  // Firebase 이메일 세션 자체는 유지되므로, 다음 접속 때 로그인 화면에서 버튼을 한 번 더 누르면 됩니다.
+  useEffect(() => {
+    const cleanup = () => clearPlayerEntryGateOnUnload();
+    window.addEventListener('pagehide', cleanup);
+    window.addEventListener('beforeunload', cleanup);
+    return () => {
+      window.removeEventListener('pagehide', cleanup);
+      window.removeEventListener('beforeunload', cleanup);
+    };
+  }, []);
 
   useEffect(() => {
     if (!eventId) return;
 
     let cancelled = false;
+    setEntryGateReady(false);
 
     (async () => {
       // ✅ 안전망: 이메일 세션 복원을 먼저 기다린 뒤,
       // 인증코드 세션이 있는 경우에만 익명 로그인을 보장합니다.
       //
-      // ✅ 추가 보완:
-      // 브라우저 재시작/PWA 재실행 시 마지막 URL이 /player/home/... 으로 바로 열리면
-      // Firebase 이메일 세션이 살아 있어도 Player HOME으로 즉시 진입하지 않고,
-      // 먼저 로그인 화면을 보여준 뒤 사용자가 파란 로그인 버튼을 눌렀을 때만 진입시킵니다.
-      // 기존 인증코드 세션은 sessionStorage(auth_*, pending_code)가 살아 있을 때만 기존처럼 유지됩니다.
+      // ✅ 보완 핵심:
+      // 일부 브라우저는 "닫은 탭 복원/마지막 세션 복원" 설정 때문에 sessionStorage가 살아남을 수 있습니다.
+      // 따라서 이메일 로그인 후 Player HOME 진입 허용은 sessionStorage만 보지 않고,
+      // localStorage의 임시 active gate까지 함께 확인합니다. 이 active gate는 pagehide/beforeunload 때 제거됩니다.
       let hasSessionAuth = false;
       let emailSessionRestored = false;
       try {
         const auth = getAuth();
         const restored = auth.currentUser || await waitForAuthRestored(1500);
         emailSessionRestored = !!(restored && !restored.isAnonymous);
+        const hasEmailGate = hasCurrentPageEmailEntryGate();
         hasSessionAuth =
           sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
           !!sessionStorage.getItem(`participant_${eventId}`) ||
           !!sessionStorage.getItem('pending_code') ||
-          sessionStorage.getItem('agm.emailLoginConfirmed') === 'true';
+          hasEmailGate;
 
         if (!hasSessionAuth && emailSessionRestored) {
           try {
@@ -108,18 +144,20 @@ export default function PlayerApp() {
         const partSS = sessionStorage.getItem(`participant_${eventId}`);
         if (partSS) {
           try { applyAuthAndParticipant(codeSS, JSON.parse(partSS)); } catch {}
+          if (!cancelled) setEntryGateReady(true);
           return;
         }
 
         // 2) localStorage fallback
         // 브라우저 재시작 후 마지막 HOME URL이 바로 열리는 경우를 막기 위해,
-        // 로그인 화면에서 이메일 세션 확인 버튼을 누른 이번 세션에서만 localStorage 복원을 허용합니다.
-        const allowLocalRestore = sessionStorage.getItem('agm.emailLoginConfirmed') === 'true';
+        // 로그인 화면에서 이메일 세션 확인 버튼을 누른 이번 화면 세션에서만 localStorage 복원을 허용합니다.
+        const allowLocalRestore = hasCurrentPageEmailEntryGate();
         if (allowLocalRestore) {
           const partLS = localStorage.getItem(playerStorageKey(eventId, 'participant'));
           const codeLS = localStorage.getItem(playerStorageKey(eventId, 'authcode')) || '';
           if (partLS) {
             try { applyAuthAndParticipant(codeLS, JSON.parse(partLS)); } catch {}
+            if (!cancelled) setEntryGateReady(true);
             return;
           }
         }
@@ -139,6 +177,12 @@ export default function PlayerApp() {
     return () => { cancelled = true; };
 
   }, [eventId, loadEvent, setEventId, setAuthCode, setParticipant, nav]);
+
+  // ✅ 비동기 게이트 판단이 끝나기 전에는 Player HOME/STEP 화면을 먼저 렌더링하지 않습니다.
+  // 이로써 브라우저가 마지막 /player/home URL을 복원해도 홈화면이 먼저 뜨는 현상을 차단합니다.
+  if (!entryGateReady) {
+    return null;
+  }
 
   return (
     <Routes>
