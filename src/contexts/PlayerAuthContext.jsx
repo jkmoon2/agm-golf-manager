@@ -1,12 +1,12 @@
 // /src/contexts/PlayerAuthContext.jsx
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
-  onAuthStateChanged, signInAnonymously, setPersistence,
+  onAuthStateChanged, setPersistence,
   browserLocalPersistence, createUserWithEmailAndPassword,
   signInWithEmailAndPassword, sendPasswordResetEmail,
   linkWithCredential, EmailAuthProvider, signOut
 } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, ensureAnonAfterCode } from '../firebase';
 
 const Ctx = createContext(null);
 export const usePlayerAuth = () => useContext(Ctx);
@@ -21,11 +21,11 @@ export default function PlayerAuthProvider({ children }) {
     return () => off();
   }, []);
 
-  const ensureAnonymous = async () => {
-    // 인증코드 입장용 익명 세션은 브라우저를 닫으면 정리되는 세션 유지 방식으로 둡니다.
-    // 이메일 자동 로그인 세션과 섞이지 않도록 익명 로그인 직전에만 session persistence를 적용합니다.
+  const ensureAnonymous = async (eventId = '') => {
+    // 인증코드 입장 흐름에서만 익명 로그인을 보장합니다.
+    // 이메일 세션이 복원 중일 수 있으므로 즉시 signInAnonymously 하지 않습니다.
     if (!auth.currentUser) {
-      await signInAnonymously(auth);
+      await ensureAnonAfterCode(eventId);
     }
     return auth.currentUser;
   };

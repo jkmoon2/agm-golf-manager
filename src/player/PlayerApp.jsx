@@ -13,8 +13,8 @@ import PlayerEventConfirm from './screens/PlayerEventConfirm';
 
 import { EventContext }   from '../contexts/EventContext';
 import { PlayerContext }  from '../contexts/PlayerContext';
-import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅ 변경: 안전망
-import { db } from '../firebase';
+import { getAuth } from 'firebase/auth'; // ✅ 변경: 안전망
+import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 
 
@@ -44,11 +44,18 @@ export default function PlayerApp() {
     let cancelled = false;
 
     (async () => {
-      // ✅ 안전망: 항상 인증 보장(없는 경우만 익명 로그인)
+      // ✅ 안전망: 이메일 세션 복원을 먼저 기다린 뒤,
+      // 인증코드 세션이 있는 경우에만 익명 로그인을 보장합니다.
       try {
         const auth = getAuth();
         if (!auth.currentUser) {
-              await signInAnonymously(auth);
+          await waitForAuthRestored(1200);
+        }
+        if (!auth.currentUser) {
+          const hasCodeSession =
+            sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
+            !!sessionStorage.getItem('pending_code');
+          if (hasCodeSession) await ensureAnonAfterCode(eventId);
         }
       } catch {}
 

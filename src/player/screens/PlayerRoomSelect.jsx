@@ -7,8 +7,7 @@ import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
 
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth } from '../../firebase';
-import { signInAnonymously } from 'firebase/auth';
+import { db, auth, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
 import { writePlayerRoom } from '../utils/playerState';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 
@@ -41,14 +40,11 @@ const roomCapacityAt = (roomCapacities, roomNo) => {
   return Math.min(4, Math.max(1, safe));
 };
 
-async function ensureAuthReady() {
+async function ensureAuthReady(eventId = '') {
   try {
-    if (!auth?.currentUser) {
-      const cred = await signInAnonymously(auth);
-      await cred.user.getIdToken(true);
-    } else {
-      await auth.currentUser.getIdToken(true);
-    }
+    if (!auth?.currentUser) await waitForAuthRestored(1200);
+    if (!auth?.currentUser) await ensureAnonAfterCode(eventId);
+    if (auth?.currentUser) await auth.currentUser.getIdToken(true);
   } catch (e) {
     console.warn('[PlayerRoomSelect] ensureAuthReady', e);
   }
@@ -57,7 +53,7 @@ async function ensureAuthReady() {
 // ✅ Firestore 규칙 허용 필드만 기록( room, authCode, joinedAt )
 async function ensureMembership(eventId, myRoom) {
   try {
-    await ensureAuthReady();
+    await ensureAuthReady(eventId);
     const uid = auth?.currentUser?.uid || null;
     if (!uid || !eventId) return;
 

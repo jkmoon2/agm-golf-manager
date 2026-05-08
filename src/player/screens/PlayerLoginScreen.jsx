@@ -1,9 +1,9 @@
 // src/player/screens/PlayerLoginScreen.jsx
 
 import React, { useState, useContext, useEffect } from 'react';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 import { doc, getDoc }                from 'firebase/firestore';
-import { db }                          from '../../firebase';
+import { db, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
 import { PlayerContext }              from '../../contexts/PlayerContext';
 import styles                          from './PlayerLoginScreen.module.css';
 import { useNavigate, useParams }      from 'react-router-dom';
@@ -54,9 +54,11 @@ export default function PlayerLoginScreen() {
     const auth = getAuth();
 
     // 1) 익명 로그인(필요 시)
+    // 이메일 세션 복원을 먼저 기다리고, 인증코드 입력 흐름에서만 익명 로그인을 실행합니다.
     if (!auth.currentUser) {
       try {
-          await signInAnonymously(auth);
+        await waitForAuthRestored(1200);
+        if (!auth.currentUser) await ensureAnonAfterCode(routeEventId);
       }
       catch (err) { alert('익명 로그인 실패: ' + err.message); return; }
     }

@@ -4,10 +4,10 @@
 import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
-import { db } from '../../firebase';
+import { db, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
 import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅
 import styles from './EventSelectScreen.module.css';
-import { getAuth, signInAnonymously } from 'firebase/auth'; // ✅
+import { getAuth } from 'firebase/auth'; // ✅
 
 export default function EventSelectScreen() {
   const nav = useNavigate();
@@ -66,13 +66,12 @@ export default function EventSelectScreen() {
 
   const ensureAnonymousAndMembership = async (eventId) => {
     const auth = getAuth();
-    if (!auth.currentUser) {
-      await signInAnonymously(auth);
-    }
+    const user = auth.currentUser || await waitForAuthRestored(1200) || await ensureAnonAfterCode(eventId);
+    if (!user) return;
     try {
       await setDoc(
-        doc(db, 'events', eventId, 'memberships', auth.currentUser.uid),
-        { uid: auth.currentUser.uid, via: 'code', updatedAt: new Date().toISOString() },
+        doc(db, 'events', eventId, 'memberships', user.uid),
+        { uid: user.uid, via: 'code', updatedAt: new Date().toISOString() },
         { merge: true }
       );
     } catch {}

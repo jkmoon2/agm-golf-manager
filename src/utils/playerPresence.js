@@ -1,8 +1,8 @@
 // /src/utils/playerPresence.js
 
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
-import { db } from '../firebase';
+import { getAuth } from 'firebase/auth';
+import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 
 const HEARTBEAT_MS = 25000;
 const IDLE_MS = 5 * 60 * 1000;
@@ -27,14 +27,13 @@ export function makePresenceSessionId(eventId = '') {
   return `${eventId || 'noevent'}__${getPresenceTabId()}`;
 }
 
-async function ensureAuthReady() {
+async function ensureAuthReady(eventId = '') {
   const auth = getAuth();
-  if (!auth.currentUser) {
-    const cred = await signInAnonymously(auth);
-    try { await cred.user.getIdToken(true); } catch {}
-    return cred.user || null;
+  if (!auth.currentUser) await waitForAuthRestored(1200);
+  if (!auth.currentUser) await ensureAnonAfterCode(eventId);
+  if (auth.currentUser) {
+    try { await auth.currentUser.getIdToken(true); } catch {}
   }
-  try { await auth.currentUser.getIdToken(true); } catch {}
   return auth.currentUser || null;
 }
 
@@ -67,7 +66,7 @@ export function startPlayerPresence(opts = {}) {
   const writePresence = async ({ closing = false } = {}) => {
     if (disposed) return;
     try {
-      const user = await ensureAuthReady();
+      const user = await ensureAuthReady(eventId);
       const idle = (nowMs() - lastActivityAt) > IDLE_MS;
       const visible = (typeof document !== 'undefined') ? !document.hidden : true;
 
