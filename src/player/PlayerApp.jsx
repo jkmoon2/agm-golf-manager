@@ -35,22 +35,37 @@ function playerStorageKey(eventId, key){
 const EMAIL_LOGIN_CONFIRMED_KEY = 'agm.emailLoginConfirmed';
 const EMAIL_LOGIN_CONFIRMED_AT_KEY = 'agm.emailLoginConfirmedAt';
 const EMAIL_LOGIN_EMAIL_KEY = 'agm.emailLoginEmail';
-const EMAIL_LOGIN_ACTIVE_KEY = 'agm.emailLoginActiveGate';
+const EMAIL_ENTRY_GATE_GLOBAL = '__AGM_EMAIL_ENTRY_GATE__';
+const EMAIL_ENTRY_GATE_TTL_MS = 12 * 60 * 60 * 1000;
+
+function normalizeEmail(v) {
+  return String(v || '').trim().toLowerCase();
+}
 
 function clearPlayerEntryGateOnUnload() {
-  try { localStorage.removeItem(EMAIL_LOGIN_ACTIVE_KEY); } catch {}
+  // sessionStorage는 브라우저 설정에 따라 닫은 탭 복원 시 살아날 수 있습니다.
+  // 그래도 기존 진단/호환 키는 정리하되, 최종 홈 진입 판단은 window 전역 게이트로만 합니다.
   try { sessionStorage.removeItem(EMAIL_LOGIN_CONFIRMED_KEY); } catch {}
   try { sessionStorage.removeItem(EMAIL_LOGIN_CONFIRMED_AT_KEY); } catch {}
   try { sessionStorage.removeItem(EMAIL_LOGIN_EMAIL_KEY); } catch {}
   try { sessionStorage.removeItem('agm.postLoginRedirect'); } catch {}
 }
 
-function hasCurrentPageEmailEntryGate() {
+function getFreshEmailEntryGate(expectedEmail = '') {
   try {
-    return sessionStorage.getItem(EMAIL_LOGIN_CONFIRMED_KEY) === 'true'
-      && localStorage.getItem(EMAIL_LOGIN_ACTIVE_KEY) === 'true';
+    const gate = window[EMAIL_ENTRY_GATE_GLOBAL];
+    if (!gate || gate.via !== 'email') return null;
+    const at = Number(gate.at || 0);
+    const expireAt = Number(gate.expireAt || 0);
+    const now = Date.now();
+    if (!at || now - at > EMAIL_ENTRY_GATE_TTL_MS) return null;
+    if (expireAt && now > expireAt) return null;
+    const gateEmail = normalizeEmail(gate.email || '');
+    const expected = normalizeEmail(expectedEmail);
+    if (expected && gateEmail && expected !== gateEmail) return null;
+    return gate;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -93,14 +108,22 @@ export default function PlayerApp() {
         const auth = getAuth();
         const restored = auth.currentUser || await waitForAuthRestored(1500);
         emailSessionRestored = !!(restored && !restored.isAnonymous);
-        const hasEmailGate = hasCurrentPageEmailEntryGate();
-        hasSessionAuth =
-          sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
-          !!sessionStorage.getItem(`participant_${eventId}`) ||
-          !!sessionStorage.getItem('pending_code') ||
-          hasEmailGate;
 
-        if (!hasSessionAuth && emailSessionRestored) {
+        const loginVia = String(sessionStorage.getItem(`agm.loginVia_${eventId}`) || '');
+        const codeSS = sessionStorage.getItem(`authcode_${eventId}`) || '';
+        const hasPendingCode = !!sessionStorage.getItem('pending_code');
+        const hasAuthFlag = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+        const hasCodeSession = hasPendingCode || loginVia === 'code' || (!loginVia && !!codeSS && hasAuthFlag);
+        const hasEmailGate = emailSessionRestored && !!getFreshEmailEntryGate(restored?.email || '');
+        const hasEmailSessionAuth = emailSessionRestored && (loginVia === 'email' || hasAuthFlag || !!sessionStorage.getItem(`participant_${eventId}`));
+
+        hasSessionAuth = hasCodeSession || hasEmailGate;
+
+        // ✅ 핵심 보완:
+        // 이메일 세션과 참가자 캐시가 남아 있어도, 이번 화면에서 로그인 버튼을 누른 window 전역 게이트가 없으면
+        // Player HOME을 바로 열지 않고 로그인 화면으로 되돌립니다.
+        // 단, 인증코드 세션은 기존 운영 흐름을 유지하기 위해 그대로 허용합니다.
+        if (!hasCodeSession && hasEmailSessionAuth && !hasEmailGate) {
           try {
             const currentPath = `${window.location.pathname || ''}${window.location.search || ''}${window.location.hash || ''}`;
             sessionStorage.setItem('agm.postLoginRedirect', currentPath || `/player/home/${eventId}`);
@@ -110,9 +133,6 @@ export default function PlayerApp() {
         }
 
         if (!auth.currentUser && !emailSessionRestored) {
-          const hasCodeSession =
-            sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
-            !!sessionStorage.getItem('pending_code');
           if (hasCodeSession) await ensureAnonAfterCode(eventId);
         }
       } catch {}
@@ -143,6 +163,24 @@ export default function PlayerApp() {
 
         const partSS = sessionStorage.getItem(`participant_${eventId}`);
         if (partSS) {
+          const loginVia = String(sessionStorage.getItem(`agm.loginVia_${eventId}`) || '');
+          const codeSSForGate = sessionStorage.getItem(`authcode_${eventId}`) || '';
+          const hasPendingCodeForGate = !!sessionStorage.getItem('pending_code');
+          const hasAuthFlagForGate = sessionStorage.getItem(`auth_${eventId}`) === 'true';
+          const isCodeSessionForGate = hasPendingCodeForGate || loginVia === 'code' || (!loginVia && !!codeSSForGate && hasAuthFlagForGate);
+          const restoredForGate = getAuth().currentUser;
+          const isEmailSessionForGate = !!(restoredForGate && !restoredForGate.isAnonymous) && (loginVia === 'email' || hasAuthFlagForGate);
+          const hasFreshEmailGateForGate = !!getFreshEmailEntryGate(restoredForGate?.email || '');
+
+          if (isEmailSessionForGate && !isCodeSessionForGate && !hasFreshEmailGateForGate) {
+            try {
+              const currentPath = `${window.location.pathname || ''}${window.location.search || ''}${window.location.hash || ''}`;
+              sessionStorage.setItem('agm.postLoginRedirect', currentPath || `/player/home/${eventId}`);
+            } catch {}
+            if (!cancelled) nav('/player/login-or-code', { replace: true });
+            return;
+          }
+
           try { applyAuthAndParticipant(codeSS, JSON.parse(partSS)); } catch {}
           if (!cancelled) setEntryGateReady(true);
           return;
@@ -151,7 +189,7 @@ export default function PlayerApp() {
         // 2) localStorage fallback
         // 브라우저 재시작 후 마지막 HOME URL이 바로 열리는 경우를 막기 위해,
         // 로그인 화면에서 이메일 세션 확인 버튼을 누른 이번 화면 세션에서만 localStorage 복원을 허용합니다.
-        const allowLocalRestore = hasCurrentPageEmailEntryGate();
+        const allowLocalRestore = !!getFreshEmailEntryGate();
         if (allowLocalRestore) {
           const partLS = localStorage.getItem(playerStorageKey(eventId, 'participant'));
           const codeLS = localStorage.getItem(playerStorageKey(eventId, 'authcode')) || '';

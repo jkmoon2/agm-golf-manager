@@ -25,6 +25,8 @@ function InnerLoginOrCode({ onEnter }) {
   const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext) || {};
 
   const SAVED_EMAIL_KEY = 'agm.player.savedEmail';
+  const EMAIL_ENTRY_GATE_GLOBAL = '__AGM_EMAIL_ENTRY_GATE__';
+  const EMAIL_ENTRY_GATE_TTL_MS = 12 * 60 * 60 * 1000;
   const [tab, setTab]   = useState('login');
   const [email, setEmail] = useState(() => {
     try { return localStorage.getItem(SAVED_EMAIL_KEY) || ''; } catch { return ''; }
@@ -161,16 +163,22 @@ function InnerLoginOrCode({ onEnter }) {
 
 
   // ✅ 이메일 세션은 살아 있더라도, 사용자가 로그인 화면에서 버튼을 눌렀을 때만
-  //    이번 브라우저 세션의 Player HOME 진입을 허용합니다.
-  //    브라우저 재시작 후 마지막 HOME URL이 바로 열려도 먼저 로그인 화면을 거치게 하기 위한 장치입니다.
+  //    이번 JS 실행 컨텍스트에서 Player HOME 진입을 허용합니다.
+  //    sessionStorage/localStorage는 브라우저의 "이전 세션 복원" 설정에 따라 살아남을 수 있으므로,
+  //    브라우저를 새로 열면 사라지는 window 전역 게이트를 최종 기준으로 사용합니다.
   const markEmailLoginConfirmed = (em) => {
+    const normalizedEmail = normalizeEmail(em);
+    const now = Date.now();
     try {
       sessionStorage.setItem('agm.emailLoginConfirmed', 'true');
-      sessionStorage.setItem('agm.emailLoginConfirmedAt', String(Date.now()));
-      if (em) sessionStorage.setItem('agm.emailLoginEmail', normalizeEmail(em));
-      // 일부 브라우저는 닫은 탭 복원 시 sessionStorage가 살아남을 수 있으므로,
-      // 현재 페이지 생명주기 동안만 유지되는 보조 게이트를 함께 사용합니다.
-      localStorage.setItem('agm.emailLoginActiveGate', 'true');
+      sessionStorage.setItem('agm.emailLoginConfirmedAt', String(now));
+      if (normalizedEmail) sessionStorage.setItem('agm.emailLoginEmail', normalizedEmail);
+      window[EMAIL_ENTRY_GATE_GLOBAL] = {
+        via: 'email',
+        email: normalizedEmail,
+        at: now,
+        expireAt: now + EMAIL_ENTRY_GATE_TTL_MS,
+      };
     } catch {}
   };
 

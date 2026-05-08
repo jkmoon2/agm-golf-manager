@@ -17,6 +17,29 @@ export default function PlayerEventList() {
   const [authUser, setAuthUser] = useState(null);
   const events = useMemo(() => (allEvents?.length ? allEvents : cache), [allEvents, cache]);
 
+
+  // ✅ 이메일 세션이 살아 있어도, 로그인 화면에서 사용자가 버튼을 누른 현재 JS 실행 컨텍스트에서만
+  //    대회 목록/참가자 홈 진입을 허용합니다. sessionStorage는 브라우저 복원 시 살아날 수 있어 최종 기준으로 쓰지 않습니다.
+  const EMAIL_ENTRY_GATE_GLOBAL = '__AGM_EMAIL_ENTRY_GATE__';
+  const EMAIL_ENTRY_GATE_TTL_MS = 12 * 60 * 60 * 1000;
+  const getFreshEmailEntryGate = (expectedEmail = '') => {
+    try {
+      const gate = window[EMAIL_ENTRY_GATE_GLOBAL];
+      if (!gate || gate.via !== 'email') return null;
+      const now = Date.now();
+      const at = Number(gate.at || 0);
+      const expireAt = Number(gate.expireAt || 0);
+      if (!at || now - at > EMAIL_ENTRY_GATE_TTL_MS) return null;
+      if (expireAt && now > expireAt) return null;
+      const gateEmail = normEmail(gate.email || '');
+      const expected = normEmail(expectedEmail);
+      if (expected && gateEmail && expected !== gateEmail) return null;
+      return gate;
+    } catch {
+      return null;
+    }
+  };
+
   // ✅ 숨김 처리: 참가자 화면에서 숨긴 대회(isHidden) 제외
   const visibleEvents = useMemo(
     () => (Array.isArray(events) ? events.filter(ev => !ev?.isHidden) : []),
@@ -51,6 +74,18 @@ export default function PlayerEventList() {
         k => k.startsWith('auth_') && sessionStorage.getItem(k) === 'true'
       );
       const emailUser = !!(authUser && !authUser.isAnonymous);
+      const emailGate = emailUser ? !!getFreshEmailEntryGate(authUser?.email || '') : false;
+      let hasCodeVia = false;
+      try {
+        for (let i = 0; i < sessionStorage.length; i += 1) {
+          const k = sessionStorage.key(i);
+          if (k && k.startsWith('agm.loginVia_') && sessionStorage.getItem(k) === 'code') hasCodeVia = true;
+        }
+      } catch {}
+      if (emailUser && !emailGate && !hasPending && !hasCodeVia) {
+        nav('/player/login-or-code', { replace: true });
+        return;
+      }
       if (!hasPending && !authedSome && !emailUser) {
         nav('/player/login-or-code', { replace: true });
       }
@@ -222,7 +257,8 @@ export default function PlayerEventList() {
 
       // 통과 처리 (세션 보존)
       markPlayerAuthed(eventId, sessionStorage.getItem('pending_code') || '', participant);
-      writePlayerTicket(eventId, { code: sessionStorage.getItem('pending_code') || '', ts: Date.now() });
+      try { sessionStorage.setItem(`agm.loginVia_${eventId}`, 'code'); } catch {}
+      writePlayerTicket(eventId, { code: sessionStorage.getItem('pending_code') || '', via: 'code', ts: Date.now() });
       return { ok:true, participant };
     } catch {
       return { ok:false };
@@ -280,6 +316,7 @@ export default function PlayerEventList() {
         );
         return;
       }
+      try { sessionStorage.setItem(`agm.loginVia_${ev.id}`, 'email'); } catch {}
       markPlayerAuthed(ev.id, participant?.authCode || '', participant);
       writePlayerTicket(ev.id, { via: 'email', email: emailUser.email || '', participantId: participant?.id ?? null, ts: Date.now() });
       await ensureAnonymousAndMembership(ev.id, 'email', participant);
@@ -291,6 +328,9 @@ export default function PlayerEventList() {
     // 이미 인증된 대회면 코드 없이 바로 입장
     try {
       if (sessionStorage.getItem(`auth_${ev.id}`) === 'true') {
+        try {
+          if (!sessionStorage.getItem(`agm.loginVia_${ev.id}`)) sessionStorage.setItem(`agm.loginVia_${ev.id}`, 'code');
+        } catch {}
         await ensureAnonymousAndMembership(ev.id, 'code'); // ✅ 변경
         if (typeof loadEvent === 'function') { try { await loadEvent(ev.id); } catch {} }
         nav(`/player/home/${ev.id}`, { replace: true });
