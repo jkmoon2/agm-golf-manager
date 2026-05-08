@@ -25,8 +25,6 @@ function InnerLoginOrCode({ onEnter }) {
   const { setEventId, setAuthCode, setParticipant } = useContext(PlayerContext) || {};
 
   const SAVED_EMAIL_KEY = 'agm.player.savedEmail';
-  const AUTO_LOGIN_KEY = 'agm.player.autoLogin';
-  const AUTO_PW_MASK = '********';
   const [tab, setTab]   = useState('login');
   const [email, setEmail] = useState(() => {
     try { return localStorage.getItem(SAVED_EMAIL_KEY) || ''; } catch { return ''; }
@@ -34,17 +32,14 @@ function InnerLoginOrCode({ onEnter }) {
   const [rememberEmail, setRememberEmail] = useState(() => {
     try { return !!localStorage.getItem(SAVED_EMAIL_KEY); } catch { return false; }
   });
-  const [autoLogin, setAutoLogin] = useState(() => {
-    try { return localStorage.getItem(AUTO_LOGIN_KEY) === '1'; } catch { return false; }
-  });
   const [pw, setPw]       = useState('');
   const [code, setCode]   = useState('');
   const [busy, setBusy]   = useState(false);
   const [showSignup, setShowSignup] = useState(false);
   const [showReset,  setShowReset]  = useState(false);
-  const [autoSessionReady, setAutoSessionReady] = useState(false);
-  const [autoSessionChecked, setAutoSessionChecked] = useState(false);
-  const [autoSessionChecking, setAutoSessionChecking] = useState(false);
+  const [savedSessionReady, setSavedSessionReady] = useState(false);
+  const [savedSessionChecked, setSavedSessionChecked] = useState(false);
+  const [savedSessionChecking, setSavedSessionChecking] = useState(false);
 
   const membersOnly = !!eventData?.membersOnly;
 
@@ -90,10 +85,8 @@ function InnerLoginOrCode({ onEnter }) {
     });
   };
 
-  // 자동 로그인은 비밀번호를 저장하지 않고 Firebase Auth의 로그인 유지 세션을 사용합니다.
-  // 표시 조건을 더 엄격하고 명확하게 분리합니다.
-  // - 초록색: Firebase 이메일 세션이 실제로 살아 있고, 저장/입력 이메일과 일치할 때
-  // - 주황색: 자동 로그인 체크값은 남아 있지만 Firebase 이메일 세션이 없거나 다른 이메일일 때
+  // 로그인 세션 확인은 별도 "자동 로그인" 체크박스에 의존하지 않습니다.
+  // 저장된 이메일과 Firebase 이메일 세션이 같은 경우에만 비밀번호 없이 로그인 버튼으로 입장합니다.
   useEffect(() => {
     if (!ready) return;
 
@@ -104,41 +97,38 @@ function InnerLoginOrCode({ onEnter }) {
     const typedEmail = normalizeEmail(email);
     const expectedEmail = typedEmail || savedEmail;
 
-    if (!autoLogin) {
-      setAutoSessionReady(false);
-      setAutoSessionChecked(true);
-      setAutoSessionChecking(false);
-      return;
+    if (!expectedEmail) {
+      setSavedSessionReady(false);
+      setSavedSessionChecked(true);
+      setSavedSessionChecking(false);
+      return () => { alive = false; };
     }
 
-    setAutoSessionReady(false);
-    setAutoSessionChecked(false);
-    setAutoSessionChecking(true);
+    setSavedSessionReady(false);
+    setSavedSessionChecked(false);
+    setSavedSessionChecking(true);
 
-    waitForEmailSessionUser(expectedEmail, 1800).then((sessionUser) => {
+    waitForEmailSessionUser(expectedEmail, 2200).then((sessionUser) => {
       if (!alive) return;
       const sessionEmail = normalizeEmail(sessionUser?.email || '');
-      const ok = !!sessionUser && !!sessionEmail;
+      const ok = !!sessionUser && !!sessionEmail && (!expectedEmail || sessionEmail === expectedEmail);
 
-      setAutoSessionReady(ok);
-      setAutoSessionChecked(true);
-      setAutoSessionChecking(false);
+      setSavedSessionReady(ok);
+      setSavedSessionChecked(true);
+      setSavedSessionChecking(false);
 
       if (ok) {
         if (sessionEmail && normalizeEmail(email) !== sessionEmail) setEmail(sessionEmail);
         if (pw) setPw('');
         try {
           localStorage.setItem(SAVED_EMAIL_KEY, sessionEmail);
-          localStorage.setItem(AUTO_LOGIN_KEY, '1');
         } catch {}
-      } else if (pw === AUTO_PW_MASK) {
-        setPw('');
       }
     });
 
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, autoLogin, user, email]);
+  }, [ready, user, email]);
   // ❌ (삭제) auth_* 존재 시 자동 이동 → 리스트 먼저 보여야 하므로 제거
   // useEffect(() => { ... }, []);
 
@@ -164,10 +154,8 @@ function InnerLoginOrCode({ onEnter }) {
 
   const rememberCurrentEmail = (em) => {
     try {
-      if (rememberEmail || autoLogin) localStorage.setItem(SAVED_EMAIL_KEY, em || '');
+      if (rememberEmail) localStorage.setItem(SAVED_EMAIL_KEY, em || '');
       else localStorage.removeItem(SAVED_EMAIL_KEY);
-      if (autoLogin) localStorage.setItem(AUTO_LOGIN_KEY, '1');
-      else localStorage.removeItem(AUTO_LOGIN_KEY);
     } catch {}
   };
 
@@ -248,30 +236,29 @@ function InnerLoginOrCode({ onEnter }) {
   const handleLogin = async () => {
     const em = email.trim();
     if (!em) { alert('이메일을 입력해 주세요.'); return; }
-    // 자동 로그인 세션이 확인된 경우에는 비밀번호 입력값과 무관하게 입장합니다.
-    // 실제 비밀번호는 브라우저에 저장하지 않고 Firebase 이메일 세션만 재사용합니다.
-    if (autoLogin) {
-      const sessionUser = autoSessionReady
-        ? getEmailSessionUser(em)
-        : await waitForEmailSessionUser(em, 800);
-      if (sessionUser) {
-        rememberCurrentEmail(sessionUser.email || em);
-        try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
-        try { writePlayerTicket('global', { via:'email-auto-session', email: sessionUser.email || em, ts:Date.now() }); } catch {}
-        navigate('/player/events', { replace: true });
-        return;
-      }
+
+    // Firebase 이메일 세션이 살아 있으면 비밀번호 없이 로그인 버튼으로 입장합니다.
+    // 실제 비밀번호는 브라우저에 저장하지 않습니다.
+    const sessionUser = savedSessionReady
+      ? getEmailSessionUser(em)
+      : await waitForEmailSessionUser(em, 800);
+    if (sessionUser) {
+      rememberCurrentEmail(sessionUser.email || em);
+      try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
+      try { writePlayerTicket('global', { via:'email-session', email: sessionUser.email || em, ts:Date.now() }); } catch {}
+      navigate('/player/events', { replace: true });
+      return;
     }
-    if (!pw.trim())    { alert(autoLogin ? '자동 로그인 세션이 확인되지 않았습니다. 비밀번호를 다시 입력해 주세요.' : '비밀번호를 입력해 주세요.'); return; }
-    if (pw === AUTO_PW_MASK && !autoSessionReady) { alert('자동 로그인 세션이 만료되었습니다. 비밀번호를 다시 입력해 주세요.'); setPw(''); return; }
+
+    if (!pw.trim()) { alert('비밀번호를 입력해 주세요.'); return; }
     setBusy(true);
     try {
       const cred = await signInEmail(em, pw);
       await ensureUserDoc(cred?.user, { email: em });
       rememberCurrentEmail(cred?.user?.email || em);
-      setAutoSessionReady(!!autoLogin);
-      setAutoSessionChecked(true);
-      setAutoSessionChecking(false);
+      setSavedSessionReady(true);
+      setSavedSessionChecked(true);
+      setSavedSessionChecking(false);
       try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
       try { writePlayerTicket('global', { via:'email-login', email: em, ts:Date.now() }); } catch {}
       // 이메일 로그인은 특정 대회/참가자 확정 전 단계이므로 항상 대회 목록으로 이동
@@ -291,7 +278,7 @@ function InnerLoginOrCode({ onEnter }) {
 
 
   const loginButtonEnabled = !busy && !!(
-    autoSessionReady ||
+    savedSessionReady ||
     (normalizeEmail(email) && pw.trim())
   );
   const codeButtonEnabled = !busy && !!code.trim();
@@ -313,12 +300,12 @@ function InnerLoginOrCode({ onEnter }) {
               <div className={styles.form}>
                 <input className={`${styles.input} selectable`} placeholder="이메일" value={email} onChange={(e)=>setEmail(e.target.value)} />
                 <input
-                  className={`${styles.input} selectable ${autoSessionReady ? styles.autoPwInput : ''}`}
-                  placeholder={autoSessionReady ? '자동 로그인 세션 확인됨' : '비밀번호'}
+                  className={`${styles.input} selectable`}
+                  placeholder={savedSessionReady ? '로그인 세션 확인됨' : '비밀번호'}
                   type="password"
                   value={pw}
-                  readOnly={autoSessionReady}
-                  disabled={autoSessionReady}
+                  readOnly={savedSessionReady}
+                  disabled={savedSessionReady}
                   onChange={(e)=>setPw(e.target.value)}
                 />
                 <div className={styles.rememberOptions}>
@@ -331,46 +318,24 @@ function InnerLoginOrCode({ onEnter }) {
                         setRememberEmail(checked);
                         try {
                           if (checked) localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
-                          else if (!autoLogin) localStorage.removeItem(SAVED_EMAIL_KEY);
+                          else localStorage.removeItem(SAVED_EMAIL_KEY);
                         } catch {}
                       }}
                     />
                     <span>이메일 저장</span>
                   </label>
-                  <label className={styles.rememberRow}>
-                    <input
-                      type="checkbox"
-                      checked={autoLogin}
-                      onChange={(e)=>{
-                        const checked = e.target.checked;
-                        setAutoLogin(checked);
-                        try {
-                          if (checked) {
-                            localStorage.setItem(AUTO_LOGIN_KEY, '1');
-                            localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
-                            setRememberEmail(true);
-                          } else {
-                            localStorage.removeItem(AUTO_LOGIN_KEY);
-                          }
-                        } catch {}
-                      }}
-                    />
-                    <span>자동 로그인</span>
-                  </label>
                 </div>
-                {autoLogin && (
-                  <div className={`${styles.autoLoginStatus} ${autoSessionReady ? styles.autoLoginReady : styles.autoLoginExpired}`}>
-                    {autoSessionReady
-                      ? '자동 로그인 세션이 확인되었습니다. 자동 로그인 버튼만 누르면 입장합니다.'
-                      : (autoSessionChecking
-                        ? '자동 로그인 세션을 확인하는 중입니다.'
-                        : (autoSessionChecked
-                          ? '자동 로그인 체크는 유지되어 있지만 세션이 확인되지 않았습니다. 같은 브라우저/주소에서 로그인한 세션이 없으면 비밀번호를 다시 입력해야 합니다.'
-                          : '자동 로그인 세션을 확인하는 중입니다.'))}
+                {(savedSessionReady || savedSessionChecking || (savedSessionChecked && rememberEmail && email)) && (
+                  <div className={`${styles.autoLoginStatus} ${savedSessionReady ? styles.autoLoginReady : styles.autoLoginExpired}`}>
+                    {savedSessionReady
+                      ? '로그인 세션이 유지되어 있습니다. 비밀번호 없이 로그인 버튼만 누르면 입장합니다.'
+                      : (savedSessionChecking
+                        ? '로그인 세션을 확인하는 중입니다.'
+                        : '저장된 이메일입니다. 세션이 없으면 비밀번호를 입력해야 합니다.')}
                   </div>
                 )}
                 <div className={styles.actions}>
-                  <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={!loginButtonEnabled}>{autoSessionReady ? '자동 로그인' : '로그인'}</button>
+                  <button type="button" className={`${styles.primary} selectable`} onClick={handleLogin} disabled={!loginButtonEnabled}>로그인</button>
                   <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowSignup(true)} disabled={busy}>회원가입</button>
                   <button type="button" className={`${styles.ghost} selectable`}   onClick={()=>setShowReset(true)}  disabled={busy}>비번 재설정</button>
                 </div>
