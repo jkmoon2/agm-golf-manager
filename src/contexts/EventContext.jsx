@@ -27,7 +27,6 @@ import {
   signInAnonymously,
   setPersistence,
   browserLocalPersistence,
-  browserSessionPersistence,
 } from 'firebase/auth';
 
 /* 저장 전에 undefined/NaN 정제 */
@@ -252,7 +251,6 @@ const ensureAuthed = (() => {
         }
 
         try {
-          await setPersistence(auth, browserSessionPersistence).catch(() => {});
           const cred = await signInAnonymously(auth);
           stop();
           p = null;

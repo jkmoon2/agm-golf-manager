@@ -6,9 +6,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signInAnonymously,
-  signOut,
-  setPersistence,
-  browserSessionPersistence
+  signOut
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -96,7 +94,6 @@ export function AuthProvider({ children }) {
       return auth.currentUser;
     }
 
-await setPersistence(auth, browserSessionPersistence).catch(() => {});
 const cred = await signInAnonymously(auth);
     try {
       sessionStorage.removeItem('agm.adminLoginUid');
