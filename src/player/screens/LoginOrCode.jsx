@@ -168,6 +168,9 @@ function InnerLoginOrCode({ onEnter }) {
       sessionStorage.setItem('agm.emailLoginConfirmed', 'true');
       sessionStorage.setItem('agm.emailLoginConfirmedAt', String(Date.now()));
       if (em) sessionStorage.setItem('agm.emailLoginEmail', normalizeEmail(em));
+      // 일부 브라우저는 닫은 탭 복원 시 sessionStorage가 살아남을 수 있으므로,
+      // 현재 페이지 생명주기 동안만 유지되는 보조 게이트를 함께 사용합니다.
+      localStorage.setItem('agm.emailLoginActiveGate', 'true');
     } catch {}
   };
 
