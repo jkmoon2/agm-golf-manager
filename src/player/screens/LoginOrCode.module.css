@@ -101,6 +101,13 @@
   cursor: pointer;
 }
 
+.primary:disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+  border: 1px solid #d1d5db;
+}
+
 .ghost {
   height: 44px;
   border-radius: 10px;
