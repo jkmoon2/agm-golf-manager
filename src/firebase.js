@@ -98,15 +98,11 @@ async function ensureUserProfile(user){
   }
 }
 
-// [ADD] 상태변경: 코드 통과자만 익명 로그인 1회 생성, 회원이면 프로필 ensure
+// [ADD] 상태변경: 이메일 회원이면 프로필만 보강합니다.
+// 로그인 화면/앱 초기 진입만으로 익명 계정이 생성되면 이메일 세션 복원과 충돌할 수 있으므로,
+// 익명 로그인은 인증코드 검증 이후 각 화면의 기존 흐름에서만 실행합니다.
 onAuthStateChanged(auth, (user) => {
   if (user) { ensureUserProfile(user); }
-  if (!user && hasAnyCodeOk()) {
-    setPersistence(auth, browserSessionPersistence)
-      .catch(() => {})
-      .then(() => signInAnonymously(auth))
-      .catch(err => console.warn('[Auth] signInAnonymously failed:', err));
-  }
 });
 
 // [NOTE]
