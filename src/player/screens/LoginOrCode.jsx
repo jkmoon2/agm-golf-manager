@@ -159,6 +159,29 @@ function InnerLoginOrCode({ onEnter }) {
     } catch {}
   };
 
+
+  // ✅ 이메일 세션은 살아 있더라도, 사용자가 로그인 화면에서 버튼을 눌렀을 때만
+  //    이번 브라우저 세션의 Player HOME 진입을 허용합니다.
+  //    브라우저 재시작 후 마지막 HOME URL이 바로 열려도 먼저 로그인 화면을 거치게 하기 위한 장치입니다.
+  const markEmailLoginConfirmed = (em) => {
+    try {
+      sessionStorage.setItem('agm.emailLoginConfirmed', 'true');
+      sessionStorage.setItem('agm.emailLoginConfirmedAt', String(Date.now()));
+      if (em) sessionStorage.setItem('agm.emailLoginEmail', normalizeEmail(em));
+    } catch {}
+  };
+
+  const consumePostLoginRedirect = () => {
+    try {
+      const v = sessionStorage.getItem('agm.postLoginRedirect') || '';
+      if (v && v.startsWith('/player/home/')) {
+        sessionStorage.removeItem('agm.postLoginRedirect');
+        return v;
+      }
+    } catch {}
+    return '/player/events';
+  };
+
   const normalizeText = (v) => String(v || '').trim().replace(/\s+/g, ' ');
   const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
 
@@ -244,9 +267,10 @@ function InnerLoginOrCode({ onEnter }) {
       : await waitForEmailSessionUser(em, 800);
     if (sessionUser) {
       rememberCurrentEmail(sessionUser.email || em);
+      markEmailLoginConfirmed(sessionUser.email || em);
       try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
       try { writePlayerTicket('global', { via:'email-session', email: sessionUser.email || em, ts:Date.now() }); } catch {}
-      navigate('/player/events', { replace: true });
+      navigate(consumePostLoginRedirect(), { replace: true });
       return;
     }
 
@@ -256,13 +280,15 @@ function InnerLoginOrCode({ onEnter }) {
       const cred = await signInEmail(em, pw);
       await ensureUserDoc(cred?.user, { email: em });
       rememberCurrentEmail(cred?.user?.email || em);
+      markEmailLoginConfirmed(cred?.user?.email || em);
       setSavedSessionReady(true);
       setSavedSessionChecked(true);
       setSavedSessionChecking(false);
       try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
       try { writePlayerTicket('global', { via:'email-login', email: em, ts:Date.now() }); } catch {}
-      // 이메일 로그인은 특정 대회/참가자 확정 전 단계이므로 항상 대회 목록으로 이동
-      navigate('/player/events', { replace: true });
+      // 이메일 로그인은 보통 대회 목록으로 이동하지만,
+      // 브라우저 재시작 후 마지막 Player HOME URL에서 온 경우에는 로그인 버튼 클릭 후 그 위치로 복귀합니다.
+      navigate(consumePostLoginRedirect(), { replace: true });
     } catch (err) {
       alert(`로그인 실패: ${err?.message || err}`);
     } finally { setBusy(false); }
@@ -370,6 +396,7 @@ function InnerLoginOrCode({ onEnter }) {
                   }, { merge: true });
                   await ensurePasswordResetIndex(u, { email: u.email || em, name });
                   setEmail(em);
+                  markEmailLoginConfirmed(u.email || em);
                   try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
                   try {
                     if (rememberEmail) localStorage.setItem(SAVED_EMAIL_KEY, em);

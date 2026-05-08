@@ -46,12 +46,34 @@ export default function PlayerApp() {
     (async () => {
       // ✅ 안전망: 이메일 세션 복원을 먼저 기다린 뒤,
       // 인증코드 세션이 있는 경우에만 익명 로그인을 보장합니다.
+      //
+      // ✅ 추가 보완:
+      // 브라우저 재시작/PWA 재실행 시 마지막 URL이 /player/home/... 으로 바로 열리면
+      // Firebase 이메일 세션이 살아 있어도 Player HOME으로 즉시 진입하지 않고,
+      // 먼저 로그인 화면을 보여준 뒤 사용자가 파란 로그인 버튼을 눌렀을 때만 진입시킵니다.
+      // 기존 인증코드 세션은 sessionStorage(auth_*, pending_code)가 살아 있을 때만 기존처럼 유지됩니다.
+      let hasSessionAuth = false;
+      let emailSessionRestored = false;
       try {
         const auth = getAuth();
-        if (!auth.currentUser) {
-          await waitForAuthRestored(1200);
+        const restored = auth.currentUser || await waitForAuthRestored(1500);
+        emailSessionRestored = !!(restored && !restored.isAnonymous);
+        hasSessionAuth =
+          sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
+          !!sessionStorage.getItem(`participant_${eventId}`) ||
+          !!sessionStorage.getItem('pending_code') ||
+          sessionStorage.getItem('agm.emailLoginConfirmed') === 'true';
+
+        if (!hasSessionAuth && emailSessionRestored) {
+          try {
+            const currentPath = `${window.location.pathname || ''}${window.location.search || ''}${window.location.hash || ''}`;
+            sessionStorage.setItem('agm.postLoginRedirect', currentPath || `/player/home/${eventId}`);
+          } catch {}
+          if (!cancelled) nav('/player/login-or-code', { replace: true });
+          return;
         }
-        if (!auth.currentUser) {
+
+        if (!auth.currentUser && !emailSessionRestored) {
           const hasCodeSession =
             sessionStorage.getItem(`auth_${eventId}`) === 'true' ||
             !!sessionStorage.getItem('pending_code');
@@ -89,12 +111,17 @@ export default function PlayerApp() {
           return;
         }
 
-        // 2) localStorage fallback (iOS/PWA에서 sessionStorage가 초기화되는 케이스 대응)
-        const partLS = localStorage.getItem(playerStorageKey(eventId, 'participant'));
-        const codeLS = localStorage.getItem(playerStorageKey(eventId, 'authcode')) || '';
-        if (partLS) {
-          try { applyAuthAndParticipant(codeLS, JSON.parse(partLS)); } catch {}
-          return;
+        // 2) localStorage fallback
+        // 브라우저 재시작 후 마지막 HOME URL이 바로 열리는 경우를 막기 위해,
+        // 로그인 화면에서 이메일 세션 확인 버튼을 누른 이번 세션에서만 localStorage 복원을 허용합니다.
+        const allowLocalRestore = sessionStorage.getItem('agm.emailLoginConfirmed') === 'true';
+        if (allowLocalRestore) {
+          const partLS = localStorage.getItem(playerStorageKey(eventId, 'participant'));
+          const codeLS = localStorage.getItem(playerStorageKey(eventId, 'authcode')) || '';
+          if (partLS) {
+            try { applyAuthAndParticipant(codeLS, JSON.parse(partLS)); } catch {}
+            return;
+          }
         }
 
         // 3) 같은 브라우저 다중 참가자 탭 충돌 방지를 위해 전역 ticket/localStorage fallback은 사용하지 않습니다.
