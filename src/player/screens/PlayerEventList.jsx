@@ -49,10 +49,23 @@ export default function PlayerEventList() {
   useEffect(() => {
     (async () => {
       if (allEvents && allEvents.length) return;
-      const snap = await getDocs(collection(db, 'events'));
-      const list = [];
-      snap.forEach(d => { const v = d.data() || {}; list.push({ id: d.id, ...v }); });
-      setCache(list);
+      try {
+        // ✅ 인증코드 입장 직후에는 아직 Firebase 사용자가 없을 수 있습니다.
+        // Firestore 규칙상 events 읽기는 isAuthed()가 필요하므로,
+        // pending_code가 있을 때만 익명 인증을 먼저 확보한 뒤 대회 목록을 읽습니다.
+        const hasPendingCode = !!sessionStorage.getItem('pending_code');
+        const auth = getAuth();
+        if (hasPendingCode && !auth.currentUser) {
+          await ensureAnonAfterCode('__event_list__', { timeoutMs: 800 });
+        }
+        const snap = await getDocs(collection(db, 'events'));
+        const list = [];
+        snap.forEach(d => { const v = d.data() || {}; list.push({ id: d.id, ...v }); });
+        setCache(list);
+      } catch (e) {
+        console.warn('[PlayerEventList] events load failed:', e);
+        setCache([]);
+      }
     })();
   }, [allEvents]);
 
@@ -303,8 +316,11 @@ export default function PlayerEventList() {
         ? auth.currentUser
         : ((authUser && !authUser.isAnonymous) ? authUser : null));
 
+    const pendingCode = (() => { try { return sessionStorage.getItem('pending_code') || ''; } catch { return ''; } })();
+
     // 이메일 로그인 사용자는 먼저 해당 대회의 참가자와 매칭한 뒤 입장
-    if (emailUser) {
+    // 단, 현재 화면에서 인증코드를 새로 입력한 경우에는 인증코드 흐름을 우선합니다.
+    if (emailUser && !pendingCode) {
       const participant = await findParticipantByEmailUser(ev.id, ev, emailUser);
       if (!participant) {
         alert(

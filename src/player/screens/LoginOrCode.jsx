@@ -7,7 +7,7 @@
 
 import React, { useState, useContext, useEffect } from 'react';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut, signInAnonymously } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../../firebase';
 import { EventContext } from '../../contexts/EventContext';
@@ -161,6 +161,42 @@ function InnerLoginOrCode({ onEnter }) {
     } catch {}
   };
 
+  // ✅ 인증코드 입장으로 전환할 때는 이메일 로그인 참가자 캐시를 먼저 정리합니다.
+  // - 기존 인증코드 입장 로직은 유지하되, 같은 브라우저에서 이메일 참가자 정보가 남아
+  //   다른 인증코드 참가자로 전환되지 않는 문제만 차단합니다.
+  const clearEmailPlayerStateForCodeLogin = () => {
+    try { delete window[EMAIL_ENTRY_GATE_GLOBAL]; } catch {}
+    try {
+      const ssRemove = [];
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const k = sessionStorage.key(i);
+        if (!k) continue;
+        if (
+          k === 'agm.emailLoginConfirmed' ||
+          k === 'agm.emailLoginConfirmedAt' ||
+          k === 'agm.emailLoginEmail' ||
+          k === 'agm.postLoginRedirect' ||
+          k.startsWith('agm.loginVia_') ||
+          k.startsWith('participant_') ||
+          k.startsWith('authcode_') ||
+          k.startsWith('auth_')
+        ) ssRemove.push(k);
+      }
+      ssRemove.forEach((k) => sessionStorage.removeItem(k));
+    } catch {}
+    try {
+      const lsRemove = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('agm:player:') && (k.includes(':participant') || k.includes(':authcode'))) {
+          lsRemove.push(k);
+        }
+      }
+      lsRemove.forEach((k) => localStorage.removeItem(k));
+    } catch {}
+  };
+
 
   // ✅ 이메일 세션은 살아 있더라도, 사용자가 로그인 화면에서 버튼을 눌렀을 때만
   //    이번 JS 실행 컨텍스트에서 Player HOME 진입을 허용합니다.
@@ -305,12 +341,28 @@ function InnerLoginOrCode({ onEnter }) {
     } finally { setBusy(false); }
   };
 
-  // ✅ 변경: 코드 입력 → 항상 pending_code 저장 → /player/events 로 이동(즉시 검증/입장 X)
+  // ✅ 변경: 코드 입력 → 이메일 참가자 캐시 정리 → 익명 인증 확보 → /player/events 이동
+  // - 이메일 세션이 살아 있는 브라우저에서 다른 참가자 인증코드로 전환할 때,
+  //   기존 이메일 참가자가 계속 뜨는 문제를 방지합니다.
   const handleCode = async () => {
     const raw = code.trim();
     if (!raw) { alert('인증코드를 입력해 주세요.'); return; }
-    try { sessionStorage.setItem('pending_code', raw); } catch {}
-    navigate('/player/events', { replace: true }); // ✅ 변경
+    setBusy(true);
+    try {
+      clearEmailPlayerStateForCodeLogin();
+      sessionStorage.setItem('pending_code', raw);
+      if (auth.currentUser && !auth.currentUser.isAnonymous) {
+        await signOut(auth);
+      }
+      if (!auth.currentUser) {
+        await signInAnonymously(auth);
+      }
+      navigate('/player/events', { replace: true }); // ✅ 변경
+    } catch (err) {
+      alert(`인증코드 입장 준비 실패: ${err?.message || err}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
 
@@ -365,7 +417,7 @@ function InnerLoginOrCode({ onEnter }) {
                 {(savedSessionReady || savedSessionChecking || (savedSessionChecked && rememberEmail && email)) && (
                   <div className={`${styles.autoLoginStatus} ${savedSessionReady ? styles.autoLoginReady : styles.autoLoginExpired}`}>
                     {savedSessionReady
-                      ? '로그인 세션이 유지되어 있습니다. 비밀번호 없이 로그인 버튼만 누르면 입장합니다.'
+                      ? '로그인 세션 유지중. 비밀번호 없이 로그인 버튼만 누르면 가능'
                       : (savedSessionChecking
                         ? '로그인 세션을 확인하는 중입니다.'
                         : '저장된 이메일입니다. 세션이 없으면 비밀번호를 입력해야 합니다.')}
