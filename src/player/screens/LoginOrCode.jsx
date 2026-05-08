@@ -417,7 +417,7 @@ function InnerLoginOrCode({ onEnter }) {
                 {(savedSessionReady || savedSessionChecking || (savedSessionChecked && rememberEmail && email)) && (
                   <div className={`${styles.autoLoginStatus} ${savedSessionReady ? styles.autoLoginReady : styles.autoLoginExpired}`}>
                     {savedSessionReady
-                      ? '로그인 세션 유지중. 비밀번호 없이 로그인 버튼만 누르면 가능'
+                      ? '로그인 세션 유지중. 비밀번호 없이 로그인 버튼만 누르면 입장 가능'
                       : (savedSessionChecking
                         ? '로그인 세션을 확인하는 중입니다.'
                         : '저장된 이메일입니다. 세션이 없으면 비밀번호를 입력해야 합니다.')}
