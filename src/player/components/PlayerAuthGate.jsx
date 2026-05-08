@@ -1,7 +1,7 @@
 // /src/player/components/PlayerAuthGate.jsx
 
 import React, { useEffect, useState } from 'react';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, signInAnonymously, setPersistence, browserSessionPersistence } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, signInAnonymously } from 'firebase/auth';
 
 export default function PlayerAuthGate({ children }) {
   const [ready, setReady] = useState(false);
@@ -40,8 +40,7 @@ export default function PlayerAuthGate({ children }) {
       sessionStorage.setItem('pending_code', code.trim());
       const auth = getAuth();
       if (!auth.currentUser) {
-        await setPersistence(auth, browserSessionPersistence).catch(() => {});
-        await signInAnonymously(auth).catch(() => {});
+          await signInAnonymously(auth).catch(() => {});
       }
       alert('인증코드가 저장되었습니다. 대회를 선택하세요.');
     } catch {}

@@ -13,7 +13,6 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import {
   setPersistence,
   browserLocalPersistence,
-  browserSessionPersistence,
   signInAnonymously,
   onAuthStateChanged,
 } from 'firebase/auth';
@@ -54,7 +53,6 @@ export function clearCodeOk(eventId) { try { localStorage.removeItem(`${CODE_PRE
 export async function ensureAnonAfterCode() {
   try {
     if (!auth.currentUser && hasAnyCodeOk()) {
-      await setPersistence(auth, browserSessionPersistence).catch(() => {});
       await signInAnonymously(auth);
     }
   } catch (err) {

@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   onAuthStateChanged, signInAnonymously, setPersistence,
-  browserLocalPersistence, browserSessionPersistence, createUserWithEmailAndPassword,
+  browserLocalPersistence, createUserWithEmailAndPassword,
   signInWithEmailAndPassword, sendPasswordResetEmail,
   linkWithCredential, EmailAuthProvider, signOut
 } from 'firebase/auth';
@@ -25,7 +25,6 @@ export default function PlayerAuthProvider({ children }) {
     // 인증코드 입장용 익명 세션은 브라우저를 닫으면 정리되는 세션 유지 방식으로 둡니다.
     // 이메일 자동 로그인 세션과 섞이지 않도록 익명 로그인 직전에만 session persistence를 적용합니다.
     if (!auth.currentUser) {
-      await setPersistence(auth, browserSessionPersistence).catch(()=>{});
       await signInAnonymously(auth);
     }
     return auth.currentUser;
