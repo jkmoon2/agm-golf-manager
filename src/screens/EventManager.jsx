@@ -26,10 +26,13 @@ import GroupRoomHoleBattleMonitor from '../eventTemplates/groupRoomHoleBattle/Gr
 import PickLineupEditor from '../eventTemplates/pickLineup/PickLineupEditor';
 import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
+import RankScoreGameEditor from '../eventTemplates/rankScoreGame/RankScoreGameEditor';
+import RankScoreGamePreview from '../eventTemplates/rankScoreGame/RankScoreGamePreview';
 import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../events/holeRankForce';
 import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
+import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../events/rankScoreGame';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -227,6 +230,9 @@ function normalizeEventParamsForAdmin(template, params) {
   if (template === 'pick-lineup') {
     const cfg = getPickLineupConfig({ template, params: raw });
     return { ...raw, ...cfg };
+  }
+  if (template === 'rank-score-game') {
+    return normalizeRankScoreGameParams(raw);
   }
   return raw;
 }
@@ -433,14 +439,16 @@ if (form.template === 'group-battle') {
       }
       const isBingo = form.template === 'bingo';
       const isGroupRoomHoleBattle = form.template === 'group-room-hole-battle';
+      const isRankScoreGame = form.template === 'rank-score-game';
       const battleMode = isGroupRoomHoleBattle ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
+      const rankScoreParams = isRankScoreGame ? normalizeRankScoreGameParams(parsed) : null;
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
-        params: parsed,
-        target: isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'),
-        rankOrder: isBingo ? 'desc' : (isGroupRoomHoleBattle ? 'asc' : 'asc'),
+        params: rankScoreParams || parsed,
+        target: isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person')),
+        rankOrder: isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : (isGroupRoomHoleBattle ? 'asc' : 'asc')),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -945,14 +953,16 @@ if (editForm?.template === 'group-battle') {
       }
       const isBingoEdit = editForm.template === 'bingo';
       const isGroupRoomHoleBattleEdit = editForm.template === 'group-room-hole-battle';
+      const isRankScoreGameEdit = editForm.template === 'rank-score-game';
       const battleModeEdit = isGroupRoomHoleBattleEdit ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
+      const rankScoreParamsEdit = isRankScoreGameEdit ? normalizeRankScoreGameParams(parsed) : null;
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
-        params: parsed,
-        target: isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target),
-        rankOrder: isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder),
+        params: rankScoreParamsEdit || parsed,
+        target: isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target)),
+        rankOrder: isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder)),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -1049,6 +1059,11 @@ if (editForm?.template === 'group-battle') {
     return computeBingo(previewDef, participants, inputsAll, { roomNames, roomCount });
   }, [previewDef, participants, inputsAll, roomNames, roomCount]);
 
+  const rankScoreGamePreview = useMemo(() => {
+    if (!previewDef || previewDef.template !== 'rank-score-game') return null;
+    return computeRankScoreGame(previewDef, participants, inputsAll?.[previewId] || {}, { roomNames, roomCount });
+  }, [previewDef, participants, inputsAll, previewId, roomNames, roomCount]);
+
   const personRowsBase = useMemo(() => {
     if (!previewDef) return [];
     if (previewDef.template === 'hole-rank-force') {
@@ -1061,8 +1076,13 @@ if (editForm?.template === 'group-battle') {
         ? bingoPreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
         : [];
     }
+    if (previewDef.template === 'rank-score-game') {
+      return Array.isArray(rankScoreGamePreview?.personRows)
+        ? rankScoreGamePreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
+        : [];
+    }
     return participants.map((p) => ({ id: p.id, name: p.nickname, room: p.room, score: compute(previewDef, perP[p.id]) }));
-  }, [participants, perP, previewDef, holeRankForcePreview, bingoPreview]);
+  }, [participants, perP, previewDef, holeRankForcePreview, bingoPreview, rankScoreGamePreview]);
 
   const personRows = useMemo(() => {
     const rows = [...personRowsBase];
@@ -1086,6 +1106,11 @@ if (editForm?.template === 'group-battle') {
       arr.sort((a, b) => sign * (a.score - b.score));
       return arr;
     }
+    if (previewDef.template === 'rank-score-game') {
+      return Array.isArray(rankScoreGamePreview?.roomRows)
+        ? rankScoreGamePreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
+        : [];
+    }
     const arr = [];
     for (let r = 1; r <= roomCount; r++) {
       const ppl = participants.filter(p => p.room === r);
@@ -1094,7 +1119,7 @@ if (editForm?.template === 'group-battle') {
     }
     arr.sort((a, b) => sign * (a.score - b.score));
     return arr;
-  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview]);
+  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview, rankScoreGamePreview]);
 
   // 팀(포볼) 계산: 1조/2조 기준으로 A/B팀 구성
   const teamRows = useMemo(() => {
@@ -1112,6 +1137,11 @@ if (editForm?.template === 'group-battle') {
         : [];
       rows.sort((a, b) => sign * (a.score - b.score));
       return rows;
+    }
+    if (previewDef.template === 'rank-score-game') {
+      return Array.isArray(rankScoreGamePreview?.teamRows)
+        ? rankScoreGamePreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
+        : [];
     }
     const rows = [];
     for (let r = 1; r <= roomCount; r++) {
@@ -1133,7 +1163,7 @@ if (editForm?.template === 'group-battle') {
     }
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview]);
+  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview, rankScoreGamePreview]);
 
 
   const joRoomRows = useMemo(() => {
@@ -1167,6 +1197,9 @@ if (editForm?.template === 'group-battle') {
   };
 
   const formatMeta = (ev) => {
+    if (ev?.template === 'rank-score-game') {
+      return getRankScoreGameMetaText(ev?.params);
+    }
     if (ev?.template === 'group-battle') {
       const m = ev?.params?.mode === 'single' ? '개인선택' : '그룹';
       const metric = ev?.params?.metric === 'score' ? '점수' : '결과';
@@ -1471,6 +1504,14 @@ if (editForm?.template === 'group-battle') {
 
 {form.template === 'pick-lineup' && (
   <PickLineupEditor
+    participants={participants}
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'rank-score-game' && (
+  <RankScoreGameEditor
     participants={participants}
     value={params}
     onChange={(next) => setParams(next)}
@@ -1855,6 +1896,14 @@ if (editForm?.template === 'group-battle') {
     onChange={(next) => setEditParams(next)}
   />
 )}
+
+{editForm.template === 'rank-score-game' && (
+  <RankScoreGameEditor
+    participants={participants}
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
                       {uiEdit.factor && (
                         <div className={css.row}>
                           <label className={css.labelGrow}>계수(factor)
@@ -2010,7 +2059,16 @@ if (editForm?.template === 'group-battle') {
             {!previewDef && <div className={css.empty}>선택된 이벤트가 없습니다.</div>}
 
             {previewDef && viewTab === 'person' && (
-              previewDef.template === 'hole-rank-force' ? (
+              previewDef.template === 'rank-score-game' ? (
+                <RankScoreGamePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputs={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : previewDef.template === 'hole-rank-force' ? (
                 <HoleRankForcePreview
                   eventDef={previewDef}
                   participants={participants}
@@ -2047,7 +2105,16 @@ if (editForm?.template === 'group-battle') {
             )}
 
             {previewDef && viewTab === 'room' && (
-              previewDef.template === 'group-room-hole-battle' ? (
+              previewDef.template === 'rank-score-game' ? (
+                <RankScoreGamePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputs={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : previewDef.template === 'group-room-hole-battle' ? (
                 <GroupRoomHoleBattlePreview
                   eventDef={previewDef}
                   participants={participants}
@@ -2124,6 +2191,16 @@ if (editForm?.template === 'group-battle') {
             )}
 
             {previewDef && viewTab === 'team' && (
+              previewDef.template === 'rank-score-game' ? (
+                <RankScoreGamePreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputs={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : (
               <ol className={css.previewList}>
                 {teamRows.map((t, i) => (
                   <li key={t.key}>
@@ -2132,6 +2209,7 @@ if (editForm?.template === 'group-battle') {
                   </li>
                 ))}
               </ol>
+              )
             )}
 
             {previewDef && viewTab === 'group' && (

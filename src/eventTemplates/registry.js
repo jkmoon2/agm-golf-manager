@@ -172,6 +172,28 @@ export const TEMPLATE_REGISTRY = [
     },
   },
   {
+    type: 'rank-score-game',
+    label: '대회 순위 점수 게임',
+    defaultParams: {
+      rankingSource: 'result',
+      pointType: 'converted',
+      gameType: 'person',
+      winnerOrder: 'desc',
+      adjustments: {},
+      randomSeed: '',
+    },
+    help: '* 대회 결과값/보정치/참가자 직접 순위를 환산점수 또는 순위점수로 바꿔 개인·포볼팀·방대방 게임을 진행합니다.',
+    ui: {
+      inputMode: false,
+      paramsJson: false,
+      factor: false,
+      rangeTable: false,
+      bonusTable: false,
+      supportsEventInputs: true,
+      supportsQuickInput: false,
+    },
+  },
+  {
     type: 'group-battle',
     label: '그룹/개인 대결',
     defaultParams: {},
