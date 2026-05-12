@@ -1,0 +1,278 @@
+// /src/events/rankScoreGame.js
+// 순위 점수 게임 계산 유틸
+// - 기준: 결과값(점수-G핸디), 보정 결과값(점수-G핸디+보정치), 참가자 직접 순위 입력
+// - 동점: 동일 순위, 다음 순위는 건너뛰는 competition rank 방식(1/2/2/4/5)
+// - 점수: 환산점수(N-rank+1) 또는 순위점수(rank)
+// - 게임: 개인 / 무작위 2인팀(포볼형) / 방대방
+
+export function defaultRankScoreGameParams() {
+  return {
+    rankingSource: 'result',       // result | adjusted | manual
+    pointType: 'converted',        // converted | rank
+    gameType: 'person',            // person | randomPair | room
+    winnerOrder: 'desc',           // desc(높은 점수 승) | asc(낮은 점수 승)
+    adjustments: {},               // { [participantId]: number }
+    randomSeed: '',
+  };
+}
+
+export function normalizeRankScoreGameParams(raw) {
+  const base = defaultRankScoreGameParams();
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const rankingSource = ['result', 'adjusted', 'manual'].includes(src.rankingSource) ? src.rankingSource : base.rankingSource;
+  const pointType = ['converted', 'rank'].includes(src.pointType) ? src.pointType : base.pointType;
+  const gameType = ['person', 'randomPair', 'room'].includes(src.gameType) ? src.gameType : base.gameType;
+  const winnerOrder = ['asc', 'desc'].includes(src.winnerOrder) ? src.winnerOrder : base.winnerOrder;
+  const adjustments = {};
+  if (src.adjustments && typeof src.adjustments === 'object') {
+    Object.entries(src.adjustments).forEach(([key, value]) => {
+      const n = Number(value);
+      if (Number.isFinite(n) && n !== 0) adjustments[String(key)] = n;
+    });
+  }
+  return {
+    ...base,
+    ...src,
+    rankingSource,
+    pointType,
+    gameType,
+    winnerOrder,
+    adjustments,
+    randomSeed: String(src.randomSeed || ''),
+  };
+}
+
+function asNum(value) {
+  if (value === '' || value == null) return NaN;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function fmtRoomLabel(roomNo, roomNames = []) {
+  const idx = Number(roomNo) - 1;
+  const name = Array.isArray(roomNames) ? roomNames[idx] : '';
+  if (String(name || '').trim()) return String(name).trim();
+  return Number.isFinite(Number(roomNo)) && Number(roomNo) >= 1 ? `${roomNo}번방` : '-';
+}
+
+function seededRandom(seedText) {
+  let h = 2166136261;
+  const text = String(seedText || 'agm-rank-score-game');
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return function next() {
+    h += 0x6D2B79F5;
+    let t = h;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleStable(items, seedText) {
+  const next = [...items];
+  const rnd = seededRandom(seedText);
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rnd() * (i + 1));
+    const tmp = next[i];
+    next[i] = next[j];
+    next[j] = tmp;
+  }
+  return next;
+}
+
+function assignCompetitionRanks(rows, valueKey = 'rankValue', order = 'asc') {
+  const valid = rows
+    .filter((row) => Number.isFinite(Number(row?.[valueKey])))
+    .sort((a, b) => {
+      const av = Number(a?.[valueKey]);
+      const bv = Number(b?.[valueKey]);
+      const diff = order === 'desc' ? (bv - av) : (av - bv);
+      if (diff) return diff;
+      return String(a?.name || a?.label || '').localeCompare(String(b?.name || b?.label || ''), 'ko');
+    });
+
+  const rankByKey = new Map();
+  let prev = null;
+  let rank = 0;
+  valid.forEach((row, idx) => {
+    const val = Number(row?.[valueKey]);
+    if (idx === 0) {
+      rank = 1;
+      prev = val;
+    } else if (val !== prev) {
+      rank = idx + 1;
+      prev = val;
+    }
+    rankByKey.set(String(row.key), rank);
+  });
+  return rankByKey;
+}
+
+function getManualRankValue(inputsSlot, pid) {
+  const person = (inputsSlot?.person && typeof inputsSlot.person === 'object') ? inputsSlot.person : {};
+  const raw = person[String(pid)];
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    if (raw.rank != null) return asNum(raw.rank);
+    if (Array.isArray(raw.values)) return asNum(raw.values[0]);
+  }
+  return asNum(raw);
+}
+
+function buildPersonRows(eventDef, participants = [], inputsSlot = {}, roomNames = []) {
+  const params = normalizeRankScoreGameParams(eventDef?.params);
+  const safeParticipants = Array.isArray(participants) ? participants : [];
+  const baseRows = safeParticipants.map((p, idx) => {
+    const pid = String(p?.id ?? idx);
+    const score = asNum(p?.score);
+    const handicap = asNum(p?.handicap);
+    const safeScore = Number.isFinite(score) ? score : 0;
+    const safeHandicap = Number.isFinite(handicap) ? handicap : 0;
+    const resultValue = safeScore - safeHandicap;
+    const adjustment = Number(params.adjustments?.[pid] ?? 0) || 0;
+    const adjustedValue = resultValue + adjustment;
+    const manualValue = getManualRankValue(inputsSlot, pid);
+    const rankValue = params.rankingSource === 'manual'
+      ? manualValue
+      : (params.rankingSource === 'adjusted' ? adjustedValue : resultValue);
+    const roomNo = Number(p?.room ?? p?.roomNumber ?? 0) || 0;
+
+    return {
+      key: pid,
+      id: pid,
+      name: String(p?.nickname || ''),
+      room: roomNo,
+      roomLabel: fmtRoomLabel(roomNo, roomNames),
+      score: safeScore,
+      handicap: safeHandicap,
+      resultValue,
+      adjustment,
+      adjustedValue,
+      manualValue,
+      rankValue,
+      rank: null,
+      convertedScore: null,
+      rankScore: null,
+      eventScore: null,
+      valid: Number.isFinite(rankValue),
+    };
+  });
+
+  const validCount = baseRows.filter((row) => row.valid).length;
+  const rankByKey = assignCompetitionRanks(baseRows, 'rankValue', 'asc');
+
+  const withRanks = baseRows.map((row) => {
+    const rank = rankByKey.get(String(row.key)) || null;
+    const convertedScore = rank ? Math.max(0, validCount - rank + 1) : null;
+    const rankScore = rank || null;
+    const eventScore = params.pointType === 'rank' ? rankScore : convertedScore;
+    return {
+      ...row,
+      rank,
+      convertedScore,
+      rankScore,
+      eventScore,
+    };
+  });
+
+  return withRanks;
+}
+
+function sortByWinner(rows = [], params) {
+  const order = params.winnerOrder === 'asc' ? 'asc' : 'desc';
+  const valid = [];
+  const invalid = [];
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const raw = row?.value;
+    const hasValue = raw !== '' && raw != null && Number.isFinite(Number(raw));
+    if (hasValue) valid.push(row);
+    else invalid.push(row);
+  });
+  valid.sort((a, b) => {
+    const av = Number(a.value);
+    const bv = Number(b.value);
+    const diff = order === 'asc' ? (av - bv) : (bv - av);
+    if (diff) return diff;
+    return String(a.name || a.label || '').localeCompare(String(b.name || b.label || ''), 'ko');
+  });
+  const rankMap = assignCompetitionRanks(valid.map((row) => ({ ...row, rankTarget: Number(row.value) })), 'rankTarget', order);
+  return [...valid.map((row) => ({ ...row, displayRank: rankMap.get(String(row.key)) || null })), ...invalid.map((row) => ({ ...row, displayRank: null }))];
+}
+
+export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {}, options = {}) {
+  const params = normalizeRankScoreGameParams(eventDef?.params);
+  const roomNames = Array.isArray(options?.roomNames) ? options.roomNames : [];
+  const roomCount = Number(options?.roomCount || 0) || Math.max(0, ...(Array.isArray(participants) ? participants : []).map((p) => Number(p?.room || p?.roomNumber || 0) || 0));
+  const personBaseRows = buildPersonRows(eventDef, participants, inputsSlot, roomNames);
+
+  const personRows = sortByWinner(personBaseRows.map((row) => ({
+    ...row,
+    value: row.eventScore,
+  })), params);
+
+  const byId = new Map(personBaseRows.map((row) => [String(row.id), row]));
+
+  const roomRows = sortByWinner(Array.from({ length: Math.max(0, roomCount) }, (_, idx) => {
+    const roomNo = idx + 1;
+    const members = personBaseRows.filter((row) => Number(row.room) === roomNo);
+    const validMembers = members.filter((row) => Number.isFinite(Number(row.eventScore)));
+    return {
+      key: String(roomNo),
+      room: roomNo,
+      name: fmtRoomLabel(roomNo, roomNames),
+      label: fmtRoomLabel(roomNo, roomNames),
+      value: validMembers.length ? validMembers.reduce((sum, row) => sum + (Number(row.eventScore) || 0), 0) : null,
+      members,
+      memberCount: members.length,
+      validCount: validMembers.length,
+    };
+  }), params);
+
+  const pairingSeed = params.randomSeed || `${eventDef?.id || eventDef?.title || 'rank-score-game'}:${personBaseRows.map((r) => r.id).join('|')}`;
+  const pairSource = personBaseRows
+    .filter((row) => Number.isFinite(Number(row.eventScore)))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), 'ko'));
+  const shuffled = shuffleStable(pairSource, pairingSeed);
+  const teamBaseRows = [];
+  for (let i = 0; i < shuffled.length; i += 2) {
+    const a = shuffled[i];
+    const b = shuffled[i + 1] || null;
+    const members = [a, b].filter(Boolean).map((row) => byId.get(String(row.id)) || row);
+    const label = members.map((row) => row.name).filter(Boolean).join(' + ') || `팀${Math.floor(i / 2) + 1}`;
+    teamBaseRows.push({
+      key: `random-${Math.floor(i / 2) + 1}`,
+      label,
+      name: label,
+      value: members.reduce((sum, row) => sum + (Number(row.eventScore) || 0), 0),
+      members,
+      roomLabel: members.map((row) => row.roomLabel).filter(Boolean).join(' / '),
+    });
+  }
+  const teamRows = sortByWinner(teamBaseRows, params);
+
+  return {
+    params,
+    personRows,
+    roomRows,
+    teamRows,
+    personBaseRows,
+  };
+}
+
+export function getRankScoreGameTarget(params) {
+  const safe = normalizeRankScoreGameParams(params);
+  if (safe.gameType === 'room') return 'room';
+  if (safe.gameType === 'randomPair') return 'team';
+  return 'person';
+}
+
+export function getRankScoreGameMetaText(params) {
+  const safe = normalizeRankScoreGameParams(params);
+  const sourceText = safe.rankingSource === 'manual' ? '참가자 직접 순위' : safe.rankingSource === 'adjusted' ? '보정 결과값' : '결과값';
+  const pointText = safe.pointType === 'rank' ? '순위점수' : '환산점수';
+  const gameText = safe.gameType === 'room' ? '방대방' : safe.gameType === 'randomPair' ? '무작위 포볼팀' : '개인전';
+  const orderText = safe.winnerOrder === 'asc' ? '낮은 합계 승' : '높은 합계 승';
+  return `rank-score · ${sourceText} · ${pointText} · ${gameText} · ${orderText}`;
+}

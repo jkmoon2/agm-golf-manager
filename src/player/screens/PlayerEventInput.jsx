@@ -14,6 +14,7 @@ import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBing
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
+import { normalizeRankScoreGameParams } from '../../events/rankScoreGame';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 
 
@@ -1771,6 +1772,68 @@ export default function PlayerEventInput(){
           const forcedGrandTotal = forcedSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
           const forcedGrandHasAny = forcedSubtotal.some((item) => item.hasAny);
 
+
+          if (ev.template === 'rank-score-game') {
+            const rankCfg = normalizeRankScoreGameParams(ev?.params);
+            const isManualRank = rankCfg.rankingSource === 'manual';
+            const minePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+            const mine = selfParticipant || roomMembers.find((p) => String(p?.id || '') === minePid) || null;
+            const inputValue = mine ? (inputsByEvent?.[ev.id]?.person?.[mine.id] ?? '') : '';
+
+            return (
+              <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                <div className={baseCss.cardHeader}>
+                  <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
+                </div>
+
+                <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
+                  {isManualRank
+                    ? '게임 완료 후 본인의 순위만 입력하고 저장을 누르세요. 동점자는 같은 숫자를 입력하면 됩니다.'
+                    : '이 이벤트는 운영자가 등록한 대회 점수/G핸디 기준으로 자동 계산됩니다. 참가자 입력은 필요하지 않습니다.'}
+                </div>
+
+                {isManualRank && (
+                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                    <table className={tCss.table} style={{ width: '100%' }}>
+                      <colgroup>
+                        <col style={{ width: '45%' }} />
+                        <col style={{ width: '55%' }} />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>닉네임</th>
+                          <th>내 순위</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>{mine ? mine.nickname : ''}</td>
+                          <td className={tCss.cellEditable}>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="off"
+                              spellCheck={false}
+                              className={tCss.cellInput}
+                              value={mine ? inputValue : ''}
+                              onChange={(e) => mine && patchValue(ev.id, mine.id, e.target.value)}
+                              onBlur={(e) => mine && finalizeValue(ev.id, mine.id, e.target.value)}
+                              placeholder="예: 1, 2, 3"
+                              data-focus-evid={ev.id}
+                              data-focus-pid={mine ? mine.id : ''}
+                              data-focus-idx={0}
+                            />
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          }
 
           if (ev.template === 'group-room-hole-battle') {
             const battleCfg = normalizeGroupRoomHoleBattleParams(ev?.params, { participants, roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
