@@ -2348,7 +2348,7 @@ export default function PlayerEventInput(){
                               key={`bingo-tab-${p.id}`}
                               type="button"
                               onClick={() => setBingoActiveParticipant(ev.id, p.id)}
-                              style={{ minHeight: 40, borderRadius: 999, border: active ? '1.5px solid #5d8df6' : '1px solid #222', background: active ? '#edf4ff' : '#fff', color: '#222', fontWeight: 800, padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                              style={{ minHeight: 40, borderRadius: 999, border: active ? '1.5px solid #5d8df6' : '1px solid #222', background: active ? '#edf4ff' : '#fff', color: '#222', fontSize: 14, lineHeight: 1.15, fontWeight: 900, padding: '0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                               title={p.nickname}
                             >
                               {p.nickname}
