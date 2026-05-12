@@ -1,6 +1,6 @@
 // /src/eventTemplates/rankScoreGame/RankScoreGamePreview.jsx
 import React, { useMemo } from 'react';
-import { computeRankScoreGame, normalizeRankScoreGameParams } from '../../events/rankScoreGame';
+import { computeRankScoreGame } from '../../events/rankScoreGame';
 
 export default function RankScoreGamePreview({ eventDef, participants = [], inputs = {}, roomNames = [], roomCount = 0, viewTab = 'person' }) {
   const data = useMemo(() => {
@@ -8,7 +8,7 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
     return computeRankScoreGame(eventDef, participants, inputs, { roomNames, roomCount });
   }, [eventDef, participants, inputs, roomNames, roomCount]);
 
-  const params = normalizeRankScoreGameParams(eventDef?.params);
+  const params = data?.params || {};
   if (!eventDef || !data) return null;
 
   const tab = viewTab === 'room' ? 'room' : viewTab === 'team' ? 'team' : 'person';
