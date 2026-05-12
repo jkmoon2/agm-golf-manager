@@ -21,6 +21,7 @@ import { computePickLineup, getPickLineupConfig } from '../../events/pickLineup'
 import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../../events/holeRankForce';
 import { computeGroupRoomHoleBattle, defaultGroupRoomHoleBattleParams, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
+import { computeRankScoreGame, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../../events/rankScoreGame';
 
 
 function normalizeResultEventParams(template, params, eventDef = null) {
@@ -58,6 +59,9 @@ function normalizeResultEventParams(template, params, eventDef = null) {
       metric: src?.metric || 'result',
     };
   }
+  if (template === 'rank-score-game') {
+    return normalizeRankScoreGameParams(src);
+  }
   return src;
 }
 
@@ -66,8 +70,8 @@ function normalizeResultEventDef(ev) {
   return {
     ...ev,
     enabled: ev?.enabled !== false,
-    target: ev?.target || (ev?.template === 'group-battle' ? ((ev?.params?.mode || 'group') === 'group' ? 'group' : 'person') : 'person'),
-    rankOrder: ev?.rankOrder || 'asc',
+    target: ev?.target || (ev?.template === 'rank-score-game' ? getRankScoreGameTarget(ev?.params) : (ev?.template === 'group-battle' ? ((ev?.params?.mode || 'group') === 'group' ? 'group' : 'person') : 'person')),
+    rankOrder: ev?.rankOrder || (ev?.template === 'rank-score-game' ? normalizeRankScoreGameParams(ev?.params).winnerOrder : 'asc'),
     params: normalizeResultEventParams(ev?.template, ev?.params, ev),
   };
 }
@@ -521,6 +525,44 @@ const events = useMemo(
         displayText: data?.metric === 'match' ? String(row.displayValue || row.resultText || 'AS') : '',
       }));
       return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
+    }
+
+
+    // ── rank-score-game(대회 순위 점수 게임) ─────────────────────
+    if (template === 'rank-score-game') {
+      const rankParams = normalizeRankScoreGameParams({ ...(params || {}), winnerOrder: rankOrder || params?.winnerOrder });
+      const rankEvent = { ...ev, params: rankParams, rankOrder: rankOrder || rankParams.winnerOrder };
+      const data = computeRankScoreGame(rankEvent, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
+      const metricLabel = rankParams.pointType === 'rank' ? '순위점수' : '환산점수';
+
+      if (target === 'team') {
+        const rows = (data.teamRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: r.displayRank || i + 1,
+          label: r.label || r.name,
+          value: r.value,
+        }));
+        return { kind: 'team', metricLabel, rows };
+      }
+
+      if (target === 'room') {
+        const rows = (data.roomRows || []).map((r, i) => ({
+          key: r.key || String(i),
+          rank: r.displayRank || i + 1,
+          label: r.label || r.name,
+          value: r.value,
+        }));
+        return { kind: 'room', metricLabel, rows };
+      }
+
+      const rows = (data.personRows || []).map((r, i) => ({
+        key: r.key || String(i),
+        rank: r.displayRank || i + 1,
+        label: r.name,
+        room: r.roomLabel || (r.room ? `${r.room}번방` : ''),
+        value: r.value,
+      }));
+      return { kind: 'person', metricLabel, rows };
     }
 
     // ── group-battle(그룹/개인 대결) ───────────────────────────────

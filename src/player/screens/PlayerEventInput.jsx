@@ -14,7 +14,7 @@ import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBing
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
-import { normalizeRankScoreGameParams } from '../../events/rankScoreGame';
+import { getRankScoreGroupSide, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 
 
@@ -1458,6 +1458,104 @@ export default function PlayerEventInput(){
 
   const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
 
+  const getRankScorePairMap = (evId) => {
+    const draftPairs = inputsByEvent?.[evId]?.shared?.rankScorePairs;
+    const serverPairs = inputsByEventServer?.[evId]?.shared?.rankScorePairs;
+    return normalizeRankScorePairs(draftPairs || serverPairs || {});
+  };
+
+  const getRankScorePairRows = (evId) => {
+    const pairs = getRankScorePairMap(evId);
+    const seen = new Set();
+    const rows = [];
+    Object.entries(pairs).forEach(([aId, bId]) => {
+      const aKey = String(aId || '');
+      const bKey = String(bId || '');
+      if (!aKey || !bKey || seen.has(aKey) || seen.has(bKey)) return;
+      const a = participantById.get(aKey);
+      const b = participantById.get(bKey);
+      if (!a || !b) return;
+      seen.add(aKey);
+      seen.add(bKey);
+      rows.push({ a, b });
+    });
+    return rows;
+  };
+
+  const patchRankScorePair = async (evId, me, partner) => {
+    if (!evId || !me || !partner) return;
+    const meId = String(me.id);
+    const partnerId = String(partner.id);
+    const currentPairs = getRankScorePairMap(evId);
+    const pairs = { ...currentPairs };
+
+    [meId, partnerId].forEach((pid) => {
+      const prev = pairs[pid];
+      if (prev != null) delete pairs[String(prev)];
+      delete pairs[pid];
+    });
+    pairs[meId] = partnerId;
+    pairs[partnerId] = meId;
+
+    const all = cloneEventInputs(draft || {});
+    const slot = { ...(all[evId] || {}) };
+    slot.shared = { ...(slot.shared || {}), rankScorePairs: pairs };
+    all[evId] = slot;
+    applyDraft(all);
+    setDirty(true);
+
+    try {
+      const merged = cloneEventInputs(inputsByEventServer || {});
+      const mSlot = { ...(merged[evId] || {}) };
+      mSlot.person = { ...(mSlot.person || {}), ...((slot.person && typeof slot.person === 'object') ? slot.person : {}) };
+      mSlot.shared = { ...(mSlot.shared || {}), rankScorePairs: pairs };
+      merged[evId] = mSlot;
+      if (typeof updateEventImmediate === 'function') {
+        await updateEventImmediate({ eventInputs: merged }, false);
+        const savedClone = cloneEventInputs(merged);
+        pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
+        if (activeEventStorageId) {
+          const nextPack = {
+            inputs: savedClone,
+            resetTokens: { ...liveEventInputResetTokens },
+          };
+          setServerInputsCachePack(nextPack);
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', savedClone);
+        }
+      }
+    } catch (e) {
+      console.warn('[PlayerEventInput] rank-score pair save failed:', e);
+    }
+  };
+
+  const handleRankScorePairPick = (evId) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId || ''));
+    if (!mine) return;
+    const mineId = String(mine.id);
+    const pairs = getRankScorePairMap(evId);
+    if (pairs[mineId]) return;
+    const mySide = getRankScoreGroupSide(mine);
+    if (!mySide) {
+      alert('포볼 선택은 1~4조 참가자만 사용할 수 있습니다.');
+      return;
+    }
+    const targetSide = mySide === 'A' ? 'B' : 'A';
+    const candidates = (participants || []).filter((p) => {
+      const pid = String(p?.id || '');
+      if (!pid || pid === mineId) return false;
+      if (pairs[pid]) return false;
+      return getRankScoreGroupSide(p) === targetSide;
+    });
+    if (!candidates.length) {
+      alert('선택 가능한 상대 그룹 참가자가 없습니다.');
+      return;
+    }
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    patchRankScorePair(evId, mine, pick);
+    alert(`${mine.nickname || '참가자'}님은 ${pick.nickname || '상대'}님과 포볼팀으로 배정되었습니다.`);
+  };
+
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
     return getBattleCellIds(shared, rowKey, holeNo, allowedIds);
@@ -1776,9 +1874,19 @@ export default function PlayerEventInput(){
           if (ev.template === 'rank-score-game') {
             const rankCfg = normalizeRankScoreGameParams(ev?.params);
             const isManualRank = rankCfg.rankingSource === 'manual';
-            const minePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
-            const mine = selfParticipant || roomMembers.find((p) => String(p?.id || '') === minePid) || null;
-            const inputValue = mine ? (inputsByEvent?.[ev.id]?.person?.[mine.id] ?? '') : '';
+            const isPairGame = rankCfg.gameType === 'randomPair';
+            const rankPairs = getRankScorePairMap(ev.id);
+            const mine = selfParticipant || participantById.get(String(selfParticipantId || ''));
+            const minePairId = mine ? rankPairs[String(mine.id)] : '';
+            const minePair = minePairId ? participantById.get(String(minePairId)) : null;
+            const mineSide = mine ? getRankScoreGroupSide(mine) : '';
+            const pairRows = getRankScorePairRows(ev.id);
+            const hasPairCandidates = mine && !minePairId && (participants || []).some((p) => {
+              const pid = String(p?.id || '');
+              if (!pid || pid === String(mine.id)) return false;
+              if (rankPairs[pid]) return false;
+              return getRankScoreGroupSide(p) && getRankScoreGroupSide(p) !== mineSide;
+            });
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -1786,49 +1894,119 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
-                  {isManualRank
-                    ? '게임 완료 후 본인의 순위만 입력하고 저장을 누르세요. 동점자는 같은 숫자를 입력하면 됩니다.'
-                    : '이 이벤트는 운영자가 등록한 대회 점수/G핸디 기준으로 자동 계산됩니다. 참가자 입력은 필요하지 않습니다.'}
-                </div>
-
                 {isManualRank && (
-                  <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                    <table className={tCss.table} style={{ width: '100%' }}>
-                      <colgroup>
-                        <col style={{ width: '45%' }} />
-                        <col style={{ width: '55%' }} />
-                      </colgroup>
-                      <thead>
-                        <tr>
-                          <th>닉네임</th>
-                          <th>내 순위</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td>{mine ? mine.nickname : ''}</td>
-                          <td className={tCss.cellEditable}>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              autoComplete="off"
-                              autoCorrect="off"
-                              autoCapitalize="off"
-                              spellCheck={false}
-                              className={tCss.cellInput}
-                              value={mine ? inputValue : ''}
-                              onChange={(e) => mine && patchValue(ev.id, mine.id, e.target.value)}
-                              onBlur={(e) => mine && finalizeValue(ev.id, mine.id, e.target.value)}
-                              placeholder="예: 1, 2, 3"
-                              data-focus-evid={ev.id}
-                              data-focus-pid={mine ? mine.id : ''}
-                              data-focus-idx={0}
-                            />
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  <>
+                    <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
+                      게임 완료 후 같은 방 참가자의 순위를 입력하고 저장을 누르세요. 동점자는 같은 숫자를 입력하면 됩니다.
+                    </div>
+                    <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                      <table className={tCss.table} style={{ width: '100%' }}>
+                        <colgroup>
+                          <col style={{ width: `${NICK_PCT}%` }} />
+                          <col style={{ width: '65%' }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>닉네임</th>
+                            <th>순위</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {orderedRoomRows.map((p, rIdx) => {
+                            const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '') : '';
+                            return (
+                              <tr key={`rank-score-${ev.id}-${rIdx}`}>
+                                <td>{p ? p.nickname : ''}</td>
+                                <td className={tCss.cellEditable}>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    autoComplete="off"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck={false}
+                                    className={tCss.cellInput}
+                                    value={cellValue}
+                                    onChange={(e) => p && patchValue(ev.id, p.id, e.target.value)}
+                                    onBlur={(e) => p && finalizeValue(ev.id, p.id, e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                    placeholder="예: 1, 2, 3"
+                                    data-focus-evid={ev.id}
+                                    data-focus-pid={p ? p.id : ''}
+                                    data-focus-idx={0}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
+                {isPairGame && (
+                  <div style={{ padding: isManualRank ? '10px 12px 0' : '0 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#183153' }}>포볼팀 배정 현황</div>
+                      <button
+                        type="button"
+                        className={baseCss.navBtn}
+                        onClick={() => handleRankScorePairPick(ev.id)}
+                        disabled={!mine || !!minePairId || !hasPairCandidates}
+                        style={{
+                          width: 116,
+                          height: 36,
+                          fontSize: 13,
+                          opacity: (!mine || !!minePairId || !hasPairCandidates) ? 0.5 : 1,
+                          pointerEvents: (!mine || !!minePairId || !hasPairCandidates) ? 'none' : undefined,
+                        }}
+                      >
+                        {minePair ? '배정완료' : '포볼 선택'}
+                      </button>
+                    </div>
+
+                    {minePair && (
+                      <div style={{ marginBottom: 8, fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
+                        내 팀원: {minePair.nickname || '-'}
+                      </div>
+                    )}
+
+                    <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
+                      <table className={tCss.table} style={{ width: '100%' }}>
+                        <colgroup>
+                          <col style={{ width: '18%' }} />
+                          <col style={{ width: '41%' }} />
+                          <col style={{ width: '41%' }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>팀</th>
+                            <th>A그룹(1·2조)</th>
+                            <th>B그룹(3·4조)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pairRows.length === 0 && (
+                            <tr>
+                              <td colSpan={3} style={{ color: '#999' }}>아직 배정된 팀이 없습니다.</td>
+                            </tr>
+                          )}
+                          {pairRows.map((row, idx) => {
+                            const aSide = getRankScoreGroupSide(row.a);
+                            const left = aSide === 'A' ? row.a : row.b;
+                            const right = aSide === 'A' ? row.b : row.a;
+                            return (
+                              <tr key={`rank-pair-${ev.id}-${idx}`}>
+                                <td>{idx + 1}</td>
+                                <td>{left?.nickname || '-'}</td>
+                                <td>{right?.nickname || '-'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>

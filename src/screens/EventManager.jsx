@@ -1061,8 +1061,8 @@ if (editForm?.template === 'group-battle') {
 
   const rankScoreGamePreview = useMemo(() => {
     if (!previewDef || previewDef.template !== 'rank-score-game') return null;
-    return computeRankScoreGame(previewDef, participants, inputsAll?.[previewId] || {}, { roomNames, roomCount });
-  }, [previewDef, participants, inputsAll, previewId, roomNames, roomCount]);
+    return computeRankScoreGame({ ...previewDef, rankOrder: viewOrder }, participants, inputsAll?.[previewId] || {}, { roomNames, roomCount });
+  }, [previewDef, participants, inputsAll, previewId, roomNames, roomCount, viewOrder]);
 
   const personRowsBase = useMemo(() => {
     if (!previewDef) return [];
@@ -1451,7 +1451,7 @@ if (editForm?.template === 'group-battle') {
                   {TEMPLATE_REGISTRY.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
                 </select>
               </label>
-              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && form.template !== 'bingo' && form.template !== 'group-room-hole-battle' && (
+              {form.template !== 'hole-rank-force' && form.template !== 'pick-lineup' && form.template !== 'bingo' && form.template !== 'group-room-hole-battle' && !!getTemplateHelp(form.template) && (
                 <p className={css.help}>{getTemplateHelp(form.template)}</p>
               )}
 
@@ -2061,7 +2061,7 @@ if (editForm?.template === 'group-battle') {
             {previewDef && viewTab === 'person' && (
               previewDef.template === 'rank-score-game' ? (
                 <RankScoreGamePreview
-                  eventDef={previewDef}
+                  eventDef={{ ...previewDef, rankOrder: viewOrder }}
                   participants={participants}
                   inputs={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
@@ -2107,7 +2107,7 @@ if (editForm?.template === 'group-battle') {
             {previewDef && viewTab === 'room' && (
               previewDef.template === 'rank-score-game' ? (
                 <RankScoreGamePreview
-                  eventDef={previewDef}
+                  eventDef={{ ...previewDef, rankOrder: viewOrder }}
                   participants={participants}
                   inputs={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
@@ -2193,7 +2193,7 @@ if (editForm?.template === 'group-battle') {
             {previewDef && viewTab === 'team' && (
               previewDef.template === 'rank-score-game' ? (
                 <RankScoreGamePreview
-                  eventDef={previewDef}
+                  eventDef={{ ...previewDef, rankOrder: viewOrder }}
                   participants={participants}
                   inputs={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
