@@ -181,6 +181,8 @@ export const TEMPLATE_REGISTRY = [
       winnerOrder: 'desc',
       adjustments: {},
       pairGroups: { A: [1, 2], B: [3, 4] },
+      calculationMethod: 'add',
+      roomRankSlots: [1, 4],
       randomSeed: '',
     },
     help: '',

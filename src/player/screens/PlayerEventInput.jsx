@@ -220,6 +220,13 @@ function displayPickOption(p){
   return String(p?.nickname || '');
 }
 
+function splitRankScorePairLabel(label){
+  const text = String(label || '');
+  const m = text.match(/^(A그룹|B그룹)\s*(.*)$/);
+  if (!m) return { title: text, groups: '' };
+  return { title: m[1], groups: m[2] || '' };
+}
+
 
 const PICK_MENU_WIDTH_PX = 136;
 
@@ -1883,6 +1890,8 @@ export default function PlayerEventInput(){
             const pairRows = getRankScorePairRows(ev.id);
             const pairLabelA = getRankScorePairGroupLabel(rankCfg.pairGroups, 'A');
             const pairLabelB = getRankScorePairGroupLabel(rankCfg.pairGroups, 'B');
+            const pairHeaderA = splitRankScorePairLabel(pairLabelA);
+            const pairHeaderB = splitRankScorePairLabel(pairLabelB);
             const hasPairCandidates = mine && !minePairId && (participants || []).some((p) => {
               const pid = String(p?.id ?? '');
               if (!pid || pid === String(mine.id)) return false;
@@ -1946,20 +1955,21 @@ export default function PlayerEventInput(){
 
                 {isPairGame && (
                   <div style={{ padding: isManualRank ? '10px 0 0' : '0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
-                      <div style={{ fontSize: 14, fontWeight: 900, color: '#183153' }}>포볼팀 배정 현황</div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px', paddingTop: 4 }}>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: '#183153' }}>포볼팀 배정 현황</div>
                       <button
                         type="button"
                         onClick={() => handleRankScorePairPick(ev.id, rankCfg)}
                         disabled={!mine || !!minePairId || !hasPairCandidates}
                         style={{
-                          width: 96,
-                          height: 34,
+                          width: 92,
+                          height: 32,
                           borderRadius: 10,
+                          marginTop: 4,
                           border: '1px solid #bcd0ff',
                           background: '#eef4ff',
                           color: '#2457d6',
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: 800,
                           opacity: (!mine || !!minePairId || !hasPairCandidates) ? 0.5 : 1,
                           pointerEvents: (!mine || !!minePairId || !hasPairCandidates) ? 'none' : undefined,
@@ -1979,15 +1989,19 @@ export default function PlayerEventInput(){
                       <table className={tCss.table} style={{ width: '100%' }}>
                         <colgroup>
                           <col style={{ width: '14%' }} />
-                          <col style={{ width: '31%' }} />
-                          <col style={{ width: '31%' }} />
-                          <col style={{ width: '24%' }} />
+                          <col style={{ width: '34%' }} />
+                          <col style={{ width: '34%' }} />
+                          <col style={{ width: '18%' }} />
                         </colgroup>
                         <thead>
                           <tr>
                             <th>팀</th>
-                            <th>{pairLabelA}</th>
-                            <th>{pairLabelB}</th>
+                            <th>
+                              {pairHeaderA.title}<span style={{ fontWeight: 400 }}> {pairHeaderA.groups}</span>
+                            </th>
+                            <th>
+                              {pairHeaderB.title}<span style={{ fontWeight: 400 }}> {pairHeaderB.groups}</span>
+                            </th>
                             <th>G합계</th>
                           </tr>
                         </thead>

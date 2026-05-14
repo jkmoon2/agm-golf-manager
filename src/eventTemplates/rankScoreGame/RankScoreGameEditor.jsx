@@ -12,6 +12,15 @@ const PAIR_GROUP_OPTIONS = [
   [3, 4],
 ];
 
+const CALC_METHOD_OPTIONS = [
+  { value: 'add', label: '더하기' },
+  { value: 'subtract', label: '빼기' },
+  { value: 'multiply', label: '곱하기' },
+  { value: 'divide', label: '나누기' },
+];
+
+const ROOM_RANK_SLOT_OPTIONS = [1, 2, 3, 4];
+
 export default function RankScoreGameEditor({ participants = [], value, onChange }) {
   const safe = normalizeRankScoreGameParams(value);
   const pairGroups = normalizeRankScorePairGroups(safe.pairGroups);
@@ -62,6 +71,16 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
       .filter((n) => Number.isFinite(n));
     const b = [1, 2, 3, 4].filter((n) => !a.includes(n));
     emit({ pairGroups: { A: a, B: b } });
+  };
+
+  const onRoomRankSlotChange = (idx, valueText) => {
+    const next = Array.isArray(safe.roomRankSlots) ? [...safe.roomRankSlots] : [1, 4];
+    const n = Number(valueText);
+    next[idx] = Number.isFinite(n) ? n : (idx === 0 ? 1 : 4);
+    if (Number(next[0]) === Number(next[1])) {
+      next[1 - idx] = ROOM_RANK_SLOT_OPTIONS.find((v) => Number(v) !== Number(next[idx])) || (idx === 0 ? 4 : 1);
+    }
+    emit({ roomRankSlots: next });
   };
 
   const commitAdjustment = (id, valueText) => {
@@ -132,7 +151,39 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
             <option value="room">방대방 게임</option>
           </select>
         </label>
+
+        <label style={labelStyle}>
+          <span style={fieldLabelStyle}>계산 방식</span>
+          <select value={safe.calculationMethod} onChange={(e) => emit({ calculationMethod: e.target.value })} style={selectStyle}>
+            {CALC_METHOD_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      {safe.gameType === 'room' && (
+        <div style={pairBoxStyle}>
+          <div style={pairTitleStyle}>방대방 계산 기준</div>
+          <div style={roomRankGridStyle}>
+            <label style={labelStyle}>
+              <span style={fieldLabelStyle}>기준 순위 1</span>
+              <select value={safe.roomRankSlots?.[0] || 1} onChange={(e) => onRoomRankSlotChange(0, e.target.value)} style={selectStyle}>
+                {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-a-${n}`} value={n}>{n}위</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              <span style={fieldLabelStyle}>기준 순위 2</span>
+              <select value={safe.roomRankSlots?.[1] || 4} onChange={(e) => onRoomRankSlotChange(1, e.target.value)} style={selectStyle}>
+                {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-b-${n}`} value={n}>{n}위</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={smallTextStyle}>
+            방 안에서 전체 순위가 좋은 순서로 1~4위를 정렬한 뒤, 선택한 두 명의 점수로 계산합니다. 빼기/나누기는 큰수 기준으로 계산합니다.
+          </div>
+        </div>
+      )}
 
       {safe.gameType === 'randomPair' && (
         <div style={pairBoxStyle}>
@@ -208,6 +259,7 @@ const selectStyle = { width: '100%', height: 42, borderRadius: 10, border: '1px 
 const smallTextStyle = { fontSize: 12, color: '#667085', lineHeight: 1.35 };
 const pairBoxStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, display: 'grid', gap: 8, background: '#fbfdff' };
 const pairTitleStyle = { fontSize: 13, fontWeight: 800, color: '#183153' };
+const roomRankGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 };
 const adjustBoxStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, display: 'grid', gap: 8 };
 const adjustListStyle = { display: 'grid', gap: 6, maxHeight: 260, overflow: 'auto', paddingRight: 2 };
 const adjustRowStyle = { display: 'grid', gridTemplateColumns: '1fr 88px', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid #f1f5f9', borderRadius: 10, background: '#fff' };
