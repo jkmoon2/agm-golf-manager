@@ -1,11 +1,20 @@
 // /src/eventTemplates/rankScoreGame/RankScoreGameEditor.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { normalizeRankScoreGameParams } from '../../events/rankScoreGame';
+import { getRankScorePairGroupLabel, normalizeRankScoreGameParams, normalizeRankScorePairGroups } from '../../events/rankScoreGame';
 
 const LONG_PRESS_MS = 450;
+const PAIR_GROUP_OPTIONS = [
+  [1, 2],
+  [1, 3],
+  [1, 4],
+  [2, 3],
+  [2, 4],
+  [3, 4],
+];
 
 export default function RankScoreGameEditor({ participants = [], value, onChange }) {
   const safe = normalizeRankScoreGameParams(value);
+  const pairGroups = normalizeRankScorePairGroups(safe.pairGroups);
   const participantsSafe = Array.isArray(participants) ? participants : [];
   const minusTimersRef = useRef({});
   const [adjustDraft, setAdjustDraft] = useState({});
@@ -43,6 +52,17 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
       };
     });
   }, [participantsSafe, adjustDraft]);
+
+  const pairGroupValue = pairGroups.A.join(',');
+
+  const onPairGroupChange = (valueText) => {
+    const a = String(valueText || '')
+      .split(',')
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n));
+    const b = [1, 2, 3, 4].filter((n) => !a.includes(n));
+    emit({ pairGroups: { A: a, B: b } });
+  };
 
   const commitAdjustment = (id, valueText) => {
     const next = { ...(safe.adjustments || {}) };
@@ -112,15 +132,30 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
             <option value="room">방대방 게임</option>
           </select>
         </label>
-
-        <label style={labelStyle}>
-          <span style={fieldLabelStyle}>승리 기준</span>
-          <select value={safe.winnerOrder} onChange={(e) => emit({ winnerOrder: e.target.value })} style={selectStyle}>
-            <option value="desc">높은 합계 승</option>
-            <option value="asc">낮은 합계 승</option>
-          </select>
-        </label>
       </div>
+
+      {safe.gameType === 'randomPair' && (
+        <div style={pairBoxStyle}>
+          <div style={pairTitleStyle}>포볼 그룹 구성</div>
+          <label style={labelStyle}>
+            <span style={fieldLabelStyle}>A그룹 조합</span>
+            <select value={pairGroupValue} onChange={(e) => onPairGroupChange(e.target.value)} style={selectStyle}>
+              {PAIR_GROUP_OPTIONS.map((arr) => {
+                const b = [1, 2, 3, 4].filter((n) => !arr.includes(n));
+                const valueText = arr.join(',');
+                return (
+                  <option key={valueText} value={valueText}>
+                    A그룹 {arr.map((n) => `${n}조`).join('+')} / B그룹 {b.map((n) => `${n}조`).join('+')}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <div style={smallTextStyle}>
+            현재 구성: {getRankScorePairGroupLabel(pairGroups, 'A')} ↔ {getRankScorePairGroupLabel(pairGroups, 'B')}
+          </div>
+        </div>
+      )}
 
       {safe.rankingSource === 'adjusted' && (
         <div style={adjustBoxStyle}>
@@ -171,6 +206,8 @@ const labelStyle = { display: 'grid', gap: 6, minWidth: 0 };
 const fieldLabelStyle = { fontSize: 13, fontWeight: 700, color: '#344054' };
 const selectStyle = { width: '100%', height: 42, borderRadius: 10, border: '1px solid #d0d7de', padding: '0 10px', background: '#fff', boxSizing: 'border-box' };
 const smallTextStyle = { fontSize: 12, color: '#667085', lineHeight: 1.35 };
+const pairBoxStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, display: 'grid', gap: 8, background: '#fbfdff' };
+const pairTitleStyle = { fontSize: 13, fontWeight: 800, color: '#183153' };
 const adjustBoxStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, display: 'grid', gap: 8 };
 const adjustListStyle = { display: 'grid', gap: 6, maxHeight: 260, overflow: 'auto', paddingRight: 2 };
 const adjustRowStyle = { display: 'grid', gridTemplateColumns: '1fr 88px', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid #f1f5f9', borderRadius: 10, background: '#fff' };

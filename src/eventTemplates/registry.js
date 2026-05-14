@@ -180,6 +180,7 @@ export const TEMPLATE_REGISTRY = [
       gameType: 'room',
       winnerOrder: 'desc',
       adjustments: {},
+      pairGroups: { A: [1, 2], B: [3, 4] },
       randomSeed: '',
     },
     help: '',

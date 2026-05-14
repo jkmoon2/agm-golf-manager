@@ -14,7 +14,7 @@ import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBing
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
-import { getRankScoreGroupSide, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
+import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 
 
@@ -1529,23 +1529,23 @@ export default function PlayerEventInput(){
     }
   };
 
-  const handleRankScorePairPick = (evId) => {
-    const mine = selfParticipant || participantById.get(String(selfParticipantId || ''));
+  const handleRankScorePairPick = (evId, rankCfg) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
     if (!mine) return;
     const mineId = String(mine.id);
     const pairs = getRankScorePairMap(evId);
     if (pairs[mineId]) return;
-    const mySide = getRankScoreGroupSide(mine);
+    const mySide = getRankScoreGroupSide(mine, rankCfg);
     if (!mySide) {
-      alert('포볼 선택은 1~4조 참가자만 사용할 수 있습니다.');
+      alert('포볼 선택은 운영자가 지정한 A/B 그룹 참가자만 사용할 수 있습니다.');
       return;
     }
     const targetSide = mySide === 'A' ? 'B' : 'A';
     const candidates = (participants || []).filter((p) => {
-      const pid = String(p?.id || '');
+      const pid = String(p?.id ?? '');
       if (!pid || pid === mineId) return false;
       if (pairs[pid]) return false;
-      return getRankScoreGroupSide(p) === targetSide;
+      return getRankScoreGroupSide(p, rankCfg) === targetSide;
     });
     if (!candidates.length) {
       alert('선택 가능한 상대 그룹 참가자가 없습니다.');
@@ -1876,16 +1876,18 @@ export default function PlayerEventInput(){
             const isManualRank = rankCfg.rankingSource === 'manual';
             const isPairGame = rankCfg.gameType === 'randomPair';
             const rankPairs = getRankScorePairMap(ev.id);
-            const mine = selfParticipant || participantById.get(String(selfParticipantId || ''));
+            const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
             const minePairId = mine ? rankPairs[String(mine.id)] : '';
             const minePair = minePairId ? participantById.get(String(minePairId)) : null;
-            const mineSide = mine ? getRankScoreGroupSide(mine) : '';
+            const mineSide = mine ? getRankScoreGroupSide(mine, rankCfg) : '';
             const pairRows = getRankScorePairRows(ev.id);
+            const pairLabelA = getRankScorePairGroupLabel(rankCfg.pairGroups, 'A');
+            const pairLabelB = getRankScorePairGroupLabel(rankCfg.pairGroups, 'B');
             const hasPairCandidates = mine && !minePairId && (participants || []).some((p) => {
-              const pid = String(p?.id || '');
+              const pid = String(p?.id ?? '');
               if (!pid || pid === String(mine.id)) return false;
               if (rankPairs[pid]) return false;
-              return getRankScoreGroupSide(p) && getRankScoreGroupSide(p) !== mineSide;
+              return getRankScoreGroupSide(p, rankCfg) && getRankScoreGroupSide(p, rankCfg) !== mineSide;
             });
 
             return (
@@ -1896,9 +1898,6 @@ export default function PlayerEventInput(){
 
                 {isManualRank && (
                   <>
-                    <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
-                      게임 완료 후 같은 방 참가자의 순위를 입력하고 저장을 누르세요. 동점자는 같은 숫자를 입력하면 됩니다.
-                    </div>
                     <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                       <table className={tCss.table} style={{ width: '100%' }}>
                         <colgroup>
@@ -1946,28 +1945,32 @@ export default function PlayerEventInput(){
                 )}
 
                 {isPairGame && (
-                  <div style={{ padding: isManualRank ? '10px 12px 0' : '0 12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: '#183153' }}>포볼팀 배정 현황</div>
+                  <div style={{ padding: isManualRank ? '10px 0 0' : '0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px' }}>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: '#183153' }}>포볼팀 배정 현황</div>
                       <button
                         type="button"
-                        className={baseCss.navBtn}
-                        onClick={() => handleRankScorePairPick(ev.id)}
+                        onClick={() => handleRankScorePairPick(ev.id, rankCfg)}
                         disabled={!mine || !!minePairId || !hasPairCandidates}
                         style={{
-                          width: 116,
-                          height: 36,
+                          width: 96,
+                          height: 34,
+                          borderRadius: 10,
+                          border: '1px solid #bcd0ff',
+                          background: '#eef4ff',
+                          color: '#2457d6',
                           fontSize: 13,
+                          fontWeight: 800,
                           opacity: (!mine || !!minePairId || !hasPairCandidates) ? 0.5 : 1,
                           pointerEvents: (!mine || !!minePairId || !hasPairCandidates) ? 'none' : undefined,
                         }}
                       >
-                        {minePair ? '배정완료' : '포볼 선택'}
+                        {minePair ? '배정완료' : '포볼선택'}
                       </button>
                     </div>
 
                     {minePair && (
-                      <div style={{ marginBottom: 8, fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
+                      <div style={{ margin: '0 12px 8px', fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
                         내 팀원: {minePair.nickname || '-'}
                       </div>
                     )}
@@ -1975,32 +1978,36 @@ export default function PlayerEventInput(){
                     <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                       <table className={tCss.table} style={{ width: '100%' }}>
                         <colgroup>
-                          <col style={{ width: '18%' }} />
-                          <col style={{ width: '41%' }} />
-                          <col style={{ width: '41%' }} />
+                          <col style={{ width: '14%' }} />
+                          <col style={{ width: '31%' }} />
+                          <col style={{ width: '31%' }} />
+                          <col style={{ width: '24%' }} />
                         </colgroup>
                         <thead>
                           <tr>
                             <th>팀</th>
-                            <th>A그룹(1·2조)</th>
-                            <th>B그룹(3·4조)</th>
+                            <th>{pairLabelA}</th>
+                            <th>{pairLabelB}</th>
+                            <th>G합계</th>
                           </tr>
                         </thead>
                         <tbody>
                           {pairRows.length === 0 && (
                             <tr>
-                              <td colSpan={3} style={{ color: '#999' }}>아직 배정된 팀이 없습니다.</td>
+                              <td colSpan={4} style={{ color: '#999' }}>아직 배정된 팀이 없습니다.</td>
                             </tr>
                           )}
                           {pairRows.map((row, idx) => {
-                            const aSide = getRankScoreGroupSide(row.a);
+                            const aSide = getRankScoreGroupSide(row.a, rankCfg);
                             const left = aSide === 'A' ? row.a : row.b;
                             const right = aSide === 'A' ? row.b : row.a;
+                            const hdSum = Number(left?.handicap || 0) + Number(right?.handicap || 0);
                             return (
                               <tr key={`rank-pair-${ev.id}-${idx}`}>
                                 <td>{idx + 1}</td>
                                 <td>{left?.nickname || '-'}</td>
                                 <td>{right?.nickname || '-'}</td>
+                                <td>{Number.isFinite(hdSum) ? hdSum : '-'}</td>
                               </tr>
                             );
                           })}
