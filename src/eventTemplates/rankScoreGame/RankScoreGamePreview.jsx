@@ -21,7 +21,7 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
   return (
     <div style={wrapStyle}>
       <div style={summaryStyle}>
-        기준: {sourceText(params.rankingSource)} · 점수: {params.pointType === 'rank' ? '순위점수' : '환산점수'} · 승리: {params.winnerOrder === 'asc' ? '낮은 합계' : '높은 합계'}
+        기준: {sourceText(params.rankingSource)} · 점수: {params.pointType === 'rank' ? '순위점수' : '환산점수'} · 계산: {calcText(params.calculationMethod)} · 정렬: {params.winnerOrder === 'asc' ? '오름' : '내림'}
       </div>
 
       {tab === 'person' && (
@@ -59,7 +59,7 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
                 <b style={scoreStyle}>{fmt(row.value)}</b>
               </div>
               <div style={membersStyle}>
-                {(row.members || []).map((m) => `${m.name || '-'}(${fmt(m.eventScore)}점/${m.rank || '-'}위)`).join(' · ') || '멤버 없음'}
+                {((row.selectedMembers || row.members || [])).map((m) => `${m.name || '-'}(${fmt(m.eventScore)}점/${m.rank || '-'}위)`).join(' · ') || '멤버 없음'}
               </div>
             </li>
           ))}
@@ -67,6 +67,13 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
       )}
     </div>
   );
+}
+
+function calcText(value) {
+  if (value === 'subtract') return '빼기';
+  if (value === 'multiply') return '곱하기';
+  if (value === 'divide') return '나누기';
+  return '더하기';
 }
 
 function sourceText(value) {

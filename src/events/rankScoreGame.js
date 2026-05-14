@@ -13,6 +13,8 @@ export function defaultRankScoreGameParams() {
     winnerOrder: 'desc',           // desc(높은 점수 승) | asc(낮은 점수 승)
     adjustments: {},               // { [participantId]: number }
     pairGroups: { A: [1, 2], B: [3, 4] }, // 포볼게임 A/B 그룹 조합
+    calculationMethod: 'add',      // add | subtract | multiply | divide
+    roomRankSlots: [1, 4],         // 방대방 계산 시 방 내부 순위 중 선택할 2개 위치
     randomSeed: '',
   };
 }
@@ -50,7 +52,7 @@ export function normalizeRankScorePairGroups(raw) {
 export function getRankScorePairGroupLabel(pairGroups, side) {
   const groups = normalizeRankScorePairGroups(pairGroups);
   const arr = side === 'B' ? groups.B : groups.A;
-  return `${side}그룹(${arr.map((n) => `${n}조`).join('·')})`;
+  return `${side}그룹 (${arr.join('+')}조)`;
 }
 
 export function normalizeRankScoreGameParams(raw) {
@@ -61,6 +63,11 @@ export function normalizeRankScoreGameParams(raw) {
   const gameType = ['randomPair', 'room'].includes(src.gameType) ? src.gameType : base.gameType;
   const winnerOrder = ['asc', 'desc'].includes(src.winnerOrder) ? src.winnerOrder : base.winnerOrder;
   const pairGroups = normalizeRankScorePairGroups(src.pairGroups);
+  const calculationMethod = ['add', 'subtract', 'multiply', 'divide'].includes(src.calculationMethod) ? src.calculationMethod : base.calculationMethod;
+  const roomRankSlotsRaw = Array.isArray(src.roomRankSlots) ? src.roomRankSlots : base.roomRankSlots;
+  let roomRankSlots = Array.from(new Set(roomRankSlotsRaw.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n >= 1 && n <= 4))).slice(0, 2);
+  if (roomRankSlots.length < 2) roomRankSlots = [...base.roomRankSlots];
+  roomRankSlots.sort((a, b) => a - b);
   const adjustments = {};
   if (src.adjustments && typeof src.adjustments === 'object') {
     Object.entries(src.adjustments).forEach(([key, value]) => {
@@ -77,6 +84,8 @@ export function normalizeRankScoreGameParams(raw) {
     winnerOrder,
     adjustments,
     pairGroups,
+    calculationMethod,
+    roomRankSlots,
     randomSeed: String(src.randomSeed || ''),
   };
 }
@@ -219,6 +228,39 @@ function buildPersonRows(eventDef, participants = [], inputsSlot = {}, roomNames
   return withRanks;
 }
 
+function calculateRankScoreValues(values = [], method = 'add') {
+  const nums = (Array.isArray(values) ? values : [])
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n));
+  if (!nums.length) return null;
+  const safeMethod = ['add', 'subtract', 'multiply', 'divide'].includes(method) ? method : 'add';
+  if (safeMethod === 'multiply') {
+    return nums.reduce((acc, n) => acc * n, 1);
+  }
+  if (safeMethod === 'subtract' || safeMethod === 'divide') {
+    if (nums.length < 2) return nums[0];
+    const sorted = [...nums].sort((a, b) => b - a);
+    const big = sorted[0];
+    const small = sorted[1];
+    if (safeMethod === 'divide') {
+      if (small === 0) return null;
+      return big / small;
+    }
+    return big - small;
+  }
+  return nums.reduce((acc, n) => acc + n, 0);
+}
+
+function sortMembersByRank(members = []) {
+  return [...(Array.isArray(members) ? members : [])]
+    .filter((row) => Number.isFinite(Number(row?.rank)) && Number.isFinite(Number(row?.eventScore)))
+    .sort((a, b) => {
+      const diff = Number(a.rank) - Number(b.rank);
+      if (diff) return diff;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+    });
+}
+
 function sortByWinner(rows = [], params) {
   const order = params.winnerOrder === 'asc' ? 'asc' : 'desc';
   const valid = [];
@@ -258,16 +300,21 @@ export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {
   const roomRows = sortByWinner(Array.from({ length: Math.max(0, roomCount) }, (_, idx) => {
     const roomNo = idx + 1;
     const members = personBaseRows.filter((row) => Number(row.room) === roomNo);
-    const validMembers = members.filter((row) => Number.isFinite(Number(row.eventScore)));
+    const rankedMembers = sortMembersByRank(members);
+    const selectedMembers = (params.roomRankSlots || [])
+      .map((slotNo) => rankedMembers[Number(slotNo) - 1])
+      .filter(Boolean);
+    const values = selectedMembers.map((row) => row.eventScore);
     return {
       key: String(roomNo),
       room: roomNo,
       name: fmtRoomLabel(roomNo, roomNames),
       label: fmtRoomLabel(roomNo, roomNames),
-      value: validMembers.length ? validMembers.reduce((sum, row) => sum + (Number(row.eventScore) || 0), 0) : null,
+      value: selectedMembers.length ? calculateRankScoreValues(values, params.calculationMethod) : null,
       members,
+      selectedMembers,
       memberCount: members.length,
-      validCount: validMembers.length,
+      validCount: selectedMembers.length,
     };
   }), params);
 
@@ -290,7 +337,7 @@ export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {
       key: `pair-${aKey}-${bKey}`,
       label,
       name: label,
-      value: members.reduce((sum, row) => sum + (Number(row.eventScore) || 0), 0),
+      value: calculateRankScoreValues(members.map((row) => row.eventScore), params.calculationMethod),
       members,
       roomLabel: members.map((row) => row.roomLabel).filter(Boolean).join(' / '),
     });
@@ -343,5 +390,7 @@ export function getRankScoreGameMetaText(params) {
   const gameText = safe.gameType === 'randomPair'
     ? `포볼 게임(${getRankScorePairGroupLabel(safe.pairGroups, 'A')} ↔ ${getRankScorePairGroupLabel(safe.pairGroups, 'B')})`
     : '방대방 게임';
-  return `rank-score · ${sourceText} · ${pointText} · ${gameText}`;
+  const calcTextMap = { add: '더하기', subtract: '빼기', multiply: '곱하기', divide: '나누기' };
+  const calcText = calcTextMap[safe.calculationMethod] || '더하기';
+  return `rank-score · ${sourceText} · ${pointText} · ${gameText} · 계산 ${calcText}`;
 }
