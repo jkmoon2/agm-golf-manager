@@ -12,8 +12,45 @@ export function defaultRankScoreGameParams() {
     gameType: 'room',              // randomPair | room
     winnerOrder: 'desc',           // desc(높은 점수 승) | asc(낮은 점수 승)
     adjustments: {},               // { [participantId]: number }
+    pairGroups: { A: [1, 2], B: [3, 4] }, // 포볼게임 A/B 그룹 조합
     randomSeed: '',
   };
+}
+
+
+export function normalizeRankScorePairGroups(raw) {
+  const defaultGroups = { A: [1, 2], B: [3, 4] };
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const normalizeList = (value) => {
+    const arr = Array.isArray(value) ? value : [];
+    return Array.from(new Set(arr.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n >= 1 && n <= 4))).sort((a, b) => a - b);
+  };
+
+  let a = normalizeList(src.A || src.a || src.teamA || src.groupA);
+  let b = normalizeList(src.B || src.b || src.teamB || src.groupB);
+
+  if (!a.length && !b.length) {
+    a = [...defaultGroups.A];
+    b = [...defaultGroups.B];
+  } else if (a.length && !b.length) {
+    b = [1, 2, 3, 4].filter((n) => !a.includes(n));
+  } else if (!a.length && b.length) {
+    a = [1, 2, 3, 4].filter((n) => !b.includes(n));
+  }
+
+  const aSet = new Set(a);
+  b = b.filter((n) => !aSet.has(n));
+
+  if (!a.length || !b.length) {
+    return { A: [...defaultGroups.A], B: [...defaultGroups.B] };
+  }
+  return { A: a, B: b };
+}
+
+export function getRankScorePairGroupLabel(pairGroups, side) {
+  const groups = normalizeRankScorePairGroups(pairGroups);
+  const arr = side === 'B' ? groups.B : groups.A;
+  return `${side}그룹(${arr.map((n) => `${n}조`).join('·')})`;
 }
 
 export function normalizeRankScoreGameParams(raw) {
@@ -23,6 +60,7 @@ export function normalizeRankScoreGameParams(raw) {
   const pointType = ['converted', 'rank'].includes(src.pointType) ? src.pointType : base.pointType;
   const gameType = ['randomPair', 'room'].includes(src.gameType) ? src.gameType : base.gameType;
   const winnerOrder = ['asc', 'desc'].includes(src.winnerOrder) ? src.winnerOrder : base.winnerOrder;
+  const pairGroups = normalizeRankScorePairGroups(src.pairGroups);
   const adjustments = {};
   if (src.adjustments && typeof src.adjustments === 'object') {
     Object.entries(src.adjustments).forEach(([key, value]) => {
@@ -38,6 +76,7 @@ export function normalizeRankScoreGameParams(raw) {
     gameType,
     winnerOrder,
     adjustments,
+    pairGroups,
     randomSeed: String(src.randomSeed || ''),
   };
 }
@@ -288,17 +327,21 @@ export function normalizeRankScorePairs(raw) {
   return out;
 }
 
-export function getRankScoreGroupSide(participant) {
+export function getRankScoreGroupSide(participant, params = null) {
   const n = Number(participant?.group ?? participant?.groupNo ?? participant?.groupNumber ?? participant?.jo ?? participant?.joNo);
   if (!Number.isFinite(n)) return '';
-  return n === 1 || n === 2 ? 'A' : n === 3 || n === 4 ? 'B' : '';
+  const groups = normalizeRankScorePairGroups(params?.pairGroups || params);
+  if (groups.A.includes(n)) return 'A';
+  if (groups.B.includes(n)) return 'B';
+  return '';
 }
 
 export function getRankScoreGameMetaText(params) {
   const safe = normalizeRankScoreGameParams(params);
   const sourceText = safe.rankingSource === 'manual' ? '참가자 직접 순위' : safe.rankingSource === 'adjusted' ? '보정 결과값' : '결과값';
   const pointText = safe.pointType === 'rank' ? '순위점수' : '환산점수';
-  const gameText = safe.gameType === 'randomPair' ? '포볼 게임' : '방대방 게임';
-  const orderText = safe.winnerOrder === 'asc' ? '낮은 합계 승' : '높은 합계 승';
-  return `rank-score · ${sourceText} · ${pointText} · ${gameText} · ${orderText}`;
+  const gameText = safe.gameType === 'randomPair'
+    ? `포볼 게임(${getRankScorePairGroupLabel(safe.pairGroups, 'A')} ↔ ${getRankScorePairGroupLabel(safe.pairGroups, 'B')})`
+    : '방대방 게임';
+  return `rank-score · ${sourceText} · ${pointText} · ${gameText}`;
 }
