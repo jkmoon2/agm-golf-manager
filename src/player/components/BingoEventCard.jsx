@@ -6,6 +6,7 @@ import tCss from '../screens/PlayerEventInput.module.css';
 import {
   computeBingo,
   normalizeBingoBoard,
+  normalizeBingoBoardCellCount,
   normalizeBingoSelectedHoles,
 } from '../../events/bingo';
 
@@ -37,9 +38,10 @@ export default function BingoEventCard({
   startEventLongMinus,
   cancelEventLongPress,
 }) {
+  const boardCellCount = normalizeBingoBoardCellCount(eventDef?.params?.boardCellCount);
   const selectedHoles = useMemo(
-    () => normalizeBingoSelectedHoles(eventDef?.params?.selectedHoles),
-    [eventDef?.params?.selectedHoles]
+    () => normalizeBingoSelectedHoles(eventDef?.params?.selectedHoles, boardCellCount),
+    [eventDef?.params?.selectedHoles, boardCellCount]
   );
   const sharedBoardInRoom = !!eventDef?.params?.sharedBoardInRoom;
   const memberIds = useMemo(
@@ -72,17 +74,17 @@ export default function BingoEventCard({
     if (!roomData) return selectedHoles;
     if (sharedBoardInRoom) {
       const slot = (roomData.slots || []).find((item) => item?.participantId);
-      return normalizeBingoBoard(slot?.board, selectedHoles);
+      return normalizeBingoBoard(slot?.board, selectedHoles, boardCellCount);
     }
     const slot = (roomData.slots || []).find((item) => String(item?.participantId) === String(editorPid));
-    return normalizeBingoBoard(slot?.board, selectedHoles);
+    return normalizeBingoBoard(slot?.board, selectedHoles, boardCellCount);
   }, [roomData, sharedBoardInRoom, editorPid, selectedHoles]);
 
   const swapHole = (holeNo) => {
     if (!editorBoard.length) return;
     const next = [...editorBoard];
     const sourceIdx = next.findIndex((value) => Number(value) === Number(holeNo));
-    const targetIdx = Math.max(0, Math.min(15, Number(activeCellIdx || 0)));
+    const targetIdx = Math.max(0, Math.min(next.length - 1, Number(activeCellIdx || 0)));
     if (sourceIdx < 0 || targetIdx < 0 || sourceIdx === targetIdx) return;
     const temp = next[targetIdx];
     next[targetIdx] = next[sourceIdx];
@@ -198,7 +200,7 @@ export default function BingoEventCard({
         <div style={editorHead}>
           <div>
             <div style={editorTitle}>빙고판 배치</div>
-            <div style={editorSub}>{sharedBoardInRoom ? '현재 방 4명이 같은 빙고판을 사용합니다.' : '참가자별로 4×4 빙고판 위치를 정할 수 있습니다.'}</div>
+            <div style={editorSub}>{sharedBoardInRoom ? '현재 방 4명이 같은 빙고판을 사용합니다.' : `참가자별로 ${boardCellCount === 9 ? '3×3' : '4×4'} 빙고판 위치를 정할 수 있습니다.`}</div>
           </div>
           <button type="button" onClick={resetBoard} style={miniBtn}>기본배치</button>
         </div>
@@ -218,7 +220,7 @@ export default function BingoEventCard({
           </div>
         )}
 
-        <div style={boardEditorGrid}>
+        <div style={{ ...boardEditorGrid, gridTemplateColumns: `repeat(${boardCellCount === 9 ? 3 : 4}, minmax(0, 1fr))` }}>
           {editorBoard.map((holeNo, idx) => (
             <button
               key={`editor-cell-${idx}`}
@@ -255,7 +257,7 @@ export default function BingoEventCard({
                 <span>{slot.participant?.nickname || ''}</span>
                 <b>{formatDisplayNumber(slot.total)}빙고</b>
               </div>
-              <div style={previewBoard}>
+              <div style={{ ...previewBoard, gridTemplateColumns: `repeat(${boardCellCount === 9 ? 3 : 4}, minmax(0, 1fr))` }}>
                 {(slot.cells || []).map((cell, idx) => (
                   <div key={`preview-cell-${slot.participantId}-${idx}`} style={previewCell}>
                     <span style={previewHoleNo}>{cell.holeNo}</span>

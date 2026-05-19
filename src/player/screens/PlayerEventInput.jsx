@@ -10,7 +10,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoGridSize, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
@@ -107,8 +107,9 @@ function formatDisplayNumber(value){
   return s;
 }
 
-function makeEmptyBingoBoard(){
-  return Array.from({ length: 16 }, () => '');
+function makeEmptyBingoBoard(cellCount = 16){
+  const count = normalizeBingoBoardCellCount(cellCount);
+  return Array.from({ length: count }, () => '');
 }
 
 function shuffleArray(arr = []) {
@@ -122,8 +123,8 @@ function shuffleArray(arr = []) {
   return next;
 }
 
-function getBingoBoardNextState(board, selectedHoles, cellIndex, moveIndex) {
-  const safeBoard = normalizeBingoBoard(board, selectedHoles);
+function getBingoBoardNextState(board, selectedHoles, cellIndex, moveIndex, boardCellCount = 16) {
+  const safeBoard = normalizeBingoBoard(board, selectedHoles, boardCellCount);
   if (Number.isInteger(moveIndex) && moveIndex >= 0 && moveIndex < safeBoard.length) {
     if (moveIndex === cellIndex) return safeBoard;
     const next = [...safeBoard];
@@ -140,7 +141,7 @@ function getBingoBoardNextState(board, selectedHoles, cellIndex, moveIndex) {
     return next;
   }
   if (safeBoard[cellIndex]) return safeBoard;
-  const nextHole = getNextBingoHole(safeBoard, selectedHoles);
+  const nextHole = getNextBingoHole(safeBoard, selectedHoles, boardCellCount);
   if (!nextHole) return safeBoard;
   const next = [...safeBoard];
   next[cellIndex] = nextHole;
@@ -192,6 +193,7 @@ function BingoPreviewCell({ holeNo, markType, muted = false, specialZone = false
 
 function BingoPreviewCard({ name, bingoCount, board, holeValues, specialZones = [] }) {
   const cells = Array.isArray(board) ? board : makeEmptyBingoBoard();
+  const gridSize = cells.length === 9 ? 3 : 4;
   return (
     <div style={{ border: '2px solid #4a8cff', borderRadius: 16, background: '#fff', padding: 12, width: '100%', boxSizing: 'border-box', boxShadow: '0 0 0 3px rgba(74,140,255,.12)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
@@ -201,7 +203,7 @@ function BingoPreviewCard({ name, bingoCount, board, holeValues, specialZones = 
           <span style={{ fontSize: BINGO_COUNT_LABEL_FONT_SIZE, fontWeight: 400 }}>빙고</span>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`, gap: 8 }}>
         {cells.map((holeNo, idx) => (
           <BingoPreviewCell
             key={`${name || 'preview'}-${idx}`}
@@ -210,6 +212,39 @@ function BingoPreviewCard({ name, bingoCount, board, holeValues, specialZones = 
             muted={!holeNo}
             specialZone={isBingoSpecialZone(idx + 1, specialZones)}
           />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+function LargeBingoPreviewCard({ total, cells = [] }) {
+  const safeCells = Array.isArray(cells) ? cells : [];
+  return (
+    <div style={{ border: '2px solid #7c3aed', borderRadius: 16, background: '#fff', padding: 12, width: '100%', boxSizing: 'border-box', boxShadow: '0 0 0 3px rgba(124,58,237,.10)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>방 대형 빙고판 6×6</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, color: '#7c2d12', lineHeight: 1 }}>
+          <span style={{ fontSize: BINGO_COUNT_NUMBER_FONT_SIZE, fontWeight: 900 }}>{Number(total || 0)}</span>
+          <span style={{ fontSize: BINGO_COUNT_LABEL_FONT_SIZE, fontWeight: 400 }}>빙고</span>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 4 }}>
+        {safeCells.map((cell, idx) => (
+          <div key={`large-bingo-cell-${idx}`} style={{ position: 'relative', aspectRatio: '1 / 1', borderRadius: 7, border: '1px solid #d6dde8', background: cell?.specialZone ? '#fff3a6' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            {cell?.mark === 'circle' && (
+              <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 2, width: 'calc(100% - 4px)', height: 'calc(100% - 4px)' }} aria-hidden="true">
+                <circle cx="50" cy="50" r="39" fill="none" stroke="#2457d6" strokeWidth="7" />
+              </svg>
+            )}
+            {cell?.mark === 'heart' && (
+              <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 2, width: 'calc(100% - 4px)', height: 'calc(100% - 4px)' }} aria-hidden="true">
+                <path d="M50 84C50 84 21 66 11 47C2 31 6 13 23 10C33 8 43 12 50 22C57 12 67 8 77 10C94 13 98 31 89 47C79 66 50 84 50 84Z" fill="none" stroke="#2457d6" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            <span style={{ position: 'relative', zIndex: 2, fontSize: 13, fontWeight: 900, color: '#16376c', lineHeight: 1 }}>{cell?.holeNo || ''}</span>
+          </div>
         ))}
       </div>
     </div>
@@ -973,6 +1008,61 @@ export default function PlayerEventInput(){
 
   const getBingoEventDef = (evId) => events.find((item) => String(item?.id) === String(evId));
 
+  const getBingoLargeOrder = (evId) => {
+    const roomIds = getBingoRoomMemberIds();
+    const roomKey = String(roomIdx || '');
+    const draftOrder = inputsByEvent?.[evId]?.shared?.largeBingoOrders?.[roomKey];
+    const serverOrder = inputsByEventServer?.[evId]?.shared?.largeBingoOrders?.[roomKey];
+    return normalizeBingoLargeOrder(draftOrder || serverOrder, roomIds);
+  };
+
+  const patchBingoLargeOrder = (evId, nextOrder) => {
+    const roomKey = String(roomIdx || '');
+    if (!evId || !roomKey) return;
+    const all = cloneEventInputs(draft || {});
+    const slot = { ...(all[evId] || {}) };
+    const shared = { ...(slot.shared || {}) };
+    const largeBingoOrders = { ...(shared.largeBingoOrders || {}) };
+    largeBingoOrders[roomKey] = normalizeBingoLargeOrder(nextOrder, getBingoRoomMemberIds());
+    slot.shared = { ...shared, largeBingoOrders };
+    all[evId] = slot;
+    applyDraft(all);
+    setDirty(true);
+  };
+
+  const applyBingoLargeOrderSlot = (evId, slotIndex) => {
+    const roomIds = getBingoRoomMemberIds();
+    const leaderId = String(roomIds[0] || '');
+    const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+    if (!leaderId || !mine || leaderId !== mine) {
+      window.alert('방 대형 빙고판 배치는 방의 첫 번째 참가자(리더)만 수정할 수 있습니다.');
+      return;
+    }
+    const idx = Number(slotIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx > 3) return;
+    const ui = getBingoUiForEvent(evId);
+    const currentMove = Number.isInteger(ui?.largeMoveIndex) ? ui.largeMoveIndex : -1;
+    if (currentMove < 0) {
+      setBingoUiState((prev) => ({
+        ...prev,
+        [evId]: { ...(prev?.[evId] || {}), largeMoveIndex: idx },
+      }));
+      return;
+    }
+    const order = getBingoLargeOrder(evId);
+    if (currentMove !== idx) {
+      const next = [...order];
+      const temp = next[currentMove];
+      next[currentMove] = next[idx];
+      next[idx] = temp;
+      patchBingoLargeOrder(evId, next);
+    }
+    setBingoUiState((prev) => ({
+      ...prev,
+      [evId]: { ...(prev?.[evId] || {}), largeMoveIndex: null },
+    }));
+  };
+
   const rememberBingoBoardDraft = (evId, pid, board, selectedHoles, roomShared = false) => {
     const key = `${evId}:${pid}`;
     const safeBoard = normalizeBingoBoard(board, selectedHoles);
@@ -1088,7 +1178,8 @@ export default function PlayerEventInput(){
 
     const baseState = getBingoPersonState(evId, mine, selectedHoles);
     const sourceBoard = normalizeBingoBoard(baseState.board, selectedHoles);
-    const hasFullBoard = sourceBoard.filter(Boolean).length >= Math.min(16, normalizeBingoSelectedHoles(selectedHoles).length);
+    const targetCellCount = normalizeBingoBoardCellCount(normalizeBingoSelectedHoles(selectedHoles).length === 9 ? 9 : 16);
+    const hasFullBoard = sourceBoard.filter(Boolean).length >= Math.min(targetCellCount, normalizeBingoSelectedHoles(selectedHoles).length);
     if (!hasFullBoard) {
       window.alert('본인 빙고판을 먼저 모두 입력한 뒤 공통배치를 실행해 주세요.');
       return;
@@ -1174,7 +1265,7 @@ export default function PlayerEventInput(){
     }
     const ok = window.confirm('본인 빙고판을 순서 없이 무작위로 배치합니다. 진행하시겠습니까?');
     if (!ok) return;
-    patchBingoBoard(evId, selectedHoles, basePid, shuffleArray(selectedHoles.slice(0, 16)), false);
+    patchBingoBoard(evId, selectedHoles, basePid, shuffleArray(selectedHoles.slice(0, selectedHoles.length === 9 ? 9 : 16)), false);
     setDirty(true);
     clearBingoMoveIndex(evId);
   };
@@ -1192,7 +1283,7 @@ export default function PlayerEventInput(){
     const ok = window.confirm('현재 본인 빙고판을 초기화합니다. 정말 진행하시겠습니까?');
     if (!ok) return;
 
-    patchBingoBoard(evId, selectedHoles, basePid, makeEmptyBingoBoard(), false);
+    patchBingoBoard(evId, selectedHoles, basePid, makeEmptyBingoBoard(selectedHoles.length === 9 ? 9 : 16), false);
     setDirty(true);
     clearBingoMoveIndex(evId);
   };
@@ -1208,7 +1299,7 @@ export default function PlayerEventInput(){
     }
     const ui = getBingoUiForEvent(evId);
     const current = getBingoPersonState(evId, basePid, selectedHoles);
-    const nextBoard = getBingoBoardNextState(current.board, selectedHoles, cellIndex, ui?.moveIndex);
+    const nextBoard = getBingoBoardNextState(current.board, selectedHoles, cellIndex, ui?.moveIndex, selectedHoles.length === 9 ? 9 : 16);
     patchBingoBoard(evId, selectedHoles, basePid, nextBoard, sharedMode);
     setDirty(true);
     clearBingoMoveIndex(evId);
@@ -2404,6 +2495,8 @@ export default function PlayerEventInput(){
           }
 
           if (isBingo) {
+            const bingoBoardCellCount = normalizeBingoBoardCellCount(ev?.params?.boardCellCount);
+            const bingoGridSize = getBingoGridSize(bingoBoardCellCount);
             const bingoScoreHoleCount = normalizeBingoScoreHoleCount(ev?.params?.scoreHoleCount);
             const bingoInputHoles = bingoScoreHoleCount === 18
               ? Array.from({ length: 18 }, (_, i) => i + 1)
@@ -2417,7 +2510,7 @@ export default function PlayerEventInput(){
             const bingoUi = getBingoUiForEvent(ev.id);
             const bingoEditorState = getBingoPersonState(ev.id, bingoEditorPid, bingoSelectedHoles);
             const bingoEditorBoard = normalizeBingoBoard(bingoEditorState.board, bingoSelectedHoles);
-            const bingoSpecialZones = normalizeBingoSpecialZones(ev?.params?.specialZones);
+            const bingoSpecialZones = normalizeBingoSpecialZones(ev?.params?.specialZones, bingoBoardCellCount);
             const bingoLocked = !!ev?.params?.inputLocked;
             const bingoMinePid = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
             const bingoOwnSelected = !!bingoMinePid && String(bingoEditorPid || '') === String(bingoMinePid);
@@ -2440,16 +2533,23 @@ export default function PlayerEventInput(){
             const bingoPreviewRows = roomMembers.filter(Boolean).map((p) => {
               const rowState = getBingoPersonStateSaved(ev.id, p.id, bingoSelectedHoles);
               const sharedState = getBingoPersonStateSaved(ev.id, bingoEditorPid, bingoSelectedHoles);
-              const board = bingoSharedMode ? normalizeBingoBoard(sharedState.board, bingoSelectedHoles) : normalizeBingoBoard(rowState.board, bingoSelectedHoles);
+              const board = bingoSharedMode ? normalizeBingoBoard(sharedState.board, bingoSelectedHoles, bingoBoardCellCount) : normalizeBingoBoard(rowState.board, bingoSelectedHoles, bingoBoardCellCount);
               const holeValues = getBingoHoleValues(rowState.values, bingoSelectedHoles);
               return {
                 pid: String(p.id),
                 name: String(p.nickname || ''),
                 board,
                 holeValues,
-                bingoCount: computeBingoCount(board, holeValues),
+                bingoCount: computeBingoCount(board, holeValues, bingoBoardCellCount),
               };
             });
+            const bingoLargeOrder = getBingoLargeOrder(ev.id);
+            const bingoLargePreview = bingoBoardCellCount === 9
+              ? buildLargeBingoPreview(bingoPreviewRows, bingoLargeOrder, bingoSpecialZones)
+              : null;
+            const bingoLeaderId = String(getBingoRoomMemberIds()[0] || '');
+            const bingoMineId = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
+            const bingoCanEditLarge = !!bingoLeaderId && !!bingoMineId && bingoLeaderId === bingoMineId;
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -2620,7 +2720,7 @@ export default function PlayerEventInput(){
                       </div>
                     )}
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${bingoGridSize}, minmax(0, 1fr))`, gap: 8, marginBottom: 8 }}>
                       {bingoEditorBoard.map((holeNo, idx) => {
                         const moveIndex = Number.isInteger(bingoUi?.moveIndex) ? bingoUi.moveIndex : -1;
                         const isMove = moveIndex === idx;
@@ -2672,6 +2772,37 @@ export default function PlayerEventInput(){
                       ))}
                     </div>
                   </div>
+
+                  {bingoBoardCellCount === 9 && bingoLargePreview && (
+                    <div style={{ marginTop: 12, border: '1px solid #e9d5ff', borderRadius: 16, background: '#fbf8ff', padding: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>방 대형 빙고판 배치</div>
+                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{bingoCanEditLarge ? '두 칸을 차례로 눌러 4명의 3×3 빙고판 위치를 바꿉니다.' : '방 리더가 4명의 3×3 빙고판 위치를 정합니다.'}</div>
+                        </div>
+                        <span style={{ border: '1px solid #c4b5fd', background: '#ede9fe', color: '#5b21b6', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>{bingoCanEditLarge ? '리더' : '보기'}</span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
+                        {bingoLargeOrder.map((pid, idx) => {
+                          const member = roomMembers.filter(Boolean).find((p) => String(p.id) === String(pid));
+                          const largeMoveIndex = Number.isInteger(bingoUi?.largeMoveIndex) ? bingoUi.largeMoveIndex : -1;
+                          const active = largeMoveIndex === idx;
+                          return (
+                            <button
+                              key={`large-order-${ev.id}-${idx}`}
+                              type="button"
+                              disabled={!bingoCanEditLarge || bingoLocked}
+                              onClick={() => applyBingoLargeOrderSlot(ev.id, idx)}
+                              style={{ minHeight: 42, borderRadius: 12, border: active ? '2px solid #7c3aed' : '1px solid #d8b4fe', background: active ? '#ede9fe' : '#fff', color: '#3b0764', fontWeight: 900, fontSize: 14, opacity: (!bingoCanEditLarge || bingoLocked) ? 0.72 : 1 }}
+                            >
+                              {idx + 1}. {member?.nickname || '-'}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <LargeBingoPreviewCard total={bingoLargePreview.total} cells={bingoLargePreview.cells} />
+                    </div>
+                  )}
                 </div>
               </div>
             );
