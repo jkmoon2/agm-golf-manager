@@ -199,7 +199,7 @@ export default function BingoEventCard({
       <div style={editorWrap}>
         <div style={editorHead}>
           <div>
-            <div style={editorTitle}>Mini빙고판 배치</div>
+            <div style={editorTitle}>{boardCellCount === 9 ? 'Mini빙고판 배치' : '빙고판 배치'}</div>
             <div style={editorSub}>{sharedBoardInRoom ? '현재 방 4명이 같은 빙고판을 사용합니다.' : `참가자별로 ${boardCellCount === 9 ? '3×3' : '4×4'} 빙고판 위치를 정할 수 있습니다.`}</div>
           </div>
           <button type="button" onClick={resetBoard} style={miniBtn}>기본배치</button>
@@ -249,7 +249,7 @@ export default function BingoEventCard({
       </div>
 
       <div style={previewWrap}>
-        <div style={editorTitle}>실시간 Mini빙고판 미리보기</div>
+        <div style={editorTitle}>{boardCellCount === 9 ? '실시간 Mini빙고판 미리보기' : '실시간 빙고판 미리보기'}</div>
         <div style={previewGrid}>
           {(roomData?.slots || []).filter((slot) => slot?.participant).map((slot) => (
             <div key={`preview-board-${slot.participantId}`} style={previewCard}>
