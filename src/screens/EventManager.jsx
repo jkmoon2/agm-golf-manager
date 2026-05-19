@@ -29,7 +29,7 @@ import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupS
 import RankScoreGameEditor from '../eventTemplates/rankScoreGame/RankScoreGameEditor';
 import RankScoreGamePreview from '../eventTemplates/rankScoreGame/RankScoreGamePreview';
 import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../events/holeRankForce';
-import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
+import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
 import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../events/rankScoreGame';
@@ -153,13 +153,16 @@ const fmt2 = (x) => {
 };
 
 function isValidBingoParams(params) {
-  return normalizeBingoSelectedHoles(params?.selectedHoles).length === 16;
+  const boardCellCount = normalizeBingoBoardCellCount(params?.boardCellCount);
+  return normalizeBingoSelectedHoles(params?.selectedHoles, boardCellCount).length === boardCellCount;
 }
 
 function getBingoCountText(params) {
-  const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles).length;
+  const boardCellCount = normalizeBingoBoardCellCount(params?.boardCellCount);
+  const holeCount = normalizeBingoSelectedHoles(params?.selectedHoles, boardCellCount).length;
   const zoneCount = Array.isArray(params?.specialZones) ? params.specialZones.length : 0;
-  return zoneCount ? `${holeCount}홀 · SZ ${zoneCount}` : `${holeCount}홀`;
+  const boardText = boardCellCount === 9 ? '3×3' : '4×4';
+  return zoneCount ? `${boardText} · ${holeCount}홀 · SZ ${zoneCount}` : `${boardText} · ${holeCount}홀`;
 }
 
 
@@ -215,8 +218,9 @@ function normalizeEventParamsForAdmin(template, params) {
     return {
       ...base,
       ...raw,
-      selectedHoles: normalizeBingoSelectedHoles(raw.selectedHoles),
-      specialZones: normalizeBingoSpecialZones(raw.specialZones),
+      boardCellCount: normalizeBingoBoardCellCount(raw.boardCellCount),
+      selectedHoles: normalizeBingoSelectedHoles(raw.selectedHoles, normalizeBingoBoardCellCount(raw.boardCellCount)),
+      specialZones: normalizeBingoSpecialZones(raw.specialZones, normalizeBingoBoardCellCount(raw.boardCellCount)),
       scoreHoleCount: normalizeBingoScoreHoleCount(raw.scoreHoleCount),
       inputLocked: !!raw.inputLocked,
     };

@@ -1,6 +1,6 @@
 // /src/eventTemplates/bingo/BingoSelectionMonitor.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, normalizeBingoBoardCellCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 
 function roomLabel(roomNames, roomNo) {
   const idx = Number(roomNo) - 1;
@@ -10,8 +10,8 @@ function roomLabel(roomNames, roomNo) {
   return Number.isFinite(Number(roomNo)) && Number(roomNo) >= 1 ? `${roomNo}번방` : '-';
 }
 
-function getSpecialZoneStats(state, selectedHoles, specialZones) {
-  const zones = normalizeBingoSpecialZones(specialZones);
+function getSpecialZoneStats(state, selectedHoles, specialZones, boardCellCount = 16) {
+  const zones = normalizeBingoSpecialZones(specialZones, boardCellCount);
   const holeValues = getBingoHoleValues(state.values, selectedHoles);
   const filled = zones.reduce((count, position) => {
     const holeNo = Number(Array.isArray(state.board) ? state.board[position - 1] : '');
@@ -35,8 +35,9 @@ export default function BingoSelectionMonitor({
   onToggleLock,
   initialMode = 'status',
 }) {
-  const selectedHoles = normalizeBingoSelectedHoles(eventDef?.params?.selectedHoles);
-  const specialZones = normalizeBingoSpecialZones(eventDef?.params?.specialZones);
+  const boardCellCount = normalizeBingoBoardCellCount(eventDef?.params?.boardCellCount);
+  const selectedHoles = normalizeBingoSelectedHoles(eventDef?.params?.selectedHoles, boardCellCount);
+  const specialZones = normalizeBingoSpecialZones(eventDef?.params?.specialZones, boardCellCount);
   const [mode, setMode] = useState(initialMode === 'special' ? 'special' : 'status');
 
   useEffect(() => {
@@ -51,16 +52,16 @@ export default function BingoSelectionMonitor({
       return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
     });
     return list.map((p) => {
-      const state = extractBingoPersonInput(inputsByEvent?.person?.[p?.id], selectedHoles);
+      const state = extractBingoPersonInput(inputsByEvent?.person?.[p?.id], selectedHoles, boardCellCount);
       const inputCount = selectedHoles.reduce((count, holeNo) => {
         const raw = state.values?.[holeNo - 1];
         return (raw === '' || raw == null) ? count : count + 1;
       }, 0);
       const boardCount = (Array.isArray(state.board) ? state.board : []).filter(Boolean).length;
       const holeValues = getBingoHoleValues(state.values, selectedHoles);
-      const bingoCount = computeBingoCount(state.board, holeValues);
-      const complete = inputCount === selectedHoles.length && boardCount === 16;
-      const special = getSpecialZoneStats(state, selectedHoles, specialZones);
+      const bingoCount = computeBingoCount(state.board, holeValues, boardCellCount);
+      const complete = inputCount === selectedHoles.length && boardCount === boardCellCount;
+      const special = getSpecialZoneStats(state, selectedHoles, specialZones, boardCellCount);
       return {
         id: String(p?.id ?? ''),
         name: String(p?.nickname || ''),
@@ -74,7 +75,7 @@ export default function BingoSelectionMonitor({
         specialComplete: special.complete,
       };
     });
-  }, [participants, inputsByEvent, roomNames, selectedHoles, specialZones]);
+  }, [participants, inputsByEvent, roomNames, selectedHoles, specialZones, boardCellCount]);
 
   const doneCount = rows.filter((row) => row.complete).length;
   const specialDoneRows = rows.filter((row) => row.specialComplete);
@@ -86,7 +87,7 @@ export default function BingoSelectionMonitor({
         <div style={headerRow}>
           <div style={{ minWidth: 0 }}>
             <div style={title}>빙고 입력 현황 / 마감</div>
-            <div style={subTitle}>{eventDef?.title || '빙고'} · 사용홀 {selectedHoles.length}개</div>
+            <div style={subTitle}>{eventDef?.title || '빙고'} · {boardCellCount === 9 ? '3×3' : '4×4'} · 사용홀 {selectedHoles.length}개</div>
           </div>
           <button type="button" style={btn} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>닫기</button>
         </div>
@@ -121,7 +122,7 @@ export default function BingoSelectionMonitor({
                     <span style={row.complete ? badgeDone : badgeWait}>{row.complete ? '완료' : '대기'}</span>
                   </div>
                   <div style={rowBody}>
-                    <div style={summaryText}>점수입력 {row.inputCount}/{selectedHoles.length} · 빙고판 {row.boardCount}/16</div>
+                    <div style={summaryText}>점수입력 {row.inputCount}/{selectedHoles.length} · 빙고판 {row.boardCount}/{boardCellCount}</div>
                     <div style={metaLine}>현재 {row.bingoCount}빙고</div>
                   </div>
                 </div>

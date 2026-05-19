@@ -107,6 +107,8 @@ export const TEMPLATE_REGISTRY = [
       selectedHoles: Array.from({ length: 18 }, (_, i) => i + 1),
       specialZones: [],
       inputLocked: false,
+      scoreHoleCount: 18,
+      boardCellCount: 16,
     },
     help: '',
     ui: {

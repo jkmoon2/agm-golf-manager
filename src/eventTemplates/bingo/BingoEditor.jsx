@@ -1,64 +1,139 @@
 // /src/eventTemplates/bingo/BingoEditor.jsx
 
 import React, { useMemo, useState } from 'react';
-import { defaultBingoParams, isValidBingoSelectedHoles, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
+import {
+  defaultBingoParams,
+  isValidBingoSelectedHoles,
+  normalizeBingoBoardCellCount,
+  normalizeBingoSelectedHoles,
+  normalizeBingoSpecialZones,
+  normalizeBingoScoreHoleCount,
+} from '../../events/bingo';
 
 const HOLES = Array.from({ length: 18 }, (_, i) => i + 1);
-const POSITIONS = Array.from({ length: 16 }, (_, i) => i + 1);
 
-function getSummary(selectedHoles) {
+function getSummary(selectedHoles, boardCellCount) {
+  const target = normalizeBingoBoardCellCount(boardCellCount);
   const count = selectedHoles.length;
-  if (count === 16) return '16개 선택 완료';
-  if (count > 16) return `${count}개 선택 · ${count - 16}개 더 해제`;
-  return `${count}개 선택`;
+  if (count === target) return `${target}개 선택 완료`;
+  if (count > target) return `${count}개 선택 · ${count - target}개 더 해제`;
+  return `${count}개 선택 · ${target - count}개 더 선택`;
+}
+
+function fitSelectedHoles(list, target) {
+  const safe = normalizeBingoSelectedHoles(list, target);
+  if (safe.length >= target) return safe.slice(0, target);
+  const used = new Set(safe);
+  const next = [...safe];
+  HOLES.forEach((holeNo) => {
+    if (next.length >= target) return;
+    if (!used.has(holeNo)) next.push(holeNo);
+  });
+  next.sort((a, b) => a - b);
+  return next;
 }
 
 export default function BingoEditor({ value, onChange }) {
   const safe = useMemo(() => {
     const base = defaultBingoParams();
     const src = value && typeof value === 'object' ? value : {};
+    const boardCellCount = normalizeBingoBoardCellCount(src.boardCellCount);
     return {
       ...base,
       ...src,
-      selectedHoles: normalizeBingoSelectedHoles(src.selectedHoles),
-      specialZones: normalizeBingoSpecialZones(src.specialZones),
+      boardCellCount,
+      selectedHoles: normalizeBingoSelectedHoles(src.selectedHoles, boardCellCount),
+      specialZones: normalizeBingoSpecialZones(src.specialZones, boardCellCount),
       inputLocked: !!src.inputLocked,
       scoreHoleCount: normalizeBingoScoreHoleCount(src.scoreHoleCount),
     };
   }, [value]);
 
+  const boardCellCount = normalizeBingoBoardCellCount(safe.boardCellCount);
+  const boardLabel = boardCellCount === 9 ? '3×3(9칸)' : '4×4(16칸)';
   const selectedHoles = safe.selectedHoles;
   const specialZones = safe.specialZones;
   const scoreHoleCount = normalizeBingoScoreHoleCount(safe.scoreHoleCount);
+  const targetCount = boardCellCount;
+  const positions = Array.from({ length: boardCellCount }, (_, i) => i + 1);
   const [openKey, setOpenKey] = useState('');
 
   const emit = (next) => {
     if (typeof onChange === 'function') onChange(next);
   };
 
+  const setBoardCellCount = (nextCount) => {
+    const target = normalizeBingoBoardCellCount(nextCount);
+    const nextScoreHoleCount = target === 9 ? (scoreHoleCount === 16 ? 9 : scoreHoleCount) : (scoreHoleCount === 9 ? 16 : scoreHoleCount);
+    emit({
+      ...safe,
+      boardCellCount: target,
+      scoreHoleCount: normalizeBingoScoreHoleCount(nextScoreHoleCount),
+      selectedHoles: fitSelectedHoles(selectedHoles, target),
+      specialZones: normalizeBingoSpecialZones(specialZones, target),
+    });
+  };
+
+  const setScoreHoleCount = (nextCount) => {
+    const normalized = normalizeBingoScoreHoleCount(nextCount);
+    const nextBoardCellCount = normalized === 9 ? 9 : boardCellCount;
+    emit({
+      ...safe,
+      boardCellCount: nextBoardCellCount,
+      scoreHoleCount: normalized,
+      selectedHoles: normalized === 9 ? fitSelectedHoles(selectedHoles, 9) : normalizeBingoSelectedHoles(selectedHoles, nextBoardCellCount),
+      specialZones: normalizeBingoSpecialZones(specialZones, nextBoardCellCount),
+    });
+  };
+
   const toggleHole = (holeNo) => {
     const has = selectedHoles.includes(holeNo);
     let next;
     if (has) {
-      if (selectedHoles.length <= 16) return;
+      if (selectedHoles.length <= targetCount) return;
       next = selectedHoles.filter((n) => n !== holeNo);
     } else {
       next = [...selectedHoles, holeNo];
     }
-    emit({ ...safe, selectedHoles: normalizeBingoSelectedHoles(next) });
+    emit({ ...safe, selectedHoles: normalizeBingoSelectedHoles(next, targetCount) });
   };
 
   const toggleSpecialZone = (position) => {
     const has = specialZones.includes(position);
     const next = has ? specialZones.filter((n) => n !== position) : [...specialZones, position];
-    emit({ ...safe, specialZones: normalizeBingoSpecialZones(next) });
+    emit({ ...safe, specialZones: normalizeBingoSpecialZones(next, boardCellCount) });
   };
 
   return (
     <div style={box}>
       <AccordionBox
+        title="빙고판 선택"
+        summary={boardLabel}
+        open={openKey === 'board'}
+        onToggle={() => setOpenKey((prev) => (prev === 'board' ? '' : 'board'))}
+      >
+        <div style={modeWrap}>
+          <button
+            type="button"
+            onClick={() => setBoardCellCount(9)}
+            style={{ ...modeChip, ...(boardCellCount === 9 ? modeChipActive : modeChipInactive) }}
+          >
+            3×3
+          </button>
+          <button
+            type="button"
+            onClick={() => setBoardCellCount(16)}
+            style={{ ...modeChip, ...(boardCellCount === 16 ? modeChipActive : modeChipInactive) }}
+          >
+            4×4
+          </button>
+        </div>
+        <div style={hintText}>3×3은 9칸 축소판, 4×4는 기존 16칸 빙고판입니다.</div>
+      </AccordionBox>
+
+      <AccordionBox
         title="사용 홀 선택"
-        summary={getSummary(selectedHoles)}
+        summary={`${getSummary(selectedHoles, boardCellCount)} · 입력 ${scoreHoleCount}홀`}
         open={openKey === 'holes'}
         onToggle={() => setOpenKey((prev) => (prev === 'holes' ? '' : 'holes'))}
       >
@@ -66,14 +141,21 @@ export default function BingoEditor({ value, onChange }) {
         <div style={modeWrap}>
           <button
             type="button"
-            onClick={() => emit({ ...safe, scoreHoleCount: 16 })}
+            onClick={() => setScoreHoleCount(9)}
+            style={{ ...modeChip, ...(scoreHoleCount === 9 ? modeChipActive : modeChipInactive) }}
+          >
+            9홀
+          </button>
+          <button
+            type="button"
+            onClick={() => setScoreHoleCount(16)}
             style={{ ...modeChip, ...(scoreHoleCount === 16 ? modeChipActive : modeChipInactive) }}
           >
             16홀
           </button>
           <button
             type="button"
-            onClick={() => emit({ ...safe, scoreHoleCount: 18 })}
+            onClick={() => setScoreHoleCount(18)}
             style={{ ...modeChip, ...(scoreHoleCount === 18 ? modeChipActive : modeChipInactive) }}
           >
             18홀
@@ -81,8 +163,10 @@ export default function BingoEditor({ value, onChange }) {
         </div>
         <div style={{ ...countTextWrap, marginTop: -4 }}>
           <span style={countText}>{selectedHoles.length}/18 선택</span>
-          <span style={{ ...countText, color: '#177a45' }}>
-            {scoreHoleCount === 18 ? '18홀 입력 · 빙고 반영은 선택된 16홀만 적용' : '2개를 해제해 16홀로 맞춰주세요'}
+          <span style={{ ...countText, color: isValidBingoSelectedHoles(selectedHoles, targetCount) ? '#177a45' : '#d97706' }}>
+            {scoreHoleCount === 18
+              ? `18홀 입력 · 빙고 반영은 선택된 ${targetCount}홀만 적용`
+              : `${targetCount}개 홀을 선택해 ${boardLabel}에 반영`}
           </span>
         </div>
 
@@ -110,7 +194,7 @@ export default function BingoEditor({ value, onChange }) {
         onToggle={() => setOpenKey((prev) => (prev === 'zones' ? '' : 'zones'))}
       >
         <div style={chipWrap}>
-          {POSITIONS.map((position) => {
+          {positions.map((position) => {
             const active = specialZones.includes(position);
             return (
               <button
@@ -198,6 +282,11 @@ const countText = {
   fontWeight: 700,
   color: '#16376c',
 };
+const hintText = {
+  fontSize: 12,
+  color: '#64748b',
+  lineHeight: 1.45,
+};
 const chipWrap = {
   display: 'grid',
   gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
@@ -235,6 +324,7 @@ const modeWrap = {
   background: '#eef2f7',
   border: '1px solid #d7dfeb',
   marginBottom: 10,
+  flexWrap: 'wrap',
 };
 const modeChip = {
   minWidth: 68,
