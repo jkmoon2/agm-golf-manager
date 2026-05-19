@@ -105,11 +105,12 @@ export function normalizeBingoScoreHoleCount(raw) {
 }
 
 export function normalizeBingoSelectedHoles(raw, targetCellCount) {
-  const baseTarget = Number(targetCellCount) === 9 ? 9 : null;
   const arr = Array.isArray(raw) ? raw : defaultBingoParams().selectedHoles;
   const uniq = Array.from(new Set(arr.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 18)));
   uniq.sort((a, b) => a - b);
-  if (!uniq.length) return baseTarget === 9 ? ALL_HOLES.slice(0, 9) : defaultBingoParams().selectedHoles;
+  // 기존 4×4 운영 방식처럼 기본값은 전체 18홀 선택 상태를 유지합니다.
+  // 3×3도 처음에는 전체 선택 → 운영자가 터치로 해제해서 9개에 맞춥니다.
+  if (!uniq.length) return defaultBingoParams().selectedHoles;
   return uniq;
 }
 

@@ -504,13 +504,15 @@ const events = useMemo(
         }));
         return { kind: 'person', metricLabel: '빙고', rows };
       }
+      const bigMap = new Map((data.largeRoomRows || []).map((r) => [String(r?.key || r?.room || ''), Number(r?.value || 0)]));
       const rows = (data.roomRows || []).map((r, i) => ({
         key: r.key || String(i),
         rank: i + 1,
         label: r.name,
         value: r.value,
+        bigValue: bigMap.get(String(r.key || r.room || '')),
       }));
-      return { kind: 'room', metricLabel: '빙고', rows };
+      return { kind: 'room', metricLabel: '빙고', extraMetricLabel: data.boardCellCount === 9 ? '빅빙고' : '', rows };
     }
 
     // ── group-room-hole-battle(그룹/방 홀별 지목전) ───────────────
@@ -723,6 +725,7 @@ const events = useMemo(
           {results.map(({ ev, res }) => {
             const title = ev?.title || '이벤트';
             const unit  = res.kind === 'person' ? '개인' : (res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '조' : '방')));
+            const hasExtraMetric = !!res.extraMetricLabel;
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
                 <div className={baseCss.cardHeader}>
@@ -737,6 +740,7 @@ const events = useMemo(
                       <col style={{ width: 56 }} />
                       {res.kind === 'person' && <col style={{ width: '50%' }} />}
                       <col />
+                      {hasExtraMetric && <col style={{ width: 74 }} />}
                       <col style={{ width: 80 }} />
                     </colgroup>
                     <thead>
@@ -744,13 +748,14 @@ const events = useMemo(
                         <th className={tCss.cell}>순위</th>
                         {res.kind === 'person' && <th className={tCss.cell}>닉네임</th>}
                         <th className={tCss.cell}>{res.kind === 'room' ? '방' : res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '방' : '방'))}</th>
+                        {hasExtraMetric && <th className={tCss.cell} style={{ color: '#2563eb' }}>{res.extraMetricLabel}</th>}
                         <th className={tCss.cell}>{res.metricLabel || '점수'}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {res.rows.length === 0 && (
                         <tr>
-                          <td className={tCss.cell} colSpan={res.kind==='person' ? 4 : 3} style={{ color:'#999' }}>
+                          <td className={tCss.cell} colSpan={(res.kind==='person' ? 4 : 3) + (hasExtraMetric ? 1 : 0)} style={{ color:'#999' }}>
                             입력된 데이터가 없습니다.
                           </td>
                         </tr>
@@ -762,6 +767,7 @@ const events = useMemo(
                           <td className={tCss.cell}>
                             {res.kind === 'person' ? (row.room || '-') : row.label}
                           </td>
+                          {hasExtraMetric && <td className={tCss.cell} style={{ color: '#2563eb' }}>{row.bigValue == null ? '' : fmtScore(row.bigValue)}</td>}
                           <td className={tCss.cell}>{row.displayText ? row.displayText : fmtScore(row.value)}</td>
                         </tr>
                       ))}

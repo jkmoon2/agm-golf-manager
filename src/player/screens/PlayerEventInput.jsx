@@ -224,15 +224,26 @@ function LargeBingoPreviewCard({ total, cells = [] }) {
   return (
     <div style={{ border: '2px solid #7c3aed', borderRadius: 16, background: '#fff', padding: 12, width: '100%', boxSizing: 'border-box', boxShadow: '0 0 0 3px rgba(124,58,237,.10)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>방 대형 빙고판 6×6</div>
+        <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>Big빙고판 6×6</div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, color: '#7c2d12', lineHeight: 1 }}>
           <span style={{ fontSize: BINGO_COUNT_NUMBER_FONT_SIZE, fontWeight: 900 }}>{Number(total || 0)}</span>
           <span style={{ fontSize: BINGO_COUNT_LABEL_FONT_SIZE, fontWeight: 400 }}>빙고</span>
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 4 }}>
-        {safeCells.map((cell, idx) => (
-          <div key={`large-bingo-cell-${idx}`} style={{ position: 'relative', aspectRatio: '1 / 1', borderRadius: 7, border: '1px solid #d6dde8', background: cell?.specialZone ? '#fff3a6' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {safeCells.map((cell, idx) => {
+          const rowNo = Math.floor(idx / 6);
+          const colNo = idx % 6;
+          const crossStyle = {
+            boxShadow: [
+              colNo === 2 ? 'inset -3px 0 0 rgba(124,58,237,.28)' : '',
+              colNo === 3 ? 'inset 3px 0 0 rgba(124,58,237,.28)' : '',
+              rowNo === 2 ? 'inset 0 -3px 0 rgba(124,58,237,.28)' : '',
+              rowNo === 3 ? 'inset 0 3px 0 rgba(124,58,237,.28)' : '',
+            ].filter(Boolean).join(', '),
+          };
+          return (
+          <div key={`large-bingo-cell-${idx}`} style={{ position: 'relative', aspectRatio: '1 / 1', borderRadius: 7, border: '1px solid #d6dde8', background: cell?.specialZone ? '#fff3a6' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', ...crossStyle }}>
             {cell?.mark === 'circle' && (
               <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 2, width: 'calc(100% - 4px)', height: 'calc(100% - 4px)' }} aria-hidden="true">
                 <circle cx="50" cy="50" r="39" fill="none" stroke="#2457d6" strokeWidth="7" />
@@ -245,7 +256,8 @@ function LargeBingoPreviewCard({ total, cells = [] }) {
             )}
             <span style={{ position: 'relative', zIndex: 2, fontSize: 13, fontWeight: 900, color: '#16376c', lineHeight: 1 }}>{cell?.holeNo || ''}</span>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1035,7 +1047,7 @@ export default function PlayerEventInput(){
     const leaderId = String(roomIds[0] || '');
     const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
     if (!leaderId || !mine || leaderId !== mine) {
-      window.alert('방 대형 빙고판 배치는 방의 첫 번째 참가자(리더)만 수정할 수 있습니다.');
+      window.alert('Big빙고판 배치는 방의 첫 번째 참가자(리더)만 수정할 수 있습니다.');
       return;
     }
     const idx = Number(slotIndex);
@@ -2557,7 +2569,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {bingoLocked && <div className={tCss.lockNotice}>빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
+                {bingoLocked && <div className={tCss.lockNotice}>Mini빙고판 배치 입력 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
@@ -2653,7 +2665,7 @@ export default function PlayerEventInput(){
                 <div style={{ padding: '12px' }}>
                   <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-                      <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>빙고판 배치</div>
+                      <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>Mini빙고판 배치</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <button
                           type="button"
@@ -2757,7 +2769,7 @@ export default function PlayerEventInput(){
                   </div>
 
                   <div style={{ marginTop: 12, border: '1px solid #dde6f2', borderRadius: 16, background: '#f8fbff', padding: 12 }}>
-                    <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c', marginBottom: 10 }}>실시간 빙고판 미리보기</div>
+                    <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c', marginBottom: 10 }}>실시간 Mini빙고판 미리보기</div>
                     <div style={{ display: 'flex', gap: 10, overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', paddingBottom: 2 }}>
                       {bingoPreviewRows.map((row) => (
                         <div key={`bingo-preview-${row.pid}`} style={{ flex: '0 0 100%', minWidth: '100%', scrollSnapAlign: 'start' }}>
@@ -2777,8 +2789,8 @@ export default function PlayerEventInput(){
                     <div style={{ marginTop: 12, border: '1px solid #e9d5ff', borderRadius: 16, background: '#fbf8ff', padding: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                         <div>
-                          <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>방 대형 빙고판 배치</div>
-                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{bingoCanEditLarge ? '두 칸을 차례로 눌러 4명의 3×3 빙고판 위치를 바꿉니다.' : '방 리더가 4명의 3×3 빙고판 위치를 정합니다.'}</div>
+                          <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>Big빙고판 배치</div>
+                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{bingoCanEditLarge ? '두 칸을 차례로 눌러 4명의 3×3 Mini빙고판 위치를 바꿉니다.' : '방 리더가 4명의 3×3 Mini빙고판 위치를 정합니다.'}</div>
                         </div>
                         <span style={{ border: '1px solid #c4b5fd', background: '#ede9fe', color: '#5b21b6', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>{bingoCanEditLarge ? '리더' : '보기'}</span>
                       </div>

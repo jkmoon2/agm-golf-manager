@@ -1,6 +1,6 @@
 // /src/eventTemplates/bingo/BingoSelectionMonitor.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, normalizeBingoBoardCellCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
+import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoHoleValues, getBingoMarkType, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
 
 function roomLabel(roomNames, roomNo) {
   const idx = Number(roomNo) - 1;
@@ -38,10 +38,10 @@ export default function BingoSelectionMonitor({
   const boardCellCount = normalizeBingoBoardCellCount(eventDef?.params?.boardCellCount);
   const selectedHoles = normalizeBingoSelectedHoles(eventDef?.params?.selectedHoles, boardCellCount);
   const specialZones = normalizeBingoSpecialZones(eventDef?.params?.specialZones, boardCellCount);
-  const [mode, setMode] = useState(initialMode === 'special' ? 'special' : 'status');
+  const [mode, setMode] = useState(initialMode === 'special' ? 'special' : (initialMode === 'big' ? 'big' : 'status'));
 
   useEffect(() => {
-    setMode(initialMode === 'special' ? 'special' : 'status');
+    setMode(initialMode === 'special' ? 'special' : (initialMode === 'big' ? 'big' : 'status'));
   }, [initialMode]);
 
   const rows = useMemo(() => {
@@ -65,7 +65,10 @@ export default function BingoSelectionMonitor({
       return {
         id: String(p?.id ?? ''),
         name: String(p?.nickname || ''),
+        roomNo: Number(p?.room || 0),
         roomLabel: roomLabel(roomNames, p?.room),
+        board: state.board,
+        holeValues,
         inputCount,
         boardCount,
         bingoCount,
@@ -76,6 +79,28 @@ export default function BingoSelectionMonitor({
       };
     });
   }, [participants, inputsByEvent, roomNames, selectedHoles, specialZones, boardCellCount]);
+
+  const bigRows = useMemo(() => {
+    if (boardCellCount !== 9) return [];
+    const roomNos = Array.from(new Set(rows.map((row) => Number(row.roomNo || 0)).filter((n) => n > 0))).sort((a, b) => a - b);
+    const orders = (inputsByEvent?.shared?.largeBingoOrders && typeof inputsByEvent.shared.largeBingoOrders === 'object') ? inputsByEvent.shared.largeBingoOrders : {};
+    return roomNos.map((roomNo) => {
+      const members = rows.filter((row) => Number(row.roomNo || 0) === roomNo);
+      const order = normalizeBingoLargeOrder(orders[String(roomNo)], members.map((row) => row.id));
+      const preview = buildLargeBingoPreview(members.map((row) => ({
+        pid: row.id,
+        name: row.name,
+        board: row.board,
+        holeValues: row.holeValues,
+      })), order, specialZones);
+      return {
+        roomNo,
+        name: roomLabel(roomNames, roomNo),
+        total: Number(preview?.total || 0),
+        members: members.map((row) => row.name).filter(Boolean).join(' · '),
+      };
+    });
+  }, [boardCellCount, rows, inputsByEvent, roomNames, specialZones]);
 
   const doneCount = rows.filter((row) => row.complete).length;
   const specialDoneRows = rows.filter((row) => row.specialComplete);
@@ -95,6 +120,7 @@ export default function BingoSelectionMonitor({
         <div style={tabRow}>
           <button type="button" style={mode === 'status' ? tabBtnOn : tabBtn} onClick={() => setMode('status')}>입력 현황</button>
           <button type="button" style={mode === 'special' ? tabBtnOn : tabBtn} onClick={() => setMode('special')}>Special Zone</button>
+          <button type="button" style={mode === 'big' ? tabBtnOn : tabBtn} onClick={() => setMode('big')}>Big빙고</button>
         </div>
 
         {mode === 'status' ? (
@@ -129,7 +155,7 @@ export default function BingoSelectionMonitor({
               ))}
             </div>
           </>
-        ) : (
+        ) : mode === 'special' ? (
           <>
             <div style={summaryBox}>
               <div style={summaryItem}>선택된 Special Zone <b>{specialZones.length}</b>칸</div>
@@ -166,6 +192,34 @@ export default function BingoSelectionMonitor({
               <div style={{ ...emptyText, marginTop: 12 }}>설정된 Special Zone이 없습니다.</div>
             )}
           </>
+        ) : (
+          <>
+            {boardCellCount === 9 ? (
+              <>
+                <div style={summaryBox}>
+                  <div style={summaryItem}>Big빙고 확인 방 <b>{bigRows.length}</b>개</div>
+                </div>
+                <div style={listWrap}>
+                  {bigRows.map((row) => (
+                    <div key={`big-${row.roomNo}`} style={rowBox}>
+                      <div style={rowHead}>
+                        <div style={{ minWidth: 0 }}>
+                          <span style={rowName}>{row.name}</span>
+                          <span style={rowMeta}> ({row.members || '참가자 없음'})</span>
+                        </div>
+                        <span style={bigBadge}>{row.total}빙고</span>
+                      </div>
+                      <div style={rowBody}>
+                        <div style={summaryText}>4명의 3×3 Mini빙고판을 합친 6×6 Big빙고 달성 현황입니다.</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ ...emptyText, marginTop: 12 }}>Big빙고는 3×3(9칸) 빙고판에서만 확인할 수 있습니다.</div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -195,7 +249,7 @@ const card = {
 const headerRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 };
 const title = { fontWeight: 800, fontSize: 16, color: '#183153' };
 const subTitle = { marginTop: 4, fontSize: 12, color: '#667085', lineHeight: 1.45 };
-const tabRow = { marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 };
+const tabRow = { marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 };
 const tabBtn = { border: '1px solid #d7dfea', background: '#f8fafc', color: '#475467', borderRadius: 10, padding: '10px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
 const tabBtnOn = { ...tabBtn, borderColor: '#2563eb', background: '#edf4ff', color: '#1d4ed8' };
 const summaryBox = { marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' };
@@ -211,6 +265,7 @@ const metaLine = { fontSize: 12, color: '#667085' };
 const badgeBase = { display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 8px', borderRadius: 999, fontSize: 12, border: '1px solid' };
 const badgeDone = { ...badgeBase, color: '#10b981', borderColor: '#a7f3d0', background: '#ecfdf5' };
 const badgeWait = { ...badgeBase, color: '#6b7280', borderColor: '#d1d5db', background: '#f9fafb' };
+const bigBadge = { ...badgeBase, color: '#2563eb', borderColor: '#bfdbfe', background: '#eff6ff', fontWeight: 800 };
 const btn = { border: '1px solid #cbd5e1', background: '#fff', borderRadius: 10, padding: '8px 12px', fontSize: 13, cursor: 'pointer' };
 const btnPrimary = { ...btn, borderColor: '#2563eb', background: '#2563eb', color: '#fff', fontWeight: 700 };
 const btnSub = { ...btn, borderColor: '#d1d5db', background: '#f8fafc', color: '#344054', fontWeight: 700 };
