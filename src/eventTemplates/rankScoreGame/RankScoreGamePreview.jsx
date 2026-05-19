@@ -21,7 +21,7 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
   return (
     <div style={wrapStyle}>
       <div style={summaryStyle}>
-        기준: {sourceText(params.rankingSource)} · 점수: {params.pointType === 'rank' ? '순위점수' : '환산점수'} · 계산: {calcText(params.calculationMethod)} · 정렬: {params.winnerOrder === 'asc' ? '오름' : '내림'}
+        기준: {sourceText(params.rankingSource)} · 점수: {params.pointType === 'rank' ? '순위점수' : '환산점수'} · 계산: {calcText(params.calculationMethod)}{params.gameType === 'room' && params.calculationMethod === 'add' ? `(${params.roomAddTarget === 'slots' ? '기준순위 2명' : '방인원 전체'})` : ''} · 정렬: {params.winnerOrder === 'asc' ? '오름' : '내림'}
       </div>
 
       {tab === 'person' && (
