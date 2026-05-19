@@ -178,23 +178,22 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
               </select>
             </label>
           )}
-          <div style={roomRankGridStyle}>
-            <label style={labelStyle}>
-              <span style={fieldLabelStyle}>기준 순위 1</span>
-              <select value={safe.roomRankSlots?.[0] || 1} onChange={(e) => onRoomRankSlotChange(0, e.target.value)} style={selectStyle}>
-                {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-a-${n}`} value={n}>{n}위</option>)}
-              </select>
-            </label>
-            <label style={labelStyle}>
-              <span style={fieldLabelStyle}>기준 순위 2</span>
-              <select value={safe.roomRankSlots?.[1] || 4} onChange={(e) => onRoomRankSlotChange(1, e.target.value)} style={selectStyle}>
-                {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-b-${n}`} value={n}>{n}위</option>)}
-              </select>
-            </label>
-          </div>
-          <div style={smallTextStyle}>
-            방 안에서는 결과값(점수-G핸디)이 낮은 사람을 우선으로 정렬하고, 같은 결과값이면 G핸디가 낮은 사람을 우선합니다. 더하기는 기본적으로 방인원 전체를 계산하고, 빼기/곱하기/나누기는 기준순위 2명으로 계산합니다.
-          </div>
+          {(safe.calculationMethod !== 'add' || safe.roomAddTarget === 'slots') && (
+            <div style={roomRankGridStyle}>
+              <label style={labelStyle}>
+                <span style={fieldLabelStyle}>기준 순위 1</span>
+                <select value={safe.roomRankSlots?.[0] || 1} onChange={(e) => onRoomRankSlotChange(0, e.target.value)} style={selectStyle}>
+                  {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-a-${n}`} value={n}>{n}위</option>)}
+                </select>
+              </label>
+              <label style={labelStyle}>
+                <span style={fieldLabelStyle}>기준 순위 2</span>
+                <select value={safe.roomRankSlots?.[1] || 4} onChange={(e) => onRoomRankSlotChange(1, e.target.value)} style={selectStyle}>
+                  {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-b-${n}`} value={n}>{n}위</option>)}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
       )}
 
