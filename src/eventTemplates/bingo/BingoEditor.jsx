@@ -69,7 +69,9 @@ export default function BingoEditor({ value, onChange }) {
       ...safe,
       boardCellCount: target,
       scoreHoleCount: normalizeBingoScoreHoleCount(nextScoreHoleCount),
-      selectedHoles: fitSelectedHoles(selectedHoles, target),
+      // 기존 4×4 방식처럼 최초에는 1~18홀이 모두 선택된 상태를 유지하고,
+      // 운영자가 터치로 해제해서 9/16개에 맞추도록 합니다.
+      selectedHoles: normalizeBingoSelectedHoles(selectedHoles, target),
       specialZones: normalizeBingoSpecialZones(specialZones, target),
     });
   };
@@ -81,7 +83,9 @@ export default function BingoEditor({ value, onChange }) {
       ...safe,
       boardCellCount: nextBoardCellCount,
       scoreHoleCount: normalized,
-      selectedHoles: normalized === 9 ? fitSelectedHoles(selectedHoles, 9) : normalizeBingoSelectedHoles(selectedHoles, nextBoardCellCount),
+      // 9홀/16홀/18홀 버튼을 눌러도 선택홀을 자동으로 잘라내지 않습니다.
+      // 기존처럼 전체 선택 상태에서 필요한 홀을 해제하는 방식으로 운영합니다.
+      selectedHoles: normalizeBingoSelectedHoles(selectedHoles, nextBoardCellCount),
       specialZones: normalizeBingoSpecialZones(specialZones, nextBoardCellCount),
     });
   };
@@ -193,7 +197,7 @@ export default function BingoEditor({ value, onChange }) {
         open={openKey === 'zones'}
         onToggle={() => setOpenKey((prev) => (prev === 'zones' ? '' : 'zones'))}
       >
-        <div style={chipWrap}>
+        <div style={boardCellCount === 9 ? zoneChipWrap3 : chipWrap}>
           {positions.map((position) => {
             const active = specialZones.includes(position);
             return (
@@ -290,6 +294,11 @@ const hintText = {
 const chipWrap = {
   display: 'grid',
   gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+  gap: 10,
+};
+const zoneChipWrap3 = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
   gap: 10,
 };
 const chip = {

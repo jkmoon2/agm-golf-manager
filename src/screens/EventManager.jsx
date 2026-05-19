@@ -434,7 +434,7 @@ if (form.template === 'group-battle') {
 }
       const parsed = JSON.parse(form.paramsJson || '{}');
       if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
-        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        alert('빙고 이벤트는 빙고판 칸 수와 동일한 홀 수를 선택해야 합니다.');
         return;
       }
       if (form.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
@@ -948,7 +948,7 @@ if (editForm?.template === 'group-battle') {
 }
       const parsed = JSON.parse(editForm.paramsJson || '{}');
       if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
-        alert('빙고 이벤트는 18홀 중 16홀을 선택해야 합니다.');
+        alert('빙고 이벤트는 빙고판 칸 수와 동일한 홀 수를 선택해야 합니다.');
         return;
       }
       if (editForm.template === 'group-room-hole-battle' && !isValidGroupRoomHoleBattleParams(parsed)) {
@@ -1739,7 +1739,7 @@ if (editForm?.template === 'group-battle') {
                                       setMenuUpId(null);
                                     }}
                                   >
-                                    Special Zone 현황
+                                    Special/Big 현황
                                   </button>
                                 </>
                               )}
