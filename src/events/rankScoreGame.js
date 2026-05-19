@@ -15,6 +15,7 @@ export function defaultRankScoreGameParams() {
     pairGroups: { A: [1, 2], B: [3, 4] }, // 포볼게임 A/B 그룹 조합
     calculationMethod: 'add',      // add | subtract | multiply | divide
     roomRankSlots: [1, 4],         // 방대방 계산 시 방 내부 순위 중 선택할 2개 위치
+    roomAddTarget: 'all',          // add일 때 all(방 전체) | slots(기준순위 2명)
     randomSeed: '',
   };
 }
@@ -64,6 +65,7 @@ export function normalizeRankScoreGameParams(raw) {
   const winnerOrder = ['asc', 'desc'].includes(src.winnerOrder) ? src.winnerOrder : base.winnerOrder;
   const pairGroups = normalizeRankScorePairGroups(src.pairGroups);
   const calculationMethod = ['add', 'subtract', 'multiply', 'divide'].includes(src.calculationMethod) ? src.calculationMethod : base.calculationMethod;
+  const roomAddTarget = ['all', 'slots'].includes(src.roomAddTarget) ? src.roomAddTarget : base.roomAddTarget;
   const roomRankSlotsRaw = Array.isArray(src.roomRankSlots) ? src.roomRankSlots : base.roomRankSlots;
   let roomRankSlots = Array.from(new Set(roomRankSlotsRaw.map((v) => Number(v)).filter((n) => Number.isFinite(n) && n >= 1 && n <= 4))).slice(0, 2);
   if (roomRankSlots.length < 2) roomRankSlots = [...base.roomRankSlots];
@@ -86,6 +88,7 @@ export function normalizeRankScoreGameParams(raw) {
     pairGroups,
     calculationMethod,
     roomRankSlots,
+    roomAddTarget,
     randomSeed: String(src.randomSeed || ''),
   };
 }
@@ -251,12 +254,14 @@ function calculateRankScoreValues(values = [], method = 'add') {
   return nums.reduce((acc, n) => acc + n, 0);
 }
 
-function sortMembersByRank(members = []) {
+function sortRoomMembersByResult(members = []) {
   return [...(Array.isArray(members) ? members : [])]
-    .filter((row) => Number.isFinite(Number(row?.rank)) && Number.isFinite(Number(row?.eventScore)))
+    .filter((row) => Number.isFinite(Number(row?.resultValue)))
     .sort((a, b) => {
-      const diff = Number(a.rank) - Number(b.rank);
-      if (diff) return diff;
+      const resultDiff = Number(a.resultValue) - Number(b.resultValue);
+      if (resultDiff) return resultDiff;
+      const handicapDiff = Number(a.handicap || 0) - Number(b.handicap || 0);
+      if (handicapDiff) return handicapDiff;
       return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
     });
 }
@@ -300,21 +305,26 @@ export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {
   const roomRows = sortByWinner(Array.from({ length: Math.max(0, roomCount) }, (_, idx) => {
     const roomNo = idx + 1;
     const members = personBaseRows.filter((row) => Number(row.room) === roomNo);
-    const rankedMembers = sortMembersByRank(members);
-    const selectedMembers = (params.roomRankSlots || [])
-      .map((slotNo) => rankedMembers[Number(slotNo) - 1])
-      .filter(Boolean);
+    const rankedMembers = sortRoomMembersByResult(members);
+    const useAllRoomMembers = params.calculationMethod === 'add' && params.roomAddTarget !== 'slots';
+    const selectedMembers = useAllRoomMembers
+      ? rankedMembers
+      : (params.roomRankSlots || [])
+        .map((slotNo) => rankedMembers[Number(slotNo) - 1])
+        .filter(Boolean);
     const values = selectedMembers.map((row) => row.eventScore);
+    const completeSelected = selectedMembers.length && selectedMembers.every((row) => Number.isFinite(Number(row?.eventScore)));
     return {
       key: String(roomNo),
       room: roomNo,
       name: fmtRoomLabel(roomNo, roomNames),
       label: fmtRoomLabel(roomNo, roomNames),
-      value: selectedMembers.length ? calculateRankScoreValues(values, params.calculationMethod) : null,
+      value: completeSelected ? calculateRankScoreValues(values, params.calculationMethod) : null,
       members,
       selectedMembers,
+      selectedMode: useAllRoomMembers ? 'all' : 'slots',
       memberCount: members.length,
-      validCount: selectedMembers.length,
+      validCount: selectedMembers.filter((row) => Number.isFinite(Number(row?.eventScore))).length,
     };
   }), params);
 
@@ -333,11 +343,13 @@ export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {
     pairedIds.add(bKey);
     const members = [a, b];
     const label = members.map((row) => row.name).filter(Boolean).join(' + ') || `팀${teamBaseRows.length + 1}`;
+    const values = members.map((row) => row.eventScore);
+    const completeMembers = members.every((row) => Number.isFinite(Number(row?.eventScore)));
     teamBaseRows.push({
       key: `pair-${aKey}-${bKey}`,
       label,
       name: label,
-      value: calculateRankScoreValues(members.map((row) => row.eventScore), params.calculationMethod),
+      value: completeMembers ? calculateRankScoreValues(values, params.calculationMethod) : null,
       members,
       roomLabel: members.map((row) => row.roomLabel).filter(Boolean).join(' / '),
     });

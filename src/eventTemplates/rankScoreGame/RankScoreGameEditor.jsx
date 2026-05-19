@@ -83,6 +83,10 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
     emit({ roomRankSlots: next });
   };
 
+  const onRoomAddTargetChange = (valueText) => {
+    emit({ roomAddTarget: valueText === 'slots' ? 'slots' : 'all' });
+  };
+
   const commitAdjustment = (id, valueText) => {
     const next = { ...(safe.adjustments || {}) };
     const text = String(valueText ?? '').trim();
@@ -165,6 +169,15 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
       {safe.gameType === 'room' && (
         <div style={pairBoxStyle}>
           <div style={pairTitleStyle}>방대방 계산 기준</div>
+          {safe.calculationMethod === 'add' && (
+            <label style={labelStyle}>
+              <span style={fieldLabelStyle}>더하기 대상</span>
+              <select value={safe.roomAddTarget === 'slots' ? 'slots' : 'all'} onChange={(e) => onRoomAddTargetChange(e.target.value)} style={selectStyle}>
+                <option value="all">방인원 전체</option>
+                <option value="slots">기준순위 2명</option>
+              </select>
+            </label>
+          )}
           <div style={roomRankGridStyle}>
             <label style={labelStyle}>
               <span style={fieldLabelStyle}>기준 순위 1</span>
@@ -180,7 +193,7 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
             </label>
           </div>
           <div style={smallTextStyle}>
-            방 안에서 전체 순위가 좋은 순서로 1~4위를 정렬한 뒤, 선택한 두 명의 점수로 계산합니다. 빼기/나누기는 큰수 기준으로 계산합니다.
+            방 안에서는 결과값(점수-G핸디)이 낮은 사람을 우선으로 정렬하고, 같은 결과값이면 G핸디가 낮은 사람을 우선합니다. 더하기는 기본적으로 방인원 전체를 계산하고, 빼기/곱하기/나누기는 기준순위 2명으로 계산합니다.
           </div>
         </div>
       )}
