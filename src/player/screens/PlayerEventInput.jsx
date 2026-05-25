@@ -765,6 +765,12 @@ export default function PlayerEventInput(){
   );
 
   const [draft, setDraft] = useState(() => {
+    // 서버/서버캐시 값을 먼저 사용하고, 서버값이 전혀 없을 때만 로컬 draft를 복원합니다.
+    // 빙고처럼 방 대표가 여러 명 점수를 입력하는 이벤트에서 오래된 로컬 draft가
+    // 서버 최신 점수를 가리는 문제를 막기 위한 최소 보완입니다.
+    if (hasMeaningfulEventInputsRoot(inputsByEventServer)) {
+      try { return JSON.parse(JSON.stringify(inputsByEventServer)); } catch { return inputsByEventServer; }
+    }
     const cachedDraft = readPlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', {});
     if (hasMeaningfulEventInputsRoot(cachedDraft)) {
       try { return JSON.parse(JSON.stringify(cachedDraft)); } catch { return cachedDraft; }
@@ -780,6 +786,11 @@ export default function PlayerEventInput(){
   const bingoLongPressDoneRef = useRef({});
   const bingoCommonPressTimersRef = useRef({});
   const bingoBoardDraftRef = useRef({});
+  // 빙고 점수/빙고판은 여러 참가자가 같은 방 데이터를 같이 저장할 수 있으므로
+  // 실제로 수정한 칸/판만 서버 최신값 위에 병합합니다.
+  const bingoTouchedCellsRef = useRef({});
+  const bingoTouchedBoardsRef = useRef({});
+  const bingoTouchedSharedRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
@@ -851,6 +862,9 @@ export default function PlayerEventInput(){
     draftTouchedRef.current = false;
     pendingSavedInputsSigRef.current = '';
     lastHydratedServerSigRef.current = stringifyEventInputs(cloned);
+    bingoTouchedCellsRef.current = {};
+    bingoTouchedBoardsRef.current = {};
+    bingoTouchedSharedRef.current = {};
     try {
       Object.entries(cloned || {}).forEach(([evId, slot]) => {
         const evDef = getBingoEventDef(evId);
@@ -996,6 +1010,57 @@ export default function PlayerEventInput(){
 
   const getBingoRoomMemberIds = () => roomMembers.filter(Boolean).map((p) => String(p.id));
 
+  const markBingoCellTouched = (evId, pid, idx) => {
+    const evKey = String(evId || '');
+    const pidKey = String(pid || '');
+    const idxKey = String(idx);
+    if (!evKey || !pidKey) return;
+    if (!bingoTouchedCellsRef.current[evKey]) bingoTouchedCellsRef.current[evKey] = {};
+    if (!bingoTouchedCellsRef.current[evKey][pidKey]) bingoTouchedCellsRef.current[evKey][pidKey] = {};
+    bingoTouchedCellsRef.current[evKey][pidKey][idxKey] = true;
+  };
+
+  const getBingoTouchedCellMap = (evId, pid) => {
+    return bingoTouchedCellsRef.current?.[String(evId || '')]?.[String(pid || '')] || {};
+  };
+
+  const isBingoCellTouched = (evId, pid, idx) => {
+    return !!getBingoTouchedCellMap(evId, pid)?.[String(idx)];
+  };
+
+  const markBingoBoardTouched = (evId, pid) => {
+    const evKey = String(evId || '');
+    const pidKey = String(pid || '');
+    if (!evKey || !pidKey) return;
+    if (!bingoTouchedBoardsRef.current[evKey]) bingoTouchedBoardsRef.current[evKey] = {};
+    bingoTouchedBoardsRef.current[evKey][pidKey] = true;
+  };
+
+  const isBingoBoardTouched = (evId, pid) => {
+    return !!bingoTouchedBoardsRef.current?.[String(evId || '')]?.[String(pid || '')];
+  };
+
+  const markBingoSharedTouched = (evId, roomKey) => {
+    const evKey = String(evId || '');
+    const rk = String(roomKey || '');
+    if (!evKey || !rk) return;
+    if (!bingoTouchedSharedRef.current[evKey]) bingoTouchedSharedRef.current[evKey] = {};
+    bingoTouchedSharedRef.current[evKey][rk] = true;
+  };
+
+  const isBingoSharedTouched = (evId, roomKey) => {
+    return !!bingoTouchedSharedRef.current?.[String(evId || '')]?.[String(roomKey || '')];
+  };
+
+  const getBingoInputCellValue = (evId, pid, valueIndex) => {
+    if (!evId || !pid) return '';
+    const draftVal = inputsByEvent?.[evId]?.person?.[pid]?.values?.[valueIndex];
+    if (isBingoCellTouched(evId, pid, valueIndex)) return draftVal ?? '';
+    const serverVal = inputsByEventServer?.[evId]?.person?.[pid]?.values?.[valueIndex];
+    if (serverVal !== undefined && serverVal !== null) return serverVal;
+    return draftVal ?? '';
+  };
+
   const getBingoUiForEvent = (evId) => (bingoUiState?.[evId] && typeof bingoUiState[evId] === 'object' ? bingoUiState[evId] : {});
 
   const setBingoActiveParticipant = (evId, pid) => {
@@ -1025,29 +1090,68 @@ export default function PlayerEventInput(){
     const roomKey = String(roomIdx || '');
     const draftOrder = inputsByEvent?.[evId]?.shared?.largeBingoOrders?.[roomKey];
     const serverOrder = inputsByEventServer?.[evId]?.shared?.largeBingoOrders?.[roomKey];
-    return normalizeBingoLargeOrder(draftOrder || serverOrder, roomIds);
+    const touched = isBingoSharedTouched(evId, roomKey);
+    return normalizeBingoLargeOrder(touched ? (draftOrder || serverOrder) : (serverOrder || draftOrder), roomIds);
   };
 
-  const patchBingoLargeOrder = (evId, nextOrder) => {
+  const getBingoLargeLeaderId = (evId) => {
+    const roomIds = getBingoRoomMemberIds();
+    const roomKey = String(roomIdx || '');
+    const draftLeader = inputsByEvent?.[evId]?.shared?.largeBingoLeaders?.[roomKey];
+    const serverLeader = inputsByEventServer?.[evId]?.shared?.largeBingoLeaders?.[roomKey];
+    const touched = isBingoSharedTouched(evId, roomKey);
+    const savedLeader = String((touched ? (draftLeader || serverLeader) : (serverLeader || draftLeader)) || '');
+    if (savedLeader && roomIds.includes(savedLeader)) return savedLeader;
+    return String(roomIds[0] || '');
+  };
+
+  const patchBingoLargeOrder = async (evId, nextOrder) => {
     const roomKey = String(roomIdx || '');
     if (!evId || !roomKey) return;
+    const roomIds = getBingoRoomMemberIds();
+    const normalizedOrder = normalizeBingoLargeOrder(nextOrder, roomIds);
+    const leaderId = getBingoLargeLeaderId(evId) || String(roomIds[0] || '');
+
     const all = cloneEventInputs(draft || {});
     const slot = { ...(all[evId] || {}) };
     const shared = { ...(slot.shared || {}) };
     const largeBingoOrders = { ...(shared.largeBingoOrders || {}) };
-    largeBingoOrders[roomKey] = normalizeBingoLargeOrder(nextOrder, getBingoRoomMemberIds());
-    slot.shared = { ...shared, largeBingoOrders };
+    const largeBingoLeaders = { ...(shared.largeBingoLeaders || {}) };
+    largeBingoOrders[roomKey] = normalizedOrder;
+    largeBingoLeaders[roomKey] = leaderId;
+    slot.shared = { ...shared, largeBingoOrders, largeBingoLeaders };
     all[evId] = slot;
-    applyDraft(all);
-    setDirty(true);
+    markBingoSharedTouched(evId, roomKey);
+    applyDraft(all, false);
+
+    // Big빙고판 배치는 방 전체 공유값이므로 저장 버튼을 기다리지 않고 즉시 저장합니다.
+    // setDoc(..., { merge:true })의 중첩 merge를 사용해 다른 참가자의 점수 입력값은 덮어쓰지 않습니다.
+    try {
+      const targetEventId = eventId || ctxId;
+      if (targetEventId) {
+        await setDoc(doc(db, 'events', targetEventId), {
+          eventInputs: {
+            [evId]: {
+              shared: {
+                largeBingoOrders: { [roomKey]: normalizedOrder },
+                largeBingoLeaders: { [roomKey]: leaderId },
+              },
+            },
+          },
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn('[PlayerEventInput] Big bingo order immediate save failed:', e);
+      setDirty(true);
+    }
   };
 
   const applyBingoLargeOrderSlot = (evId, slotIndex) => {
     const roomIds = getBingoRoomMemberIds();
-    const leaderId = String(roomIds[0] || '');
+    const leaderId = getBingoLargeLeaderId(evId);
     const mine = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
     if (!leaderId || !mine || leaderId !== mine) {
-      window.alert('Big빙고판 배치는 방의 첫 번째 참가자(리더)만 수정할 수 있습니다.');
+      window.alert('Big빙고판 배치는 방 리더만 수정할 수 있습니다.');
       return;
     }
     const idx = Number(slotIndex);
@@ -1131,6 +1235,7 @@ export default function PlayerEventInput(){
         roomShared: !!sharedMode,
       };
       rememberBingoBoardDraft(evId, pid, normalizedBoard, selectedHoles, !!sharedMode);
+      markBingoBoardTouched(evId, pid);
     });
     slot.person = person;
     all[evId] = slot;
@@ -1167,6 +1272,7 @@ export default function PlayerEventInput(){
         board: [...(sharedMode ? sourceBoard : prevState.board)],
         roomShared: !!sharedMode,
       };
+      markBingoBoardTouched(evId, pid);
     });
     slot.person = person;
     all[evId] = slot;
@@ -1213,6 +1319,7 @@ export default function PlayerEventInput(){
         roomShared: false,
       };
       rememberBingoBoardDraft(evId, pid, sourceBoard, selectedHoles, false);
+      markBingoBoardTouched(evId, pid);
     });
     slot.person = person;
     all[evId] = slot;
@@ -1397,6 +1504,7 @@ export default function PlayerEventInput(){
     if (bingoDef?.template === 'bingo') {
       const selectedHoles = normalizeBingoSelectedHoles(bingoDef?.params?.selectedHoles);
       obj = restoreBingoBoardToValue(evId, pid, obj, selectedHoles);
+      markBingoCellTouched(evId, pid, idx);
     }
     const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (idx+1);
     while (obj.values.length < atts) obj.values.push('');
@@ -1462,6 +1570,7 @@ export default function PlayerEventInput(){
     if (bingoDef?.template === 'bingo') {
       bingoSelectedHolesForSave = normalizeBingoSelectedHoles(bingoDef?.params?.selectedHoles);
       obj = restoreBingoBoardToValue(evId, pid, obj, bingoSelectedHolesForSave);
+      markBingoCellTouched(evId, pid, idx);
     }
     const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (idx+1);
     while (obj.values.length < atts) obj.values.push('');
@@ -1730,14 +1839,26 @@ export default function PlayerEventInput(){
         Object.entries(sPerson).forEach(([pid, rawVal])=>{
           if (!allowedPids.has(String(pid))) return;
           let val = rawVal;
-          if (evDef?.template === 'bingo' && typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)) {
+          if (evDef?.template === 'bingo' && typeof val === 'object' && val && Array.isArray(val.values)) {
             const selectedHoles = normalizeBingoSelectedHoles(evDef?.params?.selectedHoles);
-            val = restoreBingoBoardToValue(evId, pid, { ...val, values: [...val.values], board: [...val.board] }, selectedHoles);
+            val = restoreBingoBoardToValue(evId, pid, { ...val, values: [...val.values], board: Array.isArray(val.board) ? [...val.board] : [] }, selectedHoles);
             const prevState = extractBingoPersonInput(mPerson?.[pid], selectedHoles);
             const nextState = extractBingoPersonInput(val, selectedHoles);
-            if (!nextState.board.some(Boolean) && prevState.board.some(Boolean)) {
-              val = { ...val, board: [...prevState.board], roomShared: !!prevState.roomShared };
-            }
+            const touchedCells = getBingoTouchedCellMap(evId, pid);
+            const touchedCellKeys = Object.keys(touchedCells || {}).filter((k) => touchedCells[k]);
+            const mergedValues = [...prevState.values];
+            while (mergedValues.length < Math.max(prevState.values.length, nextState.values.length, 18)) mergedValues.push('');
+            touchedCellKeys.forEach((idxKey) => {
+              const valueIdx = Number(idxKey);
+              if (Number.isInteger(valueIdx) && valueIdx >= 0) mergedValues[valueIdx] = nextState.values[valueIdx] ?? '';
+            });
+            const boardTouched = isBingoBoardTouched(evId, pid);
+            val = {
+              ...val,
+              values: mergedValues,
+              board: boardTouched ? [...nextState.board] : [...prevState.board],
+              roomShared: boardTouched ? !!nextState.roomShared : !!prevState.roomShared,
+            };
           }
           const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
           const isEmptyBingo = typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)
@@ -1755,7 +1876,24 @@ export default function PlayerEventInput(){
 
         mSlot.person = mPerson;
         if (slot?.shared && typeof slot.shared === 'object') {
-          mSlot.shared = JSON.parse(JSON.stringify(slot.shared));
+          const clonedShared = JSON.parse(JSON.stringify(slot.shared));
+          if (evDef?.template === 'bingo') {
+            const mergedShared = { ...(mSlot.shared || {}) };
+            Object.entries(clonedShared).forEach(([sharedKey, sharedVal]) => {
+              if (sharedKey === 'largeBingoOrders' || sharedKey === 'largeBingoLeaders') {
+                const prevMap = { ...(mergedShared[sharedKey] || {}) };
+                Object.entries(sharedVal && typeof sharedVal === 'object' ? sharedVal : {}).forEach(([roomKey, roomVal]) => {
+                  if (isBingoSharedTouched(evId, roomKey)) prevMap[roomKey] = roomVal;
+                });
+                mergedShared[sharedKey] = prevMap;
+              } else {
+                mergedShared[sharedKey] = sharedVal;
+              }
+            });
+            mSlot.shared = mergedShared;
+          } else {
+            mSlot.shared = { ...(mSlot.shared || {}), ...clonedShared };
+          }
         }
         merged[evId] = mSlot;
       });
@@ -2559,7 +2697,7 @@ export default function PlayerEventInput(){
             const bingoLargePreview = bingoBoardCellCount === 9
               ? buildLargeBingoPreview(bingoPreviewRows, bingoLargeOrder, bingoSpecialZones)
               : null;
-            const bingoLeaderId = String(getBingoRoomMemberIds()[0] || '');
+            const bingoLeaderId = getBingoLargeLeaderId(ev.id);
             const bingoMineId = String(selfParticipantId || ctxParticipant?.id || ctxParticipant?.uid || '');
             const bingoCanEditLarge = !!bingoLeaderId && !!bingoMineId && bingoLeaderId === bingoMineId;
 
@@ -2600,7 +2738,7 @@ export default function PlayerEventInput(){
                             <td>{p ? p.nickname : ''}</td>
                             {bingoInputHoles.map((holeNo) => {
                               const valueIndex = holeNo - 1;
-                              const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
+                              const cellValue = p ? getBingoInputCellValue(ev.id, p.id, valueIndex) : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
                               return (
                                 <td key={`bingo-cell-${rIdx}-${holeNo}`} className={tCss.cellEditable}>
