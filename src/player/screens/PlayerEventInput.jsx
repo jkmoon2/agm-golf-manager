@@ -3056,30 +3056,35 @@ export default function PlayerEventInput(){
                               return (
                                 <td key={idx} className={tCss.cellEditable}>
                                   <div className={tCss.pickMenuHolder} onClick={(e) => e.stopPropagation()}>
-                                    <button
-                                      type="button"
-                                      className={`${tCss.pickSelectButton} ${isFourJo ? tCss.pickSelectButtonCompact : ''}`}
-                                      ref={(el) => {
-                                        const key = `${ev.id}:${p?.id || 'blank'}:${idx}`;
-                                        if (el) pickButtonRefs.current[key] = el;
-                                        else delete pickButtonRefs.current[key];
-                                      }}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
+                                    <select
+                                      className={`${tCss.pickNativeSelect} ${isFourJo ? tCss.pickNativeSelectCompact : ''}`}
+                                      value={selectedId}
+                                      onChange={(e) => {
                                         if (!p || locked) return;
-                                        const same = String(pickMenuState?.evId ?? '') === String(ev.id ?? '') && String(pickMenuState?.pid ?? '') === String(p.id ?? '') && pickMenuState?.idx === idx;
-                                        if (same) {
-                                          setPickMenuState(null);
-                                          return;
-                                        }
-                                        openPickMenuAt(ev.id, p.id, idx, options, e.currentTarget, { eventSnapshot: ev, selectorSnapshot: p });
+                                        setPickMenuState(null);
+                                        patchPickMember(ev.id, String(p.id ?? ''), idx, e.target.value, requiredCount);
                                       }}
                                       disabled={!p || locked}
                                       title={buttonText}
                                     >
-                                      <span className={tCss.pickSelectText}>{buttonText}</span>
-                                    </button>
-
+                                      <option value="">
+                                        {selectedOpt ? '선택 해제' : (options.length ? '선택' : '선택할 참가자 없음')}
+                                      </option>
+                                      {options.map((opt) => {
+                                        const value = String(opt?.id ?? '');
+                                        const selectedElsewhere = rowIds.includes(value) && rowIds[idx] !== value;
+                                        const lockedByCurrentSelection = !!selectedId && String(selectedId) !== value;
+                                        return (
+                                          <option
+                                            key={value}
+                                            value={value}
+                                            disabled={selectedElsewhere || lockedByCurrentSelection}
+                                          >
+                                            {displayPickOption(opt)}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
                                   </div>
                                 </td>
                               );
