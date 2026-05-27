@@ -207,6 +207,41 @@
   color:#1e40ff;
 }
 
+.pickNativeSelect{
+  width:100%;
+  height:calc(var(--row-h) - 6px);
+  margin:0;
+  padding:2px 4px;
+  box-sizing:border-box;
+  background:transparent;
+  border:none;
+  outline:none;
+  color:#1e40ff;
+  font-size:13px;
+  font-weight:600;
+  text-align:center;
+  text-align-last:center;
+  cursor:pointer;
+  -webkit-appearance:none;
+  appearance:none;
+}
+
+.pickNativeSelectCompact{
+  font-size:12px;
+  padding:2px 1px;
+}
+
+.pickNativeSelect:disabled{
+  color:#98a2b3;
+  opacity:1;
+  cursor:default;
+}
+
+.pickNativeSelect option{
+  color:#183153;
+  background:#fff;
+}
+
 .pickInputNick{
   padding:0 6px !important;
   white-space:nowrap;
