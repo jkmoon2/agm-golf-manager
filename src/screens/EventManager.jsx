@@ -1718,6 +1718,9 @@ if (editForm?.template === 'group-battle') {
                                   선택 현황/마감
                                 </button>
                               )}
+                              {ev?.template === 'pick-lineup' && templateUi(ev?.template).supportsEventInputs !== false && (
+                                <button onClick={() => clearInputs(ev)}>입력 초기화</button>
+                              )}
                             </>
                           ) : (
                             <>
