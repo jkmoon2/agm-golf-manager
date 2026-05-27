@@ -11,6 +11,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  writeBatch,
   serverTimestamp,
   getDoc,
   getDocFromServer,
@@ -73,23 +74,61 @@ const KNOWN_EVENT_SUBCOLLECTIONS = [
 ];
 
 async function deleteCollectionDocs(colRef, chunkSize = 50) {
-  const snap = await getDocs(colRef);
-  if (!snap?.docs?.length) return;
+  const snap = await getDocsFromServer(colRef);
+  if (!snap?.docs?.length) return 0;
+  let deleted = 0;
   for (let i = 0; i < snap.docs.length; i += chunkSize) {
+    const batch = writeBatch(db);
     const chunk = snap.docs.slice(i, i + chunkSize);
-    await Promise.all(chunk.map((d) => deleteDoc(d.ref)));
+    chunk.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    deleted += chunk.length;
   }
+  return deleted;
+}
+
+async function countCollectionDocs(colRef) {
+  const snap = await getDocsFromServer(colRef);
+  return snap?.docs?.length || 0;
 }
 
 async function deleteKnownEventSubcollections(eventId) {
   if (!eventId) return;
   for (const name of KNOWN_EVENT_SUBCOLLECTIONS) {
-    try {
-      await deleteCollectionDocs(collection(db, 'events', eventId, name));
-    } catch (e) {
-      console.warn(`[EventContext] subcollection delete failed: ${name}`, e);
-    }
+    await deleteCollectionDocs(collection(db, 'events', eventId, name));
   }
+}
+
+async function verifyKnownEventSubcollectionsDeleted(eventId) {
+  if (!eventId) return;
+  const remains = [];
+  for (const name of KNOWN_EVENT_SUBCOLLECTIONS) {
+    const count = await countCollectionDocs(collection(db, 'events', eventId, name));
+    if (count > 0) remains.push(`${name}:${count}`);
+  }
+  if (remains.length) {
+    throw new Error(`이벤트 하위 데이터 삭제 미완료: ${remains.join(', ')}`);
+  }
+}
+
+const DELETED_EVENT_IDS_STORAGE_KEY = 'agm.deletedEventIds.v1';
+
+function readDeletedEventIdsFromLocal() {
+  try {
+    if (typeof window === 'undefined') return new Set();
+    const raw = window.localStorage.getItem(DELETED_EVENT_IDS_STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set((Array.isArray(arr) ? arr : []).map(String).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDeletedEventIdsToLocal(set) {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(DELETED_EVENT_IDS_STORAGE_KEY, JSON.stringify(Array.from(set || [])));
+  } catch {}
 }
 
 function isMissingDocError(error) {
@@ -269,6 +308,7 @@ export function EventProvider({ children }) {
   const lastScoresSnapshotAtRef = useRef(0);
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
+  const deletedEventIdsRef = useRef(readDeletedEventIdsFromLocal());
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -305,6 +345,38 @@ export function EventProvider({ children }) {
     }
   };
 
+  const isDeletedEventId = useCallback((targetId) => {
+    if (!targetId) return false;
+    return deletedEventIdsRef.current.has(String(targetId));
+  }, []);
+
+  const markDeletedEventId = useCallback((targetId) => {
+    if (!targetId) return;
+    const next = new Set(deletedEventIdsRef.current || []);
+    next.add(String(targetId));
+    deletedEventIdsRef.current = next;
+    writeDeletedEventIdsToLocal(next);
+  }, []);
+
+  const unmarkDeletedEventId = useCallback((targetId) => {
+    if (!targetId) return;
+    const next = new Set(deletedEventIdsRef.current || []);
+    next.delete(String(targetId));
+    deletedEventIdsRef.current = next;
+    writeDeletedEventIdsToLocal(next);
+  }, []);
+
+  const cancelPendingEventWrites = useCallback((targetId) => {
+    if (!targetId || String(targetId) !== String(eventId || '')) return;
+    try {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    } catch {}
+    queuedUpdatesRef.current = null;
+  }, [eventId]);
+
   const clearCurrentEventSelection = useCallback((targetId) => {
     if (!targetId) return;
     try {
@@ -320,9 +392,9 @@ export function EventProvider({ children }) {
     setScoresMap({});
     scoresReadyRef.current = false;
     setScoresReady(false);
-    setEventId((prev) => (prev === targetId ? null : prev));
+    setEventId((prev) => (String(prev || '') === String(targetId) ? null : prev));
     try {
-      if (localStorage.getItem('eventId') === targetId) {
+      if (localStorage.getItem('eventId') === String(targetId)) {
         localStorage.removeItem('eventId');
       }
     } catch {}
@@ -376,7 +448,9 @@ export function EventProvider({ children }) {
       if (cancelled || !u) return;
       const colRef = collection(db, 'events');
       unsub = onSnapshot(colRef, (snap) => {
-        const evts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const evts = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((evt) => !isDeletedEventId(evt.id));
         setAllEvents(evts);
       });
     });
@@ -384,7 +458,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, []);
+  }, [isDeletedEventId]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -431,6 +505,10 @@ export function EventProvider({ children }) {
 
   const refreshEventNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
+    if (isDeletedEventId(eventId)) {
+      clearCurrentEventSelection(eventId);
+      return;
+    }
     try { diagPush('timeline', { type: 'event.refreshEventNow:start', eventId, force: !!opts?.force }); } catch {}
     const force = !!opts?.force;
     const now = Date.now();
@@ -460,10 +538,11 @@ export function EventProvider({ children }) {
         }
       } catch {}
     }
-  }, [eventId, applyIncomingEventData]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId]);
 
   const refreshScoresNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
+    if (isDeletedEventId(eventId)) return;
     try { diagPush('timeline', { type: 'event.refreshScoresNow:start', eventId, force: !!opts?.force }); } catch {}
     if (document?.hidden) return;
     const force = !!opts?.force;
@@ -496,13 +575,17 @@ export function EventProvider({ children }) {
         setScoresReady(true);
       }
     } catch {}
-  }, [eventId]);
+  }, [eventId, isDeletedEventId]);
 
   // 선택 이벤트 구독
   useEffect(() => {
     if (!eventId) {
       setEventData(null);
       lastEventDataRef.current = null;
+      return;
+    }
+    if (isDeletedEventId(eventId)) {
+      clearCurrentEventSelection(eventId);
       return;
     }
     let unsub = null,
@@ -523,7 +606,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, applyIncomingEventData, clearCurrentEventSelection]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId]);
   useEffect(() => {
     if (!eventId) {
       eventInputsSubRef.current = {};
@@ -681,6 +764,21 @@ export function EventProvider({ children }) {
   }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
 
   const loadEvent = async (id) => {
+    if (!id) return null;
+    if (isDeletedEventId(id)) {
+      try {
+        await ensureAuthed();
+        const snap = await getDocFromServer(doc(db, 'events', id));
+        if (!snap.exists()) {
+          clearCurrentEventSelection(id);
+          return null;
+        }
+        unmarkDeletedEventId(id);
+      } catch {
+        clearCurrentEventSelection(id);
+        return null;
+      }
+    }
     setEventId(id);
     localStorage.setItem('eventId', id);
     return id;
@@ -689,6 +787,11 @@ export function EventProvider({ children }) {
   // 공용 업데이트(디바운스)
   const updateEvent = async (updates, opts = {}) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
+    const targetEventId = String(eventId);
+    if (isDeletedEventId(targetEventId)) {
+      clearCurrentEventSelection(targetEventId);
+      return;
+    }
     await ensureAuthed();
     const { debounceMs = 400, ifChanged = true } = opts;
 
@@ -714,14 +817,16 @@ export function EventProvider({ children }) {
         const toWrite = queuedUpdatesRef.current;
         queuedUpdatesRef.current = null;
         try {
-          const ref = doc(db, 'events', eventId);
+          if (isDeletedEventId(targetEventId)) return;
+          const ref = doc(db, 'events', targetEventId);
           await updateDoc(ref, sanitizeUndefinedDeep(toWrite));
           lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...toWrite };
           setEventData((prev) => (prev ? { ...prev, ...toWrite } : toWrite));
-          try { broadcastEventSync(eventId, { reason: 'updateEvent' }); } catch {}
+          try { broadcastEventSync(targetEventId, { reason: 'updateEvent' }); } catch {}
         } catch (e) {
           if (isMissingDocError(e)) {
-            clearCurrentEventSelection(eventId);
+            markDeletedEventId(targetEventId);
+            clearCurrentEventSelection(targetEventId);
           }
           console.warn('[EventContext] updateEvent (debounced) failed:', e, 'payload:', toWrite);
         } finally {
@@ -734,7 +839,12 @@ export function EventProvider({ children }) {
   // 즉시 업데이트
   const updateEventImmediate = async (updates, ifChanged = true) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
-    try { diagPush('timeline', { type: 'event.updateEventImmediate:start', eventId, keys: Object.keys(updates || {}) }); } catch {}
+    const targetEventId = String(eventId);
+    if (isDeletedEventId(targetEventId)) {
+      clearCurrentEventSelection(targetEventId);
+      return;
+    }
+    try { diagPush('timeline', { type: 'event.updateEventImmediate:start', eventId: targetEventId, keys: Object.keys(updates || {}) }); } catch {}
     await ensureAuthed();
 
     const enriched = enrichParticipantsDerived(updates);
@@ -753,7 +863,8 @@ export function EventProvider({ children }) {
       if (!changed) return;
     }
     try {
-      const ref = doc(db, 'events', eventId);
+      if (isDeletedEventId(targetEventId)) return;
+      const ref = doc(db, 'events', targetEventId);
       await updateDoc(ref, sanitizeUndefinedDeep(enriched));
 
       // 즉시 저장 후 디바운스 큐/타이머 정리
@@ -768,13 +879,14 @@ export function EventProvider({ children }) {
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...enriched };
       setEventData((prev) => (prev ? { ...prev, ...enriched } : enriched));
       try {
-        diagMerge('eventContext', { lastUpdateEventAt: Date.now(), eventId, lastUpdateKeys: Object.keys(enriched || {}) });
-        diagPush('timeline', { type: 'event.updateEventImmediate:success', eventId, keys: Object.keys(enriched || {}) });
+        diagMerge('eventContext', { lastUpdateEventAt: Date.now(), eventId: targetEventId, lastUpdateKeys: Object.keys(enriched || {}) });
+        diagPush('timeline', { type: 'event.updateEventImmediate:success', eventId: targetEventId, keys: Object.keys(enriched || {}) });
       } catch {}
-      try { broadcastEventSync(eventId, { reason: 'updateEventImmediate' }); } catch {}
+      try { broadcastEventSync(targetEventId, { reason: 'updateEventImmediate' }); } catch {}
     } catch (e) {
       if (isMissingDocError(e)) {
-        clearCurrentEventSelection(eventId);
+        markDeletedEventId(targetEventId);
+        clearCurrentEventSelection(targetEventId);
         console.warn('[EventContext] updateEventImmediate skipped: target event was already deleted.', e);
         return;
       }
@@ -785,17 +897,34 @@ export function EventProvider({ children }) {
   };
 
   const updateEventById = async (id, updates) => {
+    if (!id || isDeletedEventId(id)) return;
     await ensureAuthed();
     await updateDoc(doc(db, 'events', id), updates);
     try { broadcastEventSync(id, { reason: 'updateEventById' }); } catch {}
   };
 
   const deleteEvent = async (id) => {
+    if (!id) return;
+    const targetEventId = String(id);
     await ensureAuthed();
-    await deleteKnownEventSubcollections(id);
-    await deleteDoc(doc(db, 'events', id));
-    clearCurrentEventSelection(id);
-    try { broadcastEventSync(id, { reason: 'deleteEvent' }); } catch {}
+
+    // 삭제 도중 다른 탭/화면의 늦은 저장(updateDoc)이 삭제 문서를 다시 살리거나
+    // 하위 컬렉션만 남기는 것을 막기 위해 먼저 삭제 tombstone을 세웁니다.
+    markDeletedEventId(targetEventId);
+    cancelPendingEventWrites(targetEventId);
+
+    try {
+      await deleteKnownEventSubcollections(targetEventId);
+      await verifyKnownEventSubcollectionsDeleted(targetEventId);
+      await deleteDoc(doc(db, 'events', targetEventId));
+      clearCurrentEventSelection(targetEventId);
+      try { broadcastEventSync(targetEventId, { reason: 'deleteEvent' }); } catch {}
+    } catch (e) {
+      // 실제 삭제가 실패했다면 tombstone을 되돌려 목록/수정이 막히지 않게 합니다.
+      unmarkDeletedEventId(targetEventId);
+      console.warn('[EventContext] deleteEvent failed:', e);
+      throw e;
+    }
   };
 
   // 탭 이탈/가려짐 시 강제 플러시
@@ -810,6 +939,7 @@ export function EventProvider({ children }) {
       try {
         if (isPlayerRoute) return;
         if (!eventId) return;
+        if (isDeletedEventId(eventId)) return;
         const pending = queuedUpdatesRef.current;
         if (pending) {
           queuedUpdatesRef.current = null;
@@ -828,7 +958,7 @@ export function EventProvider({ children }) {
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', flush);
     };
-  }, [eventId, isPlayerRoute]);
+  }, [eventId, isPlayerRoute, isDeletedEventId]);
 
   // 언마운트 플러시 + stale 필드 필터링
   useEffect(() => {
@@ -839,7 +969,7 @@ export function EventProvider({ children }) {
           debounceTimerRef.current = null;
         }
         const pending = queuedUpdatesRef.current;
-        if (pending && eventId) {
+        if (pending && eventId && !isDeletedEventId(eventId)) {
           queuedUpdatesRef.current = null;
 
           // 최신값과 다른 구버전 participants/roomTable은 저장에서 제외
@@ -864,7 +994,7 @@ export function EventProvider({ children }) {
         console.warn('[EventContext] unmount flush error:', e);
       }
     };
-  }, [eventId]);
+  }, [eventId, isDeletedEventId]);
 
   // publicView 저장/로드 (로컬 미러 포함)
   const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
@@ -1305,6 +1435,7 @@ export function EventProvider({ children }) {
             events: [],
             eventInputs: {},
           });
+          unmarkDeletedEventId(docRef.id);
           return docRef.id;
         },
         updateEvent,
