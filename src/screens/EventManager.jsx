@@ -443,14 +443,16 @@ if (form.template === 'group-battle') {
       }
       const isBingo = form.template === 'bingo';
       const isGroupRoomHoleBattle = form.template === 'group-room-hole-battle';
+      const isPickLineup = form.template === 'pick-lineup';
       const isRankScoreGame = form.template === 'rank-score-game';
       const battleMode = isGroupRoomHoleBattle ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
+      const pickLineupParams = isPickLineup ? normalizeEventParamsForAdmin('pick-lineup', parsed) : null;
       const rankScoreParams = isRankScoreGame ? normalizeRankScoreGameParams(parsed) : null;
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
-        params: rankScoreParams || parsed,
+        params: rankScoreParams || pickLineupParams || parsed,
         target: isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person')),
         rankOrder: isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : (isGroupRoomHoleBattle ? 'asc' : 'asc')),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate

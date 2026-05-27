@@ -1675,6 +1675,17 @@ export default function PlayerEventInput(){
     return sortedParticipants;
   };
 
+  // 개인/조 선택 대결 메뉴는 Portal에서 다시 렌더링되므로,
+  // 방 멤버(roomMembers)가 스냅샷 갱신 순간 잠깐 비거나 재정렬되어도
+  // 선택자 본인은 전체 참가자 목록에서 한 번 더 찾도록 보강합니다.
+  const getPickSelectorById = (pid) => {
+    const key = String(pid ?? '');
+    if (!key) return null;
+    return roomMembers.find((item) => String(item?.id ?? '') === key)
+      || participantById.get(key)
+      || null;
+  };
+
   const getGroupRoomBattleRows = (ev) => getGroupRoomHoleBattleRows(ev, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') });
 
   const getRankScorePairMap = (evId) => {
@@ -3043,7 +3054,7 @@ export default function PlayerEventInput(){
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (!p || locked) return;
-                                        const same = pickMenuState?.evId === ev.id && pickMenuState?.pid === p.id && pickMenuState?.idx === idx;
+                                        const same = pickMenuState?.evId === ev.id && String(pickMenuState?.pid ?? '') === String(p.id ?? '') && pickMenuState?.idx === idx;
                                         if (same) {
                                           setPickMenuState(null);
                                           return;
@@ -3312,7 +3323,7 @@ export default function PlayerEventInput(){
         {pickMenuState && (() => {
           const activeEvent = events.find((item) => item.id === pickMenuState.evId);
           const requiredCount = getPickLineupRequiredCount(activeEvent);
-          const selector = roomMembers.find((item) => String(item?.id) === String(pickMenuState.pid));
+          const selector = getPickSelectorById(pickMenuState.pid);
           const rowIds = selector
             ? padPickIds(normalizeMemberIds(inputsByEvent?.[pickMenuState.evId]?.person?.[selector.id]), requiredCount)
             : padPickIds([], requiredCount);
@@ -3360,6 +3371,16 @@ export default function PlayerEventInput(){
                 >
                   선택 해제
                 </button>
+                {!options.length && (
+                  <button
+                    type="button"
+                    className={tCss.pickMenuOption}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    disabled
+                  >
+                    선택할 참가자가 없습니다.
+                  </button>
+                )}
                 {options.map((opt) => {
                   const value = String(opt?.id || '');
                   const selectedElsewhere = rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
