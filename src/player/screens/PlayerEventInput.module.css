@@ -193,6 +193,10 @@
   color:#98a2b3;
 }
 
+.pickSelectButton:disabled .pickSelectText{
+  color:#98a2b3;
+}
+
 .pickSelectText{
   display:block;
   width:100%;
