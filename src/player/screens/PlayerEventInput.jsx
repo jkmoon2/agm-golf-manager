@@ -696,7 +696,7 @@ export default function PlayerEventInput(){
     }
   }, [roomIdx, eventId, selfParticipant]);
 
-  const openPickMenuAt = (evId, pid, idx, options = [], buttonEl = null) => {
+  const openPickMenuAt = (evId, pid, idx, options = [], buttonEl = null, menuPayload = {}) => {
     const rect = buttonEl?.getBoundingClientRect?.();
     const menuWidth = getPickMenuWidthPx(options);
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 360;
@@ -715,9 +715,22 @@ export default function PlayerEventInput(){
         top = Math.max(8, rect.top - estimatedHeight - 6);
       }
     }
-    setPickMenuState({ evId, pid, idx, left, top, width: menuWidth });
-  };
 
+    // pick-lineup 메뉴는 Portal에서 다시 렌더링됩니다.
+    // 새로 만든 이벤트는 Firestore 스냅샷/참가자 목록이 재정렬되는 순간 Portal이 먼저 렌더될 수 있으므로,
+    // 클릭 당시의 이벤트/선택자/옵션을 같이 보관하여 메뉴가 null 처리되지 않게 합니다.
+    setPickMenuState({
+      evId: String(evId ?? ''),
+      pid: String(pid ?? ''),
+      idx,
+      left,
+      top,
+      width: menuWidth,
+      eventSnapshot: menuPayload?.eventSnapshot || null,
+      selectorSnapshot: menuPayload?.selectorSnapshot || null,
+      optionsSnapshot: Array.isArray(options) ? options : [],
+    });
+  };
 
   const openBattleMenuAt = (evId, rowKey, holeNo, options = [], buttonEl = null, menuOpt = {}) => {
     const rect = buttonEl?.getBoundingClientRect?.();
@@ -3038,7 +3051,7 @@ export default function PlayerEventInput(){
                             {slotLabels.map((_, idx) => {
                               const options = getPickOptions(ev, idx);
                               const selectedId = p ? (rowIds[idx] || '') : '';
-                              const selectedOpt = options.find((opt) => String(opt?.id) === String(selectedId));
+                              const selectedOpt = options.find((opt) => String(opt?.id ?? '') === String(selectedId));
                               const buttonText = selectedOpt ? displayPickOption(selectedOpt) : '선택';
                               return (
                                 <td key={idx} className={tCss.cellEditable}>
@@ -3054,12 +3067,12 @@ export default function PlayerEventInput(){
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (!p || locked) return;
-                                        const same = pickMenuState?.evId === ev.id && String(pickMenuState?.pid ?? '') === String(p.id ?? '') && pickMenuState?.idx === idx;
+                                        const same = String(pickMenuState?.evId ?? '') === String(ev.id ?? '') && String(pickMenuState?.pid ?? '') === String(p.id ?? '') && pickMenuState?.idx === idx;
                                         if (same) {
                                           setPickMenuState(null);
                                           return;
                                         }
-                                        openPickMenuAt(ev.id, p.id, idx, options, e.currentTarget);
+                                        openPickMenuAt(ev.id, p.id, idx, options, e.currentTarget, { eventSnapshot: ev, selectorSnapshot: p });
                                       }}
                                       disabled={!p || locked}
                                       title={buttonText}
@@ -3321,13 +3334,14 @@ export default function PlayerEventInput(){
 
 
         {pickMenuState && (() => {
-          const activeEvent = events.find((item) => item.id === pickMenuState.evId);
+          const activeEvent = events.find((item) => String(item?.id ?? '') === String(pickMenuState.evId ?? '')) || pickMenuState.eventSnapshot || null;
           const requiredCount = getPickLineupRequiredCount(activeEvent);
-          const selector = getPickSelectorById(pickMenuState.pid);
+          const selector = getPickSelectorById(pickMenuState.pid) || pickMenuState.selectorSnapshot || null;
+          const selectorKey = String(selector?.id ?? pickMenuState.pid ?? '');
           const rowIds = selector
-            ? padPickIds(normalizeMemberIds(inputsByEvent?.[pickMenuState.evId]?.person?.[selector.id]), requiredCount)
+            ? padPickIds(normalizeMemberIds(inputsByEvent?.[String(pickMenuState.evId ?? '')]?.person?.[selectorKey]), requiredCount)
             : padPickIds([], requiredCount);
-          const options = activeEvent ? getPickOptions(activeEvent, pickMenuState.idx) : [];
+          const options = activeEvent ? getPickOptions(activeEvent, pickMenuState.idx) : (Array.isArray(pickMenuState.optionsSnapshot) ? pickMenuState.optionsSnapshot : []);
           const selectedId = selector ? (rowIds[pickMenuState.idx] || '') : '';
           const portalNode = typeof document !== 'undefined' ? document.body : null;
           if (!portalNode || !activeEvent || !selector) return null;
@@ -3366,7 +3380,7 @@ export default function PlayerEventInput(){
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => {
                     if (shouldIgnorePickMenuClick()) return;
-                    patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, '', requiredCount);
+                    patchPickMember(activeEvent.id, selectorKey, pickMenuState.idx, '', requiredCount);
                   }}
                 >
                   선택 해제
@@ -3382,7 +3396,7 @@ export default function PlayerEventInput(){
                   </button>
                 )}
                 {options.map((opt) => {
-                  const value = String(opt?.id || '');
+                  const value = String(opt?.id ?? '');
                   const selectedElsewhere = rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
                   const active = String(selectedId) === value;
                   const disabled = !!selectedId || selectedElsewhere;
@@ -3395,7 +3409,7 @@ export default function PlayerEventInput(){
                       onClick={() => {
                         if (shouldIgnorePickMenuClick()) return;
                         if (disabled) return;
-                        patchPickMember(activeEvent.id, selector.id, pickMenuState.idx, value, requiredCount);
+                        patchPickMember(activeEvent.id, selectorKey, pickMenuState.idx, value, requiredCount);
                         setPickMenuState(null);
                       }}
                       disabled={disabled}
