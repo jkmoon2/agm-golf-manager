@@ -242,6 +242,41 @@ export default function Step5() {
   // 각 참가자 점수 input ref (롱프레스 후 포커스 유지)
   const scoreInputRefs = useRef({});
 
+  // ✅ [PATCH] 다중 접속 운영 안정화: 점수 입력 중인 칸은 Firestore 실시간 스냅샷보다 로컬 draft를 우선 표시
+  // - participants 전체 스냅샷이 다시 내려와도 현재 입력칸의 값/포커스가 흔들리지 않도록 보호
+  // - 저장은 기존처럼 onBlur에서 마지막 값 1회만 scores 서브컬렉션에 커밋
+  const [scoreDrafts, setScoreDrafts] = useState({});
+  const scoreDraftsRef = useRef({});
+  const activeScoreIdRef = useRef(null);
+
+  const setScoreDraftMap = useCallback((updater) => {
+    setScoreDrafts((prev) => {
+      const next = typeof updater === 'function' ? updater(prev || {}) : (updater || {});
+      scoreDraftsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const clearScoreDraft = useCallback((pid, expectedValue) => {
+    const key = String(pid);
+    setScoreDraftMap((prev) => {
+      if (!Object.prototype.hasOwnProperty.call(prev || {}, key)) return prev || {};
+      if (expectedValue !== undefined && String(prev[key] ?? '') !== String(expectedValue ?? '')) return prev || {};
+      const next = { ...(prev || {}) };
+      delete next[key];
+      return next;
+    });
+  }, [setScoreDraftMap]);
+
+  const onScoreFocus = (id, currentText) => {
+    const key = String(id);
+    activeScoreIdRef.current = key;
+    setScoreDraftMap((prev) => {
+      if (Object.prototype.hasOwnProperty.call(prev || {}, key)) return prev || {};
+      return { ...(prev || {}), [key]: currentText == null ? '' : String(currentText) };
+    });
+  };
+
   // ✅ [ADD] 셀을 눌러도 점수 input에 포커스(모바일에서 "수동" 버튼 오클릭/포커스 이탈 방지)
   const focusScoreInput = (pid) => {
     try {
@@ -263,11 +298,14 @@ export default function Step5() {
     cancelScoreLongPress(pid);
 
     scoreLongPressTimers.current[pid] = setTimeout(() => {
+      const key = String(pid);
       const cur = (participantsRef.current || []).find((x) => x.id === pid);
-      const curText =
-        cur?.scoreRaw !== undefined
+      const hasDraft = Object.prototype.hasOwnProperty.call(scoreDraftsRef.current || {}, key);
+      const curText = hasDraft
+        ? String(scoreDraftsRef.current[key] ?? '')
+        : (cur?.scoreRaw !== undefined
           ? String(cur.scoreRaw ?? '')
-          : (cur?.score != null ? String(cur.score) : '');
+          : (cur?.score != null ? String(cur.score) : ''));
 
       // 요구사항: "빈칸이면 → 롱프레스하면 '-'만 들어가고 숫자 입력 기다림"
       let nextText = '-';
@@ -310,6 +348,9 @@ export default function Step5() {
   // ✅ [A안] onChange는 "로컬 업데이트만" 수행 (Firestore 저장/커밋은 하지 않음)
   const onScoreChange = (id, rawValue) => {
     const value = normalizeScoreText(rawValue);
+    const key = String(id);
+    activeScoreIdRef.current = key;
+    setScoreDraftMap((prev) => ({ ...(prev || {}), [key]: value }));
 
     setParticipants((prev) => {
       const nextList = prev.map((p) => {
@@ -339,6 +380,14 @@ export default function Step5() {
 
   // ✅ [A안] onBlur에서만 1회 커밋 (Firestore + (옵션) updateParticipant)
   const onScoreBlur = (id, rawFromDom) => {
+    const key = String(id);
+    const draftValue = Object.prototype.hasOwnProperty.call(scoreDraftsRef.current || {}, key)
+      ? scoreDraftsRef.current[key]
+      : undefined;
+    const clearExpectedText = normalizeScoreText(
+      rawFromDom !== undefined ? rawFromDom : (draftValue !== undefined ? draftValue : '')
+    );
+
     setParticipants((prev) => {
       const nextList = prev.map((p) => {
         if (p.id !== id) return p;
@@ -346,9 +395,11 @@ export default function Step5() {
         const curText =
           rawFromDom !== undefined
             ? String(rawFromDom ?? '')
-            : (p?.scoreRaw !== undefined
-              ? String(p.scoreRaw ?? '')
-              : (p?.score != null ? String(p.score) : ''));
+            : (draftValue !== undefined
+              ? String(draftValue ?? '')
+              : (p?.scoreRaw !== undefined
+                ? String(p.scoreRaw ?? '')
+                : (p?.score != null ? String(p.score) : '')));
 
         const v = normalizeScoreText(curText);
 
@@ -366,19 +417,28 @@ export default function Step5() {
       });
 
       const seq = ++scoreCommitSeqRef.current;
+      const committedScore = nextList.find((x) => x.id === id)?.score ?? null;
+      const committedText = committedScore == null ? '' : String(committedScore);
+
       Promise.resolve().then(() => {
         if (seq !== scoreCommitSeqRef.current) return;
 
         // ✅ SSOT: 점수는 scores 서브컬렉션으로만 저장
         //    - participants[] 저장은 방배정/명단용으로만 사용
-        const committedScore = nextList.find((x) => x.id === id)?.score ?? null;
         if (typeof upsertScores === 'function') {
-          upsertScores([{ id, score: committedScore }]).catch((e) => {
-            console.warn('[Step5] upsertScores(onBlur) failed:', e);
-          });
+          upsertScores([{ id, score: committedScore }])
+            .catch((e) => {
+              console.warn('[Step5] upsertScores(onBlur) failed:', e);
+            })
+            .finally(() => {
+              setTimeout(() => clearScoreDraft(id, clearExpectedText), 80);
+            });
+        } else {
+          setTimeout(() => clearScoreDraft(id, clearExpectedText), 80);
         }
       });
 
+      if (activeScoreIdRef.current === key) activeScoreIdRef.current = null;
       latestParticipantsRef.current = nextList;
       return nextList;
     });
@@ -579,6 +639,8 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
   // (F) 자동 배정 / 초기화
   // ─────────────────────────────────────────────────────────────────────────────
   const onAutoAssign = () => {
+    if (!window.confirm('자동배정을 실행하시겠습니까?\n확인을 누르면 미배정 참가자 자동배정이 바로 반영됩니다.')) return;
+
     let nextSnapshot = null;
 
     setParticipants((ps) => {
@@ -610,10 +672,14 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
   };
 
   const onReset = () => {
+    if (!window.confirm('초기화를 실행하시겠습니까?\n확인을 누르면 방배정과 점수가 초기화됩니다.')) return;
+
     let nextSnapshot = null;
 
     // ✅ [ADD] reset 이전에 예약된 onBlur 커밋(Promise)을 무효화
     scoreCommitSeqRef.current += 1;
+    activeScoreIdRef.current = null;
+    setScoreDraftMap({});
 
     // ✅ [ADD] 진행중/대기중 동기화도 같이 끊어줘야 점수 되살아남(깜빡임) 방지
     queuedSyncRef.current = null;
@@ -683,21 +749,24 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
               const pidStr = String(p.id);
               const map = scoresMap || {};
               const ready = !!scoresReady;
+              const hasDraft = Object.prototype.hasOwnProperty.call(scoreDrafts || {}, pidStr);
               const hasLiveKey = Object.prototype.hasOwnProperty.call(map, pidStr);
               const liveScore = hasLiveKey ? map[pidStr] : null;
 
               // ✅ 실시간 반영 우선순위 (Step7과 동일, SSOT 단일 구독)
-              // - 편집 중(scoreRaw)은 로컬 입력값 유지
-              // - scoresReady 이전에는 기존 participants.score를 유지(깜박임 방지)
+              // - 현재 입력 중인 draft는 participants 전체 스냅샷보다 우선 보호
+              // - 그 외에는 Firestore scores(SSOT)가 있으면 그 값을 우선 표시
               // - scoresReady 이후에는 scoresMap이 SSOT: 키가 없으면 ''(미입력)로 간주
               const displayScore =
-                p.scoreRaw !== undefined
-                  ? p.scoreRaw
-                  : ready
-                    ? (hasLiveKey ? (liveScore == null ? '' : liveScore) : '')
-                    : (hasLiveKey
-                        ? (liveScore == null ? '' : liveScore)
-                        : (p.score != null ? p.score : ''));
+                hasDraft
+                  ? scoreDrafts[pidStr]
+                  : p.scoreRaw !== undefined
+                    ? p.scoreRaw
+                    : ready
+                      ? (hasLiveKey ? (liveScore == null ? '' : liveScore) : '')
+                      : (hasLiveKey
+                          ? (liveScore == null ? '' : liveScore)
+                          : (p.score != null ? p.score : ''));
 
               return (
                 <div key={p.id} className={styles.participantRow}>
@@ -727,6 +796,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
                       inputMode="numeric"
                       pattern="-?[0-9]*"
                       value={displayScore}
+                      onFocus={(e) => onScoreFocus(p.id, e.target.value)}
                       onChange={(e) => onScoreChange(p.id, e.target.value)}
                       onBlur={(e) => onScoreBlur(p.id, e.target.value)}   // ✅ [A안] 입력 완료 시점에만 1회 저장
                       onPointerDown={(e) => {
