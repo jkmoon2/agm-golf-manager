@@ -168,11 +168,52 @@ export default function StepFlow() {
         x.nickname !== y.nickname ||
         x.handicap !== y.handicap ||
         x.room     !== y.room     ||
+        x.roomNumber !== y.roomNumber ||
         x.partner  !== y.partner  ||
         x.selected !== y.selected
       ) return false;
     }
     return true;
+  };
+
+  // ✅ [PATCH] 다중 접속 운영 안정화: Firestore participants 스냅샷 적용 시 기존 행 순서/편집 draft 보존
+  // - 다른 참가자 접속/저장으로 이벤트 문서가 갱신되어도 Admin STEP5 입력 포커스가 다른 행으로 튀지 않도록 함
+  // - 동일 id 참가자는 로컬 행 위치를 유지하고, 서버 필드만 병합
+  // - scoreRaw 같은 로컬 편집 전용 필드는 서버 스냅샷으로 지우지 않음
+  const mergeRemoteParticipantsSafely = (prevList = [], remoteList = []) => {
+    const prevArr = Array.isArray(prevList) ? prevList : [];
+    const remoteArr = Array.isArray(remoteList) ? remoteList : [];
+    if (!prevArr.length) return remoteArr;
+    if (!remoteArr.length) return prevArr;
+
+    const remoteById = new Map(remoteArr.map((p) => [String(p?.id), p]));
+    const used = new Set();
+
+    const merged = prevArr
+      .map((local) => {
+        const key = String(local?.id);
+        const remote = remoteById.get(key);
+        if (!remote) return null;
+        used.add(key);
+
+        const next = { ...local, ...remote };
+
+        // STEP5에서 입력 중인 로컬 draft 보호
+        if (Object.prototype.hasOwnProperty.call(local || {}, 'scoreRaw')) {
+          next.scoreRaw = local.scoreRaw;
+          next.score = local.score ?? next.score ?? null;
+        }
+
+        return next;
+      })
+      .filter(Boolean);
+
+    remoteArr.forEach((remote) => {
+      const key = String(remote?.id);
+      if (!used.has(key)) merged.push(remote);
+    });
+
+    return merged;
   };
   // ---------------------------------------------------------------------------
 
@@ -262,8 +303,13 @@ export default function StepFlow() {
         }
       }
 
+      const mergedList = mergeRemoteParticipantsSafely(prevList, remoteList);
+      if (shallowEqualParticipants(prevList, mergedList)) {
+        return prevList;
+      }
+
       localDirtyParticipantsMsRef.current = 0;
-      return remoteList;
+      return mergedList;
     });
     applyingRemoteParticipantsRef.current = false;
 

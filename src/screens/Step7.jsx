@@ -574,12 +574,14 @@ export default function Step7() {
   // 자동 배정
   const handleAutoClick = () => {
     if (!onAutoAssign) return;
+    if (!window.confirm('자동배정을 실행하시겠습니까?\n확인을 누르면 AGM 포볼 자동배정이 바로 반영됩니다.')) return;
     onAutoAssign();
   };
 
   // 초기화
   const handleResetClick = () => {
     if (!onReset) return;
+    if (!window.confirm('초기화를 실행하시겠습니까?\n확인을 누르면 AGM 포볼 배정과 점수가 초기화됩니다.')) return;
     setScoreDraft({});
     onReset();
   };
