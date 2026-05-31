@@ -294,46 +294,66 @@ export default function Step5() {
     delete scoreLongPressTimers.current[pid];
   };
 
-  const startScoreLongMinus = (pid) => {
+  const cancelAllScoreLongPress = useCallback(() => {
+    try {
+      Object.values(scoreLongPressTimers.current || {}).forEach((t) => {
+        if (t) clearTimeout(t);
+      });
+      scoreLongPressTimers.current = {};
+    } catch {}
+  }, []);
+
+  // ✅ [PATCH2] 키보드 오픈/회전/스크롤 중 남아 있는 롱프레스 타이머가 늦게 실행되는 것 방지
+  useEffect(() => {
+    window.addEventListener('resize', cancelAllScoreLongPress, { passive: true });
+    window.addEventListener('orientationchange', cancelAllScoreLongPress, { passive: true });
+    document.addEventListener('visibilitychange', cancelAllScoreLongPress);
+    return () => {
+      window.removeEventListener('resize', cancelAllScoreLongPress);
+      window.removeEventListener('orientationchange', cancelAllScoreLongPress);
+      document.removeEventListener('visibilitychange', cancelAllScoreLongPress);
+      cancelAllScoreLongPress();
+    };
+  }, [cancelAllScoreLongPress]);
+
+  const startScoreLongMinus = (pid, targetEl = null) => {
     cancelScoreLongPress(pid);
 
     scoreLongPressTimers.current[pid] = setTimeout(() => {
       const key = String(pid);
-      const cur = (participantsRef.current || []).find((x) => x.id === pid);
+
+      // ✅ [PATCH2] 모바일 키보드/뷰포트 resize 중 pointerup이 누락되면 과거 타이머가 늦게 실행되어
+      //   다른 행 input을 다시 focus시키는 문제가 생길 수 있습니다.
+      //   그래서 현재 실제 포커스가 이 input에 있을 때만 롱프레스 값을 반영합니다.
+      const activeEl = document.activeElement;
+      const refEl = targetEl || scoreInputRefs.current[pid];
+      if (refEl && activeEl !== refEl && activeScoreIdRef.current !== key) {
+        return;
+      }
+
       const hasDraft = Object.prototype.hasOwnProperty.call(scoreDraftsRef.current || {}, key);
+      const live = scoresMap && Object.prototype.hasOwnProperty.call(scoresMap, key) ? scoresMap[key] : null;
+      const cur = (participantsRef.current || []).find((x) => String(x?.id) === key);
       const curText = hasDraft
         ? String(scoreDraftsRef.current[key] ?? '')
-        : (cur?.scoreRaw !== undefined
-          ? String(cur.scoreRaw ?? '')
+        : (live != null
+          ? String(live)
           : (cur?.score != null ? String(cur.score) : ''));
 
       // 요구사항: "빈칸이면 → 롱프레스하면 '-'만 들어가고 숫자 입력 기다림"
       let nextText = '-';
       if (curText && curText.startsWith('-')) {
-        // 이미 -로 시작하면 토글로 제거
         nextText = curText.slice(1);
       } else if (curText && !curText.startsWith('-')) {
-        // 값이 있으면 앞에 - 붙이기
         nextText = `-${curText}`;
       } else {
-        // 빈칸이면 '-'만
         nextText = '-';
       }
 
       onScoreChange(pid, nextText);
-
-      // 포커스 유지 + 커서 맨 끝
-      setTimeout(() => {
-        const el = scoreInputRefs.current[pid];
-        if (el) {
-          try {
-            el.focus();
-            const len = String(nextText).length;
-            if (el.setSelectionRange) el.setSelectionRange(len, len);
-          } catch (e) {}
-        }
-      }, 0);
-    }, 550);
+      // ✅ [PATCH2] 여기서 강제 focus() 하지 않음.
+      //   강제 focus가 모바일 스크롤/키보드 resize와 섞이면 다른 칸으로 튀는 현상이 재발할 수 있습니다.
+    }, 650);
   };
 
   // 입력값 정리(숫자/선행 - 만 허용, 콤마 등 제거)
@@ -350,32 +370,12 @@ export default function Step5() {
     const value = normalizeScoreText(rawValue);
     const key = String(id);
     activeScoreIdRef.current = key;
+
+    // ✅ [PATCH2] 입력 중에는 participants 배열을 건드리지 않습니다.
+    // - 기존 방식은 키 입력마다 participants state가 갱신되어 28명 동시 접속/스냅샷 상황에서
+    //   행 전체가 계속 리렌더링되고, 모바일 포커스가 다른 칸으로 튀는 원인이 될 수 있었습니다.
+    // - 점수 입력칸 화면값은 scoreDrafts만으로 유지하고, Firestore 저장은 onBlur에서 1회만 수행합니다.
     setScoreDraftMap((prev) => ({ ...(prev || {}), [key]: value }));
-
-    setParticipants((prev) => {
-      const nextList = prev.map((p) => {
-        if (p.id !== id) return p;
-
-        if (value === '' || value === null) {
-          return { ...p, score: null, scoreRaw: '' };
-        }
-
-        if (value === '-') {
-          return { ...p, score: null, scoreRaw: '-' };
-        }
-
-        const num = Number(value);
-        if (Number.isNaN(num)) {
-          return { ...p, score: null, scoreRaw: value };
-        }
-
-        const clone = { ...p, score: num, scoreRaw: value }; // ✅ [PATCH] 편집 중에는 scoreRaw 유지 (liveScore 덮어쓰기 방지)
-        return clone;
-      });
-
-      latestParticipantsRef.current = nextList;
-      return nextList;
-    });
   };
 
   // ✅ [A안] onBlur에서만 1회 커밋 (Firestore + (옵션) updateParticipant)
@@ -712,6 +712,13 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
   };
 
   const onNext = async () => {
+    // ✅ [PATCH2] 입력 중 바로 다음을 누를 때 onBlur 커밋이 먼저 끝나도록 유도
+    try {
+      const el = document.activeElement;
+      if (el && typeof el.blur === 'function') el.blur();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    } catch {}
+
     try {
       await syncParticipantsToEvent(latestParticipantsRef.current || participants);
     } catch (e) {
@@ -781,13 +788,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
                   </div>
 
                   {/* 점수 입력 */}
-                  <div
-                    className={`${styles.cell} ${styles.score}`}
-                    // ✅ 셀 아무 곳이나 눌러도 input 포커스(모바일에서 "수동" 버튼 오클릭 방지)
-                    onClick={() => focusScoreInput(p.id)}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onTouchStart={(e) => e.stopPropagation()}
-                  >
+                  <div className={`${styles.cell} ${styles.score}`}>
                     <input
                       ref={(el) => {
                         if (el) scoreInputRefs.current[p.id] = el;
@@ -795,15 +796,16 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
                       type="text"
                       inputMode="numeric"
                       pattern="-?[0-9]*"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                       value={displayScore}
                       onFocus={(e) => onScoreFocus(p.id, e.target.value)}
                       onChange={(e) => onScoreChange(p.id, e.target.value)}
                       onBlur={(e) => onScoreBlur(p.id, e.target.value)}   // ✅ [A안] 입력 완료 시점에만 1회 저장
                       onPointerDown={(e) => {
-                        // ✅ iOS/모바일에서 탭 시 포커스가 안정적으로 잡히도록 보강
                         e.stopPropagation();
-                        try { e.currentTarget.focus(); } catch {}
-                        startScoreLongMinus(p.id);
+                        startScoreLongMinus(p.id, e.currentTarget);
                       }}
                       onPointerUp={() => cancelScoreLongPress(p.id)}
                       onPointerCancel={() => cancelScoreLongPress(p.id)}
