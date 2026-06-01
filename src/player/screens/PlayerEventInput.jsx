@@ -2728,7 +2728,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {bingoLocked && <div className={tCss.lockNotice}>{bingoBoardCellCount === 9 ? 'Mini빙고판 배치' : '빙고판 배치'} 입력 마감, 홀별 점수 입력은 가능</div>}
+                {bingoLocked && <div className={tCss.lockNotice}>{bingoBoardCellCount === 9 ? 'Mini빙고판' : '빙고판 배치'} 입력 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
@@ -2824,7 +2824,7 @@ export default function PlayerEventInput(){
                 <div style={{ padding: '12px' }}>
                   <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-                      <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>{bingoBoardCellCount === 9 ? 'Mini빙고판 배치' : '빙고판 배치'}</div>
+                      <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>{bingoBoardCellCount === 9 ? 'Mini빙고판' : '빙고판 배치'}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <button
                           type="button"
@@ -2949,7 +2949,7 @@ export default function PlayerEventInput(){
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                         <div>
                           <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>Big빙고판 배치</div>
-                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{bingoCanEditLarge ? '두 칸을 차례로 눌러 4명의 3×3 Mini빙고판 위치를 바꿉니다.' : '방 리더가 4명의 3×3 Mini빙고판 위치를 정합니다.'}</div>
+                          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{bingoCanEditLarge ? '두 칸을 차례로 눌러 4명의 Mini빙고판 위치를 바꿉니다.' : '방 리더가 4명의 3×3 Mini빙고판 위치를 정합니다.'}</div>
                         </div>
                         <span style={{ border: '1px solid #c4b5fd', background: '#ede9fe', color: '#5b21b6', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 900 }}>{bingoCanEditLarge ? '리더' : '보기'}</span>
                       </div>
