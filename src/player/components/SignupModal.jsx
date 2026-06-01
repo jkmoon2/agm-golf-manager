@@ -8,15 +8,24 @@ export default function SignupModal({ defaultEmail='', onClose, onComplete }) {
   const [email, setEmail] = useState(defaultEmail);
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(()=>{ if(!defaultEmail) return; setEmail(defaultEmail); },[defaultEmail]);
 
   const submit = async () => {
+    if (busy) return;
     if(!email.trim() || !password.trim() || !name.trim()){
       alert('이메일/비밀번호/이름을 모두 입력해 주세요.'); return;
     }
-    await onComplete?.({email:email.trim(), password, name:name.trim()});
-    onClose?.();
+    try {
+      setBusy(true);
+      const ok = await onComplete?.({email:email.trim(), password, name:name.trim()});
+      if (ok === false) { setBusy(false); return; }
+      onClose?.();
+    } catch (e) {
+      setBusy(false);
+      throw e;
+    }
   };
 
   return (
@@ -29,9 +38,9 @@ export default function SignupModal({ defaultEmail='', onClose, onComplete }) {
           <input className="modal__input selectable" placeholder="이름" value={name} onChange={e=>setName(e.target.value)} />
         </div>
         <div className="modal__actions">
-          <button className="modal__ghost selectable" onClick={onClose}>취소</button>
+          <button className="modal__ghost selectable" onClick={onClose} disabled={busy}>취소</button>
           {/* 문구는 '가입 신청'으로 유지 */}
-          <button className="modal__primary selectable" onClick={submit}>가입 신청</button>
+          <button className="modal__primary selectable" onClick={submit} disabled={busy}>{busy ? '처리 중…' : '가입 신청'}</button>
         </div>
       </div>
     </div>

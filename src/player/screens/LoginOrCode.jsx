@@ -446,28 +446,36 @@ function InnerLoginOrCode({ onEnter }) {
               onClose={()=>setShowSignup(false)}
               onComplete={async ({ email: em, password, name })=>{
                 try {
-                  const cred = await signUpEmail(em, password);
+                  const cleanEmail = normalizeEmail(em);
+                  const cleanName = normalizeText(name);
+                  if (!cleanEmail || !password || !cleanName) throw new Error('이메일/비밀번호/이름을 모두 입력해 주세요.');
+                  const cred = await signUpEmail(cleanEmail, password, cleanName);
                   const u = cred?.user || cred;
                   if (!u?.uid) throw new Error('회원가입 계정 정보를 확인할 수 없습니다.');
                   await setDoc(doc(db, 'users', u.uid), {
                     uid: u.uid,
-                    email: u.email || em,
-                    name,
+                    email: normalizeEmail(u.email || cleanEmail),
+                    name: cleanName,
                     role: 'player',
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString(),
                   }, { merge: true });
-                  await ensurePasswordResetIndex(u, { email: u.email || em, name });
-                  setEmail(em);
-                  markEmailLoginConfirmed(u.email || em);
+                  await ensurePasswordResetIndex(u, { email: u.email || cleanEmail, name: cleanName });
+                  setEmail(cleanEmail);
+                  markEmailLoginConfirmed(u.email || cleanEmail);
                   try { sessionStorage.setItem('agm.authRole', 'player'); } catch {}
                   try {
-                    if (rememberEmail) localStorage.setItem(SAVED_EMAIL_KEY, em);
+                    if (rememberEmail) localStorage.setItem(SAVED_EMAIL_KEY, cleanEmail);
                   } catch {}
                   alert('회원가입이 완료되었습니다. 대회 목록에서 참가할 대회를 선택해 주세요.');
                   navigate('/player/events', { replace: true });
                 } catch (err) {
-                  alert(`회원가입 실패: ${err?.message || err}`);
+                  const code = err?.code || '';
+                  const msg = code === 'auth/network-request-failed'
+                    ? '네트워크 요청 실패입니다. 인터넷 연결/VPN/광고차단/브라우저 추적차단을 확인한 뒤 다시 시도해 주세요.'
+                    : (err?.message || err);
+                  alert(`회원가입 실패: ${msg}`);
+                  return false;
                 }
               }}
             />

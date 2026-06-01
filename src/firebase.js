@@ -123,10 +123,15 @@ async function ensureUserProfile(user){
 
     const uid = user.uid;
     const key = `profileEnsured:${uid}`;
-    if(localStorage.getItem(key)==='1') return; // 1회만
-
     const ref = doc(db, 'users', uid);
     const snap = await getDoc(ref);
+    const old = snap.exists() ? (snap.data() || {}) : {};
+    const displayName = String(user.displayName || '').trim();
+
+    // 기존에는 localStorage profileEnsured가 있으면 바로 return 되어,
+    // 회원가입 직후 displayName 반영보다 users 문서 생성이 먼저 끝난 경우 이름이 빈칸으로 고정될 수 있었습니다.
+    if(snap.exists() && localStorage.getItem(key)==='1' && (!displayName || old.name)) return;
+
     if(!snap.exists()){
       const createdAt =
         (user.metadata && user.metadata.creationTime)
@@ -134,9 +139,14 @@ async function ensureUserProfile(user){
           : new Date();
       await setDoc(ref, {
         email: user.email || '',
-        name: user.displayName || '',
+        name: displayName || '',
         createdAt,                     // 실제 가입일 보관
         createdAtSrc: 'auth.metadata', // 진단용
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } else if(displayName && !String(old.name || '').trim()) {
+      await setDoc(ref, {
+        name: displayName,
         updatedAt: serverTimestamp()
       }, { merge: true });
     }
