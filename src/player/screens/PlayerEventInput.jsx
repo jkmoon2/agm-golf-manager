@@ -2728,7 +2728,7 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                {bingoLocked && <div className={tCss.lockNotice}>{bingoBoardCellCount === 9 ? 'Mini빙고판배치' : '빙고판 배치'} 입력 마감, 홀별 점수 입력은 가능</div>}
+                {bingoLocked && <div className={tCss.lockNotice}>{bingoBoardCellCount === 9 ? 'Mini빙고판' : '빙고판 배치'} 입력 마감, 홀별 점수 입력은 가능</div>}
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={tCss.table} style={{ width: `${bingoTableWidthPct}%` }}>
@@ -2824,7 +2824,7 @@ export default function PlayerEventInput(){
                 <div style={{ padding: '12px' }}>
                   <div style={{ border: '1px solid #dde6f2', borderRadius: 16, background: '#fff', padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-                      <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>{bingoBoardCellCount === 9 ? 'Mini빙고판배치' : '빙고판 배치'}</div>
+                      <div style={{ fontSize: 17, fontWeight: 900, color: '#16376c' }}>{bingoBoardCellCount === 9 ? 'Mini빙고판' : '빙고판 배치'}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <button
                           type="button"
