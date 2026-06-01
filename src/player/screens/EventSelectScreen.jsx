@@ -69,6 +69,8 @@ export default function EventSelectScreen() {
     const user = auth.currentUser || await waitForAuthRestored(1200) || await ensureAnonAfterCode(eventId);
     if (!user) return;
     try {
+      const rootSnap = await getDoc(doc(db, 'events', eventId));
+      if (!rootSnap.exists()) return;
       await setDoc(
         doc(db, 'events', eventId, 'memberships', user.uid),
         { uid: user.uid, via: 'code', updatedAt: new Date().toISOString() },

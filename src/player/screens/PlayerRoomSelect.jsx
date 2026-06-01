@@ -6,7 +6,7 @@ import { PlayerContext } from '../../contexts/PlayerContext';
 import { EventContext } from '../../contexts/EventContext';
 import styles from './PlayerRoomSelect.module.css';
 
-import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db, auth, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
 import { writePlayerRoom } from '../utils/playerState';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
@@ -67,6 +67,9 @@ async function ensureMembership(eventId, myRoom) {
         '';
       if (code) payload.authCode = String(code);
     } catch {}
+
+    const rootSnap = await getDoc(doc(db, 'events', eventId));
+    if (!rootSnap.exists()) return;
 
     await setDoc(doc(db, 'events', eventId, 'memberships', uid), payload, { merge: true });
   } catch (e) {
