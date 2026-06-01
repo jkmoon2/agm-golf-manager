@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  getDoc,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -295,6 +296,8 @@ export default function Step4() {
       name: '',
       updatedAt: serverTimestamp(),
     };
+    const rootSnap = await getDoc(doc(db, "events", eventId));
+    if (!rootSnap.exists()) return alert("삭제되었거나 존재하지 않는 대회입니다.");
     await setDoc(doc(db, "events", eventId, "participants", String(newId)), newObj, {
       merge: true,
     });

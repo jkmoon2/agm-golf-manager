@@ -4,7 +4,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom'; // [ADD] useLocation 추가
 import styles from './Settings.module.css';
 import { EventContext } from '../contexts/EventContext';
-import { collection, doc, onSnapshot, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getThemePrefs, setThemePrefs, listPresets, applyTheme } from '../themes/useTheme';
 import '../themes/agm-themes.css';
@@ -124,7 +124,7 @@ export default function Settings() {
       } else if (typeof updateEvent === 'function') {
         await updateEvent({ playerGate: next, gateUpdatedAt: serverTimestamp() });
       } else {
-        await setDoc(doc(db,'events', id), { playerGate: next, gateUpdatedAt: serverTimestamp() }, { merge: true });
+        await updateDoc(doc(db,'events', id), { playerGate: next, gateUpdatedAt: serverTimestamp() });
       }
       const snap = await getDoc(doc(db, 'events', id));
       const after = snap.exists() ? snap.data()?.playerGate : null;

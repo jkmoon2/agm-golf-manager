@@ -596,14 +596,16 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
         return nextList;
       }
 
+      // 같은 조가 같은 방에 들어가면 안 되므로, 이미 같은 조가 그 방에 있으면 "맞트레이드(스왑)"
+      // ✅ [PATCH] 정원 체크보다 같은 조 충돌자를 먼저 찾습니다.
+      // - 이동하려는 방이 가득 차 있어도, 같은 조 참가자가 있으면 그 참가자와 교체되므로 정원은 증가하지 않습니다.
+      // - 같은 조 충돌자가 없는 상태에서만 기존처럼 정원 초과를 차단합니다.
+      const conflict = ps.find((p) => p.id !== id && p.group === target.group && getRoomValue(p) === room);
       const roomCountNow = getRoomCountNow(ps, room);
-      if (roomCountNow >= getRoomCapacity(room) && prevRoom !== room) {
+      if (!conflict && roomCountNow >= getRoomCapacity(room) && prevRoom !== room) {
         blockedFull = true;
         return ps;
       }
-
-      // 같은 조가 같은 방에 들어가면 안 되므로, 이미 같은 조가 그 방에 있으면 "맞트레이드(스왑)"
-      const conflict = ps.find((p) => p.id !== id && p.group === target.group && getRoomValue(p) === room);
 
       if (conflict) {
         nextList = ps.map((p) => {

@@ -7,6 +7,8 @@ import {
   getDocs,
   doc,
   getDoc,
+  deleteDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -67,24 +69,24 @@ export default function EventSelector({ onLoaded }) {
   // 대회 삭제
   const handleDelete = async (id) => {
     if (!window.confirm('정말 이 대회를 삭제하시겠습니까? 모든 참가자 데이터도 함께 삭제됩니다.')) return;
-    try {
-      if (typeof deleteEvent === 'function') {
-        await deleteEvent(id);
-      } else {
-        throw new Error('deleteEvent 함수가 준비되지 않았습니다.');
-      }
+    if (typeof deleteEvent === 'function') {
+      await deleteEvent(id);
+    } else {
+      // 구버전 호환: 컨텍스트 삭제 함수가 없을 때만 기존 직접 삭제 실행
+      const batch = writeBatch(db);
+      const partsSnap = await getDocs(collection(db, 'events', id, 'participants'));
+      partsSnap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      await deleteDoc(doc(db, 'events', id));
+    }
 
-      // UI 업데이트
-      setEvents(ev => ev.filter(e => e.id !== id));
-      if (selected === id) setSelected('');
-      if (eventId === id) {
-        setEventId(null);
-        setEventData(null);
-        setParticipants([]);
-      }
-    } catch (e) {
-      console.error('[EventSelector] deleteEvent failed:', e);
-      alert('대회 삭제 중 오류가 발생했습니다. 콘솔 로그와 Firestore 권한을 확인해 주세요.');
+    // UI 업데이트
+    setEvents(ev => ev.filter(e => e.id !== id));
+    if (selected === id) setSelected('');
+    if (eventId === id) {
+      setEventId(null);
+      setEventData(null);
+      setParticipants([]);
     }
   };
 

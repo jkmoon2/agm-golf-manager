@@ -7,7 +7,7 @@ import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoGridSize, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
@@ -515,6 +515,9 @@ async function ensureMembership(eventId, myRoom) {
   try {
     const uid = auth?.currentUser?.uid || null;
     if (!uid || !eventId || !myRoom) return;
+    const rootRef = doc(db, 'events', eventId);
+    const rootSnap = await getDoc(rootRef);
+    if (!rootSnap.exists()) return;
     const ref = doc(db, 'events', eventId, 'memberships', uid);
     await setDoc(ref, { room: myRoom }, { merge: true });
   } catch (e) {
@@ -1142,16 +1145,10 @@ export default function PlayerEventInput(){
     try {
       const targetEventId = eventId || ctxId;
       if (targetEventId) {
-        await setDoc(doc(db, 'events', targetEventId), {
-          eventInputs: {
-            [evId]: {
-              shared: {
-                largeBingoOrders: { [roomKey]: normalizedOrder },
-                largeBingoLeaders: { [roomKey]: leaderId },
-              },
-            },
-          },
-        }, { merge: true });
+        await updateDoc(doc(db, 'events', targetEventId), {
+          [`eventInputs.${evId}.shared.largeBingoOrders.${roomKey}`]: normalizedOrder,
+          [`eventInputs.${evId}.shared.largeBingoLeaders.${roomKey}`]: leaderId,
+        });
       }
     } catch (e) {
       console.warn('[PlayerEventInput] Big bingo order immediate save failed:', e);
@@ -1926,7 +1923,7 @@ export default function PlayerEventInput(){
       if (typeof updateEventImmediate === 'function') {
         await updateEventImmediate({ eventInputs: merged }, false);
       } else {
-        await setDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged }, { merge: true });
+        await updateDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged });
       }
 
       const savedClone = cloneEventInputs(merged);
