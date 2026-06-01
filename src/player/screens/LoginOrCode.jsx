@@ -473,7 +473,9 @@ function InnerLoginOrCode({ onEnter }) {
                   const code = err?.code || '';
                   const msg = code === 'auth/network-request-failed'
                     ? '네트워크 요청 실패입니다. 인터넷 연결/VPN/광고차단/브라우저 추적차단을 확인한 뒤 다시 시도해 주세요.'
-                    : (err?.message || err);
+                    : (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use' || code === 'agm/email-already-registered'
+                      ? '이미 가입된 이메일입니다. 기존 비밀번호로 로그인하거나, 비밀번호를 모르면 비번 재설정을 이용해 주세요.'
+                      : (err?.message || err));
                   alert(`회원가입 실패: ${msg}`);
                   return false;
                 }
