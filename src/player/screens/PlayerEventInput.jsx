@@ -2283,7 +2283,7 @@ export default function PlayerEventInput(){
                                 <td>{idx + 1}</td>
                                 <td>{left?.nickname || '-'}</td>
                                 <td>{right?.nickname || '-'}</td>
-                                <td>{Number.isFinite(hdSum) ? hdSum : '-'}</td>
+                                <td style={{ color: '#d00000', fontWeight: 800 }}>{Number.isFinite(hdSum) ? hdSum : '-'}</td>
                               </tr>
                             );
                           })}
