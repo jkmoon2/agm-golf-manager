@@ -123,30 +123,36 @@ async function ensureUserProfile(user){
 
     const uid = user.uid;
     const key = `profileEnsured:${uid}`;
+    const email = String(user.email || '').trim().toLowerCase();
+    const isAdminEmail = email === 'a@a.com';
+    // 일반 회원은 기존처럼 1회만 보강합니다.
+    // 단, 운영자(a@a.com)는 Auth 계정 삭제/재생성으로 UID가 바뀌어도
+    // users/{새UID}에 관리자 필드가 항상 복구되도록 매 로그인마다 확인합니다.
+    if(!isAdminEmail && localStorage.getItem(key)==='1') return; // 1회만
+
     const ref = doc(db, 'users', uid);
     const snap = await getDoc(ref);
-    const old = snap.exists() ? (snap.data() || {}) : {};
-    const displayName = String(user.displayName || '').trim();
-
-    // 기존에는 localStorage profileEnsured가 있으면 바로 return 되어,
-    // 회원가입 직후 displayName 반영보다 users 문서 생성이 먼저 끝난 경우 이름이 빈칸으로 고정될 수 있었습니다.
-    if(snap.exists() && localStorage.getItem(key)==='1' && (!displayName || old.name)) return;
+    const createdAt =
+      (user.metadata && user.metadata.creationTime)
+        ? new Date(user.metadata.creationTime)
+        : new Date();
 
     if(!snap.exists()){
-      const createdAt =
-        (user.metadata && user.metadata.creationTime)
-          ? new Date(user.metadata.creationTime)
-          : new Date();
       await setDoc(ref, {
         email: user.email || '',
-        name: displayName || '',
+        name: isAdminEmail ? (user.displayName || '관리자') : (user.displayName || ''),
         createdAt,                     // 실제 가입일 보관
         createdAtSrc: 'auth.metadata', // 진단용
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        ...(isAdminEmail ? { role: 'admin', isAdmin: true, approved: true } : {})
       }, { merge: true });
-    } else if(displayName && !String(old.name || '').trim()) {
+    } else if (isAdminEmail) {
       await setDoc(ref, {
-        name: displayName,
+        email: user.email || 'a@a.com',
+        name: user.displayName || snap.data()?.name || '관리자',
+        role: 'admin',
+        isAdmin: true,
+        approved: true,
         updatedAt: serverTimestamp()
       }, { merge: true });
     }

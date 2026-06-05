@@ -203,7 +203,9 @@ export default function Step0() {
     } catch (e) {
       console.error('[Step0] deleteEvent failed:', e);
       const msg = String(e?.message || e || '');
-      if (msg.toLowerCase().includes('permission')) {
+      if (msg.includes('관리자 권한이 없습니다')) {
+        alert(`삭제 실패: ${msg}`);
+      } else if (msg.toLowerCase().includes('permission')) {
         alert('삭제 실패: 관리자 권한이 없습니다. (a@a.com) 로그인 상태를 확인해 주세요.');
       } else {
         alert('삭제 실패: 네트워크/권한 문제로 삭제되지 않았습니다. 콘솔 로그를 확인해 주세요.');

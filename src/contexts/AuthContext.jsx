@@ -60,7 +60,9 @@ export function AuthProvider({ children }) {
         const roleSnap = await getDoc(doc(db, 'users', user.uid));
         const role = String(roleSnap.exists() ? (roleSnap.data()?.role || '') : '').toLowerCase();
         if (role === 'admin') nextRole = 'admin';
-        if (role === 'player') nextRole = 'player';
+        // a@a.com은 Auth 계정 재생성으로 users 문서가 비어 있거나 과거 role 값이 남아도
+        // 이메일 기준 관리자 권한을 우선합니다.
+        if (role === 'player' && !isAdminEmail(user.email)) nextRole = 'player';
       } catch {}
       try {
         const adminUid = sessionStorage.getItem('agm.adminLoginUid') || '';
