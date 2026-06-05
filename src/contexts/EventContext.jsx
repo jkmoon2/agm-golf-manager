@@ -11,12 +11,12 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  writeBatch,
   serverTimestamp,
   getDoc,
   getDocFromServer,
   getDocs,
   getDocsFromServer,
-  writeBatch,
 } from 'firebase/firestore';
 import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
@@ -24,7 +24,6 @@ import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
 
 import {
   getAuth,
-  onAuthStateChanged,
 } from 'firebase/auth';
 
 /* 저장 전에 undefined/NaN 정제 */
@@ -74,50 +73,13 @@ const KNOWN_EVENT_SUBCOLLECTIONS = [
   'presence',
 ];
 
-// ✅ [DELETE-HARDENING]
-// 삭제 직후 남은 참가자/다른 탭의 늦은 저장이 scores/memberships 등을 다시 쓰면
-// Firestore 콘솔에 기울임체 ghost 문서가 재생성될 수 있습니다.
-// 삭제 대상 eventId를 tombstone으로 기록하고, 루트 문서가 실제 존재할 때만 하위 컬렉션 setDoc을 허용합니다.
-const DELETED_EVENT_IDS_KEY = 'agmDeletedEventIds.v2';
-const readDeletedEventIds = () => {
-  try {
-    const raw = localStorage.getItem(DELETED_EVENT_IDS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(arr) ? arr.map(String) : []);
-  } catch {
-    return new Set();
-  }
-};
-const writeDeletedEventIds = (set) => {
-  try {
-    const arr = Array.from(set || []).filter(Boolean).slice(-300);
-    localStorage.setItem(DELETED_EVENT_IDS_KEY, JSON.stringify(arr));
-  } catch {}
-};
-const rememberDeletedEventId = (id) => {
-  if (!id) return;
-  const set = readDeletedEventIds();
-  set.add(String(id));
-  writeDeletedEventIds(set);
-};
-const forgetDeletedEventId = (id) => {
-  if (!id) return;
-  const set = readDeletedEventIds();
-  if (!set.delete(String(id))) return;
-  writeDeletedEventIds(set);
-};
-const isDeletedEventId = (id) => {
-  if (!id) return false;
-  return readDeletedEventIds().has(String(id));
-};
-
-async function deleteCollectionDocs(colRef, chunkSize = 400) {
+async function deleteCollectionDocs(colRef, chunkSize = 50) {
   const snap = await getDocsFromServer(colRef);
   if (!snap?.docs?.length) return 0;
   let deleted = 0;
   for (let i = 0; i < snap.docs.length; i += chunkSize) {
-    const chunk = snap.docs.slice(i, i + chunkSize);
     const batch = writeBatch(db);
+    const chunk = snap.docs.slice(i, i + chunkSize);
     chunk.forEach((d) => batch.delete(d.ref));
     await batch.commit();
     deleted += chunk.length;
@@ -125,24 +87,48 @@ async function deleteCollectionDocs(colRef, chunkSize = 400) {
   return deleted;
 }
 
-async function deleteKnownEventSubcollections(eventId) {
-  if (!eventId) return 0;
-  let total = 0;
-  for (const name of KNOWN_EVENT_SUBCOLLECTIONS) {
-    // 하위 컬렉션 삭제 실패를 무시하고 루트만 삭제하면 ghost 문서가 남습니다.
-    const count = await deleteCollectionDocs(collection(db, 'events', eventId, name));
-    total += count || 0;
-  }
-  return total;
+async function countCollectionDocs(colRef) {
+  const snap = await getDocsFromServer(colRef);
+  return snap?.docs?.length || 0;
 }
 
-async function hasKnownEventSubcollectionDocs(eventId) {
-  if (!eventId) return false;
+async function deleteKnownEventSubcollections(eventId) {
+  if (!eventId) return;
   for (const name of KNOWN_EVENT_SUBCOLLECTIONS) {
-    const snap = await getDocsFromServer(collection(db, 'events', eventId, name));
-    if (snap && !snap.empty) return true;
+    await deleteCollectionDocs(collection(db, 'events', eventId, name));
   }
-  return false;
+}
+
+async function verifyKnownEventSubcollectionsDeleted(eventId) {
+  if (!eventId) return;
+  const remains = [];
+  for (const name of KNOWN_EVENT_SUBCOLLECTIONS) {
+    const count = await countCollectionDocs(collection(db, 'events', eventId, name));
+    if (count > 0) remains.push(`${name}:${count}`);
+  }
+  if (remains.length) {
+    throw new Error(`이벤트 하위 데이터 삭제 미완료: ${remains.join(', ')}`);
+  }
+}
+
+const DELETED_EVENT_IDS_STORAGE_KEY = 'agm.deletedEventIds.v1';
+
+function readDeletedEventIdsFromLocal() {
+  try {
+    if (typeof window === 'undefined') return new Set();
+    const raw = window.localStorage.getItem(DELETED_EVENT_IDS_STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set((Array.isArray(arr) ? arr : []).map(String).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDeletedEventIdsToLocal(set) {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(DELETED_EVENT_IDS_STORAGE_KEY, JSON.stringify(Array.from(set || [])));
+  } catch {}
 }
 
 function isMissingDocError(error) {
@@ -294,6 +280,20 @@ const ensureAuthed = (() => {
   };
 })();
 
+const ADMIN_EMAIL = 'a@a.com';
+function normalizeEmail(email = '') {
+  return String(email || '').trim().toLowerCase();
+}
+async function assertAdminForEventDelete() {
+  const user = auth.currentUser || await waitForAuthRestored(1800);
+  const email = normalizeEmail(user?.email || '');
+  if (!user || email !== ADMIN_EMAIL) {
+    throw new Error(`관리자 권한이 없습니다. (${email || '로그인 없음'}) 로그인 상태를 확인해 주세요.`);
+  }
+  try { await user.getIdToken(true); } catch {}
+  return user;
+}
+
 const MANUAL_REFRESH_COOLDOWN_MS = 1200;
 const MANUAL_SYNC_RAF_MS = 180;
 const PLAYER_ROUTE_REFRESH_STALE_MS = 3500;
@@ -322,6 +322,7 @@ export function EventProvider({ children }) {
   const lastScoresSnapshotAtRef = useRef(0);
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
+  const deletedEventIdsRef = useRef(readDeletedEventIdsFromLocal());
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -358,6 +359,38 @@ export function EventProvider({ children }) {
     }
   };
 
+  const isDeletedEventId = useCallback((targetId) => {
+    if (!targetId) return false;
+    return deletedEventIdsRef.current.has(String(targetId));
+  }, []);
+
+  const markDeletedEventId = useCallback((targetId) => {
+    if (!targetId) return;
+    const next = new Set(deletedEventIdsRef.current || []);
+    next.add(String(targetId));
+    deletedEventIdsRef.current = next;
+    writeDeletedEventIdsToLocal(next);
+  }, []);
+
+  const unmarkDeletedEventId = useCallback((targetId) => {
+    if (!targetId) return;
+    const next = new Set(deletedEventIdsRef.current || []);
+    next.delete(String(targetId));
+    deletedEventIdsRef.current = next;
+    writeDeletedEventIdsToLocal(next);
+  }, []);
+
+  const cancelPendingEventWrites = useCallback((targetId) => {
+    if (!targetId || String(targetId) !== String(eventId || '')) return;
+    try {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    } catch {}
+    queuedUpdatesRef.current = null;
+  }, [eventId]);
+
   const clearCurrentEventSelection = useCallback((targetId) => {
     if (!targetId) return;
     try {
@@ -373,37 +406,13 @@ export function EventProvider({ children }) {
     setScoresMap({});
     scoresReadyRef.current = false;
     setScoresReady(false);
-    setEventId((prev) => (prev === targetId ? null : prev));
+    setEventId((prev) => (String(prev || '') === String(targetId) ? null : prev));
     try {
-      if (localStorage.getItem('eventId') === targetId) {
+      if (localStorage.getItem('eventId') === String(targetId)) {
         localStorage.removeItem('eventId');
       }
     } catch {}
   }, []);
-
-  const ensureEventWritable = useCallback(async (targetId) => {
-    if (!targetId) return false;
-    if (isDeletedEventId(targetId)) {
-      clearCurrentEventSelection(targetId);
-      return false;
-    }
-    try {
-      const snap = await getDocFromServer(doc(db, 'events', targetId));
-      if (!snap.exists()) {
-        rememberDeletedEventId(targetId);
-        clearCurrentEventSelection(targetId);
-        return false;
-      }
-      return true;
-    } catch (e) {
-      if (isMissingDocError(e)) {
-        rememberDeletedEventId(targetId);
-        clearCurrentEventSelection(targetId);
-        return false;
-      }
-      return true;
-    }
-  }, [clearCurrentEventSelection]);
 
 
   const normalizePublicView = (data) => {
@@ -447,55 +456,23 @@ export function EventProvider({ children }) {
 
   // 전체 이벤트 구독
   useEffect(() => {
-    let unsub = null;
-    let unsubAuth = null;
-    let retryTimer = null;
-    let cancelled = false;
-
-    const cleanupSnapshot = () => {
-      try { if (unsub) unsub(); } catch {}
-      unsub = null;
-    };
-
-    const startSnapshot = async () => {
-      if (cancelled || unsub) return;
-      const u = auth.currentUser || await ensureAuthed();
-      if (cancelled) return;
-      if (!u) {
-        retryTimer = window.setTimeout(startSnapshot, 600);
-        return;
-      }
+    let unsub = null,
+      cancelled = false;
+    ensureAuthed().then((u) => {
+      if (cancelled || !u) return;
       const colRef = collection(db, 'events');
-      unsub = onSnapshot(
-        colRef,
-        (snap) => {
-          const deletedIds = readDeletedEventIds();
-          const evts = snap.docs
-            .map((d) => ({ id: d.id, ...d.data() }))
-            .filter((e) => !deletedIds.has(String(e.id)))
-            .filter((e) => !e.deleted && !e.isDeleted);
-          setAllEvents(evts);
-        },
-        (err) => {
-          console.warn('[EventContext] allEvents onSnapshot failed:', err);
-          cleanupSnapshot();
-          if (!cancelled) retryTimer = window.setTimeout(startSnapshot, 1200);
-        },
-      );
-    };
-
-    unsubAuth = onAuthStateChanged(auth, (u) => {
-      if (u && !unsub) startSnapshot();
+      unsub = onSnapshot(colRef, (snap) => {
+        const evts = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((evt) => !isDeletedEventId(evt.id));
+        setAllEvents(evts);
+      });
     });
-    startSnapshot();
-
     return () => {
       cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      try { if (unsubAuth) unsubAuth(); } catch {}
-      cleanupSnapshot();
+      if (unsub) unsub();
     };
-  }, []);
+  }, [isDeletedEventId]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -542,6 +519,10 @@ export function EventProvider({ children }) {
 
   const refreshEventNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
+    if (isDeletedEventId(eventId)) {
+      clearCurrentEventSelection(eventId);
+      return;
+    }
     try { diagPush('timeline', { type: 'event.refreshEventNow:start', eventId, force: !!opts?.force }); } catch {}
     const force = !!opts?.force;
     const now = Date.now();
@@ -571,10 +552,11 @@ export function EventProvider({ children }) {
         }
       } catch {}
     }
-  }, [eventId, applyIncomingEventData]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId]);
 
   const refreshScoresNow = useCallback(async (opts = {}) => {
     if (!eventId) return;
+    if (isDeletedEventId(eventId)) return;
     try { diagPush('timeline', { type: 'event.refreshScoresNow:start', eventId, force: !!opts?.force }); } catch {}
     if (document?.hidden) return;
     const force = !!opts?.force;
@@ -607,13 +589,17 @@ export function EventProvider({ children }) {
         setScoresReady(true);
       }
     } catch {}
-  }, [eventId]);
+  }, [eventId, isDeletedEventId]);
 
   // 선택 이벤트 구독
   useEffect(() => {
     if (!eventId) {
       setEventData(null);
       lastEventDataRef.current = null;
+      return;
+    }
+    if (isDeletedEventId(eventId)) {
+      clearCurrentEventSelection(eventId);
       return;
     }
     let unsub = null,
@@ -634,7 +620,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, applyIncomingEventData, clearCurrentEventSelection]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId]);
   useEffect(() => {
     if (!eventId) {
       eventInputsSubRef.current = {};
@@ -792,6 +778,21 @@ export function EventProvider({ children }) {
   }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
 
   const loadEvent = async (id) => {
+    if (!id) return null;
+    if (isDeletedEventId(id)) {
+      try {
+        await ensureAuthed();
+        const snap = await getDocFromServer(doc(db, 'events', id));
+        if (!snap.exists()) {
+          clearCurrentEventSelection(id);
+          return null;
+        }
+        unmarkDeletedEventId(id);
+      } catch {
+        clearCurrentEventSelection(id);
+        return null;
+      }
+    }
     setEventId(id);
     localStorage.setItem('eventId', id);
     return id;
@@ -800,7 +801,11 @@ export function EventProvider({ children }) {
   // 공용 업데이트(디바운스)
   const updateEvent = async (updates, opts = {}) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
-    if (isDeletedEventId(eventId)) { clearCurrentEventSelection(eventId); return; }
+    const targetEventId = String(eventId);
+    if (isDeletedEventId(targetEventId)) {
+      clearCurrentEventSelection(targetEventId);
+      return;
+    }
     await ensureAuthed();
     const { debounceMs = 400, ifChanged = true } = opts;
 
@@ -826,14 +831,16 @@ export function EventProvider({ children }) {
         const toWrite = queuedUpdatesRef.current;
         queuedUpdatesRef.current = null;
         try {
-          const ref = doc(db, 'events', eventId);
+          if (isDeletedEventId(targetEventId)) return;
+          const ref = doc(db, 'events', targetEventId);
           await updateDoc(ref, sanitizeUndefinedDeep(toWrite));
           lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...toWrite };
           setEventData((prev) => (prev ? { ...prev, ...toWrite } : toWrite));
-          try { broadcastEventSync(eventId, { reason: 'updateEvent' }); } catch {}
+          try { broadcastEventSync(targetEventId, { reason: 'updateEvent' }); } catch {}
         } catch (e) {
           if (isMissingDocError(e)) {
-            clearCurrentEventSelection(eventId);
+            markDeletedEventId(targetEventId);
+            clearCurrentEventSelection(targetEventId);
           }
           console.warn('[EventContext] updateEvent (debounced) failed:', e, 'payload:', toWrite);
         } finally {
@@ -846,8 +853,12 @@ export function EventProvider({ children }) {
   // 즉시 업데이트
   const updateEventImmediate = async (updates, ifChanged = true) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
-    if (isDeletedEventId(eventId)) { clearCurrentEventSelection(eventId); return; }
-    try { diagPush('timeline', { type: 'event.updateEventImmediate:start', eventId, keys: Object.keys(updates || {}) }); } catch {}
+    const targetEventId = String(eventId);
+    if (isDeletedEventId(targetEventId)) {
+      clearCurrentEventSelection(targetEventId);
+      return;
+    }
+    try { diagPush('timeline', { type: 'event.updateEventImmediate:start', eventId: targetEventId, keys: Object.keys(updates || {}) }); } catch {}
     await ensureAuthed();
 
     const enriched = enrichParticipantsDerived(updates);
@@ -866,7 +877,8 @@ export function EventProvider({ children }) {
       if (!changed) return;
     }
     try {
-      const ref = doc(db, 'events', eventId);
+      if (isDeletedEventId(targetEventId)) return;
+      const ref = doc(db, 'events', targetEventId);
       await updateDoc(ref, sanitizeUndefinedDeep(enriched));
 
       // 즉시 저장 후 디바운스 큐/타이머 정리
@@ -881,13 +893,14 @@ export function EventProvider({ children }) {
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...enriched };
       setEventData((prev) => (prev ? { ...prev, ...enriched } : enriched));
       try {
-        diagMerge('eventContext', { lastUpdateEventAt: Date.now(), eventId, lastUpdateKeys: Object.keys(enriched || {}) });
-        diagPush('timeline', { type: 'event.updateEventImmediate:success', eventId, keys: Object.keys(enriched || {}) });
+        diagMerge('eventContext', { lastUpdateEventAt: Date.now(), eventId: targetEventId, lastUpdateKeys: Object.keys(enriched || {}) });
+        diagPush('timeline', { type: 'event.updateEventImmediate:success', eventId: targetEventId, keys: Object.keys(enriched || {}) });
       } catch {}
-      try { broadcastEventSync(eventId, { reason: 'updateEventImmediate' }); } catch {}
+      try { broadcastEventSync(targetEventId, { reason: 'updateEventImmediate' }); } catch {}
     } catch (e) {
       if (isMissingDocError(e)) {
-        clearCurrentEventSelection(eventId);
+        markDeletedEventId(targetEventId);
+        clearCurrentEventSelection(targetEventId);
         console.warn('[EventContext] updateEventImmediate skipped: target event was already deleted.', e);
         return;
       }
@@ -898,7 +911,7 @@ export function EventProvider({ children }) {
   };
 
   const updateEventById = async (id, updates) => {
-    if (isDeletedEventId(id)) return;
+    if (!id || isDeletedEventId(id)) return;
     await ensureAuthed();
     await updateDoc(doc(db, 'events', id), updates);
     try { broadcastEventSync(id, { reason: 'updateEventById' }); } catch {}
@@ -906,40 +919,25 @@ export function EventProvider({ children }) {
 
   const deleteEvent = async (id) => {
     if (!id) return;
-    await ensureAuthed();
+    const targetEventId = String(id);
+    // 대회 삭제는 Firestore Rules와 동일하게 a@a.com 이메일 기준으로 먼저 확인합니다.
+    // Auth 계정 삭제/재생성으로 UID가 바뀌어도 이메일이 관리자이면 삭제를 허용합니다.
+    await assertAdminForEventDelete();
 
-    // 삭제 시작 즉시 같은 브라우저/탭의 늦은 저장을 차단
-    rememberDeletedEventId(id);
-    try { broadcastEventSync(id, { reason: 'deleteEvent:start' }); } catch {}
+    // 삭제 도중 다른 탭/화면의 늦은 저장(updateDoc)이 삭제 문서를 다시 살리거나
+    // 하위 컬렉션만 남기는 것을 막기 위해 먼저 삭제 tombstone을 세웁니다.
+    markDeletedEventId(targetEventId);
+    cancelPendingEventWrites(targetEventId);
 
-    let rootDeleted = false;
     try {
-      if (eventId === id) {
-        try {
-          if (debounceTimerRef.current) {
-            clearTimeout(debounceTimerRef.current);
-            debounceTimerRef.current = null;
-          }
-        } catch {}
-        queuedUpdatesRef.current = null;
-      }
-
-      await deleteKnownEventSubcollections(id);
-
-      // 서버 기준으로 잔여 하위 문서가 있으면 루트 삭제를 중단
-      const hasLeftovers = await hasKnownEventSubcollectionDocs(id);
-      if (hasLeftovers) {
-        throw new Error('하위 컬렉션 문서가 남아 있어 루트 문서 삭제를 중단했습니다.');
-      }
-
-      await deleteDoc(doc(db, 'events', id));
-      rootDeleted = true;
-
-      clearCurrentEventSelection(id);
-      setAllEvents((prev) => (Array.isArray(prev) ? prev.filter((e) => e.id !== id) : prev));
-      try { broadcastEventSync(id, { reason: 'deleteEvent' }); } catch {}
+      await deleteKnownEventSubcollections(targetEventId);
+      await verifyKnownEventSubcollectionsDeleted(targetEventId);
+      await deleteDoc(doc(db, 'events', targetEventId));
+      clearCurrentEventSelection(targetEventId);
+      try { broadcastEventSync(targetEventId, { reason: 'deleteEvent' }); } catch {}
     } catch (e) {
-      if (!rootDeleted) forgetDeletedEventId(id);
+      // 실제 삭제가 실패했다면 tombstone을 되돌려 목록/수정이 막히지 않게 합니다.
+      unmarkDeletedEventId(targetEventId);
       console.warn('[EventContext] deleteEvent failed:', e);
       throw e;
     }
@@ -957,7 +955,7 @@ export function EventProvider({ children }) {
       try {
         if (isPlayerRoute) return;
         if (!eventId) return;
-        if (isDeletedEventId(eventId)) { queuedUpdatesRef.current = null; return; }
+        if (isDeletedEventId(eventId)) return;
         const pending = queuedUpdatesRef.current;
         if (pending) {
           queuedUpdatesRef.current = null;
@@ -976,7 +974,7 @@ export function EventProvider({ children }) {
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', flush);
     };
-  }, [eventId, isPlayerRoute]);
+  }, [eventId, isPlayerRoute, isDeletedEventId]);
 
   // 언마운트 플러시 + stale 필드 필터링
   useEffect(() => {
@@ -1012,7 +1010,7 @@ export function EventProvider({ children }) {
         console.warn('[EventContext] unmount flush error:', e);
       }
     };
-  }, [eventId]);
+  }, [eventId, isDeletedEventId]);
 
   // publicView 저장/로드 (로컬 미러 포함)
   const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
@@ -1128,11 +1126,9 @@ export function EventProvider({ children }) {
     const email = emailRaw ? String(emailRaw).toLowerCase() : null;
     const eid = eventId || null;
     if (!uid || !eid) return;
-    if (isDeletedEventId(eid)) return;
 
     (async () => {
       try {
-        if (!(await ensureEventWritable(eid))) return;
         if (email) {
           const preRef = doc(db, 'events', eid, 'preMembers', email);
           const preSnap = await getDoc(preRef);
@@ -1173,7 +1169,6 @@ export function EventProvider({ children }) {
   // ───────────────────────────────────────────────
   const upsertScores = async (payload = []) => {
     if (!eventId || !Array.isArray(payload) || payload.length === 0) return;
-    if (!(await ensureEventWritable(eventId))) return;
     await ensureAuthed();
     try {
       await Promise.all(
@@ -1316,7 +1311,6 @@ export function EventProvider({ children }) {
   // 점수 초기화(서브컬렉션 삭제) — 초기화 정책: delete
   const resetScores = async () => {
     if (!eventId) return;
-    if (!(await ensureEventWritable(eventId))) return;
     await ensureAuthed();
     try {
       const snap = await getDocs(collection(db, 'events', eventId, 'scores'));
@@ -1425,8 +1419,6 @@ export function EventProvider({ children }) {
           await ensureAuthed();
           const colRef = collection(db, 'events');
           const docRef = id ? doc(db, 'events', id) : doc(colRef);
-          // 같은 ID를 재사용하는 경우, 과거 삭제 실패로 남은 알려진 하위 컬렉션을 먼저 정리
-          try { await deleteKnownEventSubcollections(docRef.id); } catch (e) { console.warn('[EventContext] createEvent pre-clean failed:', e); }
           await setDoc(docRef, {
             title,
             mode,
@@ -1459,7 +1451,7 @@ export function EventProvider({ children }) {
             events: [],
             eventInputs: {},
           });
-          forgetDeletedEventId(docRef.id);
+          unmarkDeletedEventId(docRef.id);
           return docRef.id;
         },
         updateEvent,
