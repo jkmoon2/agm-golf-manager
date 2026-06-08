@@ -7,7 +7,7 @@ import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
-import { doc, onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoGridSize, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
@@ -1842,90 +1842,114 @@ export default function PlayerEventInput(){
       try { diagPush('timeline', { type: 'playerEventInput.saveDraft:start', eventId: activeEventStorageId || '', dirty: !!dirty }); } catch {}
       await ensureMembership((eventId || ctxId), roomIdx);
 
-      const base = inputsByEventServer || {};
-      const src  = draft || {};
-      const roomPids = new Set(roomMembers.filter(Boolean).map(p=>String(p.id)));
-      const merged = { ...base };
+      const targetEventId = eventId || ctxId;
+      if (!targetEventId) return;
 
-      Object.entries(src).forEach(([evId, slot])=>{
-        const sPerson = slot?.person || {};
-        const evDef = events.find((item) => String(item?.id) === String(evId));
-        const allowedPids = evDef?.template === 'group-room-hole-battle'
-          ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') }).map((p) => String(p?.id || '')).filter(Boolean))
-          : roomPids;
-        if (!merged[evId]) merged[evId] = {};
-        const mSlot = { ...(merged[evId]||{}) };
-        const mPerson = { ...(mSlot.person||{}) };
+      const buildMergedEventInputs = (baseSource = {}) => {
+        const base = (baseSource && typeof baseSource === 'object') ? baseSource : {};
+        const src  = draft || {};
+        const roomPids = new Set(roomMembers.filter(Boolean).map(p=>String(p.id)));
+        const merged = { ...base };
 
-        Object.entries(sPerson).forEach(([pid, rawVal])=>{
-          if (!allowedPids.has(String(pid))) return;
-          let val = rawVal;
-          if (evDef?.template === 'bingo' && typeof val === 'object' && val && Array.isArray(val.values)) {
-            const selectedHoles = normalizeBingoSelectedHoles(evDef?.params?.selectedHoles);
-            val = restoreBingoBoardToValue(evId, pid, { ...val, values: [...val.values], board: Array.isArray(val.board) ? [...val.board] : [] }, selectedHoles);
-            const prevState = extractBingoPersonInput(mPerson?.[pid], selectedHoles);
-            const nextState = extractBingoPersonInput(val, selectedHoles);
-            const touchedCells = getBingoTouchedCellMap(evId, pid);
-            const touchedCellKeys = Object.keys(touchedCells || {}).filter((k) => touchedCells[k]);
-            const mergedValues = [...prevState.values];
-            while (mergedValues.length < Math.max(prevState.values.length, nextState.values.length, 18)) mergedValues.push('');
-            touchedCellKeys.forEach((idxKey) => {
-              const valueIdx = Number(idxKey);
-              if (Number.isInteger(valueIdx) && valueIdx >= 0) mergedValues[valueIdx] = nextState.values[valueIdx] ?? '';
-            });
-            const boardTouched = isBingoBoardTouched(evId, pid);
-            val = {
-              ...val,
-              values: mergedValues,
-              board: boardTouched ? [...nextState.board] : [...prevState.board],
-              roomShared: boardTouched ? !!nextState.roomShared : !!prevState.roomShared,
-            };
+        Object.entries(src).forEach(([evId, slot])=>{
+          const sPerson = slot?.person || {};
+          const evDef = events.find((item) => String(item?.id) === String(evId));
+          const allowedPids = evDef?.template === 'group-room-hole-battle'
+            ? new Set(getGroupRoomBattleScoreParticipants(evDef, participants, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0, currentRoomNo: roomIdx, currentParticipantId: selfParticipantId, currentParticipantNickname: String(selfParticipant?.nickname || '') }).map((p) => String(p?.id || '')).filter(Boolean))
+            : roomPids;
+          if (!merged[evId]) merged[evId] = {};
+          const mSlot = { ...(merged[evId]||{}) };
+          const mPerson = { ...(mSlot.person||{}) };
+
+          Object.entries(sPerson).forEach(([pid, rawVal])=>{
+            if (!allowedPids.has(String(pid))) return;
+            let val = rawVal;
+            if (evDef?.template === 'bingo' && typeof val === 'object' && val && Array.isArray(val.values)) {
+              const selectedHoles = normalizeBingoSelectedHoles(evDef?.params?.selectedHoles);
+              val = restoreBingoBoardToValue(evId, pid, { ...val, values: [...val.values], board: Array.isArray(val.board) ? [...val.board] : [] }, selectedHoles);
+              const prevState = extractBingoPersonInput(mPerson?.[pid], selectedHoles);
+              const nextState = extractBingoPersonInput(val, selectedHoles);
+              const touchedCells = getBingoTouchedCellMap(evId, pid);
+              const touchedCellKeys = Object.keys(touchedCells || {}).filter((k) => touchedCells[k]);
+              const mergedValues = [...prevState.values];
+              while (mergedValues.length < Math.max(prevState.values.length, nextState.values.length, 18)) mergedValues.push('');
+              touchedCellKeys.forEach((idxKey) => {
+                const valueIdx = Number(idxKey);
+                if (Number.isInteger(valueIdx) && valueIdx >= 0) mergedValues[valueIdx] = nextState.values[valueIdx] ?? '';
+              });
+              const boardTouched = isBingoBoardTouched(evId, pid);
+              val = {
+                ...val,
+                values: mergedValues,
+                board: boardTouched ? [...nextState.board] : [...prevState.board],
+                roomShared: boardTouched ? !!nextState.roomShared : !!prevState.roomShared,
+              };
+            }
+            const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
+            const isEmptyBingo = typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)
+              && !val.values.some((x) => String(x ?? '').trim() !== '')
+              && !val.board.some((x) => String(x ?? '').trim() !== '')
+              && !val.roomShared;
+            const isEmptyBattleScore = evDef?.template === 'group-room-hole-battle' && typeof val === 'object' && val && Array.isArray(val.values)
+              && !val.values.some((x) => String(x ?? '').trim() !== '');
+            if (val === '' || val == null || isEmptyPick || isEmptyBingo || isEmptyBattleScore || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
+              delete mPerson[pid];
+            } else {
+              mPerson[pid] = val;
+            }
+          });
+
+          mSlot.person = mPerson;
+          if (slot?.shared && typeof slot.shared === 'object') {
+            const clonedShared = JSON.parse(JSON.stringify(slot.shared));
+            if (evDef?.template === 'bingo') {
+              const mergedShared = { ...(mSlot.shared || {}) };
+              Object.entries(clonedShared).forEach(([sharedKey, sharedVal]) => {
+                if (sharedKey === 'largeBingoOrders' || sharedKey === 'largeBingoLeaders') {
+                  const prevMap = { ...(mergedShared[sharedKey] || {}) };
+                  Object.entries(sharedVal && typeof sharedVal === 'object' ? sharedVal : {}).forEach(([roomKey, roomVal]) => {
+                    if (isBingoSharedTouched(evId, roomKey)) prevMap[roomKey] = roomVal;
+                  });
+                  mergedShared[sharedKey] = prevMap;
+                } else {
+                  mergedShared[sharedKey] = sharedVal;
+                }
+              });
+              mSlot.shared = mergedShared;
+            } else {
+              mSlot.shared = { ...(mSlot.shared || {}), ...clonedShared };
+            }
           }
-          const isEmptyPick = typeof val === 'object' && val && Array.isArray(val.memberIds) && !val.memberIds.some(Boolean);
-          const isEmptyBingo = typeof val === 'object' && val && Array.isArray(val.values) && Array.isArray(val.board)
-            && !val.values.some((x) => String(x ?? '').trim() !== '')
-            && !val.board.some((x) => String(x ?? '').trim() !== '')
-            && !val.roomShared;
-          const isEmptyBattleScore = evDef?.template === 'group-room-hole-battle' && typeof val === 'object' && val && Array.isArray(val.values)
-            && !val.values.some((x) => String(x ?? '').trim() !== '');
-          if (val === '' || val == null || isEmptyPick || isEmptyBingo || isEmptyBattleScore || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
-            delete mPerson[pid];
-          } else {
-            mPerson[pid] = val;
-          }
+          merged[evId] = mSlot;
         });
 
-        mSlot.person = mPerson;
-        if (slot?.shared && typeof slot.shared === 'object') {
-          const clonedShared = JSON.parse(JSON.stringify(slot.shared));
-          if (evDef?.template === 'bingo') {
-            const mergedShared = { ...(mSlot.shared || {}) };
-            Object.entries(clonedShared).forEach(([sharedKey, sharedVal]) => {
-              if (sharedKey === 'largeBingoOrders' || sharedKey === 'largeBingoLeaders') {
-                const prevMap = { ...(mergedShared[sharedKey] || {}) };
-                Object.entries(sharedVal && typeof sharedVal === 'object' ? sharedVal : {}).forEach(([roomKey, roomVal]) => {
-                  if (isBingoSharedTouched(evId, roomKey)) prevMap[roomKey] = roomVal;
-                });
-                mergedShared[sharedKey] = prevMap;
-              } else {
-                mergedShared[sharedKey] = sharedVal;
-              }
-            });
-            mSlot.shared = mergedShared;
-          } else {
-            mSlot.shared = { ...(mSlot.shared || {}), ...clonedShared };
-          }
+        return merged;
+      };
+
+      let merged = {};
+      try {
+        await runTransaction(db, async (tx) => {
+          const ref = doc(db, 'events', targetEventId);
+          const snap = await tx.get(ref);
+          const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
+            ? snap.data().eventInputs
+            : {};
+          merged = buildMergedEventInputs(freshBase);
+          tx.update(ref, {
+            eventInputs: merged,
+            inputsUpdatedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        });
+      } catch (txErr) {
+        console.warn('[PlayerEventInput] eventInputs transaction failed; fallback to direct update:', txErr);
+        merged = buildMergedEventInputs(inputsByEventServer || {});
+        if (typeof updateEventImmediate === 'function') {
+          await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() }, false);
+        } else {
+          await updateDoc(doc(db, 'events', targetEventId), { eventInputs: merged, inputsUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() });
         }
-        merged[evId] = mSlot;
-      });
-
-
-      if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged }, false);
-      } else {
-        await updateDoc(doc(db, 'events', eventId || ctxId), { eventInputs: merged });
       }
-
       const savedClone = cloneEventInputs(merged);
       pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
       hydrateDraftFromServer(savedClone);

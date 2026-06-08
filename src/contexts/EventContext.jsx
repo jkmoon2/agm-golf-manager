@@ -24,6 +24,7 @@ import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
 
 import {
   getAuth,
+  onAuthStateChanged,
 } from 'firebase/auth';
 
 /* 저장 전에 undefined/NaN 정제 */
@@ -323,6 +324,22 @@ export function EventProvider({ children }) {
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
   const deletedEventIdsRef = useRef(readDeletedEventIdsFromLocal());
+  // ✅ Auth 복원/로그인 이후에도 events 구독이 다시 시작되도록 하는 트리거
+  // - 기존 문제: EventProvider가 로그인 전 먼저 마운트되면 ensureAuthed()가 null을 반환하고,
+  //   allEvents/eventData 구독이 시작되지 않은 채로 고정될 수 있었음.
+  const [authReadyTick, setAuthReadyTick] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    const off = onAuthStateChanged(auth, () => {
+      if (!mounted) return;
+      setAuthReadyTick((v) => v + 1);
+    });
+    return () => {
+      mounted = false;
+      try { off(); } catch {}
+    };
+  }, []);
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -472,7 +489,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [isDeletedEventId]);
+  }, [isDeletedEventId, authReadyTick]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -620,7 +637,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId, authReadyTick]);
   useEffect(() => {
     if (!eventId) {
       eventInputsSubRef.current = {};
@@ -655,7 +672,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, isPlayerRoute, applyIncomingEventData]);
+  }, [eventId, isPlayerRoute, applyIncomingEventData, authReadyTick]);
 
 
   useEffect(() => {
@@ -1260,7 +1277,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId]);
+  }, [eventId, authReadyTick]);
 
   // 참가자/관리자 공용: participants에 scoresMap을 overlay (화면 계산용)
   // - scores 스냅샷이 오기 전에는 participants.score 유지(깜박임 방지)
