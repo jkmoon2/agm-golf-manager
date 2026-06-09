@@ -1369,8 +1369,14 @@ if (editForm?.template === 'group-battle') {
   const assignHiddenFourball = async () => {
     if (!hiddenMonitorEvent) return;
     const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
-    if (params.mode !== 'fourball') return;
-    if (!askConfirm('포볼 히든팀을 무작위로 다시 배정할까요? 기존 배정은 덮어씁니다.')) return;
+    if (params.mode !== 'fourball' || params.fourballMode === 'self') return;
+    const currentSlot = (inputsAll && typeof inputsAll === 'object') ? (inputsAll[hiddenMonitorEvent.id] || {}) : {};
+    const currentPairs = (currentSlot?.shared?.hiddenFourballPairs && typeof currentSlot.shared.hiddenFourballPairs === 'object') ? currentSlot.shared.hiddenFourballPairs : {};
+    const hasExistingPairs = Object.keys(currentPairs).length > 0;
+    const confirmMessage = hasExistingPairs
+      ? '포볼 히든팀을 무작위로 다시 배정할까요? 기존 배정은 덮어씁니다.'
+      : '포볼 히든팀을 무작위로 배정할까요?';
+    if (!askConfirm(confirmMessage)) return;
     const pairs = assignHiddenFourballPairs(participants, params);
     const all = { ...(inputsAll || {}) };
     const slot = { ...(all[hiddenMonitorEvent.id] || {}) };
