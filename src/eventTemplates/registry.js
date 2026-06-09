@@ -204,11 +204,12 @@ export const TEMPLATE_REGISTRY = [
     defaultParams: {
       mode: 'personal',
       revealed: false,
+      fourballMode: 'random',
       handicapSteps: { '1-2': 3, '2-3': 3, '3-4': 3 },
       pairGroups: { A: [1, 2], B: [3, 4] },
       randomSeed: '',
     },
-    help: '* 개인 1대1 비밀 지목전 또는 운영자 무작위 포볼 히든팀을 운영합니다.',
+    help: '',
     ui: {
       inputMode: false,
       paramsJson: false,

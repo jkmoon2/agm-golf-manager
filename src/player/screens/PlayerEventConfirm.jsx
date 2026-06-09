@@ -547,19 +547,21 @@ const events = useMemo(
           rank: row.rank || i + 1,
           label: row.label,
           value: row.value,
-          displayText: `${fmtScore(row.value)} / G합 ${fmtScore(row.handicapSum)}`,
+          bigValue: row.handicapSum,
         }));
-        return { kind: 'team', metricLabel: '결과', rows };
+        return { kind: 'team', metricLabel: '결과', extraMetricLabel: 'G합', rows, isHiddenFourball: true };
       }
       const rows = (data.matchRows || []).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
         label: row.name,
-        room: `vs ${row.opponentName}`,
+        room: row.opponentName,
         value: row.point,
-        displayText: `${row.resultText} ${fmtScore(row.value)}:${fmtScore(row.opponentValue)}`,
+        status: row.status,
+        displayText: row.resultText,
+        bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}`,
       }));
-      return { kind: 'person', metricLabel: '승패', rows };
+      return { kind: 'person', metricLabel: '승패', extraMetricLabel: '결과', personHeader: '선택자', roomHeader: '상대방', rows, isHiddenPersonal: true };
     }
 
     // ── rank-score-game(대회 순위 점수 게임) ─────────────────────
@@ -769,17 +771,17 @@ const events = useMemo(
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={`${tCss.table} ${tCss['kind-' + res.kind]}`}>
                     <colgroup>
-                      <col style={{ width: 56 }} />
-                      {res.kind === 'person' && <col style={{ width: '50%' }} />}
-                      <col />
-                      {hasExtraMetric && <col style={{ width: 74 }} />}
-                      <col style={{ width: 80 }} />
+                      <col style={{ width: res.isHiddenPersonal || res.isHiddenFourball ? 46 : 56 }} />
+                      {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '30%' : '50%' }} />}
+                      <col style={res.isHiddenFourball ? { width: '54%' } : undefined} />
+                      {hasExtraMetric && <col style={{ width: res.isHiddenPersonal ? 54 : 58 }} />}
+                      <col style={{ width: res.isHiddenPersonal ? 54 : (res.isHiddenFourball ? 58 : 80) }} />
                     </colgroup>
                     <thead>
                       <tr>
                         <th className={tCss.cell}>순위</th>
-                        {res.kind === 'person' && <th className={tCss.cell}>닉네임</th>}
-                        <th className={tCss.cell}>{res.kind === 'room' ? '방' : res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '방' : '방'))}</th>
+                        {res.kind === 'person' && <th className={tCss.cell}>{res.personHeader || '닉네임'}</th>}
+                        <th className={tCss.cell}>{res.roomHeader || (res.kind === 'room' ? '방' : res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '방' : '방')))}</th>
                         {hasExtraMetric && <th className={tCss.cell} style={{ color: '#2563eb' }}>{res.extraMetricLabel}</th>}
                         <th className={tCss.cell}>{res.metricLabel || '점수'}</th>
                       </tr>
@@ -799,8 +801,8 @@ const events = useMemo(
                           <td className={tCss.cell}>
                             {res.kind === 'person' ? (row.room || '-') : row.label}
                           </td>
-                          {hasExtraMetric && <td className={tCss.cell} style={{ color: '#2563eb' }}>{row.bigValue == null ? '' : fmtScore(row.bigValue)}</td>}
-                          <td className={tCss.cell}>{row.displayText ? row.displayText : fmtScore(row.value)}</td>
+                          {hasExtraMetric && <td className={tCss.cell} style={{ color: '#2563eb', fontWeight: res.isHiddenFourball ? 900 : undefined }}>{row.bigDisplayText ? row.bigDisplayText : (row.bigValue == null ? '' : fmtScore(row.bigValue))}</td>}
+                          <td className={tCss.cell} style={{ color: res.isHiddenFourball ? '#be123c' : (res.isHiddenPersonal && row.status === 'win' ? '#1d4ed8' : (res.isHiddenPersonal && row.status === 'lose' ? '#be123c' : undefined)), fontWeight: res.isHiddenFourball || res.isHiddenPersonal ? 900 : undefined }}>{row.displayText ? row.displayText : fmtScore(row.value)}</td>
                         </tr>
                       ))}
                     </tbody>

@@ -8,6 +8,7 @@ import { getParticipantGroupNo } from './pickLineup';
 export function defaultHiddenEventParams() {
   return {
     mode: 'personal', // personal | fourball
+    fourballMode: 'random', // random | self
     revealed: false,
     handicapSteps: {
       '1-2': 3,
@@ -69,11 +70,14 @@ export function normalizeHiddenPairGroups(raw) {
 export function normalizeHiddenEventParams(raw) {
   const base = defaultHiddenEventParams();
   const src = (raw && typeof raw === 'object') ? raw : {};
-  const mode = src.mode === 'fourball' ? 'fourball' : 'personal';
+  const rawMode = String(src.mode || 'personal');
+  const mode = rawMode === 'fourball' || rawMode === 'fourball-select' ? 'fourball' : 'personal';
+  const fourballMode = mode === 'fourball' && (src.fourballMode === 'self' || src.assignMode === 'self' || rawMode === 'fourball-select') ? 'self' : 'random';
   return {
     ...base,
     ...src,
     mode,
+    fourballMode,
     revealed: !!src.revealed,
     handicapSteps: normalizeHiddenHandicapSteps(src.handicapSteps),
     pairGroups: normalizeHiddenPairGroups(src.pairGroups),
@@ -84,7 +88,8 @@ export function normalizeHiddenEventParams(raw) {
 export function getHiddenEventMetaText(params) {
   const cfg = normalizeHiddenEventParams(params);
   if (cfg.mode === 'fourball') {
-    return `hidden-event · 포볼 · A그룹 ${cfg.pairGroups.A.join('+')}조 / B그룹 ${cfg.pairGroups.B.join('+')}조 · ${cfg.revealed ? '공개' : '비공개'}`;
+    const method = cfg.fourballMode === 'self' ? '참가자 직접선택' : '운영자 무작위';
+    return `hidden-event · 포볼(${method}) · A그룹 ${cfg.pairGroups.A.join('+')}조 / B그룹 ${cfg.pairGroups.B.join('+')}조 · ${cfg.revealed ? '공개' : '비공개'}`;
   }
   return `hidden-event · 개인 1대1 · ${cfg.revealed ? '공개' : '비공개'}`;
 }
@@ -257,27 +262,25 @@ function buildPersonalRows(eventDef, participants = [], inputsSlot = {}, opt = {
 function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {}) {
   const cfg = normalizeHiddenEventParams(eventDef?.params);
   const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id), p]));
-  const pairs = normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {});
   const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
-  const seen = new Set();
   const rows = [];
 
-  Object.entries(pairs).forEach(([aId, bId]) => {
+  const pushTeam = (aId, bId, keyPrefix = '') => {
     const aKey = String(aId || '');
     const bKey = String(bId || '');
-    if (!aKey || !bKey || seen.has(aKey) || seen.has(bKey)) return;
+    if (!aKey || !bKey || aKey === bKey) return;
     const a = byId.get(aKey);
     const b = byId.get(bKey);
     if (!a || !b) return;
-    seen.add(aKey);
-    seen.add(bKey);
     const aValue = resultValue(a);
     const bValue = resultValue(b);
     const value = aValue + bValue;
     const handicapSum = (Number(a?.handicap ?? 0) || 0) + (Number(b?.handicap ?? 0) || 0);
     rows.push({
-      key: `${aKey}-${bKey}`,
+      key: `${keyPrefix}${aKey}-${bKey}`,
       memberIds: [aKey, bKey],
+      selectorId: aKey,
+      opponentId: bKey,
       label: `${a?.nickname || '-'} + ${b?.nickname || '-'}`,
       value,
       handicapSum,
@@ -292,7 +295,32 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
         resultValue: resultValue(p),
       })),
     });
-  });
+  };
+
+  if (cfg.fourballMode === 'self') {
+    const person = (inputsSlot?.person && typeof inputsSlot.person === 'object') ? inputsSlot.person : {};
+    const reciprocalSeen = new Set();
+    Object.entries(person).forEach(([selectorId, slot]) => {
+      const opponentId = getHiddenOpponentId(slot);
+      if (!opponentId) return;
+      const reverseId = getHiddenOpponentId(person?.[opponentId]);
+      const reciprocalKey = [String(selectorId), String(opponentId)].sort().join('::');
+      if (String(reverseId || '') === String(selectorId) && reciprocalSeen.has(reciprocalKey)) return;
+      if (String(reverseId || '') === String(selectorId)) reciprocalSeen.add(reciprocalKey);
+      pushTeam(selectorId, opponentId, 'self-');
+    });
+  } else {
+    const pairs = normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {});
+    const seen = new Set();
+    Object.entries(pairs).forEach(([aId, bId]) => {
+      const aKey = String(aId || '');
+      const bKey = String(bId || '');
+      if (!aKey || !bKey || seen.has(aKey) || seen.has(bKey)) return;
+      seen.add(aKey);
+      seen.add(bKey);
+      pushTeam(aKey, bKey);
+    });
+  }
 
   rows.sort((a, b) => {
     if (a.value !== b.value) return a.value - b.value;
@@ -300,7 +328,16 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     return String(a.label || '').localeCompare(String(b.label || ''), 'ko');
   });
   rows.forEach((row, idx) => { row.rank = idx + 1; });
-  return { kind: 'team', mode: 'fourball', revealed: cfg.revealed, pairMap: pairs, teamRows: rows };
+  const pairMap = cfg.fourballMode === 'self'
+    ? rows.reduce((acc, row) => {
+        const a = String(row.memberIds?.[0] || '');
+        const b = String(row.memberIds?.[1] || '');
+        if (a && b && !acc[a]) acc[a] = b;
+        if (a && b && !acc[b]) acc[b] = a;
+        return acc;
+      }, {})
+    : normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {});
+  return { kind: 'team', mode: 'fourball', fourballMode: cfg.fourballMode, revealed: cfg.revealed, pairMap, teamRows: rows };
 }
 
 export function computeHiddenEvent(eventDef, participants = [], inputsSlot = {}, opt = {}) {
