@@ -28,11 +28,15 @@ import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import RankScoreGameEditor from '../eventTemplates/rankScoreGame/RankScoreGameEditor';
 import RankScoreGamePreview from '../eventTemplates/rankScoreGame/RankScoreGamePreview';
+import HiddenEventEditor from '../eventTemplates/hiddenEvent/HiddenEventEditor';
+import HiddenEventPreview from '../eventTemplates/hiddenEvent/HiddenEventPreview';
+import HiddenEventMonitor from '../eventTemplates/hiddenEvent/HiddenEventMonitor';
 import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../events/holeRankForce';
 import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
 import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../events/rankScoreGame';
+import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, normalizeHiddenEventParams } from '../events/hiddenEvent';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -238,6 +242,9 @@ function normalizeEventParamsForAdmin(template, params) {
   if (template === 'rank-score-game') {
     return normalizeRankScoreGameParams(raw);
   }
+  if (template === 'hidden-event') {
+    return normalizeHiddenEventParams(raw);
+  }
   return raw;
 }
 
@@ -280,6 +287,7 @@ export default function EventManager() {
   const [monitorId, setMonitorId] = useState(null);
   const [bingoMonitorId, setBingoMonitorId] = useState(null);
   const [groupRoomHoleMonitorId, setGroupRoomHoleMonitorId] = useState(null);
+  const [hiddenMonitorId, setHiddenMonitorId] = useState(null);
   const [bingoMonitorMode, setBingoMonitorMode] = useState('status');
   const listItemRefs = useRef({});
   const reorderPressRef = useRef({ timer:null, active:false, eventId:'', startX:0, startY:0, mode:'' });
@@ -445,16 +453,18 @@ if (form.template === 'group-battle') {
       const isGroupRoomHoleBattle = form.template === 'group-room-hole-battle';
       const isPickLineup = form.template === 'pick-lineup';
       const isRankScoreGame = form.template === 'rank-score-game';
+      const isHiddenEvent = form.template === 'hidden-event';
       const battleMode = isGroupRoomHoleBattle ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const pickLineupParams = isPickLineup ? normalizeEventParamsForAdmin('pick-lineup', parsed) : null;
       const rankScoreParams = isRankScoreGame ? normalizeRankScoreGameParams(parsed) : null;
+      const hiddenParams = isHiddenEvent ? normalizeHiddenEventParams(parsed) : null;
       const item = {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
-        params: rankScoreParams || pickLineupParams || parsed,
-        target: isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person')),
-        rankOrder: isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : (isGroupRoomHoleBattle ? 'asc' : 'asc')),
+        params: hiddenParams || rankScoreParams || pickLineupParams || parsed,
+        target: isHiddenEvent ? (hiddenParams.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'))),
+        rankOrder: isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : 'asc'),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -960,15 +970,17 @@ if (editForm?.template === 'group-battle') {
       const isBingoEdit = editForm.template === 'bingo';
       const isGroupRoomHoleBattleEdit = editForm.template === 'group-room-hole-battle';
       const isRankScoreGameEdit = editForm.template === 'rank-score-game';
+      const isHiddenEventEdit = editForm.template === 'hidden-event';
       const battleModeEdit = isGroupRoomHoleBattleEdit ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
       const rankScoreParamsEdit = isRankScoreGameEdit ? normalizeRankScoreGameParams(parsed) : null;
+      const hiddenParamsEdit = isHiddenEventEdit ? normalizeHiddenEventParams(parsed) : null;
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
-        params: rankScoreParamsEdit || parsed,
-        target: isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target)),
-        rankOrder: isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder)),
+        params: hiddenParamsEdit || rankScoreParamsEdit || parsed,
+        target: isHiddenEventEdit ? (hiddenParamsEdit.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target))),
+        rankOrder: isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : (isHiddenEventEdit ? 'asc' : e.rankOrder))),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -1070,6 +1082,11 @@ if (editForm?.template === 'group-battle') {
     return computeRankScoreGame({ ...previewDef, rankOrder: viewOrder }, participants, inputsAll?.[previewId] || {}, { roomNames, roomCount });
   }, [previewDef, participants, inputsAll, previewId, roomNames, roomCount, viewOrder]);
 
+  const hiddenEventPreview = useMemo(() => {
+    if (!previewDef || previewDef.template !== 'hidden-event') return null;
+    return computeHiddenEvent(previewDef, participants, inputsAll?.[previewId] || {}, { roomNames, roomCount });
+  }, [previewDef, participants, inputsAll, previewId, roomNames, roomCount]);
+
   const personRowsBase = useMemo(() => {
     if (!previewDef) return [];
     if (previewDef.template === 'hole-rank-force') {
@@ -1087,8 +1104,13 @@ if (editForm?.template === 'group-battle') {
         ? rankScoreGamePreview.personRows.map((r) => ({ id: r.id, name: r.name, room: r.room, score: r.value }))
         : [];
     }
+    if (previewDef.template === 'hidden-event') {
+      return Array.isArray(hiddenEventPreview?.personRows)
+        ? hiddenEventPreview.personRows.map((r) => ({ id: r.selectorId || r.id, name: r.name, room: r.room, score: r.point ?? r.value }))
+        : [];
+    }
     return participants.map((p) => ({ id: p.id, name: p.nickname, room: p.room, score: compute(previewDef, perP[p.id]) }));
-  }, [participants, perP, previewDef, holeRankForcePreview, bingoPreview, rankScoreGamePreview]);
+  }, [participants, perP, previewDef, holeRankForcePreview, bingoPreview, rankScoreGamePreview, hiddenEventPreview]);
 
   const personRows = useMemo(() => {
     const rows = [...personRowsBase];
@@ -1149,6 +1171,11 @@ if (editForm?.template === 'group-battle') {
         ? rankScoreGamePreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
         : [];
     }
+    if (previewDef.template === 'hidden-event') {
+      return Array.isArray(hiddenEventPreview?.teamRows)
+        ? hiddenEventPreview.teamRows.map((t) => ({ key: t.key, label: t.label, score: t.value }))
+        : [];
+    }
     const rows = [];
     for (let r = 1; r <= roomCount; r++) {
       const ppl = participants.filter(p => p.room === r);
@@ -1169,7 +1196,7 @@ if (editForm?.template === 'group-battle') {
     }
     rows.sort((a, b) => sign * (a.score - b.score));
     return rows;
-  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview, rankScoreGamePreview]);
+  }, [participants, perP, perT, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview, rankScoreGamePreview, hiddenEventPreview]);
 
 
   const joRoomRows = useMemo(() => {
@@ -1203,6 +1230,9 @@ if (editForm?.template === 'group-battle') {
   };
 
   const formatMeta = (ev) => {
+    if (ev?.template === 'hidden-event') {
+      return getHiddenEventMetaText(ev?.params);
+    }
     if (ev?.template === 'rank-score-game') {
       return getRankScoreGameMetaText(ev?.params);
     }
@@ -1278,6 +1308,12 @@ if (editForm?.template === 'group-battle') {
     return (normalizedEventsOfSelected || []).find((e) => e.id === groupRoomHoleMonitorId) || null;
   }, [normalizedEventsOfSelected, groupRoomHoleMonitorId]);
 
+
+  const hiddenMonitorEvent = useMemo(() => {
+    if (!hiddenMonitorId) return null;
+    return (normalizedEventsOfSelected || []).find((e) => e.id === hiddenMonitorId) || null;
+  }, [normalizedEventsOfSelected, hiddenMonitorId]);
+
   const saveHandicapOverrides = async (overridesMap) => {
     if (!handicapEditEvent) return;
     const safe = (overridesMap && typeof overridesMap === 'object') ? overridesMap : {};
@@ -1317,6 +1353,31 @@ if (editForm?.template === 'group-battle') {
       return { ...e, params };
     });
     await updateEventImmediate({ events: next }, false);
+  };
+
+
+  const toggleHiddenReveal = async (revealed) => {
+    if (!hiddenMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== hiddenMonitorEvent.id) return e;
+      const params = normalizeHiddenEventParams({ ...(e.params || {}), revealed: !!revealed });
+      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: 'asc' };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
+  const assignHiddenFourball = async () => {
+    if (!hiddenMonitorEvent) return;
+    const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
+    if (params.mode !== 'fourball') return;
+    if (!askConfirm('포볼 히든팀을 무작위로 다시 배정할까요? 기존 배정은 덮어씁니다.')) return;
+    const pairs = assignHiddenFourballPairs(participants, params);
+    const all = { ...(inputsAll || {}) };
+    const slot = { ...(all[hiddenMonitorEvent.id] || {}) };
+    slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: Date.now() };
+    all[hiddenMonitorEvent.id] = slot;
+    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    alert('포볼 히든팀 배정이 완료되었습니다. 공개 전까지 참가자에게는 팀원이 보이지 않습니다.');
   };
   /* ── 관리자 빠른 입력 ─────────────────────────────────── */
   const [quickId, setQuickId] = useState(null);
@@ -1519,6 +1580,13 @@ if (editForm?.template === 'group-battle') {
 {form.template === 'rank-score-game' && (
   <RankScoreGameEditor
     participants={participants}
+    value={params}
+    onChange={(next) => setParams(next)}
+  />
+)}
+
+{form.template === 'hidden-event' && (
+  <HiddenEventEditor
     value={params}
     onChange={(next) => setParams(next)}
   />
@@ -1759,6 +1827,17 @@ if (editForm?.template === 'group-battle') {
                                   입력 현황/마감
                                 </button>
                               )}
+                              {ev?.template === 'hidden-event' && (
+                                <button
+                                  onClick={() => {
+                                    setHiddenMonitorId(ev.id);
+                                    setOpenMenuId(null);
+                                    setMenuUpId(null);
+                                  }}
+                                >
+                                  히든 운영/공개
+                                </button>
+                              )}
                               {templateUi(ev?.template).supportsQuickInput !== false && (
                                 <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
                               )}
@@ -1909,6 +1988,13 @@ if (editForm?.template === 'group-battle') {
 {editForm.template === 'rank-score-game' && (
   <RankScoreGameEditor
     participants={participants}
+    value={editParams}
+    onChange={(next) => setEditParams(next)}
+  />
+)}
+
+{editForm.template === 'hidden-event' && (
+  <HiddenEventEditor
     value={editParams}
     onChange={(next) => setEditParams(next)}
   />
@@ -2101,6 +2187,14 @@ if (editForm?.template === 'group-battle') {
                   roomCount={roomCount}
                   viewTab={viewTab}
                 />
+              ) : previewDef.template === 'hidden-event' ? (
+                <HiddenEventPreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                />
               ) : (
                 <ol className={css.previewList}>
                   {personRows.map((r, i) => (
@@ -2209,6 +2303,14 @@ if (editForm?.template === 'group-battle') {
                   roomCount={roomCount}
                   viewTab={viewTab}
                 />
+              ) : previewDef.template === 'hidden-event' ? (
+                <HiddenEventPreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                />
               ) : (
               <ol className={css.previewList}>
                 {teamRows.map((t, i) => (
@@ -2284,6 +2386,18 @@ if (editForm?.template === 'group-battle') {
           />
         )}
 
+
+        {hiddenMonitorEvent?.template === 'hidden-event' && (
+          <HiddenEventMonitor
+            eventDef={hiddenMonitorEvent}
+            participants={participants}
+            inputsByEvent={getInputsSlot(hiddenMonitorEvent.id)}
+            roomNames={roomNames}
+            onClose={() => setHiddenMonitorId(null)}
+            onToggleReveal={toggleHiddenReveal}
+            onAssignFourball={assignHiddenFourball}
+          />
+        )}
 
         {groupRoomHoleMonitorEvent?.template === 'group-room-hole-battle' && (
           <GroupRoomHoleBattleMonitor

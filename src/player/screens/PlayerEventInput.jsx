@@ -15,6 +15,7 @@ import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount,
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
+import { computeHiddenEvent, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 
 
@@ -1796,6 +1797,50 @@ export default function PlayerEventInput(){
     alert(`${mine.nickname || '참가자'}님은 ${pick.nickname || '상대'}님과 포볼팀으로 배정되었습니다.`);
   };
 
+
+  const patchHiddenOpponent = async (evId, opponentId) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    if (!evId || !mine) return;
+    const meId = String(mine.id || '');
+    const targetId = String(opponentId || '');
+    if (!meId) return;
+
+    const all = cloneEventInputs(draft || {});
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    if (!targetId) delete person[meId];
+    else person[meId] = { opponentId: targetId, selectedAt: Date.now() };
+    slot.person = person;
+    all[evId] = slot;
+    applyDraft(all);
+    setDirty(true);
+
+    try {
+      const merged = cloneEventInputs(inputsByEventServer || {});
+      const mSlot = { ...(merged[evId] || {}) };
+      mSlot.person = { ...(mSlot.person || {}) };
+      if (!targetId) delete mSlot.person[meId];
+      else mSlot.person[meId] = person[meId];
+      merged[evId] = mSlot;
+      if (typeof updateEventImmediate === 'function') {
+        await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: Date.now() }, false);
+        const savedClone = cloneEventInputs(merged);
+        pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
+        hydrateDraftFromServer(savedClone);
+        if (activeEventStorageId) {
+          const nextPack = { inputs: savedClone, resetTokens: { ...liveEventInputResetTokens } };
+          setServerInputsCachePack(nextPack);
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', savedClone);
+        }
+        setDirty(false);
+      }
+    } catch (e) {
+      console.warn('[PlayerEventInput] hidden opponent save failed:', e);
+      alert('히든 상대 선택 저장 중 오류가 발생했습니다.');
+    }
+  };
+
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
     return getBattleCellIds(shared, rowKey, holeNo, allowedIds);
@@ -2163,6 +2208,163 @@ export default function PlayerEventInput(){
           const forcedGrandTotal = forcedSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
           const forcedGrandHasAny = forcedSubtotal.some((item) => item.hasAny);
 
+
+          if (ev.template === 'hidden-event') {
+            const hiddenCfg = normalizeHiddenEventParams(ev?.params);
+            const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+            const mineId = String(mine?.id || '');
+            const hiddenDraftSlot = (inputsByEvent?.[ev.id] && typeof inputsByEvent[ev.id] === 'object') ? inputsByEvent[ev.id] : {};
+            const hiddenServerSlot = (inputsByEventServer?.[ev.id] && typeof inputsByEventServer[ev.id] === 'object') ? inputsByEventServer[ev.id] : {};
+            const hiddenEffectiveSlot = Object.keys(hiddenDraftSlot || {}).length ? hiddenDraftSlot : hiddenServerSlot;
+            const hiddenData = computeHiddenEvent(ev, participants, hiddenEffectiveSlot, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+
+            if (hiddenCfg.mode === 'fourball') {
+              const pairs = normalizeHiddenFourballPairs(hiddenEffectiveSlot?.shared?.hiddenFourballPairs || hiddenServerSlot?.shared?.hiddenFourballPairs || {});
+              const minePairId = mineId ? pairs[mineId] : '';
+              const minePair = minePairId ? participantById.get(String(minePairId)) : null;
+              const rows = Array.isArray(hiddenData?.teamRows) ? hiddenData.teamRows : [];
+              return (
+                <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                  <div className={baseCss.cardHeader}>
+                    <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
+                  </div>
+
+                  <div style={{ padding: '0 12px 12px' }}>
+                    <div style={{ border: '1px solid #dbe7ff', background: '#f5f8ff', borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 1.45, color: '#344054' }}>
+                      <b style={{ color: '#1d4ed8' }}>히든 포볼</b> · 운영자가 비밀로 2인 1팀을 배정한 뒤, 공개 시점에 팀원이 오픈됩니다.
+                    </div>
+
+                    {!hiddenCfg.revealed && (
+                      <div style={{ marginTop: 10, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12, fontSize: 13, color: '#667085' }}>
+                        {minePair ? '비공개 팀 배정이 완료되었습니다. 공개 전까지 팀원은 숨김 처리됩니다.' : '아직 운영자 포볼팀 배정 전입니다.'}
+                      </div>
+                    )}
+
+                    {hiddenCfg.revealed && (
+                      <>
+                        <div style={{ marginTop: 10, fontSize: 13, color: '#1d4ed8', fontWeight: 800 }}>
+                          내 팀원: {minePair ? (minePair.nickname || '-') : '배정 없음'}
+                        </div>
+                        <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`} style={{ marginTop: 8 }}>
+                          <table className={tCss.table} style={{ width: '100%' }}>
+                            <colgroup>
+                              <col style={{ width: 48 }} />
+                              <col />
+                              <col style={{ width: 70 }} />
+                              <col style={{ width: 70 }} />
+                            </colgroup>
+                            <thead>
+                              <tr>
+                                <th>순위</th>
+                                <th>팀</th>
+                                <th>G합</th>
+                                <th>결과</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {!rows.length && (
+                                <tr><td colSpan={4} style={{ color: '#999' }}>배정된 팀이 없습니다.</td></tr>
+                              )}
+                              {rows.map((row, idx) => (
+                                <tr key={`hidden-fourball-${ev.id}-${row.key}`}>
+                                  <td>{idx + 1}</td>
+                                  <td>{row.label}</td>
+                                  <td>{Number.isFinite(Number(row.handicapSum)) ? row.handicapSum : '-'}</td>
+                                  <td>{Number.isFinite(Number(row.value)) ? row.value : '-'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            const mySelection = mineId ? (hiddenEffectiveSlot?.person?.[mineId] || hiddenServerSlot?.person?.[mineId] || null) : null;
+            const selectedOpponentId = getHiddenOpponentId(mySelection);
+            const selectedOpponent = selectedOpponentId ? participantById.get(String(selectedOpponentId)) : null;
+            const hiddenCandidates = sortedParticipants.filter((p) => String(p?.id || '') !== mineId);
+            const adjustment = (mine && selectedOpponent) ? getHiddenHandicapAdjustment(mine, selectedOpponent, hiddenCfg) : 0;
+            const rows = Array.isArray(hiddenData?.matchRows) ? hiddenData.matchRows : [];
+
+            return (
+              <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                <div className={baseCss.cardHeader}>
+                  <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
+                </div>
+
+                <div style={{ padding: '0 12px 12px' }}>
+                  <div style={{ border: '1px solid #dbe7ff', background: '#f5f8ff', borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 1.45, color: '#344054' }}>
+                    <b style={{ color: '#1d4ed8' }}>히든 1대1</b> · 상대를 비밀리에 선택합니다. 운영자가 공개하기 전까지 전체 선택 결과는 숨김 처리됩니다.
+                  </div>
+
+                  <label style={{ display: 'grid', gap: 6, marginTop: 10, fontSize: 12, fontWeight: 900, color: '#344054' }}>
+                    내 히든 상대 선택
+                    <select
+                      value={selectedOpponentId}
+                      onChange={(e) => patchHiddenOpponent(ev.id, e.target.value)}
+                      disabled={!mineId}
+                      style={{ height: 38, border: '1px solid #d7dfec', borderRadius: 10, padding: '0 10px', fontSize: 14, background: '#fff' }}
+                    >
+                      <option value="">상대 선택</option>
+                      {hiddenCandidates.map((p) => (
+                        <option key={`hidden-candidate-${ev.id}-${p.id}`} value={p.id}>
+                          {getParticipantGroupNo(p) ? `${getParticipantGroupNo(p)}조 · ` : ''}{p.nickname || '-'} {p.room ? `(${p.room}방)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {selectedOpponent && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
+                      선택 완료: <b>{selectedOpponent.nickname}</b> · 조간 추가 G핸디 <b>{adjustment > 0 ? '+' : ''}{adjustment}</b>
+                    </div>
+                  )}
+
+                  {!hiddenCfg.revealed && (
+                    <div style={{ marginTop: 10, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12, fontSize: 13, color: '#667085' }}>
+                      전체 지목 결과는 아직 비공개입니다. 운영자가 공개하면 모든 참가자가 확인할 수 있습니다.
+                    </div>
+                  )}
+
+                  {hiddenCfg.revealed && (
+                    <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`} style={{ marginTop: 10 }}>
+                      <table className={tCss.table} style={{ width: '100%' }}>
+                        <colgroup>
+                          <col style={{ width: '34%' }} />
+                          <col style={{ width: '34%' }} />
+                          <col style={{ width: '16%' }} />
+                          <col style={{ width: '16%' }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>선택자</th>
+                            <th>상대</th>
+                            <th>결과</th>
+                            <th>승패</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {!rows.length && <tr><td colSpan={4} style={{ color: '#999' }}>선택된 상대가 없습니다.</td></tr>}
+                          {rows.map((row) => (
+                            <tr key={`hidden-personal-${ev.id}-${row.key}`}>
+                              <td>{row.name}</td>
+                              <td>{row.opponentName}</td>
+                              <td>{row.value} : {row.opponentValue}</td>
+                              <td style={{ fontWeight: 900, color: row.status === 'win' ? '#1d4ed8' : row.status === 'lose' ? '#be123c' : '#64748b' }}>{row.resultText}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
 
           if (ev.template === 'rank-score-game') {
             const rankCfg = normalizeRankScoreGameParams(ev?.params);

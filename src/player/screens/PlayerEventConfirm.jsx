@@ -22,6 +22,7 @@ import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHole
 import { computeGroupRoomHoleBattle, defaultGroupRoomHoleBattleParams, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
 import { computeRankScoreGame, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../../events/rankScoreGame';
+import { computeHiddenEvent, normalizeHiddenEventParams } from '../../events/hiddenEvent';
 
 
 function normalizeResultEventParams(template, params, eventDef = null) {
@@ -62,6 +63,9 @@ function normalizeResultEventParams(template, params, eventDef = null) {
   if (template === 'rank-score-game') {
     return normalizeRankScoreGameParams(src);
   }
+  if (template === 'hidden-event') {
+    return normalizeHiddenEventParams(src);
+  }
   return src;
 }
 
@@ -70,7 +74,7 @@ function normalizeResultEventDef(ev) {
   return {
     ...ev,
     enabled: ev?.enabled !== false,
-    target: ev?.target || (ev?.template === 'rank-score-game' ? getRankScoreGameTarget(ev?.params) : (ev?.template === 'group-battle' ? ((ev?.params?.mode || 'group') === 'group' ? 'group' : 'person') : 'person')),
+    target: ev?.target || (ev?.template === 'hidden-event' ? (normalizeHiddenEventParams(ev?.params).mode === 'fourball' ? 'team' : 'person') : (ev?.template === 'rank-score-game' ? getRankScoreGameTarget(ev?.params) : (ev?.template === 'group-battle' ? ((ev?.params?.mode || 'group') === 'group' ? 'group' : 'person') : 'person'))),
     rankOrder: ev?.rankOrder || (ev?.template === 'rank-score-game' ? normalizeRankScoreGameParams(ev?.params).winnerOrder : 'asc'),
     params: normalizeResultEventParams(ev?.template, ev?.params, ev),
   };
@@ -529,6 +533,34 @@ const events = useMemo(
       return { kind: data?.kind === 'group' ? 'group' : data?.kind === 'person' ? 'person' : 'room', metricLabel, rows };
     }
 
+
+    // ── hidden-event(히든 이벤트) ─────────────────────────────
+    if (template === 'hidden-event') {
+      const hiddenParams = normalizeHiddenEventParams(params);
+      const data = computeHiddenEvent(ev, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames, roomCount: effectiveRoomCount });
+      if (!hiddenParams.revealed) {
+        return { kind: hiddenParams.mode === 'fourball' ? 'team' : 'person', metricLabel: '상태', rows: [] };
+      }
+      if (hiddenParams.mode === 'fourball') {
+        const rows = (data.teamRows || []).map((row, i) => ({
+          key: row.key || String(i),
+          rank: row.rank || i + 1,
+          label: row.label,
+          value: row.value,
+          displayText: `${fmtScore(row.value)} / G합 ${fmtScore(row.handicapSum)}`,
+        }));
+        return { kind: 'team', metricLabel: '결과', rows };
+      }
+      const rows = (data.matchRows || []).map((row, i) => ({
+        key: row.key || String(i),
+        rank: i + 1,
+        label: row.name,
+        room: `vs ${row.opponentName}`,
+        value: row.point,
+        displayText: `${row.resultText} ${fmtScore(row.value)}:${fmtScore(row.opponentValue)}`,
+      }));
+      return { kind: 'person', metricLabel: '승패', rows };
+    }
 
     // ── rank-score-game(대회 순위 점수 게임) ─────────────────────
     if (template === 'rank-score-game') {

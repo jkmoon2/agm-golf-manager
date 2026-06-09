@@ -199,6 +199,27 @@ export const TEMPLATE_REGISTRY = [
     },
   },
   {
+    type: 'hidden-event',
+    label: '히든 이벤트',
+    defaultParams: {
+      mode: 'personal',
+      revealed: false,
+      handicapSteps: { '1-2': 3, '2-3': 3, '3-4': 3 },
+      pairGroups: { A: [1, 2], B: [3, 4] },
+      randomSeed: '',
+    },
+    help: '* 개인 1대1 비밀 지목전 또는 운영자 무작위 포볼 히든팀을 운영합니다.',
+    ui: {
+      inputMode: false,
+      paramsJson: false,
+      factor: false,
+      rangeTable: false,
+      bonusTable: false,
+      supportsEventInputs: true,
+      supportsQuickInput: false,
+    },
+  },
+  {
     type: 'group-battle',
     label: '그룹/개인 대결',
     defaultParams: {},
