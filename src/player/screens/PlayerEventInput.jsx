@@ -1877,7 +1877,11 @@ export default function PlayerEventInput(){
     }
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     await patchHiddenOpponent(ev.id, pick.id);
-    alert(`${mine.nickname || '참가자'}님은 ${pick.nickname || '상대'}님과 히든 포볼팀으로 배정되었습니다.`);
+    if (cfg.revealed) {
+      alert(`${mine.nickname || '참가자'}님은 ${pick.nickname || '상대'}님과 히든 포볼팀으로 배정되었습니다.`);
+    } else {
+      alert('히든 포볼팀 배정이 완료되었습니다. 공개 전까지 팀원은 숨김 처리됩니다.');
+    }
   };
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
@@ -2342,7 +2346,7 @@ export default function PlayerEventInput(){
                       </div>
                     )}
 
-                    {minePair && (
+                    {minePair && hiddenCfg.revealed && (
                       <div style={{ marginTop: 8, fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
                         내 팀원: {minePair.nickname || '-'}
                       </div>
