@@ -547,9 +547,8 @@ const events = useMemo(
           rank: row.rank || i + 1,
           label: row.label,
           value: row.value,
-          bigValue: row.handicapSum,
         }));
-        return { kind: 'team', metricLabel: '결과', extraMetricLabel: 'G합', rows, isHiddenFourball: true };
+        return { kind: 'team', metricLabel: '순위점수', rows };
       }
       const rows = (data.matchRows || []).map((row, i) => ({
         key: row.key || String(i),

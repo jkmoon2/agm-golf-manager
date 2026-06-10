@@ -1366,6 +1366,20 @@ if (editForm?.template === 'group-battle') {
     await updateEventImmediate({ events: next }, false);
   };
 
+  const toggleHiddenLock = async (ev, locked = null) => {
+    if (!ev) return;
+    const current = normalizeHiddenEventParams(ev.params);
+    const nextLocked = typeof locked === 'boolean' ? locked : !current.selectionLocked;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== ev.id) return e;
+      const params = normalizeHiddenEventParams({ ...(e.params || {}), selectionLocked: nextLocked });
+      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: 'asc' };
+    });
+    await updateEventImmediate({ events: next }, false);
+    setOpenMenuId(null);
+    setMenuUpId(null);
+  };
+
   const assignHiddenFourball = async () => {
     if (!hiddenMonitorEvent) return;
     const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
@@ -1834,15 +1848,17 @@ if (editForm?.template === 'group-battle') {
                                 </button>
                               )}
                               {ev?.template === 'hidden-event' && (
-                                <button
-                                  onClick={() => {
-                                    setHiddenMonitorId(ev.id);
-                                    setOpenMenuId(null);
-                                    setMenuUpId(null);
-                                  }}
-                                >
-                                  히든 운영/공개
-                                </button>
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setHiddenMonitorId(ev.id);
+                                      setOpenMenuId(null);
+                                      setMenuUpId(null);
+                                    }}
+                                  >
+                                    히든/배정/마감
+                                  </button>
+                                </>
                               )}
                               {templateUi(ev?.template).supportsQuickInput !== false && (
                                 <button onClick={() => openQuick(ev)}>빠른 입력(관리자)</button>
@@ -2401,6 +2417,7 @@ if (editForm?.template === 'group-battle') {
             roomNames={roomNames}
             onClose={() => setHiddenMonitorId(null)}
             onToggleReveal={toggleHiddenReveal}
+            onToggleLock={(locked) => toggleHiddenLock(hiddenMonitorEvent, locked)}
             onAssignFourball={assignHiddenFourball}
           />
         )}
