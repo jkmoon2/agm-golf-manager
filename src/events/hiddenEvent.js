@@ -19,7 +19,7 @@ export function defaultHiddenEventParams() {
       A: [1, 2],
       B: [3, 4],
     },
-    randomSeed: '',
+    selectionLocked: false,
   };
 }
 
@@ -81,17 +81,17 @@ export function normalizeHiddenEventParams(raw) {
     revealed: !!src.revealed,
     handicapSteps: normalizeHiddenHandicapSteps(src.handicapSteps),
     pairGroups: normalizeHiddenPairGroups(src.pairGroups),
-    randomSeed: String(src.randomSeed || ''),
+    selectionLocked: !!(src.selectionLocked || src.locked),
   };
 }
 
 export function getHiddenEventMetaText(params) {
   const cfg = normalizeHiddenEventParams(params);
   if (cfg.mode === 'fourball') {
-    const method = cfg.fourballMode === 'self' ? '참가자 직접선택' : '운영자 무작위';
-    return `hidden-event · 포볼(${method}) · A그룹 ${cfg.pairGroups.A.join('+')}조 / B그룹 ${cfg.pairGroups.B.join('+')}조 · ${cfg.revealed ? '공개' : '비공개'}`;
+    const method = cfg.fourballMode === 'self' ? '참가자 무작위배정' : '운영자 무작위';
+    return `hidden-event · 포볼(${method}) · A그룹 ${cfg.pairGroups.A.join('+')}조 / B그룹 ${cfg.pairGroups.B.join('+')}조 · ${cfg.revealed ? '공개' : '비공개'} · ${cfg.selectionLocked ? '마감' : '진행중'}`;
   }
-  return `hidden-event · 개인 1대1 · ${cfg.revealed ? '공개' : '비공개'}`;
+  return `hidden-event · 개인 1대1 · ${cfg.revealed ? '공개' : '비공개'} · ${cfg.selectionLocked ? '마감' : '진행중'}`;
 }
 
 export function getHiddenHandicapAdjustment(selector, opponent, params) {
@@ -171,8 +171,9 @@ export function assignHiddenFourballPairs(participants = [], params = {}) {
     return '';
   };
 
-  const aList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'A'), `${cfg.randomSeed || Date.now()}-A`);
-  const bList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'B'), `${cfg.randomSeed || Date.now()}-B`);
+  const seedBase = `agm-hidden-${Date.now()}-${Math.random()}`;
+  const aList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'A'), `${seedBase}-A`);
+  const bList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'B'), `${seedBase}-B`);
   const count = Math.min(aList.length, bList.length);
   const pairs = {};
   for (let i = 0; i < count; i += 1) {

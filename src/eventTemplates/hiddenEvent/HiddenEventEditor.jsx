@@ -75,7 +75,7 @@ export default function HiddenEventEditor({ value, onChange }) {
         <select style={inputStyle} value={modeValue} onChange={(e) => emitMode(e.target.value)}>
           <option value="personal">개인 · 비밀 1대1 지목전</option>
           <option value="fourball-random">포볼 · 운영자 무작위 2인팀</option>
-          <option value="fourball-self">포볼 · 참가자 직접 2인팀 선택</option>
+          <option value="fourball-self">포볼 · 참가자 버튼 무작위 2인팀</option>
         </select>
       </label>
 
@@ -106,7 +106,7 @@ export default function HiddenEventEditor({ value, onChange }) {
         </div>
       )}
 
-      {cfg.mode === 'fourball' && cfg.fourballMode !== 'self' && (
+      {cfg.mode === 'fourball' && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>포볼 그룹 구성</div>
           {['A', 'B'].map((side) => (
@@ -137,16 +137,11 @@ export default function HiddenEventEditor({ value, onChange }) {
               </div>
             </div>
           ))}
-          <label style={{ ...labelStyle, marginTop: 10 }}>무작위 시드값
-            <input style={inputStyle} value={cfg.randomSeed} onChange={(e) => emit({ randomSeed: e.target.value })} placeholder="비워두면 매번 새 배정" />
-          </label>
-          <div style={helpStyle}>A그룹 참가자 1명과 B그룹 참가자 1명을 무작위로 묶어 2인 1팀을 만듭니다.</div>
-        </div>
-      )}
-
-      {cfg.mode === 'fourball' && cfg.fourballMode === 'self' && (
-        <div style={helpStyle}>
-          참가자가 Player STEP3에서 비밀리에 팀원을 직접 선택합니다. 운영자가 공개하기 전까지 전체 선택 결과는 숨김 처리됩니다.
+          <div style={helpStyle}>
+            {cfg.fourballMode === 'self'
+              ? '참가자가 Player STEP3에서 포볼선택 버튼을 누르면 A그룹 1명과 B그룹 1명이 무작위로 묶입니다. 운영자가 공개하기 전까지 전체 팀 결과는 숨김 처리됩니다.'
+              : 'A그룹 참가자 1명과 B그룹 참가자 1명을 운영자가 무작위로 묶어 2인 1팀을 만듭니다.'}
+          </div>
         </div>
       )}
     </div>

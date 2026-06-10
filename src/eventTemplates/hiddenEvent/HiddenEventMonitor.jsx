@@ -15,12 +15,12 @@ const btnStyle = { border: '1px solid #d7dfec', borderRadius: 10, background: '#
 const primaryStyle = { ...btnStyle, borderColor: '#2563eb', background: '#eaf2ff', color: '#1d4ed8' };
 const dangerStyle = { ...btnStyle, borderColor: '#fecdd3', background: '#fff1f2', color: '#be123c' };
 
-export default function HiddenEventMonitor({ eventDef, participants = [], inputsByEvent = {}, roomNames = [], onClose, onToggleReveal, onAssignFourball }) {
+export default function HiddenEventMonitor({ eventDef, participants = [], inputsByEvent = {}, roomNames = [], onClose, onToggleReveal, onToggleLock, onAssignFourball }) {
   const cfg = normalizeHiddenEventParams(eventDef?.params);
   const data = computeHiddenEvent(eventDef, participants, inputsByEvent, { roomNames });
   const personalRows = Array.isArray(data?.matchRows) ? data.matchRows : [];
   const teamRows = Array.isArray(data?.teamRows) ? data.teamRows : [];
-  const fourballTitle = cfg.fourballMode === 'self' ? '포볼 참가자 직접선택' : '포볼 히든팀';
+  const fourballTitle = cfg.fourballMode === 'self' ? '포볼 참가자 무작위배정' : '포볼 히든팀';
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -28,7 +28,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 12 }}>
           <div>
             <div style={{ fontSize: 17, fontWeight: 950, color: '#16243f' }}>{eventDef?.title || '히든 이벤트'}</div>
-            <div style={{ fontSize: 12, color: '#667085', marginTop: 2 }}>{cfg.mode === 'fourball' ? fourballTitle : '개인 1대1 지목'} · {cfg.revealed ? '공개' : '비공개'}</div>
+            <div style={{ fontSize: 12, color: '#667085', marginTop: 2 }}>{cfg.mode === 'fourball' ? fourballTitle : '개인 1대1 지목'} · {cfg.revealed ? '공개' : '비공개'} · {cfg.selectionLocked ? '마감' : '진행중'}</div>
           </div>
           <button type="button" style={btnStyle} onClick={onClose}>닫기</button>
         </div>
@@ -37,6 +37,9 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
           <button type="button" style={cfg.revealed ? dangerStyle : primaryStyle} onClick={() => onToggleReveal && onToggleReveal(!cfg.revealed)}>
             {cfg.revealed ? '다시 비공개' : '전체 공개'}
           </button>
+          <button type="button" style={cfg.selectionLocked ? dangerStyle : primaryStyle} onClick={() => onToggleLock && onToggleLock(!cfg.selectionLocked)}>
+            {cfg.selectionLocked ? '마감 해제' : '마감'}
+          </button>
           {cfg.mode === 'fourball' && cfg.fourballMode !== 'self' && (
             <button type="button" style={primaryStyle} onClick={onAssignFourball}>포볼팀 무작위 배정</button>
           )}
@@ -44,7 +47,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
 
         {cfg.mode === 'fourball' ? (
           <div style={{ display: 'grid', gap: 8 }}>
-            {!teamRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>{cfg.fourballMode === 'self' ? '아직 참가자가 선택한 팀원이 없습니다.' : '아직 포볼팀이 배정되지 않았습니다.'}</div>}
+            {!teamRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>{cfg.fourballMode === 'self' ? '아직 참가자 버튼 무작위 배정 팀원이 없습니다.' : '아직 포볼팀이 배정되지 않았습니다.'}</div>}
             {teamRows.map((row, idx) => (
               <div key={row.key} style={{ border: '1px solid #e5eaf2', borderRadius: 12, padding: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>

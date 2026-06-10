@@ -1842,6 +1842,44 @@ export default function PlayerEventInput(){
     }
   };
 
+
+  const handleHiddenFourballRandomPick = async (ev, hiddenCfg) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    if (!ev || !mine) return;
+    const cfg = normalizeHiddenEventParams(hiddenCfg || ev?.params);
+    if (cfg.selectionLocked) {
+      alert('선택이 마감되어 더 이상 수정할 수 없습니다.');
+      return;
+    }
+    const mineId = String(mine.id || '');
+    const hiddenDraftSlot = (inputsByEvent?.[ev.id] && typeof inputsByEvent[ev.id] === 'object') ? inputsByEvent[ev.id] : {};
+    const hiddenServerSlot = (inputsByEventServer?.[ev.id] && typeof inputsByEventServer[ev.id] === 'object') ? inputsByEventServer[ev.id] : {};
+    const hiddenEffectiveSlot = Object.keys(hiddenDraftSlot || {}).length ? hiddenDraftSlot : hiddenServerSlot;
+    const hiddenData = computeHiddenEvent(ev, participants, hiddenEffectiveSlot, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
+    const pairs = hiddenData?.pairMap || {};
+    if (pairs[mineId]) return;
+
+    const mySide = getRankScoreGroupSide(mine, { pairGroups: cfg.pairGroups });
+    if (!mySide) {
+      alert('포볼 선택은 운영자가 지정한 A/B 그룹 참가자만 사용할 수 있습니다.');
+      return;
+    }
+    const targetSide = mySide === 'A' ? 'B' : 'A';
+    const candidates = (participants || []).filter((p) => {
+      const pid = String(p?.id ?? '');
+      if (!pid || pid === mineId) return false;
+      if (pairs[pid]) return false;
+      return getRankScoreGroupSide(p, { pairGroups: cfg.pairGroups }) === targetSide;
+    });
+    if (!candidates.length) {
+      alert('선택 가능한 상대 그룹 참가자가 없습니다.');
+      return;
+    }
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    await patchHiddenOpponent(ev.id, pick.id);
+    alert(`${mine.nickname || '참가자'}님은 ${pick.nickname || '상대'}님과 히든 포볼팀으로 배정되었습니다.`);
+  };
+
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
     const shared = getBattleSharedInputs(inputsByEvent?.[evId] || {});
     return getBattleCellIds(shared, rowKey, holeNo, allowedIds);
@@ -2212,6 +2250,7 @@ export default function PlayerEventInput(){
 
           if (ev.template === 'hidden-event') {
             const hiddenCfg = normalizeHiddenEventParams(ev?.params);
+            const hiddenLocked = !!hiddenCfg.selectionLocked;
             const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
             const mineId = String(mine?.id || '');
             const hiddenDraftSlot = (inputsByEvent?.[ev.id] && typeof inputsByEvent[ev.id] === 'object') ? inputsByEvent[ev.id] : {};
@@ -2248,17 +2287,24 @@ export default function PlayerEventInput(){
 
             if (hiddenCfg.mode === 'fourball') {
               const isSelfFourball = hiddenCfg.fourballMode === 'self';
-              const mySelection = mineId ? (hiddenEffectiveSlot?.person?.[mineId] || hiddenServerSlot?.person?.[mineId] || null) : null;
-              const selectedOpponentId = getHiddenOpponentId(mySelection);
-              const selectedOpponent = selectedOpponentId ? participantById.get(String(selectedOpponentId)) : null;
               const pairs = isSelfFourball
                 ? (hiddenData?.pairMap || {})
                 : normalizeHiddenFourballPairs(hiddenEffectiveSlot?.shared?.hiddenFourballPairs || hiddenServerSlot?.shared?.hiddenFourballPairs || {});
               const minePairId = mineId ? pairs[mineId] : '';
               const minePair = minePairId ? participantById.get(String(minePairId)) : null;
               const rows = Array.isArray(hiddenData?.teamRows) ? hiddenData.teamRows : [];
-              const hiddenCandidates = getHiddenCandidates();
-              const focusKey = `${ev.id}:hidden-fourball`;
+              const hiddenPairCfg = { pairGroups: hiddenCfg.pairGroups };
+              const pairLabelA = getRankScorePairGroupLabel(hiddenCfg.pairGroups, 'A');
+              const pairLabelB = getRankScorePairGroupLabel(hiddenCfg.pairGroups, 'B');
+              const pairHeaderA = splitRankScorePairLabel(pairLabelA);
+              const pairHeaderB = splitRankScorePairLabel(pairLabelB);
+              const mineSide = mine ? getRankScoreGroupSide(mine, hiddenPairCfg) : '';
+              const hasHiddenPairCandidates = isSelfFourball && mine && !!mineSide && !minePairId && !hiddenLocked && (participants || []).some((p) => {
+                const pid = String(p?.id ?? '');
+                if (!pid || pid === String(mine.id)) return false;
+                if (pairs[pid]) return false;
+                return getRankScoreGroupSide(p, hiddenPairCfg) && getRankScoreGroupSide(p, hiddenPairCfg) !== mineSide;
+              });
 
               return (
                 <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -2268,81 +2314,94 @@ export default function PlayerEventInput(){
 
                   <div style={{ padding: '0 12px 12px' }}>
                     <div style={{ border: '1px solid #dbe7ff', background: '#f5f8ff', borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 1.45, color: '#344054' }}>
-                      <b style={{ color: '#1d4ed8' }}>히든 포볼</b> · {isSelfFourball ? '팀원을 비밀리에 선택, 운영자가 공개전 까지 숨김처리' : '운영자가 비밀로 2인1팀 배정한 뒤, 추후 오픈'}
+                      <b style={{ color: '#1d4ed8' }}>히든 포볼</b> · {isSelfFourball ? '참가자가 버튼을 누르면 비밀리에 무작위 2인팀 배정' : '운영자가 비밀로 2인1팀 배정한 뒤, 추후 오픈'}
                     </div>
 
                     {isSelfFourball && (
-                      <label style={{ display: 'grid', gap: 6, marginTop: 10, fontSize: 12, fontWeight: 900, color: '#344054' }}>
-                        내 히든 포볼 팀원 선택
-                        <select
-                          value={selectedOpponentId}
-                          onChange={(e) => patchHiddenOpponent(ev.id, e.target.value)}
-                          onFocus={() => setHiddenSelectFocusId(focusKey)}
-                          onBlur={() => setHiddenSelectFocusId('')}
-                          disabled={!mineId}
-                          style={hiddenSelectStyle(focusKey)}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 10 }}>
+                        <div style={{ fontSize: 15, fontWeight: 900, color: '#183153' }}>포볼팀 배정 현황</div>
+                        <button
+                          type="button"
+                          onClick={() => handleHiddenFourballRandomPick(ev, hiddenCfg)}
+                          disabled={!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked}
+                          style={{
+                            width: 92,
+                            height: 32,
+                            borderRadius: 10,
+                            border: '1px solid #bcd0ff',
+                            background: '#eef4ff',
+                            color: '#2457d6',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            opacity: (!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked) ? 0.5 : 1,
+                            pointerEvents: (!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked) ? 'none' : undefined,
+                          }}
                         >
-                          <option value="">팀원 선택</option>
-                          {hiddenCandidates.map((p) => (
-                            <option key={`hidden-fourball-candidate-${ev.id}-${p.id}`} value={p.id}>
-                              {getParticipantGroupNo(p) ? `${getParticipantGroupNo(p)}조 · ` : ''}{p.nickname || '-'} {p.room ? `(${hiddenRoomLabel(p)})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                          {minePair ? '배정완료' : '포볼선택'}
+                        </button>
+                      </div>
                     )}
 
-                    {isSelfFourball && selectedOpponent && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
-                        선택 완료: <b>{selectedOpponent.nickname}</b>
+                    {minePair && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
+                        내 팀원: {minePair.nickname || '-'}
+                      </div>
+                    )}
+
+                    {hiddenLocked && isSelfFourball && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: '#be123c', fontWeight: 800 }}>
+                        선택이 마감되어 더 이상 수정할 수 없습니다.
                       </div>
                     )}
 
                     {!hiddenCfg.revealed && (
                       <div style={{ marginTop: 10, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12, fontSize: 13, color: '#667085' }}>
-                        {isSelfFourball
-                          ? (selectedOpponent ? '비공개 팀 선택 완료, 공개 전까지 팀원은 숨김 처리' : '아직 팀원을 선택하지 않았습니다.')
-                          : (minePair ? '비공개 팀 배정 완료, 공개 전까지 팀원은 숨김 처리' : '아직 운영자 포볼팀 배정 전입니다.')}
+                        {minePair ? '비공개 팀 배정 완료, 공개 전까지 팀원은 숨김 처리' : (isSelfFourball ? '아직 포볼팀이 배정되지 않았습니다.' : '아직 운영자 포볼팀 배정 전입니다.')}
                       </div>
                     )}
 
                     {hiddenCfg.revealed && (
-                      <>
-                        <div style={{ marginTop: 10, fontSize: 13, color: '#1d4ed8', fontWeight: 800 }}>
-                          내 팀원: {minePair ? (minePair.nickname || '-') : '배정 없음'}
-                        </div>
-                        <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`} style={{ marginTop: 8 }}>
-                          <table className={tCss.table} style={{ width: '100%', tableLayout: 'fixed' }}>
-                            <colgroup>
-                              <col style={{ width: 44 }} />
-                              <col />
-                              <col style={{ width: 58 }} />
-                              <col style={{ width: 58 }} />
-                            </colgroup>
-                            <thead>
-                              <tr>
-                                <th>순위</th>
-                                <th>팀</th>
-                                <th style={{ color: '#2563eb' }}>G합</th>
-                                <th style={{ color: '#be123c' }}>결과</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {!rows.length && (
-                                <tr><td colSpan={4} style={{ color: '#999' }}>{isSelfFourball ? '선택된 팀원이 없습니다.' : '배정된 팀이 없습니다.'}</td></tr>
-                              )}
-                              {rows.map((row, idx) => (
+                      <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`} style={{ marginTop: 10 }}>
+                        <table className={tCss.table} style={{ width: '100%' }}>
+                          <colgroup>
+                            <col style={{ width: '14%' }} />
+                            <col style={{ width: '34%' }} />
+                            <col style={{ width: '34%' }} />
+                            <col style={{ width: '18%' }} />
+                          </colgroup>
+                          <thead>
+                            <tr>
+                              <th>팀</th>
+                              <th>
+                                {pairHeaderA.title}<span style={{ fontWeight: 400 }}> {pairHeaderA.groups}</span>
+                              </th>
+                              <th>
+                                {pairHeaderB.title}<span style={{ fontWeight: 400 }}> {pairHeaderB.groups}</span>
+                              </th>
+                              <th>G합계</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.length === 0 && (
+                              <tr><td colSpan={4} style={{ color: '#999' }}>{isSelfFourball ? '아직 배정된 팀이 없습니다.' : '배정된 팀이 없습니다.'}</td></tr>
+                            )}
+                            {rows.map((row, idx) => {
+                              const members = Array.isArray(row.members) ? row.members : [];
+                              const left = members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'A') || members[0] || null;
+                              const right = members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'B') || members.find((m) => String(m?.id || '') !== String(left?.id || '')) || null;
+                              const hdSum = Number(left?.handicap || 0) + Number(right?.handicap || 0);
+                              return (
                                 <tr key={`hidden-fourball-${ev.id}-${row.key}`}>
                                   <td>{idx + 1}</td>
-                                  <td style={{ wordBreak: 'keep-all' }}>{row.label}</td>
-                                  <td style={{ color: '#2563eb', fontWeight: 900 }}>{Number.isFinite(Number(row.handicapSum)) ? row.handicapSum : '-'}</td>
-                                  <td style={{ color: '#be123c', fontWeight: 950 }}>{Number.isFinite(Number(row.value)) ? row.value : '-'}</td>
+                                  <td>{left?.name || '-'}</td>
+                                  <td>{right?.name || '-'}</td>
+                                  <td style={{ color: '#d00000', fontWeight: 800 }}>{Number.isFinite(hdSum) ? hdSum : '-'}</td>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2375,7 +2434,7 @@ export default function PlayerEventInput(){
                       onChange={(e) => patchHiddenOpponent(ev.id, e.target.value)}
                       onFocus={() => setHiddenSelectFocusId(focusKey)}
                       onBlur={() => setHiddenSelectFocusId('')}
-                      disabled={!mineId}
+                      disabled={!mineId || hiddenLocked}
                       style={hiddenSelectStyle(focusKey)}
                     >
                       <option value="">상대 선택</option>
@@ -2390,6 +2449,12 @@ export default function PlayerEventInput(){
                   {selectedOpponent && (
                     <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
                       선택 완료: <b>{selectedOpponent.nickname}</b> · 조간 추가 G핸디 <b>{adjustment > 0 ? '+' : ''}{adjustment}</b>
+                    </div>
+                  )}
+
+                  {hiddenLocked && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#be123c', fontWeight: 800 }}>
+                      선택이 마감되어 더 이상 수정할 수 없습니다.
                     </div>
                   )}
 
