@@ -40,8 +40,8 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
           <button type="button" style={cfg.selectionLocked ? dangerStyle : primaryStyle} onClick={() => onToggleLock && onToggleLock(!cfg.selectionLocked)}>
             {cfg.selectionLocked ? '마감 해제' : '마감'}
           </button>
-          {cfg.mode === 'fourball' && cfg.fourballMode !== 'self' && (
-            <button type="button" style={primaryStyle} onClick={onAssignFourball}>포볼팀 무작위 배정</button>
+          {cfg.mode === 'fourball' && (
+            <button type="button" style={primaryStyle} onClick={onAssignFourball}>포볼 무작위 배정</button>
           )}
         </div>
 

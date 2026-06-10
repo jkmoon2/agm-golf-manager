@@ -36,7 +36,7 @@ import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normali
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
 import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../events/rankScoreGame';
-import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, normalizeHiddenEventParams } from '../events/hiddenEvent';
+import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../events/hiddenEvent';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -1383,21 +1383,53 @@ if (editForm?.template === 'group-battle') {
   const assignHiddenFourball = async () => {
     if (!hiddenMonitorEvent) return;
     const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
-    if (params.mode !== 'fourball' || params.fourballMode === 'self') return;
+    if (params.mode !== 'fourball') return;
+
     const currentSlot = (inputsAll && typeof inputsAll === 'object') ? (inputsAll[hiddenMonitorEvent.id] || {}) : {};
-    const currentPairs = (currentSlot?.shared?.hiddenFourballPairs && typeof currentSlot.shared.hiddenFourballPairs === 'object') ? currentSlot.shared.hiddenFourballPairs : {};
+    const currentSharedPairs = normalizeHiddenFourballPairs(currentSlot?.shared?.hiddenFourballPairs || currentSlot?.shared?.pairs || {});
+    const currentPersonPairs = getHiddenFourballPairsFromPerson(currentSlot?.person || {});
+    const currentPairs = params.fourballMode === 'self'
+      ? normalizeHiddenFourballPairs({ ...currentSharedPairs, ...currentPersonPairs })
+      : currentSharedPairs;
     const hasExistingPairs = Object.keys(currentPairs).length > 0;
-    const confirmMessage = hasExistingPairs
-      ? '포볼 히든팀을 무작위로 다시 배정할까요? 기존 배정은 덮어씁니다.'
-      : '포볼 히든팀을 무작위로 배정할까요?';
+    const confirmMessage = params.fourballMode === 'self'
+      ? (hasExistingPairs
+          ? '기존 배정된 팀은 유지하고, 미배정 참가자만 포볼 무작위 배정할까요?'
+          : '미배정 참가자 전체를 포볼 무작위 배정할까요?')
+      : (hasExistingPairs
+          ? '포볼 히든팀을 무작위로 다시 배정할까요? 기존 배정은 덮어씁니다.'
+          : '포볼 히든팀을 무작위로 배정할까요?');
     if (!askConfirm(confirmMessage)) return;
-    const pairs = assignHiddenFourballPairs(participants, params);
+
+    const pairs = params.fourballMode === 'self'
+      ? assignHiddenFourballPairs(participants, params, currentPairs)
+      : assignHiddenFourballPairs(participants, params);
     const all = { ...(inputsAll || {}) };
     const slot = { ...(all[hiddenMonitorEvent.id] || {}) };
-    slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: Date.now() };
+    const now = Date.now();
+
+    if (params.fourballMode === 'self') {
+      const nextPerson = {};
+      Object.entries(pairs).forEach(([pid, partnerId]) => {
+        if (!pid || !partnerId) return;
+        nextPerson[String(pid)] = {
+          ...((currentSlot?.person && currentSlot.person[String(pid)]) || {}),
+          opponentId: String(partnerId),
+          pickedAt: ((currentSlot?.person && currentSlot.person[String(pid)]?.pickedAt) || now),
+          autoAssigned: true,
+        };
+      });
+      slot.person = nextPerson;
+      slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'self-fill' };
+    } else {
+      slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'operator-random' };
+    }
+
     all[hiddenMonitorEvent.id] = slot;
-    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
-    alert('포볼 히든팀 배정이 완료되었습니다. 공개 전까지 참가자에게는 팀원이 보이지 않습니다.');
+    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+    alert(params.fourballMode === 'self'
+      ? '포볼 무작위 배정이 완료되었습니다. 기존 배정팀은 유지하고 미배정 참가자만 추가 배정했습니다.'
+      : '포볼 히든팀 배정이 완료되었습니다. 공개 전까지 참가자에게는 팀원이 보이지 않습니다.');
   };
   /* ── 관리자 빠른 입력 ─────────────────────────────────── */
   const [quickId, setQuickId] = useState(null);
