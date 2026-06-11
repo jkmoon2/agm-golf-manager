@@ -1799,12 +1799,77 @@ export default function PlayerEventInput(){
   };
 
 
+  const getHiddenEventById = (evId) => {
+    const key = String(evId || '');
+    return (events || []).find((item) => String(item?.id || '') === key) || null;
+  };
+
+  const getHiddenTargetLimit = (hiddenCfg, targetId) => {
+    const cfg = normalizeHiddenEventParams(hiddenCfg || {});
+    if (cfg.targetLimitMode !== 'personal') return Infinity;
+    const limits = (cfg.targetLimits && typeof cfg.targetLimits === 'object') ? cfg.targetLimits : {};
+    const key = String(targetId || '');
+    if (!key || !Object.prototype.hasOwnProperty.call(limits, key)) return Infinity;
+    const n = Number(limits[key]);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : Infinity;
+  };
+
+  const countHiddenTargetSelections = (slot, targetId, exceptSelectorId = '') => {
+    const targetKey = String(targetId || '');
+    const exceptKey = String(exceptSelectorId || '');
+    if (!targetKey) return 0;
+    const person = (slot?.person && typeof slot.person === 'object') ? slot.person : {};
+    let count = 0;
+    Object.entries(person).forEach(([selectorId, rec]) => {
+      const selectorKey = String(selectorId || '');
+      if (!selectorKey || selectorKey === exceptKey) return;
+      const opponentKey = getHiddenOpponentId(rec);
+      if (String(opponentKey || '') === targetKey) count += 1;
+    });
+    return count;
+  };
+
+  const canSelectHiddenTarget = (evId, targetId, selectorId, hiddenCfg = null) => {
+    const targetKey = String(targetId || '');
+    if (!targetKey) return true;
+    const cfg = normalizeHiddenEventParams(hiddenCfg || getHiddenEventById(evId)?.params);
+    if (cfg.mode !== 'personal') return true;
+    const limit = getHiddenTargetLimit(cfg, targetKey);
+    if (!Number.isFinite(limit)) return true;
+
+    const draftSlot = (inputsByEvent?.[evId] && typeof inputsByEvent[evId] === 'object') ? inputsByEvent[evId] : {};
+    const serverSlot = (inputsByEventServer?.[evId] && typeof inputsByEventServer[evId] === 'object') ? inputsByEventServer[evId] : {};
+    const mergedSlot = {
+      ...serverSlot,
+      ...draftSlot,
+      person: {
+        ...((serverSlot?.person && typeof serverSlot.person === 'object') ? serverSlot.person : {}),
+        ...((draftSlot?.person && typeof draftSlot.person === 'object') ? draftSlot.person : {}),
+      },
+    };
+
+    const selectorKey = String(selectorId || '');
+    const currentOpponent = getHiddenOpponentId(mergedSlot?.person?.[selectorKey]);
+    if (String(currentOpponent || '') === targetKey) return true;
+
+    const usedCount = countHiddenTargetSelections(mergedSlot, targetKey, selectorKey);
+    return usedCount < limit;
+  };
+
   const patchHiddenOpponent = async (evId, opponentId) => {
     const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
     if (!evId || !mine) return;
     const meId = String(mine.id || '');
     const targetId = String(opponentId || '');
     if (!meId) return;
+
+    const hiddenEventDef = getHiddenEventById(evId);
+    const hiddenCfg = normalizeHiddenEventParams(hiddenEventDef?.params);
+    if (targetId && hiddenEventDef?.template === 'hidden-event' && hiddenCfg.mode === 'personal' && !canSelectHiddenTarget(evId, targetId, meId, hiddenCfg)) {
+      const target = participantById.get(targetId);
+      alert(`${target?.nickname || '해당 참가자'}님은 이미 지정된 지목 가능 횟수가 모두 사용되었습니다.`);
+      return;
+    }
 
     const all = cloneEventInputs(draft || {});
     const slot = { ...(all[evId] || {}) };
@@ -2267,7 +2332,11 @@ export default function PlayerEventInput(){
               return (roomNames?.[n - 1] && String(roomNames[n - 1]).trim()) ? String(roomNames[n - 1]).trim() : `${n}번방`;
             };
             const getHiddenCandidates = () => {
-              const arr = (Array.isArray(participants) ? [...participants] : []).filter((p) => String(p?.id || '') !== mineId);
+              const arr = (Array.isArray(participants) ? [...participants] : []).filter((p) => {
+                const pid = String(p?.id || '');
+                if (!pid || pid === mineId) return false;
+                return canSelectHiddenTarget(ev.id, pid, mineId, hiddenCfg);
+              });
               arr.sort((a, b) => {
                 const groupDiff = (Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999));
                 if (groupDiff) return groupDiff;

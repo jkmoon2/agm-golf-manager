@@ -13,7 +13,7 @@ const fmt = (value) => {
 const wrapStyle = { border: '1px solid #e5eaf2', borderRadius: 14, background: '#fff', overflow: 'hidden' };
 const titleStyle = { padding: '10px 12px', fontSize: 14, fontWeight: 950, color: '#16376c', borderBottom: '1px solid #eef2f7', background: '#fbfdff' };
 const tableStyle = { width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' };
-const thStyle = { background: '#f8fafc', borderBottom: '1px solid #e5eaf2', padding: '8px 6px', color: '#16243f', fontWeight: 900, textAlign: 'center' };
+const thStyle = { background: '#f8fafc', borderBottom: '1px solid #e5eaf2', padding: '8px 4px', color: '#16243f', fontWeight: 900, textAlign: 'center', whiteSpace: 'nowrap', wordBreak: 'keep-all', fontSize: 12 };
 const tdStyle = { borderBottom: '1px solid #eef2f7', padding: '8px 6px', textAlign: 'center', color: '#16243f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 
 export default function HiddenEventPreview({ eventDef, participants = [], inputsByEvent = {}, roomNames = [], roomCount = 0 }) {
@@ -27,10 +27,10 @@ export default function HiddenEventPreview({ eventDef, participants = [], inputs
         <div style={titleStyle}>{eventDef?.title || '히든 이벤트(포볼)'} · 팀 순위</div>
         <table style={tableStyle}>
           <colgroup>
-            <col style={{ width: '14%' }} />
+            <col style={{ width: '12%' }} />
             <col style={{ width: '52%' }} />
-            <col style={{ width: '17%' }} />
-            <col style={{ width: '17%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '22%' }} />
           </colgroup>
           <thead>
             <tr>

@@ -1670,6 +1670,7 @@ if (editForm?.template === 'group-battle') {
 {form.template === 'hidden-event' && (
   <HiddenEventEditor
     value={params}
+    participants={participants}
     onChange={(next) => setParams(next)}
   />
 )}
@@ -2081,6 +2082,7 @@ if (editForm?.template === 'group-battle') {
 {editForm.template === 'hidden-event' && (
   <HiddenEventEditor
     value={editParams}
+    participants={participants}
     onChange={(next) => setEditParams(next)}
   />
 )}

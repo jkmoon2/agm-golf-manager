@@ -7,6 +7,7 @@ const boxStyle = { border: '1px solid #e5eaf2', borderRadius: 14, padding: 12, b
 const labelStyle = { display: 'grid', gap: 5, fontSize: 12, fontWeight: 800, color: '#25344d', minWidth: 0 };
 const inputStyle = { width: '100%', minWidth: 0, height: 34, border: '1px solid #d7dfec', borderRadius: 9, padding: '0 10px', fontSize: 13, background: '#fff', boxSizing: 'border-box' };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 10, width: '100%', maxWidth: '100%', boxSizing: 'border-box' };
+const twoRowStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginTop: 10, width: '100%', maxWidth: '100%', boxSizing: 'border-box' };
 const helpStyle = { fontSize: 12, color: '#667085', lineHeight: 1.45, marginTop: 8, wordBreak: 'keep-all' };
 
 function toggleGroup(list = [], groupNo) {
@@ -29,7 +30,24 @@ function rawStepValue(raw, key, fallback) {
   return String(fallback ?? '');
 }
 
-export default function HiddenEventEditor({ value, onChange }) {
+function rawPointValue(raw, key, fallback) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const points = (src.personalPoints && typeof src.personalPoints === 'object') ? src.personalPoints : ((src.points && typeof src.points === 'object') ? src.points : {});
+  if (Object.prototype.hasOwnProperty.call(points, key)) return points[key] == null ? '' : String(points[key]);
+  return String(fallback ?? '');
+}
+
+function normalizeLimitMap(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const out = {};
+  Object.entries(src).forEach(([key, value]) => {
+    const n = Number(value);
+    if (String(key || '') && Number.isFinite(n) && n >= 0) out[String(key)] = Math.floor(n);
+  });
+  return out;
+}
+
+export default function HiddenEventEditor({ value, onChange, participants = [] }) {
   const cfg = normalizeHiddenEventParams(value);
   const modeValue = getModeValue(cfg);
   const [stepText, setStepText] = useState(() => ({
@@ -37,6 +55,16 @@ export default function HiddenEventEditor({ value, onChange }) {
     '2-3': rawStepValue(value, '2-3', cfg.handicapSteps['2-3']),
     '3-4': rawStepValue(value, '3-4', cfg.handicapSteps['3-4']),
   }));
+  const [pointText, setPointText] = useState(() => ({
+    win: rawPointValue(value, 'win', cfg.personalPoints.win),
+    lose: rawPointValue(value, 'lose', cfg.personalPoints.lose),
+    draw: rawPointValue(value, 'draw', cfg.personalPoints.draw),
+    mutual: rawPointValue(value, 'mutual', cfg.personalPoints.mutual),
+  }));
+  const [limitText, setLimitText] = useState(() => {
+    const map = normalizeLimitMap((value && (value.targetLimits || value.receiveLimits || value.targetReceiveLimits)) || cfg.targetLimits);
+    return Object.fromEntries(Object.entries(map).map(([k, v]) => [String(k), String(v)]));
+  });
 
   const stepSyncKey = useMemo(() => JSON.stringify((value && value.handicapSteps) || {}), [value]);
   useEffect(() => {
@@ -48,6 +76,24 @@ export default function HiddenEventEditor({ value, onChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepSyncKey]);
 
+  const pointSyncKey = useMemo(() => JSON.stringify((value && (value.personalPoints || value.points)) || {}), [value]);
+  useEffect(() => {
+    setPointText({
+      win: rawPointValue(value, 'win', cfg.personalPoints.win),
+      lose: rawPointValue(value, 'lose', cfg.personalPoints.lose),
+      draw: rawPointValue(value, 'draw', cfg.personalPoints.draw),
+      mutual: rawPointValue(value, 'mutual', cfg.personalPoints.mutual),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointSyncKey]);
+
+  const limitSyncKey = useMemo(() => JSON.stringify((value && (value.targetLimits || value.receiveLimits || value.targetReceiveLimits)) || {}), [value]);
+  useEffect(() => {
+    const map = normalizeLimitMap((value && (value.targetLimits || value.receiveLimits || value.targetReceiveLimits)) || cfg.targetLimits);
+    setLimitText(Object.fromEntries(Object.entries(map).map(([k, v]) => [String(k), String(v)])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limitSyncKey]);
+
   const emit = (patch) => onChange && onChange({ ...cfg, ...patch });
   const emitMode = (nextModeValue) => {
     if (nextModeValue === 'fourball-random') emit({ mode: 'fourball', fourballMode: 'random' });
@@ -58,6 +104,10 @@ export default function HiddenEventEditor({ value, onChange }) {
     setStepText((prev) => ({ ...prev, [key]: raw }));
     emit({ handicapSteps: { ...cfg.handicapSteps, [key]: raw === '' ? '' : Number(raw) } });
   };
+  const emitPoint = (key, raw) => {
+    setPointText((prev) => ({ ...prev, [key]: raw }));
+    emit({ personalPoints: { ...cfg.personalPoints, [key]: raw === '' ? '' : Number(raw) } });
+  };
   const emitPairGroup = (side, groupNo) => {
     const pairGroups = { ...cfg.pairGroups, [side]: toggleGroup(cfg.pairGroups?.[side], groupNo) };
     const other = side === 'A' ? 'B' : 'A';
@@ -66,6 +116,26 @@ export default function HiddenEventEditor({ value, onChange }) {
     if (!pairGroups[other].length) pairGroups[other] = [1, 2, 3, 4].filter((g) => !sideSet.has(g));
     emit({ pairGroups });
   };
+  const emitLimitMode = (nextMode) => {
+    if (nextMode !== 'personal') {
+      setLimitText({});
+      emit({ targetLimitMode: 'unlimited', targetLimits: {} });
+      return;
+    }
+    emit({ targetLimitMode: 'personal', targetLimits: normalizeLimitMap(limitText) });
+  };
+  const emitTargetLimit = (participantId, raw) => {
+    const pid = String(participantId || '');
+    if (!pid) return;
+    const nextText = { ...(limitText || {}) };
+    if (raw === '' || raw == null) delete nextText[pid];
+    else nextText[pid] = String(raw);
+    setLimitText(nextText);
+    emit({ targetLimitMode: 'personal', targetLimits: normalizeLimitMap(nextText) });
+  };
+
+  const limitModeValue = cfg.targetLimitMode === 'personal' || Object.keys(cfg.targetLimits || {}).length ? 'personal' : 'unlimited';
+  const participantList = Array.isArray(participants) ? participants : [];
 
   return (
     <div style={boxStyle}>
@@ -88,7 +158,23 @@ export default function HiddenEventEditor({ value, onChange }) {
 
       {cfg.mode === 'personal' && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>조 간 추가 G핸디</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>개인 1대1 점수 설정</div>
+          <div style={twoRowStyle}>
+            <label style={labelStyle}>승리 점수
+              <input style={inputStyle} type="number" inputMode="decimal" value={pointText.win} onChange={(e) => emitPoint('win', e.target.value)} />
+            </label>
+            <label style={labelStyle}>패배 점수
+              <input style={inputStyle} type="number" inputMode="decimal" value={pointText.lose} onChange={(e) => emitPoint('lose', e.target.value)} />
+            </label>
+            <label style={labelStyle}>비김 점수
+              <input style={inputStyle} type="number" inputMode="decimal" value={pointText.draw} onChange={(e) => emitPoint('draw', e.target.value)} />
+            </label>
+            <label style={labelStyle}>맞지목 점수
+              <input style={inputStyle} type="number" inputMode="decimal" value={pointText.mutual} onChange={(e) => emitPoint('mutual', e.target.value)} />
+            </label>
+          </div>
+
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
           <div style={rowStyle}>
             <label style={labelStyle}>1조~2조
               <input style={inputStyle} type="number" inputMode="numeric" value={stepText['1-2']} onChange={(e) => emitStep('1-2', e.target.value)} />
@@ -100,9 +186,42 @@ export default function HiddenEventEditor({ value, onChange }) {
               <input style={inputStyle} type="number" inputMode="numeric" value={stepText['3-4']} onChange={(e) => emitStep('3-4', e.target.value)} />
             </label>
           </div>
-          <div style={helpStyle}>
-            낮은 번호 조가 높은 번호 조를 선택하면 본인 G핸디가 차감되고, 높은 번호 조가 낮은 번호 조를 선택하면 본인 G핸디가 추가됩니다. 건너뛰는 조는 구간값을 합산합니다.
-          </div>
+
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>지목 받는 횟수 제한</div>
+          <label style={{ ...labelStyle, marginTop: 8 }}>제한 방식
+            <select style={inputStyle} value={limitModeValue} onChange={(e) => emitLimitMode(e.target.value)}>
+              <option value="unlimited">무제한</option>
+              <option value="personal">개인별 제한</option>
+            </select>
+          </label>
+
+          {limitModeValue === 'personal' && (
+            <div style={{ marginTop: 10, border: '1px solid #e5eaf2', borderRadius: 12, background: '#fff', padding: 8, maxHeight: 220, overflow: 'auto' }}>
+              {!participantList.length && <div style={helpStyle}>참가자 목록이 없습니다.</div>}
+              {participantList.map((p) => {
+                const pid = String(p?.id ?? '');
+                if (!pid) return null;
+                const raw = Object.prototype.hasOwnProperty.call(limitText || {}, pid) ? String(limitText[pid] ?? '') : '';
+                return (
+                  <div key={`hidden-target-limit-${pid}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 2px', borderBottom: '1px solid #f1f5f9' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: '#16243f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.nickname || '-'}</div>
+                      <div style={{ fontSize: 11, color: '#667085', marginTop: 2 }}>{p.room ? `${p.room}번방 · ` : ''}{p.group ? `${p.group}조` : ''}</div>
+                    </div>
+                    <input
+                      style={{ ...inputStyle, width: 104, height: 32, textAlign: 'center' }}
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      placeholder="무제한"
+                      value={raw}
+                      onChange={(e) => emitTargetLimit(pid, e.target.value)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
