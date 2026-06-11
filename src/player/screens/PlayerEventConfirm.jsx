@@ -550,6 +550,21 @@ const events = useMemo(
         }));
         return { kind: 'team', metricLabel: '최종결과', rows, isHiddenFourball: true };
       }
+      if (target === 'room') {
+        const map = new Map();
+        for (let r = 1; r <= effectiveRoomCount; r += 1) {
+          map.set(r, { key: String(r), room: r, label: getRoomLabel(r), value: 0 });
+        }
+        (data.matchRows || []).forEach((row) => {
+          const roomNo = Number(row?.room ?? 0);
+          if (!Number.isFinite(roomNo) || roomNo < 1) return;
+          if (!map.has(roomNo)) map.set(roomNo, { key: String(roomNo), room: roomNo, label: getRoomLabel(roomNo), value: 0 });
+          const bucket = map.get(roomNo);
+          bucket.value += Number(row?.point ?? 0) || 0;
+        });
+        const rows = Array.from(map.values()).sort((a, b) => b.value - a.value || a.room - b.room).map((row, i) => ({ ...row, rank: i + 1 }));
+        return { kind: 'room', metricLabel: '합산점수', rows };
+      }
       const rows = (data.matchRows || []).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
@@ -558,9 +573,9 @@ const events = useMemo(
         value: row.point,
         status: row.status,
         displayText: row.resultText,
-        bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}`,
+        bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}${row.mutual ? ` / 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmtScore(row.mutualPoint)}` : ''}`,
       }));
-      return { kind: 'person', metricLabel: '승패', extraMetricLabel: '결과', personHeader: '선택자', roomHeader: '상대방', rows, isHiddenPersonal: true };
+      return { kind: 'person', metricLabel: '점수', extraMetricLabel: '결과', personHeader: '선택자', roomHeader: '상대방', rows, isHiddenPersonal: true };
     }
 
     // ── rank-score-game(대회 순위 점수 게임) ─────────────────────

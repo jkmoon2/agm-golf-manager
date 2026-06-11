@@ -20,6 +20,13 @@ export function defaultHiddenEventParams() {
       B: [3, 4],
     },
     selectionLocked: false,
+    personalPoints: {
+      win: 1,
+      lose: 0,
+      draw: 0.5,
+      mutual: 0,
+    },
+    handicapOverrides: {},
   };
 }
 
@@ -31,6 +38,41 @@ function clampGroupNo(value) {
 function normalizeStepValue(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function normalizePointValue(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function normalizeHiddenPersonalPoints(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    win: normalizePointValue(src.win ?? src.winPoint ?? src.winner ?? src.WIN, 1),
+    lose: normalizePointValue(src.lose ?? src.losePoint ?? src.loser ?? src.LOSE, 0),
+    draw: normalizePointValue(src.draw ?? src.drawPoint ?? src.tie ?? src.DRAW, 0.5),
+    mutual: normalizePointValue(src.mutual ?? src.mutualPoint ?? src.match ?? src.MUTUAL, 0),
+  };
+}
+
+function normalizeHiddenHandicapOverrides(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const out = {};
+  Object.entries(src).forEach(([key, value]) => {
+    const n = Number(value);
+    if (String(key || '') && Number.isFinite(n)) out[String(key)] = n;
+  });
+  return out;
+}
+
+function getHiddenParticipantHandicap(participant, params) {
+  const cfg = normalizeHiddenEventParams(params);
+  const pid = String(participant?.id ?? '');
+  if (pid && Object.prototype.hasOwnProperty.call(cfg.handicapOverrides || {}, pid)) {
+    const n = Number(cfg.handicapOverrides[pid]);
+    if (Number.isFinite(n)) return n;
+  }
+  return Number(participant?.handicap ?? 0) || 0;
 }
 
 export function normalizeHiddenHandicapSteps(raw) {
@@ -82,6 +124,8 @@ export function normalizeHiddenEventParams(raw) {
     handicapSteps: normalizeHiddenHandicapSteps(src.handicapSteps),
     pairGroups: normalizeHiddenPairGroups(src.pairGroups),
     selectionLocked: !!(src.selectionLocked || src.locked),
+    personalPoints: normalizeHiddenPersonalPoints(src.personalPoints || src.points),
+    handicapOverrides: normalizeHiddenHandicapOverrides(src.handicapOverrides),
   };
 }
 
@@ -122,6 +166,13 @@ export function getHiddenOpponentId(slot) {
 function resultValue(p, handicapOverride = null) {
   const score = Number(p?.score ?? 0) || 0;
   const baseHandicap = Number(p?.handicap ?? 0) || 0;
+  const handicap = Number.isFinite(Number(handicapOverride)) ? Number(handicapOverride) : baseHandicap;
+  return score - handicap;
+}
+
+function hiddenResultValue(p, params, handicapOverride = null) {
+  const score = Number(p?.score ?? 0) || 0;
+  const baseHandicap = getHiddenParticipantHandicap(p, params);
   const handicap = Number.isFinite(Number(handicapOverride)) ? Number(handicapOverride) : baseHandicap;
   return score - handicap;
 }
@@ -242,19 +293,24 @@ function buildPersonalRows(eventDef, participants = [], inputsSlot = {}, opt = {
   const person = (inputsSlot?.person && typeof inputsSlot.person === 'object') ? inputsSlot.person : {};
   const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
 
+  const points = normalizeHiddenPersonalPoints(cfg.personalPoints);
   const matchRows = Object.entries(person).map(([selectorId, slot]) => {
     const selector = byId.get(String(selectorId));
     const opponentId = getHiddenOpponentId(slot);
     const opponent = byId.get(String(opponentId));
     if (!selector || !opponent) return null;
     const adjustment = getHiddenHandicapAdjustment(selector, opponent, cfg);
-    const selectorBaseHandicap = Number(selector?.handicap ?? 0) || 0;
+    const selectorBaseHandicap = getHiddenParticipantHandicap(selector, cfg);
     const selectorEffectiveHandicap = selectorBaseHandicap + adjustment;
-    const opponentHandicap = Number(opponent?.handicap ?? 0) || 0;
-    const selectorValue = resultValue(selector, selectorEffectiveHandicap);
-    const opponentValue = resultValue(opponent, opponentHandicap);
+    const opponentHandicap = getHiddenParticipantHandicap(opponent, cfg);
+    const selectorValue = hiddenResultValue(selector, cfg, selectorEffectiveHandicap);
+    const opponentValue = hiddenResultValue(opponent, cfg, opponentHandicap);
     const status = selectorValue < opponentValue ? 'win' : selectorValue > opponentValue ? 'lose' : 'draw';
-    const point = status === 'win' ? 1 : status === 'draw' ? 0.5 : 0;
+    const opponentSelectionId = getHiddenOpponentId(person[String(opponentId)] || {});
+    const mutual = String(opponentSelectionId || '') === String(selectorId || '');
+    const basePoint = status === 'win' ? points.win : status === 'draw' ? points.draw : points.lose;
+    const mutualDelta = mutual && status === 'win' ? points.mutual : mutual && status === 'lose' ? -points.mutual : 0;
+    const point = basePoint + mutualDelta;
     return {
       key: `${selectorId}-${opponentId}`,
       selectorId: String(selectorId),
@@ -274,6 +330,9 @@ function buildPersonalRows(eventDef, participants = [], inputsSlot = {}, opt = {
       value: selectorValue,
       opponentValue,
       point,
+      basePoint,
+      mutualPoint: mutualDelta,
+      mutual,
       status,
       resultText: status === 'win' ? '승' : status === 'lose' ? '패' : '무',
       detailText: `${selectorValue} : ${opponentValue}`,
@@ -311,7 +370,9 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     const aScore = Number(a?.score ?? 0) || 0;
     const bScore = Number(b?.score ?? 0) || 0;
     const scoreSum = aScore + bScore;
-    const handicapSum = (Number(a?.handicap ?? 0) || 0) + (Number(b?.handicap ?? 0) || 0);
+    const aHandicap = getHiddenParticipantHandicap(a, cfg);
+    const bHandicap = getHiddenParticipantHandicap(b, cfg);
+    const handicapSum = aHandicap + bHandicap;
     // 최종결과값 = 팀별 참가자 합산점수 - 팀 G합
     const value = scoreSum - handicapSum;
     rows.push({
@@ -330,8 +391,9 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
         roomLabel: roomLabel(roomNames, p?.room),
         group: getParticipantGroupNo(p),
         score: Number(p?.score ?? 0) || 0,
-        handicap: Number(p?.handicap ?? 0) || 0,
-        resultValue: resultValue(p),
+        handicap: getHiddenParticipantHandicap(p, cfg),
+        baseHandicap: Number(p?.handicap ?? 0) || 0,
+        resultValue: hiddenResultValue(p, cfg),
       })),
     });
   };

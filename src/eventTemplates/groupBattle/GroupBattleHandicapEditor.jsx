@@ -37,7 +37,10 @@ export default function GroupBattleHandicapEditor({
   const template = String(eventDef?.template || '');
   const metric = template === 'pick-lineup'
     ? '결과'
-    : (eventDef?.params?.metric === 'score' ? '점수' : '결과');
+    : (template === 'hidden-event' ? '히든 계산' : (eventDef?.params?.metric === 'score' ? '점수' : '결과'));
+  const eventTypeLabel = template === 'hidden-event'
+    ? '히든 이벤트'
+    : (template === 'pick-lineup' ? '개인/조 선택 대결 이벤트' : '그룹대결 이벤트');
 
   const roomLabel = (p) => {
     const r = Number(p?.room);
@@ -120,7 +123,7 @@ export default function GroupBattleHandicapEditor({
         </div>
 
         <div style={{ marginTop: 10, fontSize: 12, color:'#666', lineHeight: 1.4 }}>
-          * 여기서 수정한 G핸디는 <b>이 그룹대결 이벤트 결과</b>에만 반영됩니다.<br/>
+          * 여기서 수정한 G핸디는 <b>이 {eventTypeLabel} 결과</b>에만 반영됩니다.<br/>
           * 다른 STEP(참가자/방배정/스코어/결과표)의 G핸디 데이터와는 <b>절대 연동되지 않습니다.</b>
         </div>
 

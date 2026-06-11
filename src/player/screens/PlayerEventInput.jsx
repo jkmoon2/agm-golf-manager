@@ -2393,7 +2393,7 @@ export default function PlayerEventInput(){
                               const members = Array.isArray(row.members) ? row.members : [];
                               const left = members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'A') || members[0] || null;
                               const right = members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'B') || members.find((m) => String(m?.id || '') !== String(left?.id || '')) || null;
-                              const hdSum = Number(left?.handicap || 0) + Number(right?.handicap || 0);
+                              const hdSum = Number(row?.handicapSum ?? ((Number(left?.handicap || 0) + Number(right?.handicap || 0))));
                               return (
                                 <tr key={`hidden-fourball-${ev.id}-${row.key}`}>
                                   <td>{idx + 1}</td>

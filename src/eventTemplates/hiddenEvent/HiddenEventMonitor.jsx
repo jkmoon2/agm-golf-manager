@@ -1,7 +1,7 @@
 // /src/eventTemplates/hiddenEvent/HiddenEventMonitor.jsx
 
-import React from 'react';
-import { computeHiddenEvent, normalizeHiddenEventParams } from '../../events/hiddenEvent';
+import React, { useEffect, useState } from 'react';
+import { computeHiddenEvent, normalizeHiddenEventParams, normalizeHiddenPersonalPoints } from '../../events/hiddenEvent';
 
 const fmt = (value) => {
   const n = Number(value);
@@ -14,13 +14,33 @@ const panelStyle = { width: '100%', maxWidth: 560, maxHeight: '85dvh', overflow:
 const btnStyle = { border: '1px solid #d7dfec', borderRadius: 10, background: '#fff', padding: '9px 12px', fontSize: 13, fontWeight: 900 };
 const primaryStyle = { ...btnStyle, borderColor: '#2563eb', background: '#eaf2ff', color: '#1d4ed8' };
 const dangerStyle = { ...btnStyle, borderColor: '#fecdd3', background: '#fff1f2', color: '#be123c' };
+const inputStyle = { width: '100%', minWidth: 0, height: 34, border: '1px solid #d7dfec', borderRadius: 9, padding: '0 10px', fontSize: 13, background: '#fff', boxSizing: 'border-box' };
+const labelStyle = { display: 'grid', gap: 5, fontSize: 12, fontWeight: 800, color: '#25344d', minWidth: 0 };
 
-export default function HiddenEventMonitor({ eventDef, participants = [], inputsByEvent = {}, roomNames = [], onClose, onToggleReveal, onToggleLock, onAssignFourball }) {
+export default function HiddenEventMonitor({ eventDef, participants = [], inputsByEvent = {}, roomNames = [], onClose, onToggleReveal, onToggleLock, onAssignFourball, onSavePersonalPoints }) {
   const cfg = normalizeHiddenEventParams(eventDef?.params);
   const data = computeHiddenEvent(eventDef, participants, inputsByEvent, { roomNames });
   const personalRows = Array.isArray(data?.matchRows) ? data.matchRows : [];
   const teamRows = Array.isArray(data?.teamRows) ? data.teamRows : [];
   const fourballTitle = cfg.fourballMode === 'self' ? '포볼 참가자 무작위배정' : '포볼 히든팀';
+  const [pointDraft, setPointDraft] = useState(() => normalizeHiddenPersonalPoints(cfg.personalPoints));
+
+  useEffect(() => {
+    setPointDraft(normalizeHiddenPersonalPoints(cfg.personalPoints));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventDef?.id, JSON.stringify(cfg.personalPoints || {})]);
+
+  const updatePointDraft = (key, value) => {
+    setPointDraft((prev) => ({ ...(prev || {}), [key]: value }));
+  };
+
+  const savePointDraft = async () => {
+    const next = normalizeHiddenPersonalPoints(pointDraft);
+    if (typeof onSavePersonalPoints === 'function') {
+      await onSavePersonalPoints(next);
+      alert('개인 1대1 점수 설정이 저장되었습니다.');
+    }
+  };
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -45,6 +65,32 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
           )}
         </div>
 
+        {cfg.mode === 'personal' && (
+          <div style={{ border: '1px solid #e5eaf2', background: '#fbfdff', borderRadius: 14, padding: 12, marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c', marginBottom: 8 }}>개인 1대1 점수 설정</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+              <label style={labelStyle}>승리
+                <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.win ?? ''} onChange={(e) => updatePointDraft('win', e.target.value)} />
+              </label>
+              <label style={labelStyle}>패배
+                <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.lose ?? ''} onChange={(e) => updatePointDraft('lose', e.target.value)} />
+              </label>
+              <label style={labelStyle}>비김
+                <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.draw ?? ''} onChange={(e) => updatePointDraft('draw', e.target.value)} />
+              </label>
+              <label style={labelStyle}>맞지목
+                <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.mutual ?? ''} onChange={(e) => updatePointDraft('mutual', e.target.value)} />
+              </label>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
+              맞지목이면 승리자는 승리점수에 맞지목 점수를 더하고, 패배자는 패배점수에서 맞지목 점수를 차감합니다. 비김은 맞지목 가산/차감 없이 비김 점수만 적용합니다.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <button type="button" style={primaryStyle} onClick={savePointDraft}>점수 설정 저장</button>
+            </div>
+          </div>
+        )}
+
         {cfg.mode === 'fourball' ? (
           <div style={{ display: 'grid', gap: 8 }}>
             {!teamRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>{cfg.fourballMode === 'self' ? '아직 참가자 버튼 무작위 배정 팀원이 없습니다.' : '아직 포볼팀이 배정되지 않았습니다.'}</div>}
@@ -65,10 +111,10 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
               <div key={row.key} style={{ border: '1px solid #e5eaf2', borderRadius: 12, padding: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <b>{idx + 1}. {row.name} → {row.opponentName}</b>
-                  <b style={{ color: row.status === 'win' ? '#1d4ed8' : row.status === 'lose' ? '#be123c' : '#64748b' }}>{row.resultText}</b>
+                  <b style={{ color: row.status === 'win' ? '#1d4ed8' : row.status === 'lose' ? '#be123c' : '#64748b' }}>{row.resultText} · {fmt(row.point)}점</b>
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#667085' }}>
-                  {row.name} 결과 {fmt(row.value)} / {row.opponentName} 결과 {fmt(row.opponentValue)} · 조핸디 {row.adjustment > 0 ? '+' : ''}{fmt(row.adjustment)}
+                  {row.name} 결과 {fmt(row.value)} / {row.opponentName} 결과 {fmt(row.opponentValue)} · 조핸디 {row.adjustment > 0 ? '+' : ''}{fmt(row.adjustment)}{row.mutual ? ` · 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmt(row.mutualPoint)}` : ''}
                 </div>
               </div>
             ))}
