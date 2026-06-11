@@ -26,6 +26,11 @@ export function defaultHiddenEventParams() {
       draw: 0.5,
       mutual: 0,
     },
+    // 개인 1대1에서 상대방별 지목받는 횟수 제한
+    // - targetLimitMode: unlimited | personal
+    // - targetLimits: { [participantId]: number }
+    targetLimitMode: 'unlimited',
+    targetLimits: {},
     handicapOverrides: {},
   };
 }
@@ -61,6 +66,16 @@ function normalizeHiddenHandicapOverrides(raw) {
   Object.entries(src).forEach(([key, value]) => {
     const n = Number(value);
     if (String(key || '') && Number.isFinite(n)) out[String(key)] = n;
+  });
+  return out;
+}
+
+function normalizeHiddenTargetLimits(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const out = {};
+  Object.entries(src).forEach(([key, value]) => {
+    const n = Number(value);
+    if (String(key || '') && Number.isFinite(n) && n >= 0) out[String(key)] = Math.floor(n);
   });
   return out;
 }
@@ -125,6 +140,8 @@ export function normalizeHiddenEventParams(raw) {
     pairGroups: normalizeHiddenPairGroups(src.pairGroups),
     selectionLocked: !!(src.selectionLocked || src.locked),
     personalPoints: normalizeHiddenPersonalPoints(src.personalPoints || src.points),
+    targetLimitMode: (src.targetLimitMode === 'personal' || src.limitMode === 'personal') ? 'personal' : 'unlimited',
+    targetLimits: normalizeHiddenTargetLimits(src.targetLimits || src.receiveLimits || src.targetReceiveLimits),
     handicapOverrides: normalizeHiddenHandicapOverrides(src.handicapOverrides),
   };
 }

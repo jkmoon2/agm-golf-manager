@@ -789,7 +789,7 @@ const events = useMemo(
                       {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '30%' : '50%' }} />}
                       <col style={res.isHiddenFourball ? { width: '54%' } : undefined} />
                       {hasExtraMetric && <col style={{ width: res.isHiddenPersonal ? 54 : 58 }} />}
-                      <col style={{ width: res.isHiddenPersonal ? 54 : (res.isHiddenFourball ? 58 : 80) }} />
+                      <col style={{ width: res.isHiddenPersonal ? 54 : (res.isHiddenFourball ? 78 : 80) }} />
                     </colgroup>
                     <thead>
                       <tr>
@@ -797,7 +797,7 @@ const events = useMemo(
                         {res.kind === 'person' && <th className={tCss.cell}>{res.personHeader || '닉네임'}</th>}
                         <th className={tCss.cell}>{res.roomHeader || (res.kind === 'room' ? '방' : res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '방' : '방')))}</th>
                         {hasExtraMetric && <th className={tCss.cell} style={{ color: '#2563eb' }}>{res.extraMetricLabel}</th>}
-                        <th className={tCss.cell}>{res.metricLabel || '점수'}</th>
+                        <th className={tCss.cell} style={res.isHiddenFourball ? { whiteSpace: 'nowrap', wordBreak: 'keep-all', fontSize: 12, paddingLeft: 4, paddingRight: 4 } : undefined}>{res.metricLabel || '점수'}</th>
                       </tr>
                     </thead>
                     <tbody>

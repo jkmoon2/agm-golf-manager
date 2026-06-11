@@ -115,16 +115,15 @@ export default function GroupBattleHandicapEditor({
   return (
     <div style={backdrop} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>
       <div style={card} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap: 8 }}>
-          <div style={{ fontWeight: 800 }}>
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap: 8 }}>
+          <div style={{ fontWeight: 800, minWidth: 0 }}>
             G핸디 수정 <span style={{ color:'#9aa3ad', fontWeight: 600, marginLeft: 6 }}>· {title} · 기준: {metric}</span>
           </div>
-          <button type="button" style={btn} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>닫기</button>
+          <button type="button" style={{ ...btn, whiteSpace: 'nowrap', minWidth: 56, flexShrink: 0 }} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>닫기</button>
         </div>
 
         <div style={{ marginTop: 10, fontSize: 12, color:'#666', lineHeight: 1.4 }}>
-          * 여기서 수정한 G핸디는 <b>이 {eventTypeLabel} 결과</b>에만 반영됩니다.<br/>
-          * 다른 STEP(참가자/방배정/스코어/결과표)의 G핸디 데이터와는 <b>절대 연동되지 않습니다.</b>
+          * 여기서 수정한 G핸디는 <b>이 {eventTypeLabel} 결과</b>에만 반영됩니다.
         </div>
 
         <div style={listWrap}>
@@ -252,6 +251,7 @@ const btn = {
   padding: '8px 12px',
   fontSize: 13,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const btnSub = {
