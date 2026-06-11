@@ -36,7 +36,7 @@ import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normali
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
 import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../events/rankScoreGame';
-import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../events/hiddenEvent';
+import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs, normalizeHiddenPersonalPoints } from '../events/hiddenEvent';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -464,7 +464,7 @@ if (form.template === 'group-battle') {
         template: form.template,
         params: hiddenParams || rankScoreParams || pickLineupParams || parsed,
         target: isHiddenEvent ? (hiddenParams.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'))),
-        rankOrder: isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : 'asc'),
+        rankOrder: isHiddenEvent ? (hiddenParams.mode === 'fourball' ? 'asc' : 'desc') : (isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : 'asc')),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -980,7 +980,7 @@ if (editForm?.template === 'group-battle') {
         template: editForm.template,
         params: hiddenParamsEdit || rankScoreParamsEdit || parsed,
         target: isHiddenEventEdit ? (hiddenParamsEdit.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target))),
-        rankOrder: isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : (isHiddenEventEdit ? 'asc' : e.rankOrder))),
+        rankOrder: isHiddenEventEdit ? (hiddenParamsEdit.mode === 'fourball' ? 'asc' : 'desc') : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder))),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -1139,6 +1139,25 @@ if (editForm?.template === 'group-battle') {
         ? rankScoreGamePreview.roomRows.map((r) => ({ room: r.room, name: r.name, score: r.value }))
         : [];
     }
+    if (previewDef.template === 'hidden-event') {
+      const cfg = normalizeHiddenEventParams(previewDef.params);
+      if (cfg.mode === 'personal') {
+        const map = new Map();
+        for (let r = 1; r <= roomCount; r += 1) {
+          map.set(r, { room: r, name: roomNames[r - 1]?.trim() || `${r}번방`, score: 0 });
+        }
+        (hiddenEventPreview?.matchRows || []).forEach((row) => {
+          const roomNo = Number(row?.room ?? 0);
+          if (!Number.isFinite(roomNo) || roomNo < 1) return;
+          if (!map.has(roomNo)) map.set(roomNo, { room: roomNo, name: roomNames[roomNo - 1]?.trim() || `${roomNo}번방`, score: 0 });
+          const bucket = map.get(roomNo);
+          bucket.score += Number(row?.point ?? 0) || 0;
+        });
+        const rows = Array.from(map.values());
+        rows.sort((a, b) => b.score - a.score || a.room - b.room);
+        return rows;
+      }
+    }
     const arr = [];
     for (let r = 1; r <= roomCount; r++) {
       const ppl = participants.filter(p => p.room === r);
@@ -1147,7 +1166,7 @@ if (editForm?.template === 'group-battle') {
     }
     arr.sort((a, b) => sign * (a.score - b.score));
     return arr;
-  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview, rankScoreGamePreview]);
+  }, [participants, perP, perR, previewDef, roomCount, roomNames, sign, holeRankForcePreview, bingoPreview, rankScoreGamePreview, hiddenEventPreview]);
 
   // 팀(포볼) 계산: 1조/2조 기준으로 A/B팀 구성
   const teamRows = useMemo(() => {
@@ -1278,7 +1297,7 @@ if (editForm?.template === 'group-battle') {
   const [handicapEditId, setHandicapEditId] = useState(null);
 
   const openHandicapEditor = (ev) => {
-    if (!ev || (ev.template !== 'group-battle' && ev.template !== 'pick-lineup')) return;
+    if (!ev || (ev.template !== 'group-battle' && ev.template !== 'pick-lineup' && ev.template !== 'hidden-event')) return;
     setHandicapEditId(ev.id);
     setOpenMenuId(null);
     setMenuUpId(null);
@@ -1325,6 +1344,17 @@ if (editForm?.template === 'group-battle') {
     await updateEventImmediate({ events: next }, false);
   };
 
+  const saveHiddenPersonalPoints = async (pointsMap) => {
+    if (!hiddenMonitorEvent) return;
+    const safe = normalizeHiddenPersonalPoints(pointsMap);
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== hiddenMonitorEvent.id) return e;
+      const params = normalizeHiddenEventParams({ ...(e.params || {}), personalPoints: safe });
+      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: params.mode === 'fourball' ? 'asc' : 'desc' };
+    });
+    await updateEventImmediate({ events: next }, false);
+  };
+
   const togglePickLineupLock = async (locked) => {
     if (!pickLineupMonitorEvent) return;
     const next = (eventsOfSelected || []).map((e) => {
@@ -1361,7 +1391,7 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== hiddenMonitorEvent.id) return e;
       const params = normalizeHiddenEventParams({ ...(e.params || {}), revealed: !!revealed });
-      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: 'asc' };
+      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: params.mode === 'fourball' ? 'asc' : 'desc' };
     });
     await updateEventImmediate({ events: next }, false);
   };
@@ -1373,7 +1403,7 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== ev.id) return e;
       const params = normalizeHiddenEventParams({ ...(e.params || {}), selectionLocked: nextLocked });
-      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: 'asc' };
+      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: params.mode === 'fourball' ? 'asc' : 'desc' };
     });
     await updateEventImmediate({ events: next }, false);
     setOpenMenuId(null);
@@ -1881,6 +1911,7 @@ if (editForm?.template === 'group-battle') {
                               )}
                               {ev?.template === 'hidden-event' && (
                                 <>
+                                  <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
                                   <button
                                     onClick={() => {
                                       setHiddenMonitorId(ev.id);
@@ -2405,7 +2436,7 @@ if (editForm?.template === 'group-battle') {
         <div style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 120px)' }} />
 
         {/* 이벤트 결과 전용 G핸디 수정(다른 페이지와 연동 금지) */}
-        {(handicapEditEvent?.template === 'group-battle' || handicapEditEvent?.template === 'pick-lineup') && (
+        {(handicapEditEvent?.template === 'group-battle' || handicapEditEvent?.template === 'pick-lineup' || handicapEditEvent?.template === 'hidden-event') && (
           <GroupBattleHandicapEditor
             eventDef={handicapEditEvent}
             participants={participants}
@@ -2451,6 +2482,7 @@ if (editForm?.template === 'group-battle') {
             onToggleReveal={toggleHiddenReveal}
             onToggleLock={(locked) => toggleHiddenLock(hiddenMonitorEvent, locked)}
             onAssignFourball={assignHiddenFourball}
+            onSavePersonalPoints={saveHiddenPersonalPoints}
           />
         )}
 
