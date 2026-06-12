@@ -116,8 +116,9 @@ export default function GroupBattleHandicapEditor({
     <div style={backdrop} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>
       <div style={card} onClick={(e) => e.stopPropagation()}>
         <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap: 8 }}>
-          <div style={{ fontWeight: 800, minWidth: 0 }}>
-            G핸디 수정 <span style={{ color:'#9aa3ad', fontWeight: 600, marginLeft: 6 }}>· {title} · 기준: {metric}</span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 800 }}>G핸디 수정</div>
+            <div style={subTitleLine}>{title} · 기준: {metric}</div>
           </div>
           <button type="button" style={{ ...btn, whiteSpace: 'nowrap', minWidth: 56, flexShrink: 0 }} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>닫기</button>
         </div>
@@ -194,6 +195,18 @@ export default function GroupBattleHandicapEditor({
     </div>
   );
 }
+
+
+const subTitleLine = {
+  marginTop: 3,
+  fontSize: 12,
+  lineHeight: 1.25,
+  color: '#2563eb',
+  fontWeight: 700,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
 
 const backdrop = {
   position: 'fixed',
