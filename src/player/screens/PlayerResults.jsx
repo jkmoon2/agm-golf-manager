@@ -105,6 +105,11 @@ function readVisibleMetrics(pv, viewKey) {
   };
 }
 
+function readFourballTeamSort(pv) {
+  const v = pv?.fourballTeamSort || pv?.teamSort || 'room';
+  return (v === 'asc' || v === 'desc' || v === 'room') ? v : 'room';
+}
+
 /** AGM포볼 방 내부 정렬(0,1=A팀 / 2,3=B팀) */
 function orderRoomFourball(roomArr = []) {
   const slot = [null, null, null, null];
@@ -190,6 +195,7 @@ export default function PlayerResults() {
 
   const [hiddenRooms, setHiddenRooms] = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
+  const teamSortMode = readFourballTeamSort(sourceEventData?.publicView || {});
 
   useEffect(() => {
     const pv = sourceEventData?.publicView || {};
@@ -289,6 +295,19 @@ export default function PlayerResults() {
     vis.forEach((t, i) => { map[`${t.roomIdx}:${t.teamIdx}`] = i + 1; });
     return map;
   }, [teamsByRoom, hiddenRooms]);
+
+  const sortedTeamsForDisplay = useMemo(() => {
+    const list = teamsByRoom
+      .map((t, idx) => ({ ...t, idxInOriginal: idx }))
+      .filter(t => !hiddenRooms.has(t.roomIdx));
+    if (teamSortMode === 'asc') {
+      return list.sort((a, b) => (a.sumResult - b.sumResult) || (a.sumHandicap - b.sumHandicap) || (a.roomIdx - b.roomIdx) || (a.teamIdx - b.teamIdx));
+    }
+    if (teamSortMode === 'desc') {
+      return list.sort((a, b) => (b.sumResult - a.sumResult) || (b.sumHandicap - a.sumHandicap) || (a.roomIdx - b.roomIdx) || (a.teamIdx - b.teamIdx));
+    }
+    return list;
+  }, [teamsByRoom, hiddenRooms, teamSortMode]);
 
   const resultRef = useRef(null);
   const teamRef   = useRef(null);
@@ -472,51 +491,77 @@ export default function PlayerResults() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from({ length: roomCount }).map((_, roomIdx) => {
-                    if (hiddenRooms.has(roomIdx)) return null;
-                    const room = resultByRoom[roomIdx];
-                    if (!room) return null;
-                    const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀
-                    const r = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
-                    const sumA = r(p0) + r(p1);
-                    const sumB = r(p2) + r(p3);
-                    const rankA = teamRankMap[`${roomIdx}:0`] || '-';
-                    const rankB = teamRankMap[`${roomIdx}:1`] || '-';
+                  {teamSortMode === 'room' ? (
+                    Array.from({ length: roomCount }).map((_, roomIdx) => {
+                      if (hiddenRooms.has(roomIdx)) return null;
+                      const room = resultByRoom[roomIdx];
+                      if (!room) return null;
+                      const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀
+                      const r = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
+                      const sumA = r(p0) + r(p1);
+                      const sumB = r(p2) + r(p3);
+                      const rankA = teamRankMap[`${roomIdx}:0`] || '-';
+                      const rankB = teamRankMap[`${roomIdx}:1`] || '-';
 
-                    return (
-                      <React.Fragment key={`team-room-${roomIdx}`}>
-                        <tr>
-                          <td className={styles.td} rowSpan={4}>{roomNames[roomIdx]?.trim() ? roomNames[roomIdx] : `${roomIdx + 1}번방`}</td>
-                          <td className={styles.td}>{p0?.nickname || ''}</td>
-                          <td className={styles.td}>{p0?.handicap || 0}</td>
-                          <td className={styles.td} style={{ color:'#0b61da' }}>{p0?.score || 0}</td>
-                          <td className={styles.td} style={{ color:'red' }}>{r(p0)}</td>
-                          <td className={styles.td} rowSpan={2} style={{ fontWeight:700 }}>{sumA}</td>
-                          <td className={styles.td} rowSpan={2} style={{ background:'#fff8d1', color:'blue', fontWeight:700 }}>{rankA}등</td>
-                        </tr>
-                        <tr>
-                          <td className={styles.td}>{p1?.nickname || ''}</td>
-                          <td className={styles.td}>{p1?.handicap || 0}</td>
-                          <td className={styles.td} style={{ color:'#0b61da' }}>{p1?.score || 0}</td>
-                          <td className={styles.td} style={{ color:'red' }}>{r(p1)}</td>
-                        </tr>
-                        <tr>
-                          <td className={styles.td}>{p2?.nickname || ''}</td>
-                          <td className={styles.td}>{p2?.handicap || 0}</td>
-                          <td className={styles.td} style={{ color:'#0b61da' }}>{p2?.score || 0}</td>
-                          <td className={styles.td} style={{ color:'red' }}>{r(p2)}</td>
-                          <td className={styles.td} rowSpan={2} style={{ fontWeight:700 }}>{sumB}</td>
-                          <td className={styles.td} rowSpan={2} style={{ background:'#fff8d1', color:'blue', fontWeight:700 }}>{rankB}등</td>
-                        </tr>
-                        <tr>
-                          <td className={styles.td}>{p3?.nickname || ''}</td>
-                          <td className={styles.td}>{p3?.handicap || 0}</td>
-                          <td className={styles.td} style={{ color:'#0b61da' }}>{p3?.score || 0}</td>
-                          <td className={styles.td} style={{ color:'red' }}>{r(p3)}</td>
-                        </tr>
-                      </React.Fragment>
-                    );
-                  })}
+                      return (
+                        <React.Fragment key={`team-room-${roomIdx}`}>
+                          <tr>
+                            <td className={styles.td} rowSpan={4}>{roomNames[roomIdx]?.trim() ? roomNames[roomIdx] : `${roomIdx + 1}번방`}</td>
+                            <td className={styles.td}>{p0?.nickname || ''}</td>
+                            <td className={styles.td}>{p0?.handicap || 0}</td>
+                            <td className={styles.td} style={{ color:'#0b61da' }}>{p0?.score || 0}</td>
+                            <td className={styles.td} style={{ color:'red' }}>{r(p0)}</td>
+                            <td className={styles.td} rowSpan={2} style={{ fontWeight:700 }}>{sumA}</td>
+                            <td className={styles.td} rowSpan={2} style={{ background:'#fff8d1', color:'blue', fontWeight:700 }}>{rankA}등</td>
+                          </tr>
+                          <tr>
+                            <td className={styles.td}>{p1?.nickname || ''}</td>
+                            <td className={styles.td}>{p1?.handicap || 0}</td>
+                            <td className={styles.td} style={{ color:'#0b61da' }}>{p1?.score || 0}</td>
+                            <td className={styles.td} style={{ color:'red' }}>{r(p1)}</td>
+                          </tr>
+                          <tr>
+                            <td className={styles.td}>{p2?.nickname || ''}</td>
+                            <td className={styles.td}>{p2?.handicap || 0}</td>
+                            <td className={styles.td} style={{ color:'#0b61da' }}>{p2?.score || 0}</td>
+                            <td className={styles.td} style={{ color:'red' }}>{r(p2)}</td>
+                            <td className={styles.td} rowSpan={2} style={{ fontWeight:700 }}>{sumB}</td>
+                            <td className={styles.td} rowSpan={2} style={{ background:'#fff8d1', color:'blue', fontWeight:700 }}>{rankB}등</td>
+                          </tr>
+                          <tr>
+                            <td className={styles.td}>{p3?.nickname || ''}</td>
+                            <td className={styles.td}>{p3?.handicap || 0}</td>
+                            <td className={styles.td} style={{ color:'#0b61da' }}>{p3?.score || 0}</td>
+                            <td className={styles.td} style={{ color:'red' }}>{r(p3)}</td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })
+                  ) : (
+                    sortedTeamsForDisplay.map((team) => {
+                      const r = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
+                      const rank = teamRankMap[`${team.roomIdx}:${team.teamIdx}`] || '-';
+                      return (
+                        <React.Fragment key={`team-sorted-${team.roomIdx}-${team.teamIdx}`}>
+                          <tr>
+                            <td className={styles.td} rowSpan={2}>{team.roomName}</td>
+                            <td className={styles.td}>{team.members[0]?.nickname || ''}</td>
+                            <td className={styles.td}>{team.members[0]?.handicap || 0}</td>
+                            <td className={styles.td} style={{ color:'#0b61da' }}>{team.members[0]?.score || 0}</td>
+                            <td className={styles.td} style={{ color:'red' }}>{r(team.members[0])}</td>
+                            <td className={styles.td} rowSpan={2} style={{ fontWeight:700 }}>{team.sumResult}</td>
+                            <td className={styles.td} rowSpan={2} style={{ background:'#fff8d1', color:'blue', fontWeight:700 }}>{rank}등</td>
+                          </tr>
+                          <tr>
+                            <td className={styles.td}>{team.members[1]?.nickname || ''}</td>
+                            <td className={styles.td}>{team.members[1]?.handicap || 0}</td>
+                            <td className={styles.td} style={{ color:'#0b61da' }}>{team.members[1]?.score || 0}</td>
+                            <td className={styles.td} style={{ color:'red' }}>{r(team.members[1])}</td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
