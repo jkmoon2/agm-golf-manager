@@ -45,12 +45,12 @@ export default function usePersistRoomTableSelection({
     const vm = payload.visibleMetrics || { score: false, banddang: false };
     try {
       const docRef = doc(db, 'events', eid);
+      // publicView 전체를 덮어쓰면 STEP8 팀결과표 정렬값(fourballTeamSort)이 사라질 수 있으므로
+      // 필요한 하위 필드만 점 표기법으로 갱신합니다.
       await updateDoc(docRef, {
-        publicView: {
-          hiddenRooms: payload.hiddenRooms || [], // 1-based
-          visibleMetrics: vm,
-          metrics: vm,
-        }
+        'publicView.hiddenRooms': payload.hiddenRooms || [], // 1-based
+        'publicView.visibleMetrics': vm,
+        'publicView.metrics': vm,
       });
     } catch (e) {
       console.warn('[usePersistRoomTableSelection] remote save failed:', e);

@@ -810,6 +810,7 @@ export default function PlayerEventInput(){
   const bingoTouchedBoardsRef = useRef({});
   const bingoTouchedSharedRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
+  const pendingSavedInputsUntilRef = useRef(0);
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
   const resetTokenRef = useRef({});
@@ -879,6 +880,7 @@ export default function PlayerEventInput(){
     const cloned = cloneEventInputs(source);
     draftTouchedRef.current = false;
     pendingSavedInputsSigRef.current = '';
+    pendingSavedInputsUntilRef.current = 0;
     lastHydratedServerSigRef.current = stringifyEventInputs(cloned);
     bingoTouchedCellsRef.current = {};
     bingoTouchedBoardsRef.current = {};
@@ -895,6 +897,17 @@ export default function PlayerEventInput(){
       });
     } catch {}
     setDraft(cloned);
+  };
+
+  // 저장 직후 Firestore의 이전 스냅샷이 잠깐 다시 들어와도,
+  // 방금 저장한 값이 화면에서 빈칸/이전값으로 되돌아가지 않도록 짧게 보호합니다.
+  const keepSavedDraftVisible = (savedClone, holdMs = 5000) => {
+    const savedSig = stringifyEventInputs(savedClone);
+    pendingSavedInputsSigRef.current = savedSig;
+    pendingSavedInputsUntilRef.current = Date.now() + holdMs;
+    hydrateDraftFromServer(savedClone);
+    pendingSavedInputsSigRef.current = savedSig;
+    pendingSavedInputsUntilRef.current = Date.now() + holdMs;
   };
 
   const applyDraft = (next, touched = true) => {
@@ -921,6 +934,12 @@ export default function PlayerEventInput(){
         hydrateDraftFromServer(inputsByEventServer);
         return;
       }
+      if (Date.now() < (pendingSavedInputsUntilRef.current || 0)) {
+        // 아직 최신 저장 스냅샷이 도착하기 전이면 이전 서버값으로 draft를 덮지 않음
+        return;
+      }
+      pendingSavedInputsSigRef.current = '';
+      pendingSavedInputsUntilRef.current = 0;
     }
 
     const canHydrate = !draftTouchedRef.current || draftEmpty || draftSig === prevHydratedSig;
@@ -985,6 +1004,7 @@ export default function PlayerEventInput(){
       });
       draftTouchedRef.current = false;
       pendingSavedInputsSigRef.current = '';
+      pendingSavedInputsUntilRef.current = 0;
       lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
       setDraft(nextDraft);
       setDirty(false);
@@ -2110,8 +2130,7 @@ export default function PlayerEventInput(){
         }
       }
       const savedClone = cloneEventInputs(merged);
-      pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
-      hydrateDraftFromServer(savedClone);
+      keepSavedDraftVisible(savedClone);
       if (activeEventStorageId) {
         const nextPack = {
           inputs: savedClone,

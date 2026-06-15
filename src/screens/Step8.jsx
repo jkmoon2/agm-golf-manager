@@ -182,6 +182,12 @@ export default function Step8() {
       score: typeof vm.score === 'boolean' ? vm.score : true,
       banddang: typeof vm.banddang === 'boolean' ? vm.banddang : true
     });
+
+    // 팀결과표 정렬값도 Firestore publicView를 기준으로 복원
+    const savedTeamSort = pv.fourballTeamSort || pv.teamSort;
+    if (['room', 'asc', 'desc'].includes(savedTeamSort)) {
+      setTeamSortMode(savedTeamSort);
+    }
   }, [eventData?.publicView, roomCount]);
 
   // 운영자 즉시 저장(홈으로 나가지 않아도 Player 반영)
@@ -189,11 +195,15 @@ export default function Step8() {
     if (!updateEventImmediate) return;
     try {
       const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a,b)=>a-b); // 1-based
+      const prevPv = eventData?.publicView || {};
       await updateEventImmediate({
         publicView: {
+          ...prevPv,
           hiddenRooms: hiddenArr,
           visibleMetrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
-          metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang }
+          metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
+          fourballTeamSort: teamSortMode,
+          teamSort: teamSortMode
         }
       });
     } catch (e) {
@@ -216,6 +226,32 @@ export default function Step8() {
     // 즉시 반영
     persistPublicViewNow(hiddenRooms, next);
     setSelectMenuOpen(false);
+  };
+
+  // 팀결과표 정렬값 저장(Admin STEP8 → Player STEP5/결과표 연동용)
+  const persistTeamSortModeNow = async (nextMode) => {
+    if (!updateEventImmediate) return;
+    try {
+      const prevPv = eventData?.publicView || {};
+      await updateEventImmediate({
+        publicView: {
+          ...prevPv,
+          hiddenRooms: Array.from(hiddenRooms).map(Number).sort((a,b)=>a-b),
+          visibleMetrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
+          metrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
+          fourballTeamSort: nextMode,
+          teamSort: nextMode
+        }
+      });
+    } catch (e) {
+      console.warn('[Step8] persistTeamSortModeNow failed:', e);
+    }
+  };
+
+  const onTeamSortSelect = (nextMode) => {
+    setTeamSortMode(nextMode);
+    setTeamSortMenuOpen(false);
+    persistTeamSortModeNow(nextMode);
   };
 
   // ── 2) 캡처용 refs ───────────────────────────────────────
@@ -773,13 +809,25 @@ export default function Step8() {
                 onClick={() => setTeamSortMenuOpen(o => !o)}
                 style={{ minWidth: 72, padding: '7px 10px', fontSize: 13 }}
               >
-                {teamSortLabel}
+                정렬
               </button>
               {teamSortMenuOpen && (
                 <div
                   ref={teamSortMenuRef}
                   className={styles.dropdownMenu}
-                  style={{ right: 0, left: 'auto', minWidth: 92, zIndex: 15 }}
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    left: 'auto',
+                    minWidth: 92,
+                    zIndex: 30,
+                    background: '#fff',
+                    border: '1px solid #d6deec',
+                    borderRadius: 8,
+                    boxShadow: '0 8px 18px rgba(15, 35, 75, 0.15)',
+                    overflow: 'hidden'
+                  }}
                 >
                   {[
                     ['room', '방'],
@@ -789,7 +837,7 @@ export default function Step8() {
                     <button
                       key={`team-sort-${value}`}
                       type="button"
-                      onClick={() => { setTeamSortMode(value); setTeamSortMenuOpen(false); }}
+                      onClick={() => onTeamSortSelect(value)}
                       style={{ display: 'block', width: '100%', border: 0, background: teamSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'left', padding: '9px 10px', fontSize: 13, fontWeight: teamSortMode === value ? 800 : 600 }}
                     >
                       {label}
