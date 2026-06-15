@@ -59,6 +59,11 @@ export default function Step8() {
   // ※ hiddenRooms를 **1-based(방번호)** 세트로 유지합니다.
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
+  // 팀결과표 정렬: 방(기본) / 오름(낮은 총점 우선) / 내림(높은 총점 우선)
+  const [teamSortMode, setTeamSortMode]     = useState('room');
+  const [teamSortMenuOpen, setTeamSortMenuOpen] = useState(false);
+  const teamSortMenuRef = useRef(null);
+  const teamSortBtnRef = useRef(null);
   const [visibleMetrics, setVisibleMetrics] = useState({
     score: true,
     banddang: true
@@ -133,6 +138,17 @@ export default function Step8() {
     document.addEventListener('mousedown', onDoc, true);
     return () => document.removeEventListener('mousedown', onDoc, true);
   }, [selectMenuOpen]);
+
+  useEffect(() => {
+    if (!teamSortMenuOpen) return;
+    const onDoc = (e) => {
+      if (teamSortMenuRef.current && teamSortMenuRef.current.contains(e.target)) return;
+      if (teamSortBtnRef.current && teamSortBtnRef.current.contains(e.target)) return;
+      setTeamSortMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
+  }, [teamSortMenuOpen]);
 
   // 공통 헬퍼(인덱스 → 1-based Set 판정)
   const isHiddenIdx = (i) => hiddenRooms.has(i + 1);
@@ -452,6 +468,32 @@ export default function Step8() {
     return rankMapObj;
   }, [teamsByRoom, hiddenRooms]);
 
+  const visibleTeamEntries = useMemo(() => {
+    const list = teamsByRoom
+      .map((team, idx) => ({ ...team, idxInOriginal: idx, rank: teamRankMap[idx] || '-' }))
+      .filter(team => !isHiddenIdx(team.roomIdx));
+
+    if (teamSortMode === 'asc') {
+      return [...list].sort((a, b) => {
+        if (a.sumResult !== b.sumResult) return a.sumResult - b.sumResult;
+        if (a.sumHandicap !== b.sumHandicap) return a.sumHandicap - b.sumHandicap;
+        if (a.roomIdx !== b.roomIdx) return a.roomIdx - b.roomIdx;
+        return a.teamIdx - b.teamIdx;
+      });
+    }
+    if (teamSortMode === 'desc') {
+      return [...list].sort((a, b) => {
+        if (a.sumResult !== b.sumResult) return b.sumResult - a.sumResult;
+        if (a.sumHandicap !== b.sumHandicap) return b.sumHandicap - a.sumHandicap;
+        if (a.roomIdx !== b.roomIdx) return b.roomIdx - a.roomIdx;
+        return b.teamIdx - a.teamIdx;
+      });
+    }
+    return list;
+  }, [teamsByRoom, teamRankMap, hiddenRooms, teamSortMode]);
+
+  const teamSortLabel = teamSortMode === 'asc' ? '오름' : (teamSortMode === 'desc' ? '내림' : '방');
+
   return (
     <div className={styles.step} style={__pageStyle}>
       {/* ─── “선택” 버튼 + 드롭다운 ─── */}
@@ -721,7 +763,42 @@ export default function Step8() {
 
         {/* ── [Team Result Table - 화면용] ── */}
         <div className={styles.teamContainer}>
-          <h4 className={styles.tableTitle}>📋 팀결과표</h4>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, position: 'relative' }}>
+            <h4 className={styles.tableTitle} style={{ margin: 0 }}>📋 팀결과표</h4>
+            <div style={{ position: 'relative' }}>
+              <button
+                ref={teamSortBtnRef}
+                type="button"
+                className={styles.selectButton}
+                onClick={() => setTeamSortMenuOpen(o => !o)}
+                style={{ minWidth: 72, padding: '7px 10px', fontSize: 13 }}
+              >
+                {teamSortLabel}
+              </button>
+              {teamSortMenuOpen && (
+                <div
+                  ref={teamSortMenuRef}
+                  className={styles.dropdownMenu}
+                  style={{ right: 0, left: 'auto', minWidth: 92, zIndex: 15 }}
+                >
+                  {[
+                    ['room', '방'],
+                    ['asc', '오름'],
+                    ['desc', '내림'],
+                  ].map(([value, label]) => (
+                    <button
+                      key={`team-sort-${value}`}
+                      type="button"
+                      onClick={() => { setTeamSortMode(value); setTeamSortMenuOpen(false); }}
+                      style={{ display: 'block', width: '100%', border: 0, background: teamSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'left', padding: '9px 10px', fontSize: 13, fontWeight: teamSortMode === value ? 800 : 600 }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           <div className={styles.tableContainer}>
             <table className={styles.table}>
               <thead>
@@ -736,81 +813,117 @@ export default function Step8() {
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: roomCount }).map((_, roomIdx) => {
-                  if (isHiddenIdx(roomIdx)) return null;
+                {teamSortMode === 'room'
+                  ? Array.from({ length: roomCount }).map((_, roomIdx) => {
+                      if (isHiddenIdx(roomIdx)) return null;
 
-                  const idxA = teamsByRoom.findIndex(
-                    t => t.roomIdx === roomIdx && t.teamIdx === 0
-                  );
-                  const idxB = teamsByRoom.findIndex(
-                    t => t.roomIdx === roomIdx && t.teamIdx === 1
-                  );
-                  const teamA = teamsByRoom[idxA];
-                  const teamB = teamsByRoom[idxB];
-                  const rankA = teamRankMap[idxA] || '-';
-                  const rankB = teamRankMap[idxB] || '-';
+                      const idxA = teamsByRoom.findIndex(
+                        t => t.roomIdx === roomIdx && t.teamIdx === 0
+                      );
+                      const idxB = teamsByRoom.findIndex(
+                        t => t.roomIdx === roomIdx && t.teamIdx === 1
+                      );
+                      const teamA = teamsByRoom[idxA];
+                      const teamB = teamsByRoom[idxB];
+                      if (!teamA || !teamB) return null;
+                      const rankA = teamRankMap[idxA] || '-';
+                      const rankB = teamRankMap[idxB] || '-';
 
-                  return (
-                    <React.Fragment key={`team-room-${roomIdx}`}>
-                      {/* ① “방” 셀을 rowSpan=4 로 병합 */}
-                      <tr key={`team-room-${roomIdx}-A0`}>
-                        <td rowSpan={4} className={styles.cell} style={__COL.teamRoom}>
-                          {teamA.roomName}
-                        </td>
-                        <td className={styles.cell} style={__COL.teamNick}>{teamA.members[0]?.nickname}</td>
-                        <td className={styles.cell} style={__COL.teamGhandi}>{teamA.members[0]?.handicap}</td>
-                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
-                          {teamA.members[0]?.score}
-                        </td>
-                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
-                          {(teamA.members[0]?.score || 0) - (teamA.members[0]?.handicap || 0)}
-                        </td>
-                        <td rowSpan={2} className={styles.footerResult} style={__COL.teamTotal}>
-                          {teamA.sumResult}
-                        </td>
-                        <td rowSpan={2} className={styles.footerRank} style={__COL.teamRank}>
-                          {rankA}등
-                        </td>
-                      </tr>
-                      <tr key={`team-room-${roomIdx}-A1`}>
-                        <td className={styles.cell} style={__COL.teamNick}>{teamA.members[1]?.nickname}</td>
-                        <td className={styles.cell} style={__COL.teamGhandi}>{teamA.members[1]?.handicap}</td>
-                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
-                          {teamA.members[1]?.score}
-                        </td>
-                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
-                          {(teamA.members[1]?.score || 0) - (teamA.members[1]?.handicap || 0)}
-                        </td>
-                      </tr>
-                      <tr key={`team-room-${roomIdx}-B0`}>
-                        <td className={styles.cell} style={__COL.teamNick}>{teamB.members[0]?.nickname}</td>
-                        <td className={styles.cell} style={__COL.teamGhandi}>{teamB.members[0]?.handicap}</td>
-                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
-                          {teamB.members[0]?.score}
-                        </td>
-                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
-                          {(teamB.members[0]?.score || 0) - (teamB.members[0]?.handicap || 0)}
-                        </td>
-                        <td rowSpan={2} className={styles.footerResult} style={__COL.teamTotal}>
-                          {teamB.sumResult}
-                        </td>
-                        <td rowSpan={2} className={styles.footerRank} style={__COL.teamRank}>
-                          {rankB}등
-                        </td>
-                      </tr>
-                      <tr key={`team-room-${roomIdx}-B1`}>
-                        <td className={styles.cell} style={__COL.teamNick}>{teamB.members[1]?.nickname}</td>
-                        <td className={styles.cell} style={__COL.teamGhandi}>{teamB.members[1]?.handicap}</td>
-                        <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
-                          {teamB.members[1]?.score}
-                        </td>
-                        <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
-                          {(teamB.members[1]?.score || 0) - (teamB.members[1]?.handicap || 0)}
-                        </td>
-                      </tr>
-                    </React.Fragment>
-                  );
-                })}
+                      return (
+                        <React.Fragment key={`team-room-${roomIdx}`}>
+                          {/* 방 기준: 기존처럼 방 셀을 4명 병합 */}
+                          <tr key={`team-room-${roomIdx}-A0`}>
+                            <td rowSpan={4} className={styles.cell} style={__COL.teamRoom}>
+                              {teamA.roomName}
+                            </td>
+                            <td className={styles.cell} style={__COL.teamNick}>{teamA.members[0]?.nickname}</td>
+                            <td className={styles.cell} style={__COL.teamGhandi}>{teamA.members[0]?.handicap}</td>
+                            <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
+                              {teamA.members[0]?.score}
+                            </td>
+                            <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
+                              {(teamA.members[0]?.score || 0) - (teamA.members[0]?.handicap || 0)}
+                            </td>
+                            <td rowSpan={2} className={styles.footerResult} style={__COL.teamTotal}>
+                              {teamA.sumResult}
+                            </td>
+                            <td rowSpan={2} className={styles.footerRank} style={__COL.teamRank}>
+                              {rankA}등
+                            </td>
+                          </tr>
+                          <tr key={`team-room-${roomIdx}-A1`}>
+                            <td className={styles.cell} style={__COL.teamNick}>{teamA.members[1]?.nickname}</td>
+                            <td className={styles.cell} style={__COL.teamGhandi}>{teamA.members[1]?.handicap}</td>
+                            <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
+                              {teamA.members[1]?.score}
+                            </td>
+                            <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
+                              {(teamA.members[1]?.score || 0) - (teamA.members[1]?.handicap || 0)}
+                            </td>
+                          </tr>
+                          <tr key={`team-room-${roomIdx}-B0`}>
+                            <td className={styles.cell} style={__COL.teamNick}>{teamB.members[0]?.nickname}</td>
+                            <td className={styles.cell} style={__COL.teamGhandi}>{teamB.members[0]?.handicap}</td>
+                            <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
+                              {teamB.members[0]?.score}
+                            </td>
+                            <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
+                              {(teamB.members[0]?.score || 0) - (teamB.members[0]?.handicap || 0)}
+                            </td>
+                            <td rowSpan={2} className={styles.footerResult} style={__COL.teamTotal}>
+                              {teamB.sumResult}
+                            </td>
+                            <td rowSpan={2} className={styles.footerRank} style={__COL.teamRank}>
+                              {rankB}등
+                            </td>
+                          </tr>
+                          <tr key={`team-room-${roomIdx}-B1`}>
+                            <td className={styles.cell} style={__COL.teamNick}>{teamB.members[1]?.nickname}</td>
+                            <td className={styles.cell} style={__COL.teamGhandi}>{teamB.members[1]?.handicap}</td>
+                            <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
+                              {teamB.members[1]?.score}
+                            </td>
+                            <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
+                              {(teamB.members[1]?.score || 0) - (teamB.members[1]?.handicap || 0)}
+                            </td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })
+                  : visibleTeamEntries.map((team) => (
+                      <React.Fragment key={`team-sorted-${team.idxInOriginal}`}>
+                        {/* 오름/내림 기준: 방 셀을 팀 2명만 병합 */}
+                        <tr key={`team-sorted-${team.idxInOriginal}-0`}>
+                          <td rowSpan={2} className={styles.cell} style={__COL.teamRoom}>
+                            {team.roomName}
+                          </td>
+                          <td className={styles.cell} style={__COL.teamNick}>{team.members[0]?.nickname}</td>
+                          <td className={styles.cell} style={__COL.teamGhandi}>{team.members[0]?.handicap}</td>
+                          <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
+                            {team.members[0]?.score}
+                          </td>
+                          <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
+                            {(team.members[0]?.score || 0) - (team.members[0]?.handicap || 0)}
+                          </td>
+                          <td rowSpan={2} className={styles.footerResult} style={__COL.teamTotal}>
+                            {team.sumResult}
+                          </td>
+                          <td rowSpan={2} className={styles.footerRank} style={__COL.teamRank}>
+                            {team.rank}등
+                          </td>
+                        </tr>
+                        <tr key={`team-sorted-${team.idxInOriginal}-1`}>
+                          <td className={styles.cell} style={__COL.teamNick}>{team.members[1]?.nickname}</td>
+                          <td className={styles.cell} style={__COL.teamGhandi}>{team.members[1]?.handicap}</td>
+                          <td className={styles.cell} style={{ ...__COL.teamScore, color: 'blue' }}>
+                            {team.members[1]?.score}
+                          </td>
+                          <td className={styles.cell} style={{ ...__COL.teamResult, color: 'red' }}>
+                            {(team.members[1]?.score || 0) - (team.members[1]?.handicap || 0)}
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    ))}
               </tbody>
             </table>
           </div>
@@ -861,83 +974,118 @@ export default function Step8() {
               </tr>
             </thead>
             <tbody>
-              {Array.from({ length: roomCount }).map((_, roomIdx) => {
-                if (isHiddenIdx(roomIdx)) return null;
+              {teamSortMode === 'room'
+                ? Array.from({ length: roomCount }).map((_, roomIdx) => {
+                    if (isHiddenIdx(roomIdx)) return null;
 
-                const idxA = teamsByRoom.findIndex(
-                  t => t.roomIdx === roomIdx && t.teamIdx === 0
-                );
-                const idxB = teamsByRoom.findIndex(
-                  t => t.roomIdx === roomIdx && t.teamIdx === 1
-                );
-                const teamA = teamsByRoom[idxA];
-                const teamB = teamsByRoom[idxB];
-                const rankA = teamRankMap[idxA] || '-';
-                const rankB = teamRankMap[idxB] || '-';
+                    const idxA = teamsByRoom.findIndex(
+                      t => t.roomIdx === roomIdx && t.teamIdx === 0
+                    );
+                    const idxB = teamsByRoom.findIndex(
+                      t => t.roomIdx === roomIdx && t.teamIdx === 1
+                    );
+                    const teamA = teamsByRoom[idxA];
+                    const teamB = teamsByRoom[idxB];
+                    if (!teamA || !teamB) return null;
+                    const rankA = teamRankMap[idxA] || '-';
+                    const rankB = teamRankMap[idxB] || '-';
 
-                return (
-                  <React.Fragment key={`offscreen-team-room-${roomIdx}`}>
-                    <tr key={`offscreen-team-room-${roomIdx}-A0`}>
-                      <td
-                        rowSpan={4}
-                        style={{ ...captureCellStyle, ...__COL.teamRoom }}
-                      >
-                        {teamA.roomName}
-                      </td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamA.members[0]?.nickname}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamA.members[0]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
-                        {teamA.members[0]?.score}
-                      </td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
-                        {(teamA.members[0]?.score || 0) - (teamA.members[0]?.handicap || 0)}
-                      </td>
-                      <td rowSpan={2} style={{ ...captureFooterResultStyle, ...__COL.teamTotal }}>
-                        {teamA.sumResult}
-                      </td>
-                      <td rowSpan={2} style={{ ...captureFooterRankStyle, ...__COL.teamRank }}>
-                        {rankA}등
-                      </td>
-                    </tr>
-                    <tr key={`offscreen-team-room-${roomIdx}-A1`}>
-                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamA.members[1]?.nickname}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamA.members[1]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
-                        {teamA.members[1]?.score}
-                      </td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
-                        {(teamA.members[1]?.score || 0) - (teamA.members[1]?.handicap || 0)}
-                      </td>
-                    </tr>
-                    <tr key={`offscreen-team-room-${roomIdx}-B0`}>
-                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamB.members[0]?.nickname}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamB.members[0]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
-                        {teamB.members[0]?.score}
-                      </td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
-                        {(teamB.members[0]?.score || 0) - (teamB.members[0]?.handicap || 0)}
-                      </td>
-                      <td rowSpan={2} style={{ ...captureFooterResultStyle, ...__COL.teamTotal }}>
-                        {teamB.sumResult}
-                      </td>
-                      <td rowSpan={2} style={{ ...captureFooterRankStyle, ...__COL.teamRank }}>
-                        {rankB}등
-                      </td>
-                    </tr>
-                    <tr key={`offscreen-team-room-${roomIdx}-B1`}>
-                      <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamB.members[1]?.nickname}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamB.members[1]?.handicap}</td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
-                        {teamB.members[1]?.score}
-                      </td>
-                      <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
-                        {(teamB.members[1]?.score || 0) - (teamB.members[1]?.handicap || 0)}
-                      </td>
-                    </tr>
-                  </React.Fragment>
-                );
-              })}
+                    return (
+                      <React.Fragment key={`offscreen-team-room-${roomIdx}`}>
+                        <tr key={`offscreen-team-room-${roomIdx}-A0`}>
+                          <td
+                            rowSpan={4}
+                            style={{ ...captureCellStyle, ...__COL.teamRoom }}
+                          >
+                            {teamA.roomName}
+                          </td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamA.members[0]?.nickname}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamA.members[0]?.handicap}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
+                            {teamA.members[0]?.score}
+                          </td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
+                            {(teamA.members[0]?.score || 0) - (teamA.members[0]?.handicap || 0)}
+                          </td>
+                          <td rowSpan={2} style={{ ...captureFooterResultStyle, ...__COL.teamTotal }}>
+                            {teamA.sumResult}
+                          </td>
+                          <td rowSpan={2} style={{ ...captureFooterRankStyle, ...__COL.teamRank }}>
+                            {rankA}등
+                          </td>
+                        </tr>
+                        <tr key={`offscreen-team-room-${roomIdx}-A1`}>
+                          <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamA.members[1]?.nickname}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamA.members[1]?.handicap}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
+                            {teamA.members[1]?.score}
+                          </td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
+                            {(teamA.members[1]?.score || 0) - (teamA.members[1]?.handicap || 0)}
+                          </td>
+                        </tr>
+                        <tr key={`offscreen-team-room-${roomIdx}-B0`}>
+                          <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamB.members[0]?.nickname}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamB.members[0]?.handicap}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
+                            {teamB.members[0]?.score}
+                          </td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
+                            {(teamB.members[0]?.score || 0) - (teamB.members[0]?.handicap || 0)}
+                          </td>
+                          <td rowSpan={2} style={{ ...captureFooterResultStyle, ...__COL.teamTotal }}>
+                            {teamB.sumResult}
+                          </td>
+                          <td rowSpan={2} style={{ ...captureFooterRankStyle, ...__COL.teamRank }}>
+                            {rankB}등
+                          </td>
+                        </tr>
+                        <tr key={`offscreen-team-room-${roomIdx}-B1`}>
+                          <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{teamB.members[1]?.nickname}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{teamB.members[1]?.handicap}</td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
+                            {teamB.members[1]?.score}
+                          </td>
+                          <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
+                            {(teamB.members[1]?.score || 0) - (teamB.members[1]?.handicap || 0)}
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })
+                : visibleTeamEntries.map((team) => (
+                    <React.Fragment key={`offscreen-team-sorted-${team.idxInOriginal}`}>
+                      <tr key={`offscreen-team-sorted-${team.idxInOriginal}-0`}>
+                        <td rowSpan={2} style={{ ...captureCellStyle, ...__COL.teamRoom }}>
+                          {team.roomName}
+                        </td>
+                        <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{team.members[0]?.nickname}</td>
+                        <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{team.members[0]?.handicap}</td>
+                        <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
+                          {team.members[0]?.score}
+                        </td>
+                        <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
+                          {(team.members[0]?.score || 0) - (team.members[0]?.handicap || 0)}
+                        </td>
+                        <td rowSpan={2} style={{ ...captureFooterResultStyle, ...__COL.teamTotal }}>
+                          {team.sumResult}
+                        </td>
+                        <td rowSpan={2} style={{ ...captureFooterRankStyle, ...__COL.teamRank }}>
+                          {team.rank}등
+                        </td>
+                      </tr>
+                      <tr key={`offscreen-team-sorted-${team.idxInOriginal}-1`}>
+                        <td style={{ ...captureCellStyle, ...__COL.teamNick }}>{team.members[1]?.nickname}</td>
+                        <td style={{ ...captureCellStyle, ...__COL.teamGhandi }}>{team.members[1]?.handicap}</td>
+                        <td style={{ ...captureCellStyle, ...__COL.teamScore, color: 'blue' }}>
+                          {team.members[1]?.score}
+                        </td>
+                        <td style={{ ...captureCellStyle, ...__COL.teamResult, color: 'red' }}>
+                          {(team.members[1]?.score || 0) - (team.members[1]?.handicap || 0)}
+                        </td>
+                      </tr>
+                    </React.Fragment>
+                  ))}
             </tbody>
           </table>
         </div>

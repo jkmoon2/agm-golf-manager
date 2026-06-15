@@ -349,7 +349,8 @@ export default function PlayerScoreInput() {
 
   const inputRefs = useRef({});
   const holdMapRef = useRef({});
-  const LONG_PRESS_MS = 1000;
+  // ✅ STEP3 이벤트 입력과 동일한 길게누르기 반응 시간으로 통일
+  const LONG_PRESS_MS = 450;
   const MOVE_CANCEL_PX = 10;
 
   // ✅ [PATCH] Android(특히 Chrome)에서 input의 long-press가 PointerEvent로 안정적으로 전달되지 않는 케이스가 있어
