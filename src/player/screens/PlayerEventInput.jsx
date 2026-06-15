@@ -1073,8 +1073,14 @@ export default function PlayerEventInput(){
   const getBingoInputCellValue = (evId, pid, valueIndex) => {
     if (!evId || !pid) return '';
     const draftVal = inputsByEvent?.[evId]?.person?.[pid]?.values?.[valueIndex];
-    if (isBingoCellTouched(evId, pid, valueIndex)) return draftVal ?? '';
     const serverVal = inputsByEventServer?.[evId]?.person?.[pid]?.values?.[valueIndex];
+
+    // ✅ 저장 직후 Firestore 스냅샷이 도착하기 전까지는 방금 저장한 draft 값을 우선 표시
+    // - 기존에는 saveDraft()에서 touched 상태를 초기화한 직후, 아직 오래된 serverVal을 먼저 읽어
+    //   미니빙고 점수 입력칸이 잠깐 빈칸/이전값으로 깜박이는 현상이 발생할 수 있었음.
+    if (pendingSavedInputsSigRef.current) return draftVal ?? serverVal ?? '';
+
+    if (isBingoCellTouched(evId, pid, valueIndex)) return draftVal ?? '';
     if (serverVal !== undefined && serverVal !== null) return serverVal;
     return draftVal ?? '';
   };
