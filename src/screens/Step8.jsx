@@ -889,7 +889,7 @@ export default function Step8() {
                       className={styles.footerBlank}
                       style={{ background: '#f7f7f7' }}
                     />
-                    <td className={styles.footerRankFinal}>
+                    <td className={styles.footerRankFinal} style={{ color: 'blue' }}>
                       {rankMap[i]}등
                     </td>
                   </React.Fragment>
