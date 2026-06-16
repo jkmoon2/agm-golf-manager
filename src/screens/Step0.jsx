@@ -9,7 +9,14 @@ import { serverTimestamp } from 'firebase/firestore';
 
 export default function Step0() {
   const { createEvent, loadEvent, deleteEvent, allEvents, updateEventById } = useContext(EventContext);
-  const [viewMode, setViewMode]     = useState('stroke');
+  const [viewMode, setViewMode]     = useState(() => {
+    try {
+      const saved = localStorage.getItem('homeViewMode');
+      return saved === 'fourball' ? 'fourball' : 'stroke';
+    } catch {
+      return 'stroke';
+    }
+  });
   // (hotfix) locally hide deleted events to prevent reappearing in list
   const HIDDEN_KEY = 'agmHiddenEventIds.v1';
   const [hiddenEventIds, setHiddenEventIds] = useState(() => {
@@ -34,11 +41,23 @@ export default function Step0() {
   };
 
   // normalize historic mode values (agm -> fourball)
-  const normMode = (m) => (m === 'agm' ? 'fourball' : (m || 'stroke'));
-  // default to STROKE on first mount (ignore previous local storage to fix inconsistent state)
+  // ✅ [MODE-GUARD] 모드가 비어있거나 과거/혼합 값이어도 목록에서 잘못 분류되지 않도록 보정
+  const normMode = (m, evt = null) => {
+    const raw = String(m || '').trim().toLowerCase();
+    if (raw === 'fourball' || raw === 'agm' || raw === 'agm-fourball' || raw === 'agm_fourball') return 'fourball';
+    if (raw === 'stroke') return 'stroke';
+    // 과거 버그로 mode가 잘못 저장된 경우를 대비한 안전망(제목 기반 1회 보정)
+    const titleHint = String(evt?.title || evt?.name || '').toLowerCase();
+    if (titleHint.includes('포볼') || titleHint.includes('fourball') || titleHint.includes('agm')) return 'fourball';
+    return 'stroke';
+  };
+  // ✅ [MODE-GUARD] 홈 복귀 시 마지막 탭을 유지하되, 잘못된 저장값만 stroke로 정리
   useEffect(() => {
-    setViewMode('stroke');
-    try { localStorage.setItem('homeViewMode','stroke'); } catch {}
+    try {
+      const saved = localStorage.getItem('homeViewMode');
+      if (saved === 'stroke' || saved === 'fourball') setViewMode(saved);
+      else localStorage.setItem('homeViewMode','stroke');
+    } catch {}
   }, []);
   const [selectedId, setSelectedId] = useState(null);
   const navigate = useNavigate();
@@ -78,7 +97,7 @@ export default function Step0() {
   const filtered = useMemo(() => {
     const hidden = new Set(hiddenEventIds || []);
     return (allEvents || [])
-      .filter((e) => normMode(e.mode) === viewMode)
+      .filter((e) => normMode(e.mode, e) === viewMode)
       .filter((e) => !hidden.has(e.id))
       .filter((e) => !e.deleted && !e.isDeleted);
   }, [allEvents, viewMode, hiddenEventIds]);
@@ -116,6 +135,18 @@ export default function Step0() {
 
   const handleLoad = async () => {
     if (!selectedId) { alert('불러올 대회를 선택해주세요.'); return; }
+    // ✅ [MODE-GUARD] 과거 버그/늦은 저장으로 mode가 잘못 들어간 대회는 불러오기 전에 1회 자동 보정
+    try {
+      const evt = (allEvents || []).find((e) => String(e.id) === String(selectedId));
+      const fixedMode = normMode(evt?.mode, evt);
+      const currentMode = normMode(evt?.mode, null);
+      if (evt?.id && evt?.mode !== fixedMode && currentMode !== fixedMode) {
+        await updateEventById(evt.id, { mode: fixedMode });
+      }
+      try { localStorage.setItem('homeViewMode', fixedMode); } catch {}
+    } catch (e) {
+      console.warn('[Step0] mode repair skipped:', e);
+    }
     await loadEvent(selectedId);
     navigate('/admin/home/1');
   };
@@ -295,8 +326,8 @@ export default function Step0() {
                 <div className={styles.cardMain}>
                   <div className={styles.titleRow}>
                     <h3 className={styles.title} title={evt.title}>{evt.title}</h3>
-                    <span className={`${styles.badge} ${(normMode(evt.mode) === 'fourball')?styles.badgeFour:styles.badgeStroke}`}>
-                      {(normMode(evt.mode) === 'fourball') ? 'AGM 포볼' : '스트로크'}
+                    <span className={`${styles.badge} ${(normMode(evt.mode, evt) === 'fourball')?styles.badgeFour:styles.badgeStroke}`}>
+                      {(normMode(evt.mode, evt) === 'fourball') ? 'AGM 포볼' : '스트로크'}
                     </span>
                     {/* ★ patch: 종료 라벨을 윗줄로 이동(배지 옆) */}
                     {closed && <span className={styles.closed}>종료</span>}

@@ -24,7 +24,6 @@ import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
 
 import {
   getAuth,
-  onAuthStateChanged,
 } from 'firebase/auth';
 
 /* 저장 전에 undefined/NaN 정제 */
@@ -165,6 +164,27 @@ function normalizeMode(mode = 'stroke') {
 function participantsFieldByMode(mode = 'stroke') {
   // ✅ mode 값이 'agm'으로 들어오는 케이스까지 포볼로 동일 취급
   return normalizeMode(mode) === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
+function guardEventModeUpdate(updates, current) {
+  try {
+    if (!updates || typeof updates !== 'object') return updates;
+    if (!Object.prototype.hasOwnProperty.call(updates, 'mode')) return updates;
+    const currentModeRaw = current?.mode;
+    if (!currentModeRaw) {
+      updates.mode = normalizeMode(updates.mode);
+      return updates;
+    }
+    const currentMode = normalizeMode(currentModeRaw);
+    const nextMode = normalizeMode(updates.mode);
+    // 명시적 모드 변경 플래그가 없는 일반 저장에서는 기존 대회 mode를 보존
+    if (currentMode !== nextMode && updates.__allowModeChange !== true) {
+      updates.mode = currentMode;
+    } else {
+      updates.mode = nextMode;
+    }
+    delete updates.__allowModeChange;
+  } catch {}
+  return updates;
 }
 function mergeParticipantsById(primary = [], legacy = []) {
   const map = new Map();
@@ -324,22 +344,6 @@ export function EventProvider({ children }) {
   const lastEventRefreshAtRef = useRef(0);
   const lastScoresRefreshAtRef = useRef(0);
   const deletedEventIdsRef = useRef(readDeletedEventIdsFromLocal());
-  // ✅ Auth 복원/로그인 이후에도 events 구독이 다시 시작되도록 하는 트리거
-  // - 기존 문제: EventProvider가 로그인 전 먼저 마운트되면 ensureAuthed()가 null을 반환하고,
-  //   allEvents/eventData 구독이 시작되지 않은 채로 고정될 수 있었음.
-  const [authReadyTick, setAuthReadyTick] = useState(0);
-
-  useEffect(() => {
-    let mounted = true;
-    const off = onAuthStateChanged(auth, () => {
-      if (!mounted) return;
-      setAuthReadyTick((v) => v + 1);
-    });
-    return () => {
-      mounted = false;
-      try { off(); } catch {}
-    };
-  }, []);
 
   const stableStringify = (value) => {
     const seen = new WeakSet();
@@ -489,7 +493,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [isDeletedEventId, authReadyTick]);
+  }, [isDeletedEventId]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -637,7 +641,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId, authReadyTick]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId]);
   useEffect(() => {
     if (!eventId) {
       eventInputsSubRef.current = {};
@@ -672,7 +676,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, isPlayerRoute, applyIncomingEventData, authReadyTick]);
+  }, [eventId, isPlayerRoute, applyIncomingEventData]);
 
 
   useEffect(() => {
@@ -826,7 +830,8 @@ export function EventProvider({ children }) {
     await ensureAuthed();
     const { debounceMs = 400, ifChanged = true } = opts;
 
-    const enriched = enrichParticipantsDerived(updates);
+    const guardedUpdates = guardEventModeUpdate({ ...updates }, lastEventDataRef.current || {});
+    const enriched = enrichParticipantsDerived(guardedUpdates);
     // ✅ participants 저장 시, 모드별 필드(participantsStroke/participantsFourball)에도 같이 저장
     ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
 
@@ -878,7 +883,8 @@ export function EventProvider({ children }) {
     try { diagPush('timeline', { type: 'event.updateEventImmediate:start', eventId: targetEventId, keys: Object.keys(updates || {}) }); } catch {}
     await ensureAuthed();
 
-    const enriched = enrichParticipantsDerived(updates);
+    const guardedUpdates = guardEventModeUpdate({ ...updates }, lastEventDataRef.current || {});
+    const enriched = enrichParticipantsDerived(guardedUpdates);
     // ✅ participants 저장 시, 모드별 필드(participantsStroke/participantsFourball)에도 같이 저장
     ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
 
@@ -1277,7 +1283,7 @@ export function EventProvider({ children }) {
       cancelled = true;
       if (unsub) unsub();
     };
-  }, [eventId, authReadyTick]);
+  }, [eventId]);
 
   // 참가자/관리자 공용: participants에 scoresMap을 overlay (화면 계산용)
   // - scores 스냅샷이 오기 전에는 participants.score 유지(깜박임 방지)

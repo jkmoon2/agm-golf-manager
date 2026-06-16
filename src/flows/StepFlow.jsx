@@ -74,6 +74,12 @@ const withTimeout = async (promise, ms = 2500) => {
   }
 };
 
+// ✅ [MODE-GUARD] 포볼/스트로크 모드가 늦은 저장으로 서로 덮이는 것을 막기 위한 정규화
+const normalizeFlowMode = (m) => {
+  const raw = String(m || '').trim().toLowerCase();
+  return (raw === 'fourball' || raw === 'agm' || raw === 'agm-fourball' || raw === 'agm_fourball') ? 'fourball' : 'stroke';
+};
+
 // ✅ [ADD] save() 직렬화(순서 보장) - reset/점수 저장 레이스 방지
 const saveChainRef = { current: Promise.resolve() };
 
@@ -429,6 +435,22 @@ export default function StepFlow() {
         clean[key] = value;
       }
     });
+
+    // ✅ [MODE-GUARD] eventData가 늦게 동기화되기 전 기본값(stroke)이 저장되어
+    // AGM 포볼 대회의 mode를 stroke로 덮어쓰는 초창기 버그 재발 방지
+    try {
+      if (Object.prototype.hasOwnProperty.call(clean, 'mode') && eventData?.mode) {
+        const serverMode = normalizeFlowMode(eventData.mode);
+        const nextMode = normalizeFlowMode(clean.mode);
+        if (serverMode !== nextMode) {
+          clean.mode = serverMode;
+        } else {
+          clean.mode = nextMode;
+        }
+      } else if (Object.prototype.hasOwnProperty.call(clean, 'mode')) {
+        clean.mode = normalizeFlowMode(clean.mode);
+      }
+    } catch {}
 
     /**
      * ✅ [ADD] 동일 payload/동일 in-flight payload 저장 스킵 → 쓰기 폭주 방지

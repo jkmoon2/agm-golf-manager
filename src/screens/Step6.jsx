@@ -628,7 +628,7 @@ export default function Step6() {
                       colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
                       className={styles.footerBlank}
                     />
-                    <td className={styles.footerRank} style={{ ...__COL.resultResult, background: '#fff8d1' }}>
+                    <td className={styles.footerRank} style={{ ...__COL.resultResult, background: '#fff8d1', color: 'blue' }}>
                       {rankMap[i]}등
                     </td>
                   </React.Fragment>
