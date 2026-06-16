@@ -110,6 +110,11 @@ function readFourballTeamSort(pv) {
   return (v === 'asc' || v === 'desc' || v === 'room') ? v : 'room';
 }
 
+function readResultSort(pv) {
+  const v = pv?.resultSort || pv?.finalResultSort || 'room';
+  return (v === 'asc' || v === 'desc' || v === 'room') ? v : 'room';
+}
+
 /** AGM포볼 방 내부 정렬(0,1=A팀 / 2,3=B팀) */
 function orderRoomFourball(roomArr = []) {
   const slot = [null, null, null, null];
@@ -196,6 +201,7 @@ export default function PlayerResults() {
   const [hiddenRooms, setHiddenRooms] = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const teamSortMode = readFourballTeamSort(sourceEventData?.publicView || {});
+  const resultSortMode = readResultSort(sourceEventData?.publicView || {});
 
   useEffect(() => {
     const pv = sourceEventData?.publicView || {};
@@ -274,6 +280,17 @@ export default function PlayerResults() {
       .sort((a, b) => a.tot - b.tot || a.hd - b.hd);
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
+
+  const resultRoomOrder = useMemo(() => {
+    const list = Array.from({ length: roomCount }, (_, i) => i).filter(i => !hiddenRooms.has(i));
+    if (resultSortMode === 'asc') {
+      return [...list].sort((a, b) => (rankMap[a] || 9999) - (rankMap[b] || 9999) || a - b);
+    }
+    if (resultSortMode === 'desc') {
+      return [...list].sort((a, b) => (rankMap[b] || 9999) - (rankMap[a] || 9999) || b - a);
+    }
+    return list;
+  }, [roomCount, hiddenRooms, rankMap, resultSortMode]);
 
   const teamsByRoom = useMemo(() => {
     if (mode !== 'fourball') return [];
@@ -384,7 +401,7 @@ export default function PlayerResults() {
               style={{ minWidth: `calc(var(--cols) * ( var(--nick-w) + ${metricsPerRoom} * var(--metric-w) + 12px ))` }}
             >
               <colgroup>
-                {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
+                {resultRoomOrder.map((i) => (
                   <React.Fragment key={`colgrp-${i}`}>
                     <col style={{ width: 'var(--nick-w)' }} />
                     <col style={{ width: 'var(--metric-w)' }} />
@@ -397,14 +414,14 @@ export default function PlayerResults() {
 
               <thead>
                 <tr>
-                  {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
+                  {resultRoomOrder.map((i) => (
                     <th key={`res-h-${i}`} colSpan={2 + (visibleMetrics.score?1:0) + (visibleMetrics.banddang?1:0) + 1} className={styles.th}>
                       {roomNames[i]?.trim() ? roomNames[i] : `${i + 1}번방`}
                     </th>
                   ))}
                 </tr>
                 <tr>
-                  {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
+                  {resultRoomOrder.map((i) => (
                     <React.Fragment key={`res-sub-${i}`}>
                       <th className={`${styles.subTh} ${styles.nickCol}`}>닉네임</th>
                       <th className={`${styles.subTh} ${styles.metricCol} ${styles.gHead}`}>G핸디</th>
@@ -419,7 +436,7 @@ export default function PlayerResults() {
               <tbody>
                 {Array.from({ length: MAX_PER_ROOM }).map((_, ri) => (
                   <tr key={`res-row-${ri}`}>
-                    {Array.from({length: roomCount}).map((_, ci) => !hiddenRooms.has(ci) && (
+                    {resultRoomOrder.map((ci) => (
                       <React.Fragment key={`res-${ci}-${ri}`}>
                         <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{(resultByRoom[ci]||{}).detail?.[ri]?.nickname || ''}</span></td>
                         <td className={`${styles.td} ${styles.metricCol}`}>{(resultByRoom[ci]||{}).detail?.[ri]?.handicap || 0}</td>
@@ -434,7 +451,7 @@ export default function PlayerResults() {
 
               <tfoot>
                 <tr>
-                  {Array.from({length: roomCount}).map((_, ci) => !hiddenRooms.has(ci) && (
+                  {resultRoomOrder.map((ci) => (
                     <React.Fragment key={`res-sum-${ci}`}>
                       <td className={`${styles.td} ${styles.totalLabel}`}>합계</td>
                       <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{(resultByRoom[ci]||{}).sumHandicap || 0}</td>
@@ -447,7 +464,7 @@ export default function PlayerResults() {
                   ))}
                 </tr>
                 <tr>
-                  {Array.from({length: roomCount}).map((_, i) => !hiddenRooms.has(i) && (
+                  {resultRoomOrder.map((i) => (
                     <React.Fragment key={`res-rank-${i}`}>
                       <td colSpan={metricsPerRoom} className={styles.td} />
                       <td className={`${styles.td} ${styles.metricCol} ${styles.rankCell}`}>{rankMap[i]}등</td>

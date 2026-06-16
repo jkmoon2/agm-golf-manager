@@ -32,6 +32,11 @@ export default function Step6() {
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const [menuOpen, setMenuOpen]             = useState(false);
+  // 최종결과표 정렬: 방(기본) / 오름(1위→N위) / 내림(N위→1위)
+  const [resultSortMode, setResultSortMode] = useState('room');
+  const [resultSortMenuOpen, setResultSortMenuOpen] = useState(false);
+  const resultSortMenuRef = useRef(null);
+  const resultSortBtnRef = useRef(null);
 
   const showScore    = !!visibleMetrics.score;
   const setShowScore = (v) => setVisibleMetrics(m => ({ ...m, score: !!v }));
@@ -162,16 +167,21 @@ export default function Step6() {
   });
 
   // 운영자 토글 시 즉시 저장(홈 버튼 없이도 Player 반영)
-  const persistPublicViewNow = async (nextHiddenRoomsSet = hiddenRooms, nextVisible = visibleMetrics) => {
+  const persistPublicViewNow = async (nextHiddenRoomsSet = hiddenRooms, nextVisible = visibleMetrics, nextResultSort = resultSortMode) => {
     if (!updateEventImmediate) return;
     try {
       const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a, b) => a - b); // 1-based 저장
+      const prevPv = eventData?.publicView || {};
       await updateEventImmediate({
         publicView: {
+          ...prevPv,
           hiddenRooms: hiddenArr,
           visibleMetrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
           // 구버전 호환 키
-          metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang }
+          metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
+          // Admin STEP6/8 최종결과표 정렬값 → Player STEP5 연동
+          resultSort: nextResultSort,
+          finalResultSort: nextResultSort
         }
       });
     } catch (e) {
@@ -201,6 +211,11 @@ export default function Step6() {
     if (nextVM.score !== visibleMetrics.score || nextVM.banddang !== visibleMetrics.banddang) {
       setVisibleMetrics(nextVM);
     }
+
+    const savedResultSort = pv.resultSort || pv.finalResultSort;
+    if (['room', 'asc', 'desc'].includes(savedResultSort)) {
+      setResultSortMode(savedResultSort);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventData?.publicView, roomCount]);
 
@@ -212,6 +227,17 @@ export default function Step6() {
     return () => document.removeEventListener('click', close, true);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!resultSortMenuOpen) return;
+    const onDoc = (e) => {
+      if (resultSortMenuRef.current && resultSortMenuRef.current.contains(e.target)) return;
+      if (resultSortBtnRef.current && resultSortBtnRef.current.contains(e.target)) return;
+      setResultSortMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
+  }, [resultSortMenuOpen]);
+
   // 헬퍼: 내부 인덱스(0-based) → 숨김 여부(1-based Set)
   const isHiddenIdx = (idx) => hiddenRooms.has(idx + 1);
 
@@ -221,12 +247,18 @@ export default function Step6() {
     const s = new Set(hiddenRooms);
     s.has(roomNo) ? s.delete(roomNo) : s.add(roomNo);
     setHiddenRooms(s);
-    persistPublicViewNow(s, visibleMetrics);
+    persistPublicViewNow(s, visibleMetrics, resultSortMode);
   };
   const toggleMetric = (key) => {
     const next = { ...visibleMetrics, [key]: !visibleMetrics[key] };
     setVisibleMetrics(next);
-    persistPublicViewNow(hiddenRooms, next);
+    persistPublicViewNow(hiddenRooms, next, resultSortMode);
+  };
+
+  const onResultSortSelect = (nextMode) => {
+    setResultSortMode(nextMode);
+    setResultSortMenuOpen(false);
+    persistPublicViewNow(hiddenRooms, visibleMetrics, nextMode);
   };
 
   // 캡처용 refs
@@ -364,6 +396,17 @@ export default function Step6() {
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
 
+  const resultRoomOrder = useMemo(() => {
+    const list = Array.from({ length: roomCount }, (_, i) => i).filter(i => !isHiddenIdx(i));
+    if (resultSortMode === 'asc') {
+      return [...list].sort((a, b) => (rankMap[a] || 9999) - (rankMap[b] || 9999) || a - b);
+    }
+    if (resultSortMode === 'desc') {
+      return [...list].sort((a, b) => (rankMap[b] || 9999) - (rankMap[a] || 9999) || b - a);
+    }
+    return list;
+  }, [roomCount, hiddenRooms, rankMap, resultSortMode]);
+
   return (
     <div className={styles.step} style={__pageStyle}>
       {/* ──────────────── 스크롤 본문 래퍼 시작 ──────────────── */}
@@ -464,12 +507,59 @@ export default function Step6() {
 
         {/* 최종결과표 */}
         <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
-          <h4 className={styles.tableTitle}>📊 최종결과표</h4>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, position: 'relative' }}>
+            <h4 className={styles.tableTitle} style={{ margin: 0 }}>📊 최종결과표</h4>
+            <div style={{ position: 'relative' }}>
+              <button
+                ref={resultSortBtnRef}
+                type="button"
+                className={styles.selectButton}
+                onClick={() => setResultSortMenuOpen(o => !o)}
+                style={{ minWidth: 72, width: 72, padding: '7px 10px', fontSize: 13 }}
+              >
+                정렬
+              </button>
+              {resultSortMenuOpen && (
+                <div
+                  ref={resultSortMenuRef}
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    width: 72,
+                    minWidth: 72,
+                    zIndex: 30,
+                    background: '#fff',
+                    border: '1px solid #d6deec',
+                    borderRadius: 8,
+                    boxShadow: '0 8px 18px rgba(15, 35, 75, 0.15)',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {[
+                    ['room', '방'],
+                    ['asc', '오름'],
+                    ['desc', '내림'],
+                  ].map(([value, label]) => (
+                    <button
+                      key={`result-sort-${value}`}
+                      type="button"
+                      onClick={() => onResultSortSelect(value)}
+                      style={{ display: 'block', width: '100%', border: 0, background: resultSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '9px 6px', fontSize: 13, fontWeight: resultSortMode === value ? 800 : 600 }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           <table className={`${styles.table} ${styles.fixedRows}`}>
             <thead>
               <tr>
-                {headers.map((h, i) =>
-                  !isHiddenIdx(i) && (
+                {resultRoomOrder.map((i) => {
+                  const h = headers[i];
+                  return (
                     <th
                       key={i}
                       colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0) + 1}
@@ -477,28 +567,27 @@ export default function Step6() {
                     >
                       {h}
                     </th>
-                  )
-                )}
+                  );
+                })}
               </tr>
               <tr>
-                {headers.map((_, i) =>
-                  !isHiddenIdx(i) && (
-                    <React.Fragment key={i}>
-                      <th className={styles.header} style={__COL.resultNick}>닉네임</th>
-                      <th className={styles.header} style={__COL.resultGhandi}>G핸디</th>
-                      {showScore   && <th className={styles.header} style={__COL.resultScore}>점수</th>}
-                      {showHalved  && <th className={styles.header} style={__COL.resultBanddang}>반땅</th>}
-                      <th className={styles.header} style={__COL.resultResult}>결과</th>
-                    </React.Fragment>
-                  )
-                )}
+                {resultRoomOrder.map((i) => (
+                  <React.Fragment key={i}>
+                    <th className={styles.header} style={__COL.resultNick}>닉네임</th>
+                    <th className={styles.header} style={__COL.resultGhandi}>G핸디</th>
+                    {showScore   && <th className={styles.header} style={__COL.resultScore}>점수</th>}
+                    {showHalved  && <th className={styles.header} style={__COL.resultBanddang}>반땅</th>}
+                    <th className={styles.header} style={__COL.resultResult}>결과</th>
+                  </React.Fragment>
+                ))}
               </tr>
             </thead>
             <tbody>
               {Array.from({ length: MAX }).map((_, ri) => (
                 <tr key={ri}>
-                  {resultByRoom.map((roomObj, ci) =>
-                    !isHiddenIdx(ci) && (
+                  {resultRoomOrder.map((ci) => {
+                    const roomObj = resultByRoom[ci];
+                    return (
                       <React.Fragment key={ci}>
                         <td className={styles.cell} style={__COL.resultNick}>{roomObj.detail[ri].nickname}</td>
                         <td className={styles.cell} style={__COL.resultGhandi}>{roomObj.detail[ri].handicap}</td>
@@ -512,15 +601,16 @@ export default function Step6() {
                           {roomObj.detail[ri].result}
                         </td>
                       </React.Fragment>
-                    )
-                  )}
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
-                {resultByRoom.map((roomObj, ci) =>
-                  !isHiddenIdx(ci) && (
+                {resultRoomOrder.map((ci) => {
+                  const roomObj = resultByRoom[ci];
+                  return (
                     <React.Fragment key={ci}>
                       <td className={styles.footerLabel} style={__COL.resultNick}>합계</td>
                       <td className={styles.footerValue} style={__COL.resultGhandi}>{roomObj.sumHandicap}</td>
@@ -528,23 +618,21 @@ export default function Step6() {
                       {showHalved && <td className={styles.footerBanddang} style={__COL.resultBanddang}>{roomObj.sumBanddang}</td>}
                       <td className={styles.footerResult} style={__COL.resultResult}>{roomObj.sumResult}</td>
                     </React.Fragment>
-                  )
-                )}
+                  );
+                })}
               </tr>
               <tr>
-                {headers.map((_, i) =>
-                  !isHiddenIdx(i) && (
-                    <React.Fragment key={i}>
-                      <td
-                        colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
-                        className={styles.footerBlank}
-                      />
-                      <td className={styles.footerRank} style={{ ...__COL.resultResult, background: '#fff8d1' }}>
-                        {rankMap[i]}등
-                      </td>
-                    </React.Fragment>
-                  )
-                )}
+                {resultRoomOrder.map((i) => (
+                  <React.Fragment key={i}>
+                    <td
+                      colSpan={2 + (showScore ? 1 : 0) + (showHalved ? 1 : 0)}
+                      className={styles.footerBlank}
+                    />
+                    <td className={styles.footerRank} style={{ ...__COL.resultResult, background: '#fff8d1' }}>
+                      {rankMap[i]}등
+                    </td>
+                  </React.Fragment>
+                ))}
               </tr>
             </tfoot>
           </table>
