@@ -64,6 +64,11 @@ export default function Step8() {
   const [teamSortMenuOpen, setTeamSortMenuOpen] = useState(false);
   const teamSortMenuRef = useRef(null);
   const teamSortBtnRef = useRef(null);
+  // 최종결과표 정렬: 방(기본) / 오름(1위→N위) / 내림(N위→1위)
+  const [resultSortMode, setResultSortMode] = useState('room');
+  const [resultSortMenuOpen, setResultSortMenuOpen] = useState(false);
+  const resultSortMenuRef = useRef(null);
+  const resultSortBtnRef = useRef(null);
   const [visibleMetrics, setVisibleMetrics] = useState({
     score: true,
     banddang: true
@@ -150,6 +155,17 @@ export default function Step8() {
     return () => document.removeEventListener('mousedown', onDoc, true);
   }, [teamSortMenuOpen]);
 
+  useEffect(() => {
+    if (!resultSortMenuOpen) return;
+    const onDoc = (e) => {
+      if (resultSortMenuRef.current && resultSortMenuRef.current.contains(e.target)) return;
+      if (resultSortBtnRef.current && resultSortBtnRef.current.contains(e.target)) return;
+      setResultSortMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
+  }, [resultSortMenuOpen]);
+
   // 공통 헬퍼(인덱스 → 1-based Set 판정)
   const isHiddenIdx = (i) => hiddenRooms.has(i + 1);
 
@@ -188,6 +204,12 @@ export default function Step8() {
     if (['room', 'asc', 'desc'].includes(savedTeamSort)) {
       setTeamSortMode(savedTeamSort);
     }
+
+    // 최종결과표 정렬값도 Firestore publicView를 기준으로 복원
+    const savedResultSort = pv.resultSort || pv.finalResultSort;
+    if (['room', 'asc', 'desc'].includes(savedResultSort)) {
+      setResultSortMode(savedResultSort);
+    }
   }, [eventData?.publicView, roomCount]);
 
   // 운영자 즉시 저장(홈으로 나가지 않아도 Player 반영)
@@ -203,7 +225,9 @@ export default function Step8() {
           visibleMetrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
           metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
           fourballTeamSort: teamSortMode,
-          teamSort: teamSortMode
+          teamSort: teamSortMode,
+          resultSort: resultSortMode,
+          finalResultSort: resultSortMode
         }
       });
     } catch (e) {
@@ -240,7 +264,9 @@ export default function Step8() {
           visibleMetrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
           metrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
           fourballTeamSort: nextMode,
-          teamSort: nextMode
+          teamSort: nextMode,
+          resultSort: resultSortMode,
+          finalResultSort: resultSortMode
         }
       });
     } catch (e) {
@@ -252,6 +278,34 @@ export default function Step8() {
     setTeamSortMode(nextMode);
     setTeamSortMenuOpen(false);
     persistTeamSortModeNow(nextMode);
+  };
+
+  // 최종결과표 정렬값 저장(Admin STEP6/8 → Player STEP5 연동용)
+  const persistResultSortModeNow = async (nextMode) => {
+    if (!updateEventImmediate) return;
+    try {
+      const prevPv = eventData?.publicView || {};
+      await updateEventImmediate({
+        publicView: {
+          ...prevPv,
+          hiddenRooms: Array.from(hiddenRooms).map(Number).sort((a,b)=>a-b),
+          visibleMetrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
+          metrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
+          fourballTeamSort: teamSortMode,
+          teamSort: teamSortMode,
+          resultSort: nextMode,
+          finalResultSort: nextMode
+        }
+      });
+    } catch (e) {
+      console.warn('[Step8] persistResultSortModeNow failed:', e);
+    }
+  };
+
+  const onResultSortSelect = (nextMode) => {
+    setResultSortMode(nextMode);
+    setResultSortMenuOpen(false);
+    persistResultSortModeNow(nextMode);
   };
 
   // ── 2) 캡처용 refs ───────────────────────────────────────
@@ -437,6 +491,17 @@ export default function Step8() {
       });
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
+
+  const resultRoomOrder = useMemo(() => {
+    const list = Array.from({ length: roomCount }, (_, i) => i).filter(i => !isHiddenIdx(i));
+    if (resultSortMode === 'asc') {
+      return [...list].sort((a, b) => (rankMap[a] || 9999) - (rankMap[b] || 9999) || a - b);
+    }
+    if (resultSortMode === 'desc') {
+      return [...list].sort((a, b) => (rankMap[b] || 9999) - (rankMap[a] || 9999) || b - a);
+    }
+    return list;
+  }, [roomCount, hiddenRooms, rankMap, resultSortMode]);
 
   // ── 10) 팀결과표용: 방별 2인씩 팀A/팀B ─────────────────────
   const teamsByRoom = useMemo(() => {
@@ -662,12 +727,59 @@ export default function Step8() {
           ref={resultRef}
           className={`${styles.tableContainer} ${styles.resultContainer}`}
         >
-          <h4 className={styles.tableTitle}>📊 최종결과표</h4>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, position: 'relative' }}>
+            <h4 className={styles.tableTitle} style={{ margin: 0 }}>📊 최종결과표</h4>
+            <div style={{ position: 'relative' }}>
+              <button
+                ref={resultSortBtnRef}
+                type="button"
+                className={styles.selectButton}
+                onClick={() => setResultSortMenuOpen(o => !o)}
+                style={{ minWidth: 72, width: 72, padding: '7px 10px', fontSize: 13 }}
+              >
+                정렬
+              </button>
+              {resultSortMenuOpen && (
+                <div
+                  ref={resultSortMenuRef}
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    width: 72,
+                    minWidth: 72,
+                    zIndex: 30,
+                    background: '#fff',
+                    border: '1px solid #d6deec',
+                    borderRadius: 8,
+                    boxShadow: '0 8px 18px rgba(15, 35, 75, 0.15)',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {[
+                    ['room', '방'],
+                    ['asc', '오름'],
+                    ['desc', '내림'],
+                  ].map(([value, label]) => (
+                    <button
+                      key={`result-sort-${value}`}
+                      type="button"
+                      onClick={() => onResultSortSelect(value)}
+                      style={{ display: 'block', width: '100%', border: 0, background: resultSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '9px 6px', fontSize: 13, fontWeight: resultSortMode === value ? 800 : 600 }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           <table className={styles.table}>
             <thead>
               <tr>
-                {headers.map((h, i) =>
-                  !isHiddenIdx(i) && (
+                {resultRoomOrder.map((i) => {
+                  const h = headers[i];
+                  return (
                     <th
                       key={`res-header-room-${i}`}
                       colSpan={
@@ -680,28 +792,27 @@ export default function Step8() {
                     >
                       {h}
                     </th>
-                  )
-                )}
+                  );
+                })}
               </tr>
               <tr>
-                {headers.map((_, i) =>
-                  !isHiddenIdx(i) && (
-                    <React.Fragment key={`res-subhdr-room-${i}`}>
-                      <th className={styles.header} style={__COL.resultNick}>닉네임</th>
-                      <th className={styles.header} style={__COL.resultGhandi}>G핸디</th>
-                      {visibleMetrics.score    && <th className={styles.header} style={__COL.resultScore}>점수</th>}
-                      {visibleMetrics.banddang && <th className={styles.header} style={__COL.resultBanddang}>반땅</th>}
-                      <th className={styles.header} style={__COL.resultResult}>결과</th>
-                    </React.Fragment>
-                  )
-                )}
+                {resultRoomOrder.map((i) => (
+                  <React.Fragment key={`res-subhdr-room-${i}`}>
+                    <th className={styles.header} style={__COL.resultNick}>닉네임</th>
+                    <th className={styles.header} style={__COL.resultGhandi}>G핸디</th>
+                    {visibleMetrics.score    && <th className={styles.header} style={__COL.resultScore}>점수</th>}
+                    {visibleMetrics.banddang && <th className={styles.header} style={__COL.resultBanddang}>반땅</th>}
+                    <th className={styles.header} style={__COL.resultResult}>결과</th>
+                  </React.Fragment>
+                ))}
               </tr>
             </thead>
             <tbody>
               {Array.from({ length: MAX_PER_ROOM }).map((_, ri) => (
                 <tr key={`res-slot-${ri}`}>
-                  {resultByRoom.map((room, ci) =>
-                    !isHiddenIdx(ci) && (
+                  {resultRoomOrder.map((ci) => {
+                    const room = resultByRoom[ci];
+                    return (
                       <React.Fragment key={`res-room-${ci}-slot-${ri}`}>
                         <td className={styles.cell} style={__COL.resultNick}>{room.detail[ri].nickname}</td>
                         <td className={styles.cell} style={__COL.resultGhandi}>{room.detail[ri].handicap}</td>
@@ -717,15 +828,16 @@ export default function Step8() {
                           {room.detail[ri].result}
                         </td>
                       </React.Fragment>
-                    )
-                  )}
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
-                {resultByRoom.map((room, ci) =>
-                  !isHiddenIdx(ci) && (
+                {resultRoomOrder.map((ci) => {
+                  const room = resultByRoom[ci];
+                  return (
                     <React.Fragment key={`res-footer-room-${ci}`}>
                       <td
                         className={styles.footerLabel}
@@ -762,28 +874,26 @@ export default function Step8() {
                         {room.sumResult}
                       </td>
                     </React.Fragment>
-                  )
-                )}
+                  );
+                })}
               </tr>
               <tr>
-                {headers.map((_, i) =>
-                  !isHiddenIdx(i) && (
-                    <React.Fragment key={`res-rank-room-${i}`}>
-                      <td
-                        colSpan={
-                          2
-                          + (visibleMetrics.score    ? 1 : 0)
-                          + (visibleMetrics.banddang ? 1 : 0)
-                        }
-                        className={styles.footerBlank}
-                        style={{ background: '#f7f7f7' }}
-                      />
-                      <td className={styles.footerRankFinal}>
-                        {rankMap[i]}등
-                      </td>
-                    </React.Fragment>
-                  )
-                )}
+                {resultRoomOrder.map((i) => (
+                  <React.Fragment key={`res-rank-room-${i}`}>
+                    <td
+                      colSpan={
+                        2
+                        + (visibleMetrics.score    ? 1 : 0)
+                        + (visibleMetrics.banddang ? 1 : 0)
+                      }
+                      className={styles.footerBlank}
+                      style={{ background: '#f7f7f7' }}
+                    />
+                    <td className={styles.footerRankFinal}>
+                      {rankMap[i]}등
+                    </td>
+                  </React.Fragment>
+                ))}
               </tr>
             </tfoot>
           </table>
@@ -807,7 +917,7 @@ export default function Step8() {
                 type="button"
                 className={styles.selectButton}
                 onClick={() => setTeamSortMenuOpen(o => !o)}
-                style={{ minWidth: 72, padding: '7px 10px', fontSize: 13 }}
+                style={{ minWidth: 72, width: 72, padding: '7px 10px', fontSize: 13 }}
               >
                 정렬
               </button>
@@ -820,7 +930,8 @@ export default function Step8() {
                     top: 'calc(100% + 4px)',
                     right: 0,
                     left: 'auto',
-                    minWidth: 92,
+                    width: 72,
+                    minWidth: 72,
                     zIndex: 30,
                     background: '#fff',
                     border: '1px solid #d6deec',
@@ -838,7 +949,7 @@ export default function Step8() {
                       key={`team-sort-${value}`}
                       type="button"
                       onClick={() => onTeamSortSelect(value)}
-                      style={{ display: 'block', width: '100%', border: 0, background: teamSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'left', padding: '9px 10px', fontSize: 13, fontWeight: teamSortMode === value ? 800 : 600 }}
+                      style={{ display: 'block', width: '100%', border: 0, background: teamSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '9px 6px', fontSize: 13, fontWeight: teamSortMode === value ? 800 : 600 }}
                     >
                       {label}
                     </button>
