@@ -1234,6 +1234,17 @@ export default function Step8() {
           </div>
         </div>
 
+        {/* 팀결과표 다운로드 버튼 (표 영역 밖에 독립 배치) */}
+        <div className={`${styles.actionButtons} ${styles.teamActionButtons}`}>
+          <button onClick={() => downloadTable(teamCaptureRef, 'team-results', 'jpg')}>
+            JPG로 저장
+          </button>
+          <button onClick={() => downloadTable(teamCaptureRef, 'team-results', 'pdf')}>
+            PDF로 저장
+          </button>
+        </div>
+
+
         {/* ── [Team Result Table - 캡처용(off‐screen)] ── */}
         <div
           ref={teamCaptureRef}
@@ -1393,16 +1404,6 @@ export default function Step8() {
                   ))}
             </tbody>
           </table>
-        </div>
-
-        {/* 팀결과표 다운로드 버튼 (off‐screen 복제본을 캡처) */}
-        <div className={styles.actionButtons}>
-          <button onClick={() => downloadTable(teamCaptureRef, 'team-results', 'jpg')}>
-            JPG로 저장
-          </button>
-          <button onClick={() => downloadTable(teamCaptureRef, 'team-results', 'pdf')}>
-            PDF로 저장
-          </button>
         </div>
       </div>
 
