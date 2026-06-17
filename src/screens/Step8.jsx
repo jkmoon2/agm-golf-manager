@@ -782,7 +782,18 @@ export default function Step8() {
           >
             <h4
               className={styles.tableTitle}
-              style={{ margin: 0, padding: 0, borderBottom: 'none', position: 'static' }}
+              style={{
+                margin: 0,
+                padding: 0,
+                borderBottom: 'none',
+                position: 'static',
+                width: 'auto',
+                minWidth: 0,
+                flex: '1 1 auto',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
             >📊 최종결과표</h4>
             <div style={{ position: 'relative', flex: '0 0 auto' }}>
               <button
@@ -1009,7 +1020,18 @@ export default function Step8() {
           >
             <h4
               className={styles.tableTitle}
-              style={{ margin: 0, padding: 0, borderBottom: 'none', position: 'static' }}
+              style={{
+                margin: 0,
+                padding: 0,
+                borderBottom: 'none',
+                position: 'static',
+                width: 'auto',
+                minWidth: 0,
+                flex: '1 1 auto',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
             >📋 팀결과표</h4>
             <div style={{ position: 'relative', flex: '0 0 auto' }}>
               <button
