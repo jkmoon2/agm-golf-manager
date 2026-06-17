@@ -141,7 +141,7 @@ export default function Step0() {
       const fixedMode = normMode(evt?.mode, evt);
       const currentMode = normMode(evt?.mode, null);
       if (evt?.id && evt?.mode !== fixedMode && currentMode !== fixedMode) {
-        await updateEventById(evt.id, { mode: fixedMode });
+        await updateEventById(evt.id, { mode: fixedMode, __allowModeChange: true });
       }
       try { localStorage.setItem('homeViewMode', fixedMode); } catch {}
     } catch (e) {

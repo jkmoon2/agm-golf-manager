@@ -106,11 +106,17 @@ function readVisibleMetrics(pv, viewKey) {
 }
 
 function readFourballTeamSort(pv) {
+  // ✅ Admin STEP8에서 '공유' 체크한 경우에만 Player STEP5에 팀결과표 정렬 반영
+  const shared = pv?.fourballTeamSortShared === true || pv?.teamSortShared === true;
+  if (!shared) return 'room';
   const v = pv?.fourballTeamSort || pv?.teamSort || 'room';
   return (v === 'asc' || v === 'desc' || v === 'room') ? v : 'room';
 }
 
 function readResultSort(pv) {
+  // ✅ Admin STEP6/8에서 '공유' 체크한 경우에만 Player STEP5에 최종결과표 정렬 반영
+  const shared = pv?.resultSortShared === true || pv?.finalResultSortShared === true;
+  if (!shared) return 'room';
   const v = pv?.resultSort || pv?.finalResultSort || 'room';
   return (v === 'asc' || v === 'desc' || v === 'room') ? v : 'room';
 }

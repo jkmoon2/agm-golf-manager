@@ -186,6 +186,32 @@ function guardEventModeUpdate(updates, current) {
   } catch {}
   return updates;
 }
+
+// ✅ mode가 실제로 변경되는 경우만 추적 로그를 남깁니다.
+// - 일반 저장에서 mode가 실수로 들어와 guard에 의해 보존된 경우에는 로그가 남지 않습니다.
+// - __allowModeChange === true 등 명시적 변경만 modeChanged* 필드에 기록됩니다.
+function appendModeChangeAudit(updates, current) {
+  try {
+    if (!updates || typeof updates !== 'object') return updates;
+    if (!Object.prototype.hasOwnProperty.call(updates, 'mode')) return updates;
+    const beforeRaw = current?.mode;
+    if (!beforeRaw) return updates;
+    const beforeMode = normalizeMode(beforeRaw);
+    const afterMode = normalizeMode(updates.mode);
+    if (beforeMode === afterMode) return updates;
+
+    const user = getAuth()?.currentUser || null;
+    const by = user?.email || user?.uid || 'unknown';
+    return {
+      ...updates,
+      modeChangedAt: serverTimestamp(),
+      modeChangedFrom: beforeMode,
+      modeChangedTo: afterMode,
+      modeChangedBy: by,
+    };
+  } catch {}
+  return updates;
+}
 function mergeParticipantsById(primary = [], legacy = []) {
   const map = new Map();
   const push = (arr) => {
@@ -830,7 +856,7 @@ export function EventProvider({ children }) {
     await ensureAuthed();
     const { debounceMs = 400, ifChanged = true } = opts;
 
-    const guardedUpdates = guardEventModeUpdate({ ...updates }, lastEventDataRef.current || {});
+    const guardedUpdates = appendModeChangeAudit(guardEventModeUpdate({ ...updates }, lastEventDataRef.current || {}), lastEventDataRef.current || {});
     const enriched = enrichParticipantsDerived(guardedUpdates);
     // ✅ participants 저장 시, 모드별 필드(participantsStroke/participantsFourball)에도 같이 저장
     ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
@@ -883,7 +909,7 @@ export function EventProvider({ children }) {
     try { diagPush('timeline', { type: 'event.updateEventImmediate:start', eventId: targetEventId, keys: Object.keys(updates || {}) }); } catch {}
     await ensureAuthed();
 
-    const guardedUpdates = guardEventModeUpdate({ ...updates }, lastEventDataRef.current || {});
+    const guardedUpdates = appendModeChangeAudit(guardEventModeUpdate({ ...updates }, lastEventDataRef.current || {}), lastEventDataRef.current || {});
     const enriched = enrichParticipantsDerived(guardedUpdates);
     // ✅ participants 저장 시, 모드별 필드(participantsStroke/participantsFourball)에도 같이 저장
     ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
@@ -936,7 +962,17 @@ export function EventProvider({ children }) {
   const updateEventById = async (id, updates) => {
     if (!id || isDeletedEventId(id)) return;
     await ensureAuthed();
-    await updateDoc(doc(db, 'events', id), updates);
+    let safeUpdates = updates || {};
+    try {
+      if (safeUpdates && typeof safeUpdates === 'object' && Object.prototype.hasOwnProperty.call(safeUpdates, 'mode')) {
+        const snap = await getDocFromServer(doc(db, 'events', id));
+        const current = snap.exists() ? (snap.data() || {}) : {};
+        safeUpdates = appendModeChangeAudit(guardEventModeUpdate({ ...safeUpdates }, current), current);
+      }
+    } catch (e) {
+      console.warn('[EventContext] updateEventById mode audit failed:', e);
+    }
+    await updateDoc(doc(db, 'events', id), sanitizeUndefinedDeep(safeUpdates));
     try { broadcastEventSync(id, { reason: 'updateEventById' }); } catch {}
   };
 
@@ -1467,6 +1503,14 @@ export function EventProvider({ children }) {
               hiddenRooms: [],
               score: true,
               banddang: true,
+              resultSort: 'room',
+              finalResultSort: 'room',
+              resultSortShared: false,
+              finalResultSortShared: false,
+              fourballTeamSort: 'room',
+              teamSort: 'room',
+              fourballTeamSortShared: false,
+              teamSortShared: false,
               stroke: { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } },
               fourball: { hiddenRooms: [], visibleMetrics: { score: true, banddang: true } },
             },
