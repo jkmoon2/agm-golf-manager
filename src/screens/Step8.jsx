@@ -584,23 +584,20 @@ export default function Step8() {
 
     visibleTeams.sort((a, b) => {
       if (a.sumResult !== b.sumResult) return a.sumResult - b.sumResult;
-      return a.sumHandicap - b.sumHandicap;
+      if (a.sumHandicap !== b.sumHandicap) return a.sumHandicap - b.sumHandicap;
+      if (a.roomIdx !== b.roomIdx) return a.roomIdx - b.roomIdx;
+      return a.teamIdx - b.teamIdx;
     });
 
     const rankMapObj = {};
+    let lastKey = null;
+    let lastRank = 0;
     visibleTeams.forEach((t, i) => {
-      const duplicates = visibleTeams
-        .map((x, j) =>
-          x.roomIdx === t.roomIdx &&
-          x.sumResult === t.sumResult &&
-          x.sumHandicap === t.sumHandicap
-            ? j
-            : -1
-        )
-        .filter(j => j >= 0);
-      duplicates.forEach(j => {
-        rankMapObj[ visibleTeams[j].idxInOriginal ] = i + 1;
-      });
+      const key = `${t.sumResult}::${t.sumHandicap}`;
+      const rank = key === lastKey ? lastRank : i + 1;
+      rankMapObj[t.idxInOriginal] = rank;
+      lastKey = key;
+      lastRank = rank;
     });
 
     return rankMapObj;
@@ -764,15 +761,36 @@ export default function Step8() {
           ref={resultRef}
           className={`${styles.tableContainer} ${styles.resultContainer}`}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, position: 'relative' }}>
-            <h4 className={styles.tableTitle} style={{ margin: 0 }}>📊 최종결과표</h4>
-            <div style={{ position: 'relative' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              marginBottom: 0,
+              position: 'sticky',
+              left: 0,
+              top: 0,
+              zIndex: 6,
+              background: '#fff',
+              padding: '6px 8px',
+              borderBottom: '1px solid #bbb',
+              boxSizing: 'border-box',
+              width: '100%',
+              minWidth: '100%',
+            }}
+          >
+            <h4
+              className={styles.tableTitle}
+              style={{ margin: 0, padding: 0, borderBottom: 'none', position: 'static' }}
+            >📊 최종결과표</h4>
+            <div style={{ position: 'relative', flex: '0 0 auto' }}>
               <button
                 ref={resultSortBtnRef}
                 type="button"
                 className={styles.selectButton}
                 onClick={() => setResultSortMenuOpen(o => !o)}
-                style={{ minWidth: 72, width: 72, padding: '7px 10px', fontSize: 13 }}
+                style={{ minWidth: 64, width: 64, padding: '7px 8px', fontSize: 13 }}
               >
                 정렬
               </button>
@@ -783,8 +801,8 @@ export default function Step8() {
                     position: 'absolute',
                     top: 'calc(100% + 4px)',
                     right: 0,
-                    width: 72,
-                    minWidth: 72,
+                    width: 64,
+                    minWidth: 64,
                     zIndex: 30,
                     background: '#fff',
                     border: '1px solid #d6deec',
@@ -970,15 +988,36 @@ export default function Step8() {
 
         {/* ── [Team Result Table - 화면용] ── */}
         <div className={styles.teamContainer}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, position: 'relative' }}>
-            <h4 className={styles.tableTitle} style={{ margin: 0 }}>📋 팀결과표</h4>
-            <div style={{ position: 'relative' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              marginBottom: 0,
+              position: 'sticky',
+              left: 0,
+              top: 0,
+              zIndex: 6,
+              background: '#fff',
+              padding: '6px 8px',
+              borderBottom: '1px solid #bbb',
+              boxSizing: 'border-box',
+              width: '100%',
+              minWidth: '100%',
+            }}
+          >
+            <h4
+              className={styles.tableTitle}
+              style={{ margin: 0, padding: 0, borderBottom: 'none', position: 'static' }}
+            >📋 팀결과표</h4>
+            <div style={{ position: 'relative', flex: '0 0 auto' }}>
               <button
                 ref={teamSortBtnRef}
                 type="button"
                 className={styles.selectButton}
                 onClick={() => setTeamSortMenuOpen(o => !o)}
-                style={{ minWidth: 72, width: 72, padding: '7px 10px', fontSize: 13 }}
+                style={{ minWidth: 64, width: 64, padding: '7px 8px', fontSize: 13 }}
               >
                 정렬
               </button>
@@ -991,8 +1030,8 @@ export default function Step8() {
                     top: 'calc(100% + 4px)',
                     right: 0,
                     left: 'auto',
-                    width: 72,
-                    minWidth: 72,
+                    width: 64,
+                    minWidth: 64,
                     zIndex: 30,
                     background: '#fff',
                     border: '1px solid #d6deec',

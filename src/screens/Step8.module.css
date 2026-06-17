@@ -122,12 +122,19 @@
 
 /* 테이블 제목(헤더) */
 .tableContainer .tableTitle {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 5;
   background: #fff;
   padding: 6px 8px;
   font-size: 16px;
   text-align: left;
   margin: 0;
   border-bottom: 1px solid #bbb;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 100%;
 }
 
 /* ─── 테이블 공통 ─── */
@@ -204,14 +211,21 @@
 .teamContainer h4 {
   margin: 0;
 }
-/* 제목 sticky 제거 */
+/* 팀결과표 제목도 가로 스크롤과 분리해 고정 */
 .teamContainer .tableTitle {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 5;
   background: #fff;
   padding: 6px 8px;
   font-size: 16px;
   text-align: left;
   margin: 0;
   border-bottom: 1px solid #bbb;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 100%;
 }
 /* ─── Team 테이블 바로 밑 여백 수정 ─── */
 .teamContainer .tableContainer {
