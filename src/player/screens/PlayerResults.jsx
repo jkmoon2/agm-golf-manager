@@ -313,9 +313,22 @@ export default function PlayerResults() {
 
   const teamRankMap = useMemo(() => {
     const vis = teamsByRoom.filter(t => !hiddenRooms.has(t.roomIdx));
-    vis.sort((a,b) => (a.sumResult - b.sumResult) || (a.sumHandicap - b.sumHandicap));
+    vis.sort((a,b) =>
+      (a.sumResult - b.sumResult) ||
+      (a.sumHandicap - b.sumHandicap) ||
+      (a.roomIdx - b.roomIdx) ||
+      (a.teamIdx - b.teamIdx)
+    );
     const map = {};
-    vis.forEach((t, i) => { map[`${t.roomIdx}:${t.teamIdx}`] = i + 1; });
+    let lastKey = null;
+    let lastRank = 0;
+    vis.forEach((t, i) => {
+      const key = `${t.sumResult}::${t.sumHandicap}`;
+      const rank = key === lastKey ? lastRank : i + 1;
+      map[`${t.roomIdx}:${t.teamIdx}`] = rank;
+      lastKey = key;
+      lastRank = rank;
+    });
     return map;
   }, [teamsByRoom, hiddenRooms]);
 

@@ -537,15 +537,36 @@ export default function Step6() {
 
         {/* 최종결과표 */}
         <div ref={resultRef} className={`${styles.tableContainer} ${styles.resultContainer}`}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, position: 'relative' }}>
-            <h4 className={styles.tableTitle} style={{ margin: 0 }}>📊 최종결과표</h4>
-            <div style={{ position: 'relative' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              marginBottom: 0,
+              position: 'sticky',
+              left: 0,
+              top: 0,
+              zIndex: 6,
+              background: '#fff',
+              padding: '6px 8px',
+              borderBottom: '1px solid #bbb',
+              boxSizing: 'border-box',
+              width: '100%',
+              minWidth: '100%',
+            }}
+          >
+            <h4
+              className={styles.tableTitle}
+              style={{ margin: 0, padding: 0, borderBottom: 'none', position: 'static' }}
+            >📊 최종결과표</h4>
+            <div style={{ position: 'relative', flex: '0 0 auto' }}>
               <button
                 ref={resultSortBtnRef}
                 type="button"
                 className={styles.selectButton}
                 onClick={() => setResultSortMenuOpen(o => !o)}
-                style={{ minWidth: 72, width: 72, padding: '7px 10px', fontSize: 13 }}
+                style={{ minWidth: 64, width: 64, padding: '7px 8px', fontSize: 13 }}
               >
                 정렬
               </button>
@@ -556,8 +577,8 @@ export default function Step6() {
                     position: 'absolute',
                     top: 'calc(100% + 4px)',
                     right: 0,
-                    width: 72,
-                    minWidth: 72,
+                    width: 64,
+                    minWidth: 64,
                     zIndex: 30,
                     background: '#fff',
                     border: '1px solid #d6deec',
