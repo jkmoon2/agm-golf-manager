@@ -379,3 +379,50 @@
   flex: none;
   white-space: nowrap;
 }
+
+/* ────────────────────────────────────────────────────────────────
+   STEP8 팀결과표 JPG/PDF 버튼 분리 최종 보정
+   - 팀결과표는 표 영역(teamContainer) 안에서만 상/하/좌/우 스크롤
+   - JPG/PDF 버튼은 teamContainer 밖의 일반 버튼 영역에 고정 배치
+   - 직전 패치의 max-height:none 때문에 버튼이 긴 표의 끝에 붙어
+     표 안에 들어간 것처럼 보이던 현상을 차단
+   ──────────────────────────────────────────────────────────────── */
+.teamContainer {
+  max-height: min(62vh, 520px) !important;
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.teamContainer > .tableContainer {
+  margin: 0 !important;
+  border: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  background: transparent;
+}
+
+.teamActionButtons {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  position: relative !important;
+  z-index: 20 !important;
+  clear: both !important;
+  float: none !important;
+  width: auto !important;
+  margin: 6px 6px 18px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+
+.teamActionButtons button {
+  flex: 0 0 auto !important;
+  margin-right: 0 !important;
+  white-space: nowrap !important;
+}
