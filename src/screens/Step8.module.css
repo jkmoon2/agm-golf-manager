@@ -426,3 +426,73 @@
   margin-right: 0 !important;
   white-space: nowrap !important;
 }
+
+/* ────────────────────────────────────────────────────────────────
+   STEP8 모바일 드래그/스크롤 최종 정리
+   - 세로 스크롤은 표 내부가 아니라 전체 페이지(contentWrapper)가 담당
+   - 표 영역은 높이 제한 없이 실제 표 높이와 일치
+   - 표에서는 좌/우 드래그만 자연스럽게 사용하고, 위/아래 드래그는 페이지 스크롤로 전달
+   - 팀결과표 JPG/PDF 버튼은 길어진 표 바로 아래, 표 영역 밖에 독립 배치
+   ──────────────────────────────────────────────────────────────── */
+.contentWrapper {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y pinch-zoom;
+}
+
+.tableContainer,
+.resultContainer,
+.teamContainer {
+  height: auto !important;
+  max-height: none !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.resultContainer {
+  padding-bottom: 0 !important;
+}
+
+.teamContainer {
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.teamContainer > .tableContainer {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.teamContainer > .tableContainer .table {
+  margin-bottom: 0 !important;
+}
+
+.teamActionButtons {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  position: relative !important;
+  z-index: 20 !important;
+  clear: both !important;
+  float: none !important;
+  width: auto !important;
+  margin: 6px 6px 18px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+
+.teamActionButtons button {
+  flex: 0 0 auto !important;
+  margin-right: 0 !important;
+  white-space: nowrap !important;
+}

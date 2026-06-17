@@ -418,3 +418,23 @@
   padding-top: 0;
   padding-bottom: 0;
 }
+/* ────────────────────────────────────────────────────────────────
+   STEP6 모바일 드래그/스크롤 최종 정리
+   - 세로 스크롤은 전체 페이지가 담당
+   - 표 내부는 높이 제한 없이 실제 표 높이와 일치
+   - 표 좌/우 드래그는 유지하고 위/아래 드래그는 페이지 스크롤로 전달
+   ──────────────────────────────────────────────────────────────── */
+.tableContainer,
+.resultContainer {
+  height: auto !important;
+  max-height: none !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom !important;
+}
+
+.step {
+  overflow: visible !important;
+  touch-action: pan-y pinch-zoom;
+}
