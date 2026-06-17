@@ -357,3 +357,25 @@
   line-height: 1.25;
   white-space: nowrap;
 }
+
+
+/* ────────────────────────────────────────────────────────────────
+   STEP8 팀결과표 다운로드 버튼 위치 보정
+   - 팀결과표 JPG/PDF 버튼을 표 스크롤/표 영역 밖에 독립적으로 배치
+   - 방배정표/최종결과표 버튼과 같은 흐름으로 보이도록 정리
+   ──────────────────────────────────────────────────────────────── */
+.teamActionButtons {
+  display: block;
+  position: relative;
+  z-index: 7;
+  clear: both;
+  margin: 4px 6px 16px !important;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.teamActionButtons button {
+  flex: none;
+  white-space: nowrap;
+}
