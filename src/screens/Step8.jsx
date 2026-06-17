@@ -61,11 +61,15 @@ export default function Step8() {
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
   // 팀결과표 정렬: 방(기본) / 오름(낮은 총점 우선) / 내림(높은 총점 우선)
   const [teamSortMode, setTeamSortMode]     = useState('room');
+  // ✅ 공유 체크 시에만 Player STEP5에 팀결과표 정렬을 반영(기본: Admin 전용)
+  const [teamSortShared, setTeamSortShared] = useState(false);
   const [teamSortMenuOpen, setTeamSortMenuOpen] = useState(false);
   const teamSortMenuRef = useRef(null);
   const teamSortBtnRef = useRef(null);
   // 최종결과표 정렬: 방(기본) / 오름(1위→N위) / 내림(N위→1위)
   const [resultSortMode, setResultSortMode] = useState('room');
+  // ✅ 공유 체크 시에만 Player STEP5에 최종결과표 정렬을 반영(기본: Admin 전용)
+  const [resultSortShared, setResultSortShared] = useState(false);
   const [resultSortMenuOpen, setResultSortMenuOpen] = useState(false);
   const resultSortMenuRef = useRef(null);
   const resultSortBtnRef = useRef(null);
@@ -199,35 +203,44 @@ export default function Step8() {
       banddang: typeof vm.banddang === 'boolean' ? vm.banddang : true
     });
 
-    // 팀결과표 정렬값도 Firestore publicView를 기준으로 복원
+    // 팀결과표 정렬값은 공유 체크가 켜진 경우에만 Firestore publicView를 기준으로 복원
+    const savedTeamShared = pv.fourballTeamSortShared === true || pv.teamSortShared === true;
+    if (teamSortShared !== savedTeamShared) setTeamSortShared(savedTeamShared);
     const savedTeamSort = pv.fourballTeamSort || pv.teamSort;
-    if (['room', 'asc', 'desc'].includes(savedTeamSort)) {
+    if (savedTeamShared && ['room', 'asc', 'desc'].includes(savedTeamSort)) {
       setTeamSortMode(savedTeamSort);
     }
 
-    // 최종결과표 정렬값도 Firestore publicView를 기준으로 복원
+    // 최종결과표 정렬값도 공유 체크가 켜진 경우에만 Firestore publicView를 기준으로 복원
+    const savedResultShared = pv.resultSortShared === true || pv.finalResultSortShared === true;
+    if (resultSortShared !== savedResultShared) setResultSortShared(savedResultShared);
     const savedResultSort = pv.resultSort || pv.finalResultSort;
-    if (['room', 'asc', 'desc'].includes(savedResultSort)) {
+    if (savedResultShared && ['room', 'asc', 'desc'].includes(savedResultSort)) {
       setResultSortMode(savedResultSort);
     }
   }, [eventData?.publicView, roomCount]);
 
   // 운영자 즉시 저장(홈으로 나가지 않아도 Player 반영)
+  // ✅ 정렬은 공유 체크가 켜진 경우에만 publicView에 Player용으로 공개합니다.
   const persistPublicViewNow = async (nextHiddenRoomsSet = hiddenRooms, nextVisible = visibleMetrics) => {
     if (!updateEventImmediate) return;
     try {
       const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a,b)=>a-b); // 1-based
       const prevPv = eventData?.publicView || {};
+      const teamSortPatch = teamSortShared
+        ? { fourballTeamSort: teamSortMode, teamSort: teamSortMode, fourballTeamSortShared: true, teamSortShared: true }
+        : { fourballTeamSortShared: false, teamSortShared: false };
+      const resultSortPatch = resultSortShared
+        ? { resultSort: resultSortMode, finalResultSort: resultSortMode, resultSortShared: true, finalResultSortShared: true }
+        : { resultSortShared: false, finalResultSortShared: false };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
           hiddenRooms: hiddenArr,
           visibleMetrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
           metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
-          fourballTeamSort: teamSortMode,
-          teamSort: teamSortMode,
-          resultSort: resultSortMode,
-          finalResultSort: resultSortMode
+          ...teamSortPatch,
+          ...resultSortPatch,
         }
       });
     } catch (e) {
@@ -253,20 +266,23 @@ export default function Step8() {
   };
 
   // 팀결과표 정렬값 저장(Admin STEP8 → Player STEP5/결과표 연동용)
-  const persistTeamSortModeNow = async (nextMode) => {
+  const persistTeamSortModeNow = async (nextMode, nextShared = teamSortShared) => {
     if (!updateEventImmediate) return;
     try {
       const prevPv = eventData?.publicView || {};
+      const teamSortPatch = nextShared
+        ? { fourballTeamSort: nextMode, teamSort: nextMode, fourballTeamSortShared: true, teamSortShared: true }
+        : { fourballTeamSortShared: false, teamSortShared: false };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
           hiddenRooms: Array.from(hiddenRooms).map(Number).sort((a,b)=>a-b),
           visibleMetrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
           metrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
-          fourballTeamSort: nextMode,
-          teamSort: nextMode,
-          resultSort: resultSortMode,
-          finalResultSort: resultSortMode
+          ...teamSortPatch,
+          ...(resultSortShared
+            ? { resultSort: resultSortMode, finalResultSort: resultSortMode, resultSortShared: true, finalResultSortShared: true }
+            : { resultSortShared: false, finalResultSortShared: false })
         }
       });
     } catch (e) {
@@ -277,24 +293,36 @@ export default function Step8() {
   const onTeamSortSelect = (nextMode) => {
     setTeamSortMode(nextMode);
     setTeamSortMenuOpen(false);
-    persistTeamSortModeNow(nextMode);
+    // 공유 체크가 꺼져 있으면 Admin STEP8에만 적용하고 Player에는 반영하지 않습니다.
+    if (teamSortShared) {
+      persistTeamSortModeNow(nextMode, true);
+    }
+  };
+
+  const onTeamSortShareToggle = () => {
+    const nextShared = !teamSortShared;
+    setTeamSortShared(nextShared);
+    persistTeamSortModeNow(teamSortMode, nextShared);
   };
 
   // 최종결과표 정렬값 저장(Admin STEP6/8 → Player STEP5 연동용)
-  const persistResultSortModeNow = async (nextMode) => {
+  const persistResultSortModeNow = async (nextMode, nextShared = resultSortShared) => {
     if (!updateEventImmediate) return;
     try {
       const prevPv = eventData?.publicView || {};
+      const resultSortPatch = nextShared
+        ? { resultSort: nextMode, finalResultSort: nextMode, resultSortShared: true, finalResultSortShared: true }
+        : { resultSortShared: false, finalResultSortShared: false };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
           hiddenRooms: Array.from(hiddenRooms).map(Number).sort((a,b)=>a-b),
           visibleMetrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
           metrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
-          fourballTeamSort: teamSortMode,
-          teamSort: teamSortMode,
-          resultSort: nextMode,
-          finalResultSort: nextMode
+          ...(teamSortShared
+            ? { fourballTeamSort: teamSortMode, teamSort: teamSortMode, fourballTeamSortShared: true, teamSortShared: true }
+            : { fourballTeamSortShared: false, teamSortShared: false }),
+          ...resultSortPatch,
         }
       });
     } catch (e) {
@@ -305,7 +333,16 @@ export default function Step8() {
   const onResultSortSelect = (nextMode) => {
     setResultSortMode(nextMode);
     setResultSortMenuOpen(false);
-    persistResultSortModeNow(nextMode);
+    // 공유 체크가 꺼져 있으면 Admin STEP8에만 적용하고 Player에는 반영하지 않습니다.
+    if (resultSortShared) {
+      persistResultSortModeNow(nextMode, true);
+    }
+  };
+
+  const onResultSortShareToggle = () => {
+    const nextShared = !resultSortShared;
+    setResultSortShared(nextShared);
+    persistResultSortModeNow(resultSortMode, nextShared);
   };
 
   // ── 2) 캡처용 refs ───────────────────────────────────────
@@ -756,6 +793,30 @@ export default function Step8() {
                     overflow: 'hidden'
                   }}
                 >
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      width: '100%',
+                      padding: '8px 4px',
+                      borderBottom: '1px solid #edf1f7',
+                      color: '#0b275a',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={resultSortShared}
+                      onChange={onResultSortShareToggle}
+                      style={{ margin: 0, width: 13, height: 13 }}
+                    />
+                    공유
+                  </label>
                   {[
                     ['room', '방'],
                     ['asc', '오름'],
@@ -765,7 +826,7 @@ export default function Step8() {
                       key={`result-sort-${value}`}
                       type="button"
                       onClick={() => onResultSortSelect(value)}
-                      style={{ display: 'block', width: '100%', border: 0, background: resultSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '9px 6px', fontSize: 13, fontWeight: resultSortMode === value ? 800 : 600 }}
+                      style={{ display: 'block', width: '100%', border: 0, background: resultSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '8px 4px', fontSize: 13, fontWeight: resultSortMode === value ? 800 : 600 }}
                     >
                       {label}
                     </button>
@@ -940,6 +1001,30 @@ export default function Step8() {
                     overflow: 'hidden'
                   }}
                 >
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      width: '100%',
+                      padding: '8px 4px',
+                      borderBottom: '1px solid #edf1f7',
+                      color: '#0b275a',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={teamSortShared}
+                      onChange={onTeamSortShareToggle}
+                      style={{ margin: 0, width: 13, height: 13 }}
+                    />
+                    공유
+                  </label>
                   {[
                     ['room', '방'],
                     ['asc', '오름'],
@@ -949,7 +1034,7 @@ export default function Step8() {
                       key={`team-sort-${value}`}
                       type="button"
                       onClick={() => onTeamSortSelect(value)}
-                      style={{ display: 'block', width: '100%', border: 0, background: teamSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '9px 6px', fontSize: 13, fontWeight: teamSortMode === value ? 800 : 600 }}
+                      style={{ display: 'block', width: '100%', border: 0, background: teamSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '8px 4px', fontSize: 13, fontWeight: teamSortMode === value ? 800 : 600 }}
                     >
                       {label}
                     </button>

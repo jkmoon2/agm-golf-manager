@@ -34,6 +34,8 @@ export default function Step6() {
   const [menuOpen, setMenuOpen]             = useState(false);
   // 최종결과표 정렬: 방(기본) / 오름(1위→N위) / 내림(N위→1위)
   const [resultSortMode, setResultSortMode] = useState('room');
+  // ✅ 공유 체크 시에만 Player STEP5에 최종결과표 정렬을 반영(기본: Admin 전용)
+  const [resultSortShared, setResultSortShared] = useState(false);
   const [resultSortMenuOpen, setResultSortMenuOpen] = useState(false);
   const resultSortMenuRef = useRef(null);
   const resultSortBtnRef = useRef(null);
@@ -167,11 +169,28 @@ export default function Step6() {
   });
 
   // 운영자 토글 시 즉시 저장(홈 버튼 없이도 Player 반영)
-  const persistPublicViewNow = async (nextHiddenRoomsSet = hiddenRooms, nextVisible = visibleMetrics, nextResultSort = resultSortMode) => {
+  // ✅ 정렬은 공유 체크가 켜진 경우에만 publicView에 Player용으로 공개합니다.
+  const persistPublicViewNow = async (
+    nextHiddenRoomsSet = hiddenRooms,
+    nextVisible = visibleMetrics,
+    nextResultSort = resultSortMode,
+    nextResultShared = resultSortShared
+  ) => {
     if (!updateEventImmediate) return;
     try {
       const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a, b) => a - b); // 1-based 저장
       const prevPv = eventData?.publicView || {};
+      const sortPatch = nextResultShared
+        ? {
+            resultSort: nextResultSort,
+            finalResultSort: nextResultSort,
+            resultSortShared: true,
+            finalResultSortShared: true,
+          }
+        : {
+            resultSortShared: false,
+            finalResultSortShared: false,
+          };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
@@ -179,9 +198,7 @@ export default function Step6() {
           visibleMetrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
           // 구버전 호환 키
           metrics: { score: !!nextVisible.score, banddang: !!nextVisible.banddang },
-          // Admin STEP6/8 최종결과표 정렬값 → Player STEP5 연동
-          resultSort: nextResultSort,
-          finalResultSort: nextResultSort
+          ...sortPatch,
         }
       });
     } catch (e) {
@@ -212,8 +229,12 @@ export default function Step6() {
       setVisibleMetrics(nextVM);
     }
 
+    const savedResultShared = pv.resultSortShared === true || pv.finalResultSortShared === true;
+    if (resultSortShared !== savedResultShared) setResultSortShared(savedResultShared);
     const savedResultSort = pv.resultSort || pv.finalResultSort;
-    if (['room', 'asc', 'desc'].includes(savedResultSort)) {
+    // 공유 중일 때만 서버 정렬값을 Admin 상태로 복원합니다.
+    // 공유하지 않는 동안에는 Admin 화면의 로컬 정렬 상태를 유지합니다.
+    if (savedResultShared && ['room', 'asc', 'desc'].includes(savedResultSort)) {
       setResultSortMode(savedResultSort);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,18 +268,27 @@ export default function Step6() {
     const s = new Set(hiddenRooms);
     s.has(roomNo) ? s.delete(roomNo) : s.add(roomNo);
     setHiddenRooms(s);
-    persistPublicViewNow(s, visibleMetrics, resultSortMode);
+    persistPublicViewNow(s, visibleMetrics, resultSortMode, resultSortShared);
   };
   const toggleMetric = (key) => {
     const next = { ...visibleMetrics, [key]: !visibleMetrics[key] };
     setVisibleMetrics(next);
-    persistPublicViewNow(hiddenRooms, next, resultSortMode);
+    persistPublicViewNow(hiddenRooms, next, resultSortMode, resultSortShared);
   };
 
   const onResultSortSelect = (nextMode) => {
     setResultSortMode(nextMode);
     setResultSortMenuOpen(false);
-    persistPublicViewNow(hiddenRooms, visibleMetrics, nextMode);
+    // 공유 체크가 꺼져 있으면 Admin STEP6에만 적용하고 Player에는 반영하지 않습니다.
+    if (resultSortShared) {
+      persistPublicViewNow(hiddenRooms, visibleMetrics, nextMode, true);
+    }
+  };
+
+  const onResultSortShareToggle = () => {
+    const nextShared = !resultSortShared;
+    setResultSortShared(nextShared);
+    persistPublicViewNow(hiddenRooms, visibleMetrics, resultSortMode, nextShared);
   };
 
   // 캡처용 refs
@@ -536,6 +566,30 @@ export default function Step6() {
                     overflow: 'hidden'
                   }}
                 >
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      width: '100%',
+                      padding: '8px 4px',
+                      borderBottom: '1px solid #edf1f7',
+                      color: '#0b275a',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={resultSortShared}
+                      onChange={onResultSortShareToggle}
+                      style={{ margin: 0, width: 13, height: 13 }}
+                    />
+                    공유
+                  </label>
                   {[
                     ['room', '방'],
                     ['asc', '오름'],
@@ -545,7 +599,7 @@ export default function Step6() {
                       key={`result-sort-${value}`}
                       type="button"
                       onClick={() => onResultSortSelect(value)}
-                      style={{ display: 'block', width: '100%', border: 0, background: resultSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '9px 6px', fontSize: 13, fontWeight: resultSortMode === value ? 800 : 600 }}
+                      style={{ display: 'block', width: '100%', border: 0, background: resultSortMode === value ? '#eef4ff' : '#fff', color: '#0b275a', textAlign: 'center', padding: '8px 4px', fontSize: 13, fontWeight: resultSortMode === value ? 800 : 600 }}
                     >
                       {label}
                     </button>
