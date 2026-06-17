@@ -310,3 +310,50 @@
 .stepFooter button:active {
   background: #d0d0d0;
 }
+
+/* ────────────────────────────────────────────────────────────────
+   STEP8 모바일 표 레이아웃 보정
+   - 최종결과표/팀결과표는 내부 세로 스크롤(max-height)로 자르지 않고 전체 높이를 펼침
+   - 좌/우 이동은 표 영역 전체에서 자연스럽게 처리
+   - 팀결과표는 바깥 박스와 안쪽 tableContainer가 이중 여백/이중 스크롤이 되지 않도록 정리
+   ──────────────────────────────────────────────────────────────── */
+.resultContainer {
+  max-height: none !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  padding-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.resultContainer .table {
+  margin-bottom: 0;
+}
+
+.teamContainer {
+  max-height: none !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  padding-top: 0 !important;
+  padding-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.teamContainer > .tableContainer {
+  margin: 0 !important;
+  border: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  background: transparent;
+}
+
+.teamContainer > .tableContainer .table {
+  margin: 0;
+}
+
+.teamContainer .footerRank,
+.resultContainer .footerRankFinal {
+  line-height: 1.25;
+  white-space: nowrap;
+}
