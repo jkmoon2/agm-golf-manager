@@ -203,19 +203,19 @@ export default function Step8() {
       banddang: typeof vm.banddang === 'boolean' ? vm.banddang : true
     });
 
-    // 팀결과표 정렬값은 공유 체크가 켜진 경우에만 Firestore publicView를 기준으로 복원
+    // ✅ Admin 정렬값은 공유 여부와 관계없이 대회 기준으로 복원합니다.
+    //    공유 체크는 Player STEP5 반영 여부만 결정합니다.
     const savedTeamShared = pv.fourballTeamSortShared === true || pv.teamSortShared === true;
     if (teamSortShared !== savedTeamShared) setTeamSortShared(savedTeamShared);
     const savedTeamSort = pv.fourballTeamSort || pv.teamSort;
-    if (savedTeamShared && ['room', 'asc', 'desc'].includes(savedTeamSort)) {
+    if (['room', 'asc', 'desc'].includes(savedTeamSort)) {
       setTeamSortMode(savedTeamSort);
     }
 
-    // 최종결과표 정렬값도 공유 체크가 켜진 경우에만 Firestore publicView를 기준으로 복원
     const savedResultShared = pv.resultSortShared === true || pv.finalResultSortShared === true;
     if (resultSortShared !== savedResultShared) setResultSortShared(savedResultShared);
     const savedResultSort = pv.resultSort || pv.finalResultSort;
-    if (savedResultShared && ['room', 'asc', 'desc'].includes(savedResultSort)) {
+    if (['room', 'asc', 'desc'].includes(savedResultSort)) {
       setResultSortMode(savedResultSort);
     }
   }, [eventData?.publicView, roomCount]);
@@ -227,12 +227,20 @@ export default function Step8() {
     try {
       const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a,b)=>a-b); // 1-based
       const prevPv = eventData?.publicView || {};
-      const teamSortPatch = teamSortShared
-        ? { fourballTeamSort: teamSortMode, teamSort: teamSortMode, fourballTeamSortShared: true, teamSortShared: true }
-        : { fourballTeamSortShared: false, teamSortShared: false };
-      const resultSortPatch = resultSortShared
-        ? { resultSort: resultSortMode, finalResultSort: resultSortMode, resultSortShared: true, finalResultSortShared: true }
-        : { resultSortShared: false, finalResultSortShared: false };
+      // ✅ Admin 정렬값은 공유 여부와 관계없이 저장하고,
+      //    Player STEP5 반영 여부만 Shared 플래그로 제어합니다.
+      const teamSortPatch = {
+        fourballTeamSort: teamSortMode,
+        teamSort: teamSortMode,
+        fourballTeamSortShared: !!teamSortShared,
+        teamSortShared: !!teamSortShared,
+      };
+      const resultSortPatch = {
+        resultSort: resultSortMode,
+        finalResultSort: resultSortMode,
+        resultSortShared: !!resultSortShared,
+        finalResultSortShared: !!resultSortShared,
+      };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
@@ -270,9 +278,12 @@ export default function Step8() {
     if (!updateEventImmediate) return;
     try {
       const prevPv = eventData?.publicView || {};
-      const teamSortPatch = nextShared
-        ? { fourballTeamSort: nextMode, teamSort: nextMode, fourballTeamSortShared: true, teamSortShared: true }
-        : { fourballTeamSortShared: false, teamSortShared: false };
+      const teamSortPatch = {
+        fourballTeamSort: nextMode,
+        teamSort: nextMode,
+        fourballTeamSortShared: !!nextShared,
+        teamSortShared: !!nextShared,
+      };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
@@ -280,9 +291,10 @@ export default function Step8() {
           visibleMetrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
           metrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
           ...teamSortPatch,
-          ...(resultSortShared
-            ? { resultSort: resultSortMode, finalResultSort: resultSortMode, resultSortShared: true, finalResultSortShared: true }
-            : { resultSortShared: false, finalResultSortShared: false })
+          resultSort: resultSortMode,
+          finalResultSort: resultSortMode,
+          resultSortShared: !!resultSortShared,
+          finalResultSortShared: !!resultSortShared,
         }
       });
     } catch (e) {
@@ -293,10 +305,9 @@ export default function Step8() {
   const onTeamSortSelect = (nextMode) => {
     setTeamSortMode(nextMode);
     setTeamSortMenuOpen(false);
-    // 공유 체크가 꺼져 있으면 Admin STEP8에만 적용하고 Player에는 반영하지 않습니다.
-    if (teamSortShared) {
-      persistTeamSortModeNow(nextMode, true);
-    }
+    // ✅ 공유 체크가 꺼져 있어도 Admin용 정렬값은 대회 기준으로 저장합니다.
+    //    Player 반영 여부는 teamSortShared 값으로만 제어합니다.
+    persistTeamSortModeNow(nextMode, teamSortShared);
   };
 
   const onTeamSortShareToggle = () => {
@@ -310,18 +321,22 @@ export default function Step8() {
     if (!updateEventImmediate) return;
     try {
       const prevPv = eventData?.publicView || {};
-      const resultSortPatch = nextShared
-        ? { resultSort: nextMode, finalResultSort: nextMode, resultSortShared: true, finalResultSortShared: true }
-        : { resultSortShared: false, finalResultSortShared: false };
+      const resultSortPatch = {
+        resultSort: nextMode,
+        finalResultSort: nextMode,
+        resultSortShared: !!nextShared,
+        finalResultSortShared: !!nextShared,
+      };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
           hiddenRooms: Array.from(hiddenRooms).map(Number).sort((a,b)=>a-b),
           visibleMetrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
           metrics: { score: !!visibleMetrics.score, banddang: !!visibleMetrics.banddang },
-          ...(teamSortShared
-            ? { fourballTeamSort: teamSortMode, teamSort: teamSortMode, fourballTeamSortShared: true, teamSortShared: true }
-            : { fourballTeamSortShared: false, teamSortShared: false }),
+          fourballTeamSort: teamSortMode,
+          teamSort: teamSortMode,
+          fourballTeamSortShared: !!teamSortShared,
+          teamSortShared: !!teamSortShared,
           ...resultSortPatch,
         }
       });
@@ -333,10 +348,9 @@ export default function Step8() {
   const onResultSortSelect = (nextMode) => {
     setResultSortMode(nextMode);
     setResultSortMenuOpen(false);
-    // 공유 체크가 꺼져 있으면 Admin STEP8에만 적용하고 Player에는 반영하지 않습니다.
-    if (resultSortShared) {
-      persistResultSortModeNow(nextMode, true);
-    }
+    // ✅ 공유 체크가 꺼져 있어도 Admin용 정렬값은 대회 기준으로 저장합니다.
+    //    Player 반영 여부는 resultSortShared 값으로만 제어합니다.
+    persistResultSortModeNow(nextMode, resultSortShared);
   };
 
   const onResultSortShareToggle = () => {

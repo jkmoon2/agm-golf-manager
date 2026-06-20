@@ -56,10 +56,25 @@ function PwaRouteRememberer() {
   useEffect(() => {
     try {
       const full = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+
+      // ✅ PWA가 start_url 때문에 '/' 또는 '/login'으로 시작한 순간에는
+      //    기존에 저장해 둔 참가자 경로(/player/events)를 덮어쓰지 않습니다.
+      //    이 덮어쓰기가 발생하면 홈화면 앱 실행 시 운영자 로그인으로 고정되는 문제가 생깁니다.
+      const isPwaStartPlaceholder = isStandalonePWA()
+        && (location.pathname === '/' || location.pathname === '/login');
+      if (isPwaStartPlaceholder) return;
+
       localStorage.setItem('agm.lastRoute', full);
+
       if (location.pathname.startsWith('/player')) {
         localStorage.setItem('agm.lastMode', 'player');
-      } else if (location.pathname.startsWith('/admin') || location.pathname.startsWith('/login')) {
+        // /player/events에서 홈화면 추가한 참가자 PWA를 다음 실행 때 참가자 화면으로 복원
+        localStorage.setItem('agm.installMode', 'player');
+      } else if (location.pathname.startsWith('/admin')) {
+        localStorage.setItem('agm.lastMode', 'admin');
+        localStorage.setItem('agm.installMode', 'admin');
+      } else if (location.pathname.startsWith('/login')) {
+        // 로그인 화면은 운영자/참가자 공용 진입점으로 쓰일 수 있으므로 installMode는 바꾸지 않습니다.
         localStorage.setItem('agm.lastMode', 'admin');
       }
     } catch (e) {
@@ -109,15 +124,31 @@ function PwaStartRedirect() {
     }
 
     let last = null;
+    let lastMode = null;
     try {
       last = localStorage.getItem('agm.lastRoute');
+      lastMode = localStorage.getItem('agm.lastMode');
     } catch (e) {
       last = null;
+      lastMode = null;
     }
 
-    if (last && last !== location.pathname) {
+    if (last && last.startsWith('/player')) {
       navigate(last, { replace: true });
+      return;
     }
+    if (lastMode === 'player') {
+      navigate('/player/events', { replace: true });
+      return;
+    }
+    if (last && last !== location.pathname && last !== '/' && last !== '/login') {
+      navigate(last, { replace: true });
+      return;
+    }
+
+    // 설치 모드를 알 수 없는 홈화면 앱은 참가자 링크 사용 비중이 높으므로
+    // 운영자 로그인으로 떨어지기보다 참가자 로그인/이벤트 목록으로 우선 복원합니다.
+    navigate('/player/events', { replace: true });
   }, [location.pathname, navigate]);
 
   return null;

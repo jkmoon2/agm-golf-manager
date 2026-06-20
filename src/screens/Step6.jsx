@@ -180,17 +180,14 @@ export default function Step6() {
     try {
       const hiddenArr = Array.from(nextHiddenRoomsSet).map(Number).sort((a, b) => a - b); // 1-based 저장
       const prevPv = eventData?.publicView || {};
-      const sortPatch = nextResultShared
-        ? {
-            resultSort: nextResultSort,
-            finalResultSort: nextResultSort,
-            resultSortShared: true,
-            finalResultSortShared: true,
-          }
-        : {
-            resultSortShared: false,
-            finalResultSortShared: false,
-          };
+      // ✅ Admin 정렬값은 공유 여부와 관계없이 대회 publicView에 저장합니다.
+      //    단, Player STEP5는 resultSortShared/finalResultSortShared가 true일 때만 읽습니다.
+      const sortPatch = {
+        resultSort: nextResultSort,
+        finalResultSort: nextResultSort,
+        resultSortShared: !!nextResultShared,
+        finalResultSortShared: !!nextResultShared,
+      };
       await updateEventImmediate({
         publicView: {
           ...prevPv,
@@ -232,9 +229,9 @@ export default function Step6() {
     const savedResultShared = pv.resultSortShared === true || pv.finalResultSortShared === true;
     if (resultSortShared !== savedResultShared) setResultSortShared(savedResultShared);
     const savedResultSort = pv.resultSort || pv.finalResultSort;
-    // 공유 중일 때만 서버 정렬값을 Admin 상태로 복원합니다.
-    // 공유하지 않는 동안에는 Admin 화면의 로컬 정렬 상태를 유지합니다.
-    if (savedResultShared && ['room', 'asc', 'desc'].includes(savedResultSort)) {
+    // ✅ Admin 정렬값은 대회 기준으로 항상 복원합니다.
+    //    공유 체크는 Player STEP5 반영 여부만 결정합니다.
+    if (['room', 'asc', 'desc'].includes(savedResultSort)) {
       setResultSortMode(savedResultSort);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -279,10 +276,9 @@ export default function Step6() {
   const onResultSortSelect = (nextMode) => {
     setResultSortMode(nextMode);
     setResultSortMenuOpen(false);
-    // 공유 체크가 꺼져 있으면 Admin STEP6에만 적용하고 Player에는 반영하지 않습니다.
-    if (resultSortShared) {
-      persistPublicViewNow(hiddenRooms, visibleMetrics, nextMode, true);
-    }
+    // ✅ 공유 체크가 꺼져 있어도 Admin용 정렬값은 대회 기준으로 저장합니다.
+    //    Player 반영 여부는 resultSortShared 값으로만 제어합니다.
+    persistPublicViewNow(hiddenRooms, visibleMetrics, nextMode, resultSortShared);
   };
 
   const onResultSortShareToggle = () => {
