@@ -811,6 +811,10 @@ export default function PlayerEventInput(){
   const bingoTouchedSharedRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
   const pendingSavedInputsUntilRef = useRef(0);
+  // 숫자/누적 입력을 빈칸으로 삭제했을 때 Firestore 기존값이 되살아나지 않도록
+  // 삭제 의사를 별도 추적합니다. draft에 빈 문자열이 없거나 리렌더 타이밍이 엇갈려도
+  // saveDraft 병합 단계에서 이 목록을 기준으로 서버값을 명시 삭제합니다.
+  const pendingPersonDeleteRef = useRef({});
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
   const resetTokenRef = useRef({});
@@ -881,6 +885,7 @@ export default function PlayerEventInput(){
     draftTouchedRef.current = false;
     pendingSavedInputsSigRef.current = '';
     pendingSavedInputsUntilRef.current = 0;
+    pendingPersonDeleteRef.current = {};
     lastHydratedServerSigRef.current = stringifyEventInputs(cloned);
     bingoTouchedCellsRef.current = {};
     bingoTouchedBoardsRef.current = {};
@@ -913,6 +918,38 @@ export default function PlayerEventInput(){
   const applyDraft = (next, touched = true) => {
     draftTouchedRef.current = !!touched;
     setDraft(next);
+  };
+
+  const markPersonDelete = (evId, pid) => {
+    const evKey = String(evId || '');
+    const pidKey = String(pid || '');
+    if (!evKey || !pidKey) return;
+    if (!pendingPersonDeleteRef.current[evKey]) pendingPersonDeleteRef.current[evKey] = {};
+    pendingPersonDeleteRef.current[evKey][pidKey] = true;
+  };
+
+  const clearPersonDelete = (evId, pid) => {
+    const evKey = String(evId || '');
+    const pidKey = String(pid || '');
+    if (!evKey || !pidKey) return;
+    if (pendingPersonDeleteRef.current[evKey]) {
+      delete pendingPersonDeleteRef.current[evKey][pidKey];
+      if (!Object.keys(pendingPersonDeleteRef.current[evKey]).length) delete pendingPersonDeleteRef.current[evKey];
+    }
+  };
+
+  const hasPendingPersonDelete = (evId, pid) => {
+    return !!pendingPersonDeleteRef.current?.[String(evId || '')]?.[String(pid || '')];
+  };
+
+  const applyPendingPersonDeletes = (evId, personMap, allowedPids = null) => {
+    const out = { ...(personMap || {}) };
+    const pending = pendingPersonDeleteRef.current?.[String(evId || '')] || {};
+    Object.keys(pending).forEach((pid) => {
+      if (allowedPids && !allowedPids.has(String(pid))) return;
+      delete out[String(pid)];
+    });
+    return out;
   };
 
   useEffect(() => () => {
@@ -1005,6 +1042,7 @@ export default function PlayerEventInput(){
       draftTouchedRef.current = false;
       pendingSavedInputsSigRef.current = '';
       pendingSavedInputsUntilRef.current = 0;
+      pendingPersonDeleteRef.current = {};
       lastHydratedServerSigRef.current = stringifyEventInputs(nextDraft);
       setDraft(nextDraft);
       setDirty(false);
@@ -1035,6 +1073,8 @@ export default function PlayerEventInput(){
 
   useEffect(() => {
     if (!activeEventStorageId) return;
+    // Firestore eventData가 준비된 뒤에는 오래된 로컬 draft cache를 다시 살리지 않습니다.
+    // 숫자를 삭제해 서버가 빈 상태가 된 뒤 cache 때문에 예전 값이 재등장하는 문제를 차단합니다.
     if (eventSnapshotReady) return;
     const draftEmpty = !hasMeaningfulEventInputs(draft);
     if (!draftEmpty) return;
@@ -1528,6 +1568,8 @@ export default function PlayerEventInput(){
     const prev = String(person[pid] ?? '');
     const next = String(value ?? '');
     if (prev === next) return;
+    if (String(next).trim() === '') markPersonDelete(evId, pid);
+    else clearPersonDelete(evId, pid);
     person[pid] = next;
     slot.person = person; all[evId] = slot;
     applyDraft(all);
@@ -1551,6 +1593,9 @@ export default function PlayerEventInput(){
     const next = String(value ?? '');
     if (prev === next) return;
     obj.values[idx] = next;
+    const hasAnyAccumValue = obj.values.some(s => String(s ?? '').trim() !== '');
+    if (!hasAnyAccumValue) markPersonDelete(evId, pid);
+    else clearPersonDelete(evId, pid);
     person[pid]=obj; slot.person=person; all[evId]=slot;
     applyDraft(all);
   };
@@ -1589,8 +1634,13 @@ export default function PlayerEventInput(){
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
 
-    if (!v || Number.isNaN(num)) person[pid] = '';
-    else person[pid] = num;
+    if (!v || Number.isNaN(num)) {
+      markPersonDelete(evId, pid);
+      person[pid] = '';
+    } else {
+      clearPersonDelete(evId, pid);
+      person[pid] = num;
+    }
 
     slot.person = person; all[evId] = slot;
     applyDraft(all);
@@ -1618,8 +1668,13 @@ export default function PlayerEventInput(){
     const hasBingoBoardForSave = bingoSelectedHolesForSave
       ? normalizeBingoBoard(obj.board, bingoSelectedHolesForSave).some(Boolean)
       : false;
-    if (!obj.values.some(s => String(s).trim() !== '') && !hasBingoBoardForSave) person[pid] = { ...obj, __delete: true };
-    else person[pid] = obj;
+    if (!obj.values.some(s => String(s).trim() !== '') && !hasBingoBoardForSave) {
+      markPersonDelete(evId, pid);
+      person[pid] = { ...obj, __delete: true };
+    } else {
+      clearPersonDelete(evId, pid);
+      person[pid] = obj;
+    }
 
     slot.person = person; all[evId] = slot;
     applyDraft(all);
@@ -1831,6 +1886,23 @@ export default function PlayerEventInput(){
     return (events || []).find((item) => String(item?.id || '') === key) || null;
   };
 
+  const getHiddenSameGroupOnly = (hiddenCfg = null) => {
+    const cfg = normalizeHiddenEventParams(hiddenCfg || {});
+    return !!(
+      cfg.sameGroupOnly ||
+      cfg.sameGroupTargetOnly ||
+      cfg.targetScope === 'sameGroup' ||
+      cfg.opponentScope === 'sameGroup' ||
+      cfg.targetGroupScope === 'sameGroup'
+    );
+  };
+
+  const isSameHiddenGroup = (selector, target) => {
+    const selectorGroup = Number(getParticipantGroupNo(selector));
+    const targetGroup = Number(getParticipantGroupNo(target));
+    return !!(selector && target && Number.isFinite(selectorGroup) && Number.isFinite(targetGroup) && selectorGroup === targetGroup);
+  };
+
   const getHiddenTargetLimit = (hiddenCfg, targetId) => {
     const cfg = normalizeHiddenEventParams(hiddenCfg || {});
     if (cfg.targetLimitMode !== 'personal') return Infinity;
@@ -1862,13 +1934,11 @@ export default function PlayerEventInput(){
     const cfg = normalizeHiddenEventParams(hiddenCfg || getHiddenEventById(evId)?.params);
     if (cfg.mode !== 'personal') return true;
 
-    if (cfg.sameGroupOnly) {
+    if (getHiddenSameGroupOnly(cfg)) {
       const selectorKey = String(selectorId || '');
       const selector = participantById.get(selectorKey) || (String(selfParticipant?.id || '') === selectorKey ? selfParticipant : null);
       const target = participantById.get(targetKey);
-      const selectorGroup = Number(getParticipantGroupNo(selector));
-      const targetGroup = Number(getParticipantGroupNo(target));
-      if (!selector || !target || !Number.isFinite(selectorGroup) || !Number.isFinite(targetGroup) || selectorGroup !== targetGroup) return false;
+      if (!isSameHiddenGroup(selector, target)) return false;
     }
 
     const limit = getHiddenTargetLimit(cfg, targetKey);
@@ -1902,11 +1972,9 @@ export default function PlayerEventInput(){
 
     const hiddenEventDef = getHiddenEventById(evId);
     const hiddenCfg = normalizeHiddenEventParams(hiddenEventDef?.params);
-    if (targetId && hiddenEventDef?.template === 'hidden-event' && hiddenCfg.mode === 'personal' && hiddenCfg.sameGroupOnly) {
+    if (targetId && hiddenEventDef?.template === 'hidden-event' && hiddenCfg.mode === 'personal' && getHiddenSameGroupOnly(hiddenCfg)) {
       const target = participantById.get(targetId);
-      const myGroup = Number(getParticipantGroupNo(mine));
-      const targetGroup = Number(getParticipantGroupNo(target));
-      if (!target || !Number.isFinite(myGroup) || !Number.isFinite(targetGroup) || myGroup !== targetGroup) {
+      if (!isSameHiddenGroup(mine, target)) {
         alert('같은 조 참가자만 지목할 수 있습니다.');
         return;
       }
@@ -2094,14 +2162,15 @@ export default function PlayerEventInput(){
               && !val.values.some((x) => String(x ?? '').trim() !== '');
             const isEmptyBattleScore = evDef?.template === 'group-room-hole-battle' && typeof val === 'object' && val && Array.isArray(val.values)
               && !val.values.some((x) => String(x ?? '').trim() !== '');
-            if (isDeleteMarker || val === '' || val == null || isEmptyPick || isEmptyBingo || isEmptyAccum || isEmptyBattleScore || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
+            if (isDeleteMarker || hasPendingPersonDelete(evId, pid) || val === '' || val == null || isEmptyPick || isEmptyBingo || isEmptyAccum || isEmptyBattleScore || (typeof val==='object' && !Array.isArray(val.values) && !Object.keys(val).length)) {
               delete mPerson[pid];
             } else {
               mPerson[pid] = val;
             }
           });
 
-          mSlot.person = mPerson;
+          const mergedPersonAfterDeletes = applyPendingPersonDeletes(evId, mPerson, allowedPids);
+          mSlot.person = mergedPersonAfterDeletes;
           if (slot?.shared && typeof slot.shared === 'object') {
             const clonedShared = JSON.parse(JSON.stringify(slot.shared));
             if (evDef?.template === 'bingo') {
@@ -2153,6 +2222,7 @@ export default function PlayerEventInput(){
         }
       }
       const savedClone = cloneEventInputs(merged);
+      pendingPersonDeleteRef.current = {};
       keepSavedDraftVisible(savedClone);
       if (activeEventStorageId) {
         const nextPack = {
@@ -2235,6 +2305,7 @@ export default function PlayerEventInput(){
         }
 
         for (const pid of roomPids) {
+          if (hasPendingPersonDelete(evId, pid)) return true;
           if (ev.template === 'pick-lineup') {
             const requiredCount = getPickLineupRequiredCount(ev);
             const baseArr = getServerPickIds(evId, pid, requiredCount);
@@ -2380,9 +2451,11 @@ export default function PlayerEventInput(){
               return (roomNames?.[n - 1] && String(roomNames[n - 1]).trim()) ? String(roomNames[n - 1]).trim() : `${n}번방`;
             };
             const getHiddenCandidates = () => {
+              const sameGroupOnly = getHiddenSameGroupOnly(hiddenCfg);
               const arr = (Array.isArray(participants) ? [...participants] : []).filter((p) => {
                 const pid = String(p?.id || '');
                 if (!pid || pid === mineId) return false;
+                if (sameGroupOnly && !isSameHiddenGroup(mine, p)) return false;
                 return canSelectHiddenTarget(ev.id, pid, mineId, hiddenCfg);
               });
               arr.sort((a, b) => {
