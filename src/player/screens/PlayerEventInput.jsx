@@ -7,7 +7,7 @@ import baseCss from './PlayerRoomTable.module.css';
 import tCss   from './PlayerEventInput.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
-import { doc, onSnapshot, setDoc, updateDoc, getDoc, runTransaction, serverTimestamp, deleteField, FieldPath } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoGridSize, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
@@ -1871,35 +1871,10 @@ export default function PlayerEventInput(){
       merged[evId] = mSlot;
       if (typeof updateEventImmediate === 'function') {
         await updateEventImmediate({ eventInputs: merged }, false);
-        // 숫자칸 삭제는 병합 객체 저장 외에도 Firestore 필드 삭제를 한 번 더 수행합니다.
-      // 라이브 중 다른 클라이언트/오래된 스냅샷이 남긴 값이 다시 살아나는 것을 막는 안전장치입니다.
-      try {
-        const deleteArgs = [];
-        Object.entries(deletedSingleValuesRef.current || {}).forEach(([evId, pidMap]) => {
-          Object.keys(pidMap || {}).forEach((pid) => {
-            if (String(evId || '') && String(pid ?? '')) {
-              deleteArgs.push(new FieldPath('eventInputs', String(evId), 'person', String(pid)), deleteField());
-            }
-          });
-        });
-        Object.entries(deletedAccumValuesRef.current || {}).forEach(([evId, pidMap]) => {
-          Object.entries(pidMap || {}).forEach(([pid]) => {
-            const savedVal = merged?.[evId]?.person?.[pid];
-            const emptyAfterMerge = !savedVal || (typeof savedVal === 'object' && Array.isArray(savedVal.values) && !savedVal.values.some((x) => String(x ?? '').trim() !== '') && !(Array.isArray(savedVal.board) && savedVal.board.some((x) => String(x ?? '').trim() !== '')) && !savedVal.roomShared);
-            if (emptyAfterMerge && String(evId || '') && String(pid ?? '')) {
-              deleteArgs.push(new FieldPath('eventInputs', String(evId), 'person', String(pid)), deleteField());
-            }
-          });
-        });
-        if (deleteArgs.length) {
-          await updateDoc(doc(db, 'events', targetEventId), ...deleteArgs, 'inputsUpdatedAt', serverTimestamp(), 'updatedAt', serverTimestamp());
-          merged = buildMergedEventInputs(merged);
-        }
-      } catch (deleteErr) {
-        console.warn('[PlayerEventInput] explicit delete cleanup failed:', deleteErr);
-      }
+        // 숫자칸 삭제 명시 정리는 saveDraft() 내부 병합 단계에서 처리합니다.
+        // 이 함수는 히든/순위 포볼 팀 선택 저장용이라 targetEventId/buildMergedEventInputs를 사용하지 않습니다.
 
-      const savedClone = cloneEventInputs(merged);
+        const savedClone = cloneEventInputs(merged);
         pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
         if (activeEventStorageId) {
           const nextPack = {
