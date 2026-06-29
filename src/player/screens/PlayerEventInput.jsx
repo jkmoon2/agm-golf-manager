@@ -986,7 +986,8 @@ export default function PlayerEventInput(){
       pendingSavedInputsUntilRef.current = 0;
     }
 
-    const canHydrate = !draftTouchedRef.current || draftEmpty || draftSig === prevHydratedSig;
+    // 사용자가 값을 지워 draft가 비어도(draftEmpty) 저장 전에는 서버 이전값으로 되살리면 안 됩니다.
+    const canHydrate = !draftTouchedRef.current || draftSig === prevHydratedSig;
     if (canHydrate && serverSig !== draftSig) {
       hydrateDraftFromServer(inputsByEventServer);
       return;
@@ -1914,16 +1915,17 @@ export default function PlayerEventInput(){
   const canSelectHiddenTarget = (evId, targetId, selectorId, hiddenCfg = null) => {
     const targetKey = String(targetId || '');
     if (!targetKey) return true;
-    const cfg = normalizeHiddenEventParams(hiddenCfg || getHiddenEventById(evId)?.params);
+    const rawCfg = hiddenCfg || getHiddenEventById(evId)?.params || {};
+    const cfg = normalizeHiddenEventParams(rawCfg);
     if (cfg.mode !== 'personal') return true;
     const sameGroupOnly = !!(
-      cfg.sameGroupOnly ||
-      cfg.sameGroupTargetOnly ||
-      cfg.sameGroupTargetsOnly ||
-      cfg.onlySameGroup ||
-      cfg.sameGroup ||
-      cfg.targetScope === 'sameGroup' ||
-      cfg.opponentScope === 'sameGroup'
+      cfg.sameGroupOnly || rawCfg.sameGroupOnly ||
+      cfg.sameGroupTargetOnly || rawCfg.sameGroupTargetOnly ||
+      cfg.sameGroupTargetsOnly || rawCfg.sameGroupTargetsOnly ||
+      cfg.onlySameGroup || rawCfg.onlySameGroup ||
+      cfg.sameGroup || rawCfg.sameGroup ||
+      cfg.targetScope === 'sameGroup' || rawCfg.targetScope === 'sameGroup' ||
+      cfg.opponentScope === 'sameGroup' || rawCfg.opponentScope === 'sameGroup'
     );
     if (sameGroupOnly) {
       const selector = participantById.get(String(selectorId || ''));
@@ -1957,7 +1959,7 @@ export default function PlayerEventInput(){
   const patchHiddenOpponent = async (evId, opponentId) => {
     const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
     if (!evId || !mine) return;
-    const meId = String(mine.id || '');
+    const meId = String(mine.id ?? '');
     const targetId = String(opponentId || '');
     if (!meId) return;
 
@@ -2446,7 +2448,7 @@ export default function PlayerEventInput(){
             const hiddenCfg = normalizeHiddenEventParams(ev?.params);
             const hiddenLocked = !!hiddenCfg.selectionLocked;
             const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
-            const mineId = String(mine?.id || '');
+            const mineId = String(mine?.id ?? '');
             const hiddenDraftSlot = (inputsByEvent?.[ev.id] && typeof inputsByEvent[ev.id] === 'object') ? inputsByEvent[ev.id] : {};
             const hiddenServerSlot = (inputsByEventServer?.[ev.id] && typeof inputsByEventServer[ev.id] === 'object') ? inputsByEventServer[ev.id] : {};
             const hiddenEffectiveSlot = Object.keys(hiddenDraftSlot || {}).length ? hiddenDraftSlot : hiddenServerSlot;
@@ -2458,20 +2460,21 @@ export default function PlayerEventInput(){
             };
             const getHiddenCandidates = () => {
               const mineGroup = Number(getParticipantGroupNo(mine));
+              const rawHiddenParams = ev?.params || {};
               const sameGroupOnly = !!(
-                hiddenCfg?.sameGroupOnly ||
-                hiddenCfg?.sameGroupTargetOnly ||
-                hiddenCfg?.sameGroupTargetsOnly ||
-                hiddenCfg?.onlySameGroup ||
-                hiddenCfg?.sameGroup ||
-                hiddenCfg?.targetScope === 'sameGroup' ||
-                hiddenCfg?.opponentScope === 'sameGroup'
+                hiddenCfg?.sameGroupOnly || rawHiddenParams.sameGroupOnly ||
+                hiddenCfg?.sameGroupTargetOnly || rawHiddenParams.sameGroupTargetOnly ||
+                hiddenCfg?.sameGroupTargetsOnly || rawHiddenParams.sameGroupTargetsOnly ||
+                hiddenCfg?.onlySameGroup || rawHiddenParams.onlySameGroup ||
+                hiddenCfg?.sameGroup || rawHiddenParams.sameGroup ||
+                hiddenCfg?.targetScope === 'sameGroup' || rawHiddenParams.targetScope === 'sameGroup' ||
+                hiddenCfg?.opponentScope === 'sameGroup' || rawHiddenParams.opponentScope === 'sameGroup'
               );
               const arr = (Array.isArray(participants) ? [...participants] : []).filter((p) => {
-                const pid = String(p?.id || '');
+                const pid = String(p?.id ?? '');
                 if (!pid || pid === mineId) return false;
-                if (sameGroupOnly && Number(getParticipantGroupNo(p)) !== mineGroup) return false;
-                return canSelectHiddenTarget(ev.id, pid, mineId, hiddenCfg);
+                if (sameGroupOnly && (!Number.isFinite(mineGroup) || Number(getParticipantGroupNo(p)) !== mineGroup)) return false;
+                return canSelectHiddenTarget(ev.id, pid, mineId, { ...rawHiddenParams, ...hiddenCfg });
               });
               arr.sort((a, b) => {
                 const groupDiff = (Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999));
