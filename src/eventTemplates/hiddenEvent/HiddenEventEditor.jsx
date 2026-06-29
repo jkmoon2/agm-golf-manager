@@ -108,9 +108,6 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     setPointText((prev) => ({ ...prev, [key]: raw }));
     emit({ personalPoints: { ...cfg.personalPoints, [key]: raw === '' ? '' : Number(raw) } });
   };
-  const emitTargetScope = (checked) => {
-    emit({ targetScope: checked ? 'sameGroup' : 'all' });
-  };
   const emitPairGroup = (side, groupNo) => {
     const pairGroups = { ...cfg.pairGroups, [side]: toggleGroup(cfg.pairGroups?.[side], groupNo) };
     const other = side === 'A' ? 'B' : 'A';
@@ -177,12 +174,12 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             </label>
           </div>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 12, fontWeight: 900, color: '#25344d', lineHeight: 1.35 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 12, fontSize: 13, fontWeight: 900, color: '#16376c' }}>
             <input
               type="checkbox"
-              checked={cfg.targetScope === 'sameGroup'}
-              onChange={(e) => emitTargetScope(e.target.checked)}
-              style={{ width: 16, height: 16, flexShrink: 0 }}
+              checked={!!cfg.sameGroupOnly}
+              onChange={(e) => emit({ sameGroupOnly: !!e.target.checked })}
+              style={{ width: 16, height: 16, margin: 0 }}
             />
             같은 조 참가자만 지목 허용
           </label>
