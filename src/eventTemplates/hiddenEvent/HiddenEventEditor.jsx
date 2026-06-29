@@ -138,6 +138,9 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     emit({
       sameGroupOnly: !!checked,
       sameGroupTargetOnly: !!checked,
+      sameGroupTargetsOnly: !!checked,
+      onlySameGroup: !!checked,
+      sameGroup: !!checked,
       targetScope: checked ? 'sameGroup' : 'all',
       opponentScope: checked ? 'sameGroup' : 'all',
     });

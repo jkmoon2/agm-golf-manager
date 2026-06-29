@@ -463,6 +463,7 @@ if (form.template === 'group-battle') {
         title: form.title.trim() || '이벤트',
         template: form.template,
         params: hiddenParams || rankScoreParams || pickLineupParams || parsed,
+        ...(isHiddenEvent ? { sameGroupOnly: !!hiddenParams.sameGroupOnly, sameGroupTargetOnly: !!hiddenParams.sameGroupOnly, targetScope: hiddenParams.targetScope || 'all', opponentScope: hiddenParams.opponentScope || 'all' } : {}),
         target: isHiddenEvent ? (hiddenParams.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'))),
         rankOrder: isHiddenEvent ? (hiddenParams.mode === 'fourball' ? 'asc' : 'desc') : (isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : 'asc')),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
@@ -979,6 +980,7 @@ if (editForm?.template === 'group-battle') {
         title: editForm.title.trim() || e.title,
         template: editForm.template,
         params: hiddenParamsEdit || rankScoreParamsEdit || parsed,
+        ...(isHiddenEventEdit ? { sameGroupOnly: !!hiddenParamsEdit.sameGroupOnly, sameGroupTargetOnly: !!hiddenParamsEdit.sameGroupOnly, targetScope: hiddenParamsEdit.targetScope || 'all', opponentScope: hiddenParamsEdit.opponentScope || 'all' } : {}),
         target: isHiddenEventEdit ? (hiddenParamsEdit.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target))),
         rankOrder: isHiddenEventEdit ? (hiddenParamsEdit.mode === 'fourball' ? 'asc' : 'desc') : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder))),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,

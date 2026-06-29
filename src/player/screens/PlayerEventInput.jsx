@@ -881,20 +881,20 @@ export default function PlayerEventInput(){
 
   const markSingleDeleted = (evId, pid) => {
     const evKey = String(evId || '');
-    const pidKey = String(pid || '');
+    const pidKey = String(pid ?? '');
     if (!evKey || !pidKey) return;
     deletedSingleValuesRef.current[evKey] = { ...(deletedSingleValuesRef.current[evKey] || {}), [pidKey]: true };
   };
   const clearSingleDeleted = (evId, pid) => {
     const evKey = String(evId || '');
-    const pidKey = String(pid || '');
+    const pidKey = String(pid ?? '');
     if (!evKey || !pidKey || !deletedSingleValuesRef.current[evKey]) return;
     delete deletedSingleValuesRef.current[evKey][pidKey];
     if (!Object.keys(deletedSingleValuesRef.current[evKey]).length) delete deletedSingleValuesRef.current[evKey];
   };
   const markAccumDeleted = (evId, pid, idx) => {
     const evKey = String(evId || '');
-    const pidKey = String(pid || '');
+    const pidKey = String(pid ?? '');
     const idxKey = String(idx);
     if (!evKey || !pidKey || idxKey === '') return;
     const evMap = { ...(deletedAccumValuesRef.current[evKey] || {}) };
@@ -903,7 +903,7 @@ export default function PlayerEventInput(){
   };
   const clearAccumDeleted = (evId, pid, idx) => {
     const evKey = String(evId || '');
-    const pidKey = String(pid || '');
+    const pidKey = String(pid ?? '');
     const idxKey = String(idx);
     const evMap = deletedAccumValuesRef.current[evKey];
     if (!evMap || !evMap[pidKey]) return;
@@ -916,6 +916,31 @@ export default function PlayerEventInput(){
     if (!evKey) return;
     delete deletedSingleValuesRef.current[evKey];
     delete deletedAccumValuesRef.current[evKey];
+  };
+
+  const hasPendingDeletedMarks = () => {
+    const single = deletedSingleValuesRef.current || {};
+    const accum = deletedAccumValuesRef.current || {};
+    return Object.keys(single).length > 0 || Object.keys(accum).length > 0;
+  };
+
+  const getHiddenSameGroupOnlyFlag = (eventDef, normalizedCfg = null) => {
+    const evObj = (eventDef && typeof eventDef === 'object') ? eventDef : {};
+    const raw = (evObj.params && typeof evObj.params === 'object') ? evObj.params : {};
+    const cfg = normalizedCfg || normalizeHiddenEventParams(raw);
+    const values = [
+      cfg?.sameGroupOnly, cfg?.sameGroupTargetOnly, cfg?.sameGroupTargetsOnly, cfg?.onlySameGroup, cfg?.sameGroup,
+      raw.sameGroupOnly, raw.sameGroupTargetOnly, raw.sameGroupTargetsOnly, raw.onlySameGroup, raw.sameGroup,
+      evObj.sameGroupOnly, evObj.sameGroupTargetOnly, evObj.sameGroupTargetsOnly, evObj.onlySameGroup, evObj.sameGroup,
+      cfg?.targetScope, cfg?.opponentScope, raw.targetScope, raw.opponentScope, evObj.targetScope, evObj.opponentScope,
+    ];
+    return values.some((v) => v === true || String(v || '').trim().toLowerCase() === 'samegroup' || String(v || '').trim() === '같은조');
+  };
+
+  const isSameGroupParticipant = (a, b) => {
+    const ga = Number(getParticipantGroupNo(a));
+    const gb = Number(getParticipantGroupNo(b));
+    return Number.isFinite(ga) && Number.isFinite(gb) && ga === gb;
   };
 
   const hydrateDraftFromServer = (source) => {
@@ -972,6 +997,11 @@ export default function PlayerEventInput(){
     const draftSig = stringifyEventInputs(draft);
     const draftEmpty = !hasMeaningfulEventInputs(draft);
     const prevHydratedSig = lastHydratedServerSigRef.current || '';
+
+    if (hasPendingDeletedMarks()) {
+      // 사용자가 숫자칸을 비운 상태는 저장 전까지 서버의 이전값으로 되살리면 안 됩니다.
+      return;
+    }
 
     if (pendingSavedInputsSigRef.current) {
       if (serverSig === pendingSavedInputsSigRef.current) {
@@ -1096,7 +1126,7 @@ export default function PlayerEventInput(){
 
   const markBingoCellTouched = (evId, pid, idx) => {
     const evKey = String(evId || '');
-    const pidKey = String(pid || '');
+    const pidKey = String(pid ?? '');
     const idxKey = String(idx);
     if (!evKey || !pidKey) return;
     if (!bingoTouchedCellsRef.current[evKey]) bingoTouchedCellsRef.current[evKey] = {};
@@ -1114,7 +1144,7 @@ export default function PlayerEventInput(){
 
   const markBingoBoardTouched = (evId, pid) => {
     const evKey = String(evId || '');
-    const pidKey = String(pid || '');
+    const pidKey = String(pid ?? '');
     if (!evKey || !pidKey) return;
     if (!bingoTouchedBoardsRef.current[evKey]) bingoTouchedBoardsRef.current[evKey] = {};
     bingoTouchedBoardsRef.current[evKey][pidKey] = true;
@@ -1578,6 +1608,7 @@ export default function PlayerEventInput(){
     person[pid] = next;
     slot.person = person; all[evId] = slot;
     applyDraft(all);
+    setDirty(true);
   };
 
   const patchAccum = (evId, pid, idx, value, attemptsOverride) => {
@@ -1602,6 +1633,7 @@ export default function PlayerEventInput(){
     obj.values[idx] = next;
     person[pid]=obj; slot.person=person; all[evId]=slot;
     applyDraft(all);
+    setDirty(true);
   };
 
   const patchPickMember = (evId, pid, idx, value, requiredCount) => {
@@ -1648,6 +1680,7 @@ export default function PlayerEventInput(){
 
     slot.person = person; all[evId] = slot;
     applyDraft(all);
+    setDirty(true);
   };
   const finalizeAccum = (evId, pid, idx, raw, attemptsOverride) => {
     const v = String(raw ?? '').trim();
@@ -1679,6 +1712,7 @@ export default function PlayerEventInput(){
 
     slot.person = person; all[evId] = slot;
     applyDraft(all);
+    setDirty(true);
   };
 
   const patchBonus = (evId, pid, idxOrVal, value, isAccum, attemptsOverride) => {
@@ -1837,6 +1871,9 @@ export default function PlayerEventInput(){
       merged[evId] = mSlot;
       if (typeof updateEventImmediate === 'function') {
         await updateEventImmediate({ eventInputs: merged }, false);
+        // 숫자칸 삭제 명시 정리는 saveDraft() 내부 병합 단계에서 처리합니다.
+        // 이 함수는 히든/순위 포볼 팀 선택 저장용이라 targetEventId/buildMergedEventInputs를 사용하지 않습니다.
+
         const savedClone = cloneEventInputs(merged);
         pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
         if (activeEventStorageId) {
@@ -1913,26 +1950,16 @@ export default function PlayerEventInput(){
   };
 
   const canSelectHiddenTarget = (evId, targetId, selectorId, hiddenCfg = null) => {
-    const targetKey = String(targetId || '');
+    const targetKey = String(targetId ?? '');
     if (!targetKey) return true;
-    const rawCfg = hiddenCfg || getHiddenEventById(evId)?.params || {};
+    const eventDef = getHiddenEventById(evId);
+    const rawCfg = hiddenCfg || eventDef?.params || {};
     const cfg = normalizeHiddenEventParams(rawCfg);
     if (cfg.mode !== 'personal') return true;
-    const sameGroupOnly = !!(
-      cfg.sameGroupOnly || rawCfg.sameGroupOnly ||
-      cfg.sameGroupTargetOnly || rawCfg.sameGroupTargetOnly ||
-      cfg.sameGroupTargetsOnly || rawCfg.sameGroupTargetsOnly ||
-      cfg.onlySameGroup || rawCfg.onlySameGroup ||
-      cfg.sameGroup || rawCfg.sameGroup ||
-      cfg.targetScope === 'sameGroup' || rawCfg.targetScope === 'sameGroup' ||
-      cfg.opponentScope === 'sameGroup' || rawCfg.opponentScope === 'sameGroup'
-    );
-    if (sameGroupOnly) {
-      const selector = participantById.get(String(selectorId || ''));
+    if (getHiddenSameGroupOnlyFlag(eventDef, cfg)) {
+      const selector = participantById.get(String(selectorId ?? ''));
       const target = participantById.get(targetKey);
-      const selectorGroup = Number(getParticipantGroupNo(selector));
-      const targetGroup = Number(getParticipantGroupNo(target));
-      if (!Number.isFinite(selectorGroup) || !Number.isFinite(targetGroup) || selectorGroup !== targetGroup) return false;
+      if (!isSameGroupParticipant(selector, target)) return false;
     }
     const limit = getHiddenTargetLimit(cfg, targetKey);
     if (!Number.isFinite(limit)) return true;
@@ -1948,7 +1975,7 @@ export default function PlayerEventInput(){
       },
     };
 
-    const selectorKey = String(selectorId || '');
+    const selectorKey = String(selectorId ?? '');
     const currentOpponent = getHiddenOpponentId(mergedSlot?.person?.[selectorKey]);
     if (String(currentOpponent || '') === targetKey) return true;
 
@@ -2459,22 +2486,12 @@ export default function PlayerEventInput(){
               return (roomNames?.[n - 1] && String(roomNames[n - 1]).trim()) ? String(roomNames[n - 1]).trim() : `${n}번방`;
             };
             const getHiddenCandidates = () => {
-              const mineGroup = Number(getParticipantGroupNo(mine));
-              const rawHiddenParams = ev?.params || {};
-              const sameGroupOnly = !!(
-                hiddenCfg?.sameGroupOnly || rawHiddenParams.sameGroupOnly ||
-                hiddenCfg?.sameGroupTargetOnly || rawHiddenParams.sameGroupTargetOnly ||
-                hiddenCfg?.sameGroupTargetsOnly || rawHiddenParams.sameGroupTargetsOnly ||
-                hiddenCfg?.onlySameGroup || rawHiddenParams.onlySameGroup ||
-                hiddenCfg?.sameGroup || rawHiddenParams.sameGroup ||
-                hiddenCfg?.targetScope === 'sameGroup' || rawHiddenParams.targetScope === 'sameGroup' ||
-                hiddenCfg?.opponentScope === 'sameGroup' || rawHiddenParams.opponentScope === 'sameGroup'
-              );
+              const sameGroupOnly = getHiddenSameGroupOnlyFlag(ev, hiddenCfg);
               const arr = (Array.isArray(participants) ? [...participants] : []).filter((p) => {
                 const pid = String(p?.id ?? '');
                 if (!pid || pid === mineId) return false;
-                if (sameGroupOnly && (!Number.isFinite(mineGroup) || Number(getParticipantGroupNo(p)) !== mineGroup)) return false;
-                return canSelectHiddenTarget(ev.id, pid, mineId, { ...rawHiddenParams, ...hiddenCfg });
+                if (sameGroupOnly && !isSameGroupParticipant(mine, p)) return false;
+                return canSelectHiddenTarget(ev.id, pid, mineId, ev?.params || hiddenCfg);
               });
               arr.sort((a, b) => {
                 const groupDiff = (Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999));
@@ -2485,6 +2502,7 @@ export default function PlayerEventInput(){
               });
               return arr;
             };
+
             const hiddenSelectStyle = (key) => ({
               height: 38,
               border: hiddenSelectFocusId === key ? '2px solid #2563eb' : '1px solid #d7dfec',

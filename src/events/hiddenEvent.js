@@ -28,6 +28,10 @@ export function defaultHiddenEventParams() {
     },
     // 개인 1대1에서 같은 조 참가자만 상대 후보로 허용
     sameGroupOnly: false,
+    sameGroupTargetOnly: false,
+    sameGroupTargetsOnly: false,
+    onlySameGroup: false,
+    sameGroup: false,
     targetScope: 'all', // all | sameGroup
     // 개인 1대1에서 상대방별 지목받는 횟수 제한
     // - targetLimitMode: unlimited | personal
@@ -143,8 +147,13 @@ export function normalizeHiddenEventParams(raw) {
     pairGroups: normalizeHiddenPairGroups(src.pairGroups),
     selectionLocked: !!(src.selectionLocked || src.locked),
     personalPoints: normalizeHiddenPersonalPoints(src.personalPoints || src.points),
-    sameGroupOnly: !!(src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || src.targetScope === 'sameGroup' || src.opponentScope === 'sameGroup'),
-    targetScope: (src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || src.targetScope === 'sameGroup' || src.opponentScope === 'sameGroup') ? 'sameGroup' : 'all',
+    sameGroupOnly: !!(src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || String(src.targetScope || '').toLowerCase() === 'samegroup' || String(src.opponentScope || '').toLowerCase() === 'samegroup' || src.targetScope === '같은조' || src.opponentScope === '같은조'),
+    sameGroupTargetOnly: !!(src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || String(src.targetScope || '').toLowerCase() === 'samegroup' || String(src.opponentScope || '').toLowerCase() === 'samegroup' || src.targetScope === '같은조' || src.opponentScope === '같은조'),
+    sameGroupTargetsOnly: !!(src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || String(src.targetScope || '').toLowerCase() === 'samegroup' || String(src.opponentScope || '').toLowerCase() === 'samegroup' || src.targetScope === '같은조' || src.opponentScope === '같은조'),
+    onlySameGroup: !!(src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || String(src.targetScope || '').toLowerCase() === 'samegroup' || String(src.opponentScope || '').toLowerCase() === 'samegroup' || src.targetScope === '같은조' || src.opponentScope === '같은조'),
+    sameGroup: !!(src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || String(src.targetScope || '').toLowerCase() === 'samegroup' || String(src.opponentScope || '').toLowerCase() === 'samegroup' || src.targetScope === '같은조' || src.opponentScope === '같은조'),
+    targetScope: (src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || String(src.targetScope || '').toLowerCase() === 'samegroup' || String(src.opponentScope || '').toLowerCase() === 'samegroup' || src.targetScope === '같은조' || src.opponentScope === '같은조') ? 'sameGroup' : 'all',
+    opponentScope: (src.sameGroupOnly || src.sameGroupTargetOnly || src.sameGroupTargetsOnly || src.onlySameGroup || src.sameGroup || String(src.targetScope || '').toLowerCase() === 'samegroup' || String(src.opponentScope || '').toLowerCase() === 'samegroup' || src.targetScope === '같은조' || src.opponentScope === '같은조') ? 'sameGroup' : 'all',
     targetLimitMode: (src.targetLimitMode === 'personal' || src.limitMode === 'personal') ? 'personal' : 'unlimited',
     targetLimits: normalizeHiddenTargetLimits(src.targetLimits || src.receiveLimits || src.targetReceiveLimits),
     handicapOverrides: normalizeHiddenHandicapOverrides(src.handicapOverrides),
