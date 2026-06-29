@@ -134,6 +134,15 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     emit({ targetLimitMode: 'personal', targetLimits: normalizeLimitMap(nextText) });
   };
 
+  const emitSameGroupOnly = (checked) => {
+    emit({
+      sameGroupOnly: !!checked,
+      sameGroupTargetOnly: !!checked,
+      targetScope: checked ? 'sameGroup' : 'all',
+      opponentScope: checked ? 'sameGroup' : 'all',
+    });
+  };
+
   const limitModeValue = cfg.targetLimitMode === 'personal' || Object.keys(cfg.targetLimits || {}).length ? 'personal' : 'unlimited';
   const participantList = Array.isArray(participants) ? participants : [];
 
@@ -157,6 +166,18 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
       </label>
 
       {cfg.mode === 'personal' && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 900, color: '#16243f' }}>
+          <input
+            type="checkbox"
+            checked={!!cfg.sameGroupOnly}
+            onChange={(e) => emitSameGroupOnly(e.target.checked)}
+            style={{ width: 16, height: 16 }}
+          />
+          같은 조 참가자만 지목 허용
+        </label>
+      )}
+
+      {cfg.mode === 'personal' && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>개인 1대1 점수 설정</div>
           <div style={twoRowStyle}>
@@ -173,24 +194,6 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
               <input style={inputStyle} type="number" inputMode="decimal" value={pointText.mutual} onChange={(e) => emitPoint('mutual', e.target.value)} />
             </label>
           </div>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 12, fontSize: 13, fontWeight: 900, color: '#16376c' }}>
-            <input
-              type="checkbox"
-              checked={!!cfg.sameGroupOnly}
-              onChange={(e) => {
-                const checked = !!e.target.checked;
-                emit({
-                  sameGroupOnly: checked,
-                  sameGroupTargetOnly: checked,
-                  targetScope: checked ? 'sameGroup' : 'all',
-                  opponentScope: checked ? 'sameGroup' : 'all',
-                });
-              }}
-              style={{ width: 16, height: 16, margin: 0 }}
-            />
-            같은 조 참가자만 지목 허용
-          </label>
 
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
           <div style={rowStyle}>
