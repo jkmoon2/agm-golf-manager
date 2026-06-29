@@ -26,14 +26,14 @@ export function defaultHiddenEventParams() {
       draw: 0.5,
       mutual: 0,
     },
-    // 개인 1대1에서 상대 지목 범위
-    // - targetScope: all | sameGroup
-    targetScope: 'all',
     // 개인 1대1에서 상대방별 지목받는 횟수 제한
     // - targetLimitMode: unlimited | personal
     // - targetLimits: { [participantId]: number }
+    // 개인 1대1 상대 후보 범위
+    // - sameGroupOnly: true이면 본인과 같은 조 참가자만 지목 가능
     targetLimitMode: 'unlimited',
     targetLimits: {},
+    sameGroupOnly: false,
     handicapOverrides: {},
   };
 }
@@ -143,9 +143,9 @@ export function normalizeHiddenEventParams(raw) {
     pairGroups: normalizeHiddenPairGroups(src.pairGroups),
     selectionLocked: !!(src.selectionLocked || src.locked),
     personalPoints: normalizeHiddenPersonalPoints(src.personalPoints || src.points),
-    targetScope: (src.targetScope === 'sameGroup' || src.targetGroupScope === 'sameGroup' || src.sameGroupOnly === true) ? 'sameGroup' : 'all',
     targetLimitMode: (src.targetLimitMode === 'personal' || src.limitMode === 'personal') ? 'personal' : 'unlimited',
     targetLimits: normalizeHiddenTargetLimits(src.targetLimits || src.receiveLimits || src.targetReceiveLimits),
+    sameGroupOnly: !!(src.sameGroupOnly || src.sameGroupTargetOnly || src.targetScope === 'sameGroup' || src.opponentScope === 'sameGroup'),
     handicapOverrides: normalizeHiddenHandicapOverrides(src.handicapOverrides),
   };
 }
