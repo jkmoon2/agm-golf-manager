@@ -5,7 +5,7 @@ import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { db, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
-import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅
+import { collection, getDocs, getDocsFromServer, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅
 import styles from './EventSelectScreen.module.css';
 import { getAuth } from 'firebase/auth'; // ✅
 
@@ -22,13 +22,37 @@ export default function EventSelectScreen() {
   );
 
   useEffect(() => {
-    (async () => {
+    let alive = true;
+    let retryTimer = null;
+    const clearRetry = () => { try { if (retryTimer) clearTimeout(retryTimer); } catch {}; retryTimer = null; };
+    const scheduleRetry = () => {
+      if (!alive) return;
+      clearRetry();
+      retryTimer = setTimeout(() => { retryTimer = null; loadEventsOnce(); }, 900);
+    };
+    const loadEventsOnce = async () => {
+      if (!alive) return;
       if (allEvents && allEvents.length) return;
-      const snap = await getDocs(collection(db, 'events'));
-      const list = [];
-      snap.forEach(d => { const v = d.data() || {}; list.push({ id: d.id, ...v }); });
-      setCache(list);
-    })();
+      try {
+        const auth = getAuth();
+        const hasPendingCode = !!sessionStorage.getItem('pending_code');
+        if (hasPendingCode && !auth.currentUser) await ensureAnonAfterCode('__event_select__', { timeoutMs: 1200 });
+        else if (!auth.currentUser) await waitForAuthRestored(1200);
+        if (!getAuth().currentUser) { scheduleRetry(); return; }
+        let snap = null;
+        try { snap = await getDocsFromServer(collection(db, 'events')); }
+        catch { snap = await getDocs(collection(db, 'events')); }
+        if (!alive) return;
+        const list = [];
+        snap.forEach(d => { const v = d.data() || {}; list.push({ id: d.id, ...v }); });
+        setCache(list);
+      } catch (e) {
+        console.warn('[EventSelectScreen] events load failed; retrying:', e);
+        scheduleRetry();
+      }
+    };
+    loadEventsOnce();
+    return () => { alive = false; clearRetry(); };
   }, [allEvents]);
 
   useEffect(() => {

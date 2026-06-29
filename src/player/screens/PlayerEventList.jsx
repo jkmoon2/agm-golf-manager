@@ -4,7 +4,7 @@ import React, { useContext, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EventContext } from '../../contexts/EventContext';
 import { db, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
-import { collection, getDocs, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
+import { collection, getDocs, getDocsFromServer, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅ 변경: setDoc 추가
 import styles from './EventSelectScreen.module.css';
 import { getAuth, onAuthStateChanged } from 'firebase/auth'; // ✅ 이메일 로그인 감지
 import { markPlayerAuthed, writePlayerTicket } from '../utils/playerState';
@@ -47,7 +47,24 @@ export default function PlayerEventList() {
   );
 
   useEffect(() => {
-    (async () => {
+    let alive = true;
+    let retryTimer = null;
+
+    const clearRetry = () => {
+      try { if (retryTimer) clearTimeout(retryTimer); } catch {}
+      retryTimer = null;
+    };
+    const scheduleRetry = () => {
+      if (!alive) return;
+      clearRetry();
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        loadEventsOnce();
+      }, 900);
+    };
+
+    const loadEventsOnce = async () => {
+      if (!alive) return;
       if (allEvents && allEvents.length) return;
       try {
         // ✅ 인증코드 입장 직후에는 아직 Firebase 사용자가 없을 수 있습니다.
@@ -56,18 +73,38 @@ export default function PlayerEventList() {
         const hasPendingCode = !!sessionStorage.getItem('pending_code');
         const auth = getAuth();
         if (hasPendingCode && !auth.currentUser) {
-          await ensureAnonAfterCode('__event_list__', { timeoutMs: 800 });
+          await ensureAnonAfterCode('__event_list__', { timeoutMs: 1200 });
+        } else if (!auth.currentUser) {
+          await waitForAuthRestored(1200);
         }
-        const snap = await getDocs(collection(db, 'events'));
+
+        if (!getAuth().currentUser) {
+          scheduleRetry();
+          return;
+        }
+
+        let snap = null;
+        try {
+          snap = await getDocsFromServer(collection(db, 'events'));
+        } catch {
+          snap = await getDocs(collection(db, 'events'));
+        }
+        if (!alive) return;
         const list = [];
         snap.forEach(d => { const v = d.data() || {}; list.push({ id: d.id, ...v }); });
         setCache(list);
       } catch (e) {
-        console.warn('[PlayerEventList] events load failed:', e);
-        setCache([]);
+        console.warn('[PlayerEventList] events load failed; retrying:', e);
+        if (alive) scheduleRetry();
       }
-    })();
-  }, [allEvents]);
+    };
+
+    loadEventsOnce();
+    return () => {
+      alive = false;
+      clearRetry();
+    };
+  }, [allEvents, authReady, authUser]);
 
   useEffect(() => {
     const auth = getAuth();
