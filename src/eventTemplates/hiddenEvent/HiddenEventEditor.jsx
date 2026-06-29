@@ -178,7 +178,15 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             <input
               type="checkbox"
               checked={!!cfg.sameGroupOnly}
-              onChange={(e) => emit({ sameGroupOnly: !!e.target.checked })}
+              onChange={(e) => {
+                const checked = !!e.target.checked;
+                emit({
+                  sameGroupOnly: checked,
+                  sameGroupTargetOnly: checked,
+                  targetScope: checked ? 'sameGroup' : 'all',
+                  opponentScope: checked ? 'sameGroup' : 'all',
+                });
+              }}
               style={{ width: 16, height: 16, margin: 0 }}
             />
             같은 조 참가자만 지목 허용
