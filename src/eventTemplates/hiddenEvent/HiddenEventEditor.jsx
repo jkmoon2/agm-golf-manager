@@ -108,6 +108,9 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     setPointText((prev) => ({ ...prev, [key]: raw }));
     emit({ personalPoints: { ...cfg.personalPoints, [key]: raw === '' ? '' : Number(raw) } });
   };
+  const emitTargetScope = (checked) => {
+    emit({ targetScope: checked ? 'sameGroup' : 'all' });
+  };
   const emitPairGroup = (side, groupNo) => {
     const pairGroups = { ...cfg.pairGroups, [side]: toggleGroup(cfg.pairGroups?.[side], groupNo) };
     const other = side === 'A' ? 'B' : 'A';
@@ -173,6 +176,16 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
               <input style={inputStyle} type="number" inputMode="decimal" value={pointText.mutual} onChange={(e) => emitPoint('mutual', e.target.value)} />
             </label>
           </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 12, fontWeight: 900, color: '#25344d', lineHeight: 1.35 }}>
+            <input
+              type="checkbox"
+              checked={cfg.targetScope === 'sameGroup'}
+              onChange={(e) => emitTargetScope(e.target.checked)}
+              style={{ width: 16, height: 16, flexShrink: 0 }}
+            />
+            같은 조 참가자만 지목 허용
+          </label>
 
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
           <div style={rowStyle}>

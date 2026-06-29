@@ -24,6 +24,7 @@ import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
 
 import {
   getAuth,
+  onAuthStateChanged,
 } from 'firebase/auth';
 
 /* 저장 전에 undefined/NaN 정제 */
@@ -351,6 +352,18 @@ export function EventProvider({ children }) {
   const location = useLocation();
   const isPlayerRoute = !!location?.pathname?.startsWith('/player');
 
+  // ✅ Auth 복원/변경 시 Firestore 구독을 반드시 다시 시도하기 위한 트리거
+  // - iOS/모바일 PWA에서 Firebase 세션 복원이 늦으면 기존 1회 구독 시도가 null로 끝나고
+  //   이후 대회 목록이 계속 빈 상태로 남는 문제가 있어 auth state 변화를 구독 재시도 기준으로 사용합니다.
+  const [authStateTick, setAuthStateTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const off = onAuthStateChanged(auth, () => {
+      if (alive) setAuthStateTick((v) => v + 1);
+    });
+    return () => { alive = false; try { off(); } catch {} };
+  }, []);
+
   const [allEvents, setAllEvents] = useState([]);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
@@ -503,23 +516,82 @@ export function EventProvider({ children }) {
 
   // 전체 이벤트 구독
   useEffect(() => {
-    let unsub = null,
-      cancelled = false;
-    ensureAuthed().then((u) => {
-      if (cancelled || !u) return;
+    let unsub = null;
+    let cancelled = false;
+    let retryTimer = null;
+
+    const clearRetry = () => {
+      try { if (retryTimer) clearTimeout(retryTimer); } catch {}
+      retryTimer = null;
+    };
+
+    const applyEventsSnap = (snap) => {
+      const evts = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((evt) => !isDeletedEventId(evt.id));
+      setAllEvents(evts);
+    };
+
+    const scheduleRetry = (delay = 900) => {
+      if (cancelled) return;
+      clearRetry();
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        startSubscribe();
+      }, delay);
+    };
+
+    const startSubscribe = async () => {
+      if (cancelled) return;
+      try { if (unsub) { unsub(); unsub = null; } } catch {}
+
+      let u = null;
+      try { u = await ensureAuthed(); } catch { u = auth.currentUser || null; }
+      if (cancelled) return;
+
+      // Auth 복원이 아직 끝나지 않았거나 인증코드 익명 세션 생성이 늦는 경우,
+      // 여기서 포기하지 않고 짧게 재시도합니다.
+      if (!u) {
+        scheduleRetry(900);
+        return;
+      }
+
       const colRef = collection(db, 'events');
-      unsub = onSnapshot(colRef, (snap) => {
-        const evts = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((evt) => !isDeletedEventId(evt.id));
-        setAllEvents(evts);
-      });
-    });
+
+      // onSnapshot 첫 수신 전 빈 화면이 오래 남지 않도록 서버 getDocs를 1회 보강합니다.
+      try {
+        const snap = await getDocsFromServer(colRef);
+        if (!cancelled) applyEventsSnap(snap);
+      } catch {
+        try {
+          const snap = await getDocs(colRef);
+          if (!cancelled) applyEventsSnap(snap);
+        } catch {}
+      }
+
+      if (cancelled) return;
+      unsub = onSnapshot(
+        colRef,
+        (snap) => {
+          clearRetry();
+          applyEventsSnap(snap);
+        },
+        (err) => {
+          console.warn('[EventContext] allEvents snapshot failed; retrying:', err);
+          try { if (unsub) { unsub(); unsub = null; } } catch {}
+          scheduleRetry(1200);
+        }
+      );
+    };
+
+    startSubscribe();
+
     return () => {
       cancelled = true;
-      if (unsub) unsub();
+      clearRetry();
+      try { if (unsub) unsub(); } catch {}
     };
-  }, [isDeletedEventId]);
+  }, [isDeletedEventId, authStateTick]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -649,25 +721,73 @@ export function EventProvider({ children }) {
       clearCurrentEventSelection(eventId);
       return;
     }
-    let unsub = null,
-      cancelled = false;
-    ensureAuthed().then((u) => {
-      if (cancelled || !u) return;
+    let unsub = null;
+    let cancelled = false;
+    let retryTimer = null;
+
+    const clearRetry = () => {
+      try { if (retryTimer) clearTimeout(retryTimer); } catch {}
+      retryTimer = null;
+    };
+    const scheduleRetry = (delay = 900) => {
+      if (cancelled) return;
+      clearRetry();
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        startSubscribe();
+      }, delay);
+    };
+
+    const startSubscribe = async () => {
+      if (cancelled) return;
+      try { if (unsub) { unsub(); unsub = null; } } catch {}
+      let u = null;
+      try { u = await ensureAuthed(); } catch { u = auth.currentUser || null; }
+      if (cancelled) return;
+      if (!u) {
+        scheduleRetry(900);
+        return;
+      }
+
       const docRef = doc(db, 'events', eventId);
-      unsub = onSnapshot(docRef, { includeMetadataChanges: true }, (snap) => {
-        if (!snap.exists()) {
-          clearCurrentEventSelection(eventId);
-          return;
+
+      try {
+        const snap = await getDocFromServer(docRef);
+        if (!cancelled && snap.exists()) {
+          lastEventSnapshotAtRef.current = Date.now();
+          applyIncomingEventData(snap.data() || {});
         }
-        lastEventSnapshotAtRef.current = Date.now();
-        applyIncomingEventData(snap.data());
-      });
-    });
+      } catch {}
+
+      if (cancelled) return;
+      unsub = onSnapshot(
+        docRef,
+        { includeMetadataChanges: true },
+        (snap) => {
+          clearRetry();
+          if (!snap.exists()) {
+            clearCurrentEventSelection(eventId);
+            return;
+          }
+          lastEventSnapshotAtRef.current = Date.now();
+          applyIncomingEventData(snap.data());
+        },
+        (err) => {
+          console.warn('[EventContext] event snapshot failed; retrying:', err);
+          try { if (unsub) { unsub(); unsub = null; } } catch {}
+          scheduleRetry(1200);
+        }
+      );
+    };
+
+    startSubscribe();
+
     return () => {
       cancelled = true;
-      if (unsub) unsub();
+      clearRetry();
+      try { if (unsub) unsub(); } catch {}
     };
-  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId]);
+  }, [eventId, applyIncomingEventData, clearCurrentEventSelection, isDeletedEventId, authStateTick]);
   useEffect(() => {
     if (!eventId) {
       eventInputsSubRef.current = {};

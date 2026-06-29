@@ -778,8 +778,8 @@ export default function PlayerEventInput(){
     return filterCachedEventInputsByResetTokens(cachedInputs, serverInputsCachePack?.resetTokens, liveEventInputResetTokens);
   }, [serverInputsCachePack, liveEventInputResetTokens, eventSnapshotReady]);
   const inputsByEventServer = useMemo(
-    () => (hasMeaningfulEventInputsRoot(rawInputsByEventServer) ? rawInputsByEventServer : cachedInputsByEventServer),
-    [rawInputsByEventServer, cachedInputsByEventServer]
+    () => (eventSnapshotReady ? rawInputsByEventServer : cachedInputsByEventServer),
+    [eventSnapshotReady, rawInputsByEventServer, cachedInputsByEventServer]
   );
 
   const [draft, setDraft] = useState(() => {
@@ -1840,6 +1840,15 @@ export default function PlayerEventInput(){
     return Number.isFinite(n) && n >= 0 ? Math.floor(n) : Infinity;
   };
 
+  const isHiddenSameGroupTargetAllowed = (selector, target, hiddenCfg = null) => {
+    const cfg = normalizeHiddenEventParams(hiddenCfg || {});
+    if (cfg.targetScope !== 'sameGroup') return true;
+    const selectorGroup = Number(getParticipantGroupNo(selector));
+    const targetGroup = Number(getParticipantGroupNo(target));
+    if (!Number.isFinite(selectorGroup) || !Number.isFinite(targetGroup)) return false;
+    return selectorGroup === targetGroup;
+  };
+
   const countHiddenTargetSelections = (slot, targetId, exceptSelectorId = '') => {
     const targetKey = String(targetId || '');
     const exceptKey = String(exceptSelectorId || '');
@@ -1860,6 +1869,9 @@ export default function PlayerEventInput(){
     if (!targetKey) return true;
     const cfg = normalizeHiddenEventParams(hiddenCfg || getHiddenEventById(evId)?.params);
     if (cfg.mode !== 'personal') return true;
+    const selector = participantById.get(String(selectorId || '')) || participants.find((p) => String(p?.id || '') === String(selectorId || ''));
+    const target = participantById.get(targetKey) || participants.find((p) => String(p?.id || '') === targetKey);
+    if (!isHiddenSameGroupTargetAllowed(selector, target, cfg)) return false;
     const limit = getHiddenTargetLimit(cfg, targetKey);
     if (!Number.isFinite(limit)) return true;
 
@@ -1891,10 +1903,16 @@ export default function PlayerEventInput(){
 
     const hiddenEventDef = getHiddenEventById(evId);
     const hiddenCfg = normalizeHiddenEventParams(hiddenEventDef?.params);
-    if (targetId && hiddenEventDef?.template === 'hidden-event' && hiddenCfg.mode === 'personal' && !canSelectHiddenTarget(evId, targetId, meId, hiddenCfg)) {
+    if (targetId && hiddenEventDef?.template === 'hidden-event' && hiddenCfg.mode === 'personal') {
       const target = participantById.get(targetId);
-      alert(`${target?.nickname || '해당 참가자'}님은 이미 지정된 지목 가능 횟수가 모두 사용되었습니다.`);
-      return;
+      if (!isHiddenSameGroupTargetAllowed(mine, target, hiddenCfg)) {
+        alert('이 이벤트는 같은 조 참가자만 지목할 수 있습니다.');
+        return;
+      }
+      if (!canSelectHiddenTarget(evId, targetId, meId, hiddenCfg)) {
+        alert(`${target?.nickname || '해당 참가자'}님은 이미 지정된 지목 가능 횟수가 모두 사용되었습니다.`);
+        return;
+      }
     }
 
     const all = cloneEventInputs(draft || {});
@@ -2075,6 +2093,18 @@ export default function PlayerEventInput(){
               delete mPerson[pid];
             } else {
               mPerson[pid] = val;
+            }
+          });
+
+          // ✅ 삭제/전체 빈칸 저장 복구 방지
+          // finalizeValue/finalizeAccum은 값이 완전히 비면 draft.person[pid] 자체를 삭제합니다.
+          // 기존 병합은 draft에 남아있는 pid만 처리해서 Firestore 최신값(base)에 있던 예전 점수가 다시 살아났습니다.
+          // 현재 방(또는 해당 이벤트 허용 대상)의 pid가 draft에 없으면 명시적으로 서버값에서도 삭제합니다.
+          allowedPids.forEach((pid) => {
+            const key = String(pid || '');
+            if (!key) return;
+            if (!Object.prototype.hasOwnProperty.call(sPerson, key)) {
+              delete mPerson[key];
             }
           });
 
