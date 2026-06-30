@@ -529,7 +529,7 @@ async function ensureMembership(eventId, myRoom) {
 export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
-  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate, updateEventInputsTransaction } = useContext(EventContext) || {};
+  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
   const { participant: ctxParticipant, participants: ctxParticipants } = useContext(PlayerContext) || {};
   const effectiveEventData = useEffectivePlayerEventData();
 
@@ -814,6 +814,9 @@ export default function PlayerEventInput(){
   const bingoTouchedSharedRef = useRef({});
   const pendingSavedInputsSigRef = useRef('');
   const pendingSavedInputsUntilRef = useRef(0);
+  // 저장 성공 직후 Firestore 최신 스냅샷이 아직 도착하지 않아도
+  // 방금 저장한 draft와 동일하면 저장 버튼을 다시 활성화하지 않기 위한 기준값입니다.
+  const savedDraftSigRef = useRef('');
   const draftTouchedRef = useRef(false);
   const lastHydratedServerSigRef = useRef('');
   const resetTokenRef = useRef({});
@@ -974,6 +977,7 @@ export default function PlayerEventInput(){
     const savedSig = stringifyEventInputs(savedClone);
     pendingSavedInputsSigRef.current = savedSig;
     pendingSavedInputsUntilRef.current = Date.now() + holdMs;
+    savedDraftSigRef.current = savedSig;
     hydrateDraftFromServer(savedClone);
     pendingSavedInputsSigRef.current = savedSig;
     pendingSavedInputsUntilRef.current = Date.now() + holdMs;
@@ -2234,23 +2238,19 @@ export default function PlayerEventInput(){
 
       let merged = {};
       try {
-        if (typeof updateEventInputsTransaction === 'function') {
-          merged = await updateEventInputsTransaction(targetEventId, (freshBase) => buildMergedEventInputs(freshBase));
-        } else {
-          await runTransaction(db, async (tx) => {
-            const ref = doc(db, 'events', targetEventId);
-            const snap = await tx.get(ref);
-            const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
-              ? snap.data().eventInputs
-              : {};
-            merged = buildMergedEventInputs(freshBase);
-            tx.update(ref, {
-              eventInputs: merged,
-              inputsUpdatedAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            });
+        await runTransaction(db, async (tx) => {
+          const ref = doc(db, 'events', targetEventId);
+          const snap = await tx.get(ref);
+          const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
+            ? snap.data().eventInputs
+            : {};
+          merged = buildMergedEventInputs(freshBase);
+          tx.update(ref, {
+            eventInputs: merged,
+            inputsUpdatedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
           });
-        }
+        });
       } catch (txErr) {
         console.warn('[PlayerEventInput] eventInputs transaction failed; fallback to direct update:', txErr);
         merged = buildMergedEventInputs(inputsByEventServer || {});
@@ -2260,7 +2260,6 @@ export default function PlayerEventInput(){
           await updateDoc(doc(db, 'events', targetEventId), { eventInputs: merged, inputsUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() });
         }
       }
-      merged = merged || {};
       const savedClone = cloneEventInputs(merged);
       keepSavedDraftVisible(savedClone);
       if (activeEventStorageId) {
@@ -2297,6 +2296,15 @@ export default function PlayerEventInput(){
     const draftEmpty = !hasMeaningfulEventInputs(draft);
     const serverHasData = hasMeaningfulEventInputs(inputsByEventServer);
     if (!draftTouchedRef.current && draftEmpty && serverHasData) {
+      setDirty(false);
+      return;
+    }
+
+    // 저장 성공 직후에는 내 브라우저의 Firestore 스냅샷이 아직 이전값일 수 있습니다.
+    // 이때 draft와 서버를 비교하면 다시 dirty=true가 되어 저장 버튼이 살아납니다.
+    // 방금 저장한 draft와 현재 draft가 동일하면 저장 완료 상태로 보고 버튼을 비활성화합니다.
+    const draftSig = stringifyEventInputs(draft);
+    if (savedDraftSigRef.current && draftSig === savedDraftSigRef.current) {
       setDirty(false);
       return;
     }
