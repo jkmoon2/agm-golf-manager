@@ -110,6 +110,66 @@ export default function Step7() {
   // ✅ Admin STEP5 강제 메뉴와 동일하게 STEP2 방 목록 기준으로 표시
   const rooms = Array.from({ length: Array.isArray(roomNames) ? roomNames.length : 0 }, (_, i) => i + 1);
 
+  // ✅ room/partner 호환 필드 헬퍼
+  // - 포볼 배정은 Admin STEP8/Player 쪽에서 roomNumber/teammateId를 함께 참조하는 경우가 있어
+  //   Step7 강제 이동 시 room만 바뀌고 roomNumber가 옛값으로 남으면 다른 화면에 반영되지 않는다.
+  const getRoomValue = (p) => (p?.room ?? p?.roomNumber ?? null);
+  const makeRoomFields = (roomNo) => ({ room: roomNo, roomNumber: roomNo });
+  const makePartnerFields = (partnerId) => ({ partner: partnerId, teammateId: partnerId, teammate: partnerId });
+
+  const normalizeForceChanges = (changes = []) =>
+    changes.map((ch) => {
+      const fields = { ...(ch?.fields || {}) };
+      if (Object.prototype.hasOwnProperty.call(fields, 'room')) {
+        fields.roomNumber = fields.room;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, 'roomNumber')) {
+        fields.room = fields.roomNumber;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, 'partner')) {
+        fields.teammateId = fields.partner;
+        fields.teammate = fields.partner;
+      }
+      if (Object.prototype.hasOwnProperty.call(fields, 'teammateId') && !Object.prototype.hasOwnProperty.call(fields, 'partner')) {
+        fields.partner = fields.teammateId;
+        fields.teammate = fields.teammateId;
+      }
+      return { ...ch, fields };
+    });
+
+  const buildRoomTableFromList = (list = []) => {
+    const table = {};
+    (list || []).forEach((p) => {
+      const r = getRoomValue(p);
+      if (r == null) return;
+      if (!table[r]) table[r] = [];
+      table[r].push(p.id);
+    });
+    return table;
+  };
+
+  const buildCompatParticipants = (list = []) =>
+    (list || []).map((p) => {
+      const r = getRoomValue(p);
+      const partner = p?.partner ?? p?.teammateId ?? p?.teammate ?? null;
+      return {
+        ...p,
+        room: r,
+        roomNumber: r,
+        partner,
+        teammateId: partner,
+        teammate: partner,
+      };
+    });
+
+  const applyChangesToList = (base = [], changes = []) => {
+    const map = new Map((changes || []).map((ch) => [String(ch.id), ch.fields || {}]));
+    return (base || []).map((p) => {
+      const c = map.get(String(p.id));
+      return c ? { ...p, ...c } : p;
+    });
+  };
+
   // 1조/2조 판별 (group 필드 우선, 없으면 id로 fallback)
   const isGroup1 = (p) =>
     Number.isFinite(Number(p?.group))
@@ -119,7 +179,7 @@ export default function Step7() {
   // 완료 여부: 방 + 파트너 둘 다 할당되어 있으면 완료로 간주
   const isCompleted = (id) => {
     const me = participants.find((p) => p.id === id);
-    return !!(me && me.room != null && me.partner != null);
+    return !!(me && getRoomValue(me) != null && me.partner != null);
   };
 
   const findParticipant = (id) =>
@@ -127,7 +187,7 @@ export default function Step7() {
 
   // ✅ 방/팀 관련 헬퍼들 (트레이드용 최소 추가)
   const getRoomMembers = (roomNo) =>
-    participants.filter((p) => Number(p?.room) === Number(roomNo));
+    participants.filter((p) => Number(getRoomValue(p)) === Number(roomNo));
 
   const getGroup1InRoom = (roomNo) =>
     getRoomMembers(roomNo).filter((p) => isGroup1(p));
@@ -146,28 +206,59 @@ export default function Step7() {
   const applyBulkChanges = async (changes) => {
     if (!Array.isArray(changes) || !changes.length) return;
 
+    // ✅ 핵심 보정: room만 바꾸면 roomNumber가 옛값으로 남아 STEP8/Player가 예전 방을 계속 볼 수 있음
+    const normalizedChanges = normalizeForceChanges(changes);
+    const nextParticipants = applyChangesToList(participants, normalizedChanges);
+    const compatParticipants = buildCompatParticipants(nextParticipants);
+
     // 1순위: StepFlow에서 제공하는 updateParticipantsBulk 사용
     if (typeof updateParticipantsBulk === 'function') {
-      await updateParticipantsBulk(changes);
-      return;
-    }
-
-    // 2순위: 개별 업데이트
-    if (typeof updateParticipant === 'function') {
-      for (const ch of changes) {
+      await updateParticipantsBulk(normalizedChanges);
+    } else if (typeof updateParticipant === 'function') {
+      // 2순위: 개별 업데이트
+      for (const ch of normalizedChanges) {
         await updateParticipant(ch.id, ch.fields);
       }
-      return;
+    } else if (typeof setParticipants === 'function') {
+      // 3순위(최후): setParticipants 로컬 수정
+      setParticipants(compatParticipants);
     }
 
-    // 3순위(최후): setParticipants 로컬만 수정 (Firestore 반영은 브리지 useEffect가 처리)
-    if (typeof setParticipants === 'function') {
-      setParticipants((prev) =>
-        prev.map((p) => {
-          const c = changes.find((ch) => String(ch.id) === String(p.id));
-          return c ? { ...p, ...(c.fields || {}) } : p;
-        })
-      );
+    // ✅ STEP8/Player 즉시 반영용 보강 저장
+    // - StepFlow 저장도 실행되지만, 강제 이동 직후 다른 화면이 participantsFourball/roomTable/rooms를 읽는 경우를 위해
+    //   포볼 기준 미러 필드를 같은 값으로 한 번 더 맞춘다.
+    try {
+      if (eventId && typeof updateEventImmediate === 'function') {
+        await updateEventImmediate({
+          participants: compatParticipants,
+          participantsFourball: compatParticipants,
+          roomTable: buildRoomTableFromList(compatParticipants),
+          participantsUpdatedAt: serverTimestamp(),
+          participantsUpdatedAtClient: Date.now(),
+        }, false);
+      }
+    } catch (e) {
+      console.warn('[Step7] force move event mirror update failed:', e);
+    }
+
+    try {
+      if (typeof persistRoomsFromParticipants === 'function') {
+        await persistRoomsFromParticipants(compatParticipants);
+      }
+    } catch (e) {
+      console.warn('[Step7] force move rooms mirror update failed:', e);
+    }
+
+    try {
+      if (typeof upsertScores === 'function') {
+        await upsertScores(compatParticipants.map((p) => ({
+          id: p.id,
+          score: p.score ?? null,
+          room: getRoomValue(p),
+        })));
+      }
+    } catch (e) {
+      console.warn('[Step7] force move scores mirror update failed:', e);
     }
   };
 
@@ -188,7 +279,7 @@ export default function Step7() {
       return;
     }
 
-    const srcRoom = Number(me1.room);
+    const srcRoom = Number(getRoomValue(me1));
     const dstRoom = Number(targetRoom);
 
     if (!Number.isFinite(dstRoom)) {
@@ -210,8 +301,8 @@ export default function Step7() {
     // 0팀/1팀(<= 2명) → 그냥 팀 이동
     if (dstCount <= getRoomCapacity(dstRoom) - 2) {
       await applyBulkChanges([
-        { id: me1.id, fields: { room: dstRoom } },
-        { id: me2.id, fields: { room: dstRoom } },
+        { id: me1.id, fields: makeRoomFields(dstRoom) },
+        { id: me2.id, fields: makeRoomFields(dstRoom) },
       ]);
       alert(
         `팀 이동 완료:\n${me1.nickname} / ${me2.nickname} → ${dstRoom}번 방`
@@ -253,10 +344,10 @@ export default function Step7() {
     const b2 = pick.g2;
 
     await applyBulkChanges([
-      { id: me1.id, fields: { room: dstRoom } },
-      { id: me2.id, fields: { room: dstRoom } },
-      { id: b1.id, fields: { room: srcRoom } },
-      { id: b2.id, fields: { room: srcRoom } },
+      { id: me1.id, fields: makeRoomFields(dstRoom) },
+      { id: me2.id, fields: makeRoomFields(dstRoom) },
+      { id: b1.id, fields: makeRoomFields(srcRoom) },
+      { id: b2.id, fields: makeRoomFields(srcRoom) },
     ]);
 
     alert(
@@ -281,7 +372,7 @@ export default function Step7() {
       return;
     }
 
-    const srcRoom = Number(me1.room);
+    const srcRoom = Number(getRoomValue(me1));
     const dstRoom = Number(targetRoom);
 
     if (!Number.isFinite(dstRoom)) {
@@ -329,10 +420,10 @@ export default function Step7() {
 
     // 1조만 서로 방을 바꾸고, 2조는 그대로 방에 남아 있으면서 새로운 파트너와 팀 구성
     const changes = [
-      { id: me1.id, fields: { room: dstRoom, partner: dest2.id } },
-      { id: dest1.id, fields: { room: srcRoom, partner: me2.id } },
-      { id: me2.id, fields: { partner: dest1.id } },
-      { id: dest2.id, fields: { partner: me1.id } },
+      { id: me1.id, fields: { ...makeRoomFields(dstRoom), ...makePartnerFields(dest2.id) } },
+      { id: dest1.id, fields: { ...makeRoomFields(srcRoom), ...makePartnerFields(me2.id) } },
+      { id: me2.id, fields: makePartnerFields(dest1.id) },
+      { id: dest2.id, fields: makePartnerFields(me1.id) },
     ];
 
     await applyBulkChanges(changes);
@@ -621,7 +712,7 @@ export default function Step7() {
     try {
       const core = participants.map((p) => ({
         id: p.id,
-        room: p.room ?? null,
+        room: getRoomValue(p) ?? null,
         partner: p.partner ?? null,
         score: p.score ?? null,
       }));
@@ -635,7 +726,7 @@ export default function Step7() {
     // Firestore로 내보낼 participants 호환 형태
     const compat = participants.map((p) => ({
       ...p,
-      roomNumber: p.room ?? null,
+      roomNumber: getRoomValue(p) ?? null,
       teammateId: p.partner ?? null,
       teammate: p.partner ?? null,
     }));
@@ -643,7 +734,7 @@ export default function Step7() {
     // roomTable 구성 (방 번호 → 참가자 id 배열)
     const roomTable = {};
     participants.forEach((p) => {
-      const r = p.room;
+      const r = getRoomValue(p);
       if (r == null) return;
       if (!roomTable[r]) roomTable[r] = [];
       roomTable[r].push(p.id);
@@ -672,7 +763,7 @@ export default function Step7() {
           const payload = participants.map((p) => ({
             id: p.id,
             score: p.score ?? null,
-            room: p.room ?? null,
+            room: getRoomValue(p) ?? null,
           }));
           await upsertScores(payload);
         }

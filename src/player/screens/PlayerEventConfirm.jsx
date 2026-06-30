@@ -785,11 +785,11 @@ const events = useMemo(
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={`${tCss.table} ${tCss['kind-' + res.kind]}`}>
                     <colgroup>
-                      <col style={{ width: res.isHiddenPersonal || res.isHiddenFourball ? 46 : 56 }} />
-                      {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '24%' : '50%' }} />}
-                      <col style={res.isHiddenPersonal ? { width: '34%' } : (res.isHiddenFourball ? { width: '54%' } : undefined)} />
+                      <col style={{ width: res.isHiddenPersonal || res.isHiddenFourball ? 44 : 56 }} />
+                      {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '22%' : '50%' }} />}
+                      <col style={res.isHiddenPersonal ? { width: '24%' } : (res.isHiddenFourball ? { width: '54%' } : undefined)} />
                       {hasExtraMetric && <col style={{ width: res.isHiddenPersonal ? 48 : 58 }} />}
-                      <col style={{ width: res.isHiddenPersonal ? 46 : (res.isHiddenFourball ? 78 : 80) }} />
+                      <col style={{ width: res.isHiddenPersonal ? 44 : (res.isHiddenFourball ? 78 : 80) }} />
                     </colgroup>
                     <thead>
                       <tr>
