@@ -49,6 +49,9 @@ export default function Step7() {
   // 로딩 상태(수동 버튼용)
   const [loadingId, setLoadingId] = useState(null);
 
+  // ✅ 강제 메뉴 상태(포볼 팀 단위 이동/맞교체/배정취소)
+  const [forceSelectingId, setForceSelectingId] = useState(null);
+
   // 점수 입력용 draft 상태(id → 문자열)
   const [scoreDraft, setScoreDraft] = useState({});
 
@@ -103,6 +106,9 @@ export default function Step7() {
     const safe = Number.isFinite(raw) ? raw : 4;
     return Math.min(4, Math.max(1, safe));
   };
+
+  // ✅ Admin STEP5 강제 메뉴와 동일하게 STEP2 방 목록 기준으로 표시
+  const rooms = Array.from({ length: Array.isArray(roomNames) ? roomNames.length : 0 }, (_, i) => i + 1);
 
   // 1조/2조 판별 (group 필드 우선, 없으면 id로 fallback)
   const isGroup1 = (p) =>
@@ -571,6 +577,16 @@ export default function Step7() {
     }
   };
 
+  // ✅ 강제 메뉴: 포볼 팀(1조+파트너)을 방 단위로 이동/맞교체하거나 배정취소
+  const handleForceAssign = async (id, roomNo) => {
+    setForceSelectingId(null);
+    if (roomNo == null) {
+      handleCancelClick(id);
+      return;
+    }
+    await moveTeamOrTradePair(id, roomNo);
+  };
+
   // 자동 배정
   const handleAutoClick = () => {
     if (!onAutoAssign) return;
@@ -678,7 +694,7 @@ export default function Step7() {
         <div className={`${styles.cell} ${styles.handicap}`}>G핸디</div>
         <div className={`${styles.cell} ${styles.score}`}>점수</div>
         <div className={`${styles.cell} ${styles.manual}`}>수동</div>
-        <div className={`${styles.cell} ${styles.force}`}>취소</div>
+        <div className={`${styles.cell} ${styles.force}`}>강제</div>
       </div>
 
       {/* 리스트 본문 */}
@@ -763,15 +779,41 @@ export default function Step7() {
                 )}
               </div>
 
-              {/* 취소 (1조만 표시) */}
-              <div className={`${styles.cell} ${styles.force}`}>
+              {/* 강제 (1조 팀 단위 이동/맞교체/배정취소) */}
+              <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
                 {group1 ? (
-                  <button
-                    className={styles.smallBtn}
-                    onClick={() => handleCancelClick(p.id)}
-                  >
-                    취소
-                  </button>
+                  <>
+                    <button
+                      className={styles.smallBtn}
+                      onClick={() =>
+                        setForceSelectingId(forceSelectingId === p.id ? null : p.id)
+                      }
+                    >
+                      강제
+                    </button>
+                    {forceSelectingId === p.id && (
+                      <div className={styles.forceMenu}>
+                        {rooms.map((r) => {
+                          const name = roomNames[r - 1]?.trim() || `${r}번 방`;
+                          return (
+                            <div
+                              key={r}
+                              className={styles.forceOption}
+                              onClick={() => handleForceAssign(p.id, r)}
+                            >
+                              {name}
+                            </div>
+                          );
+                        })}
+                        <div
+                          className={styles.forceOption}
+                          onClick={() => handleForceAssign(p.id, null)}
+                        >
+                          배정취소
+                        </div>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div style={{ width: 28, height: 28 }} />
                 )}
