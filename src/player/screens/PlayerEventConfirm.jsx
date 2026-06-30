@@ -575,7 +575,7 @@ const events = useMemo(
         displayText: row.resultText,
         bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}${row.mutual ? ` / 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmtScore(row.mutualPoint)}` : ''}`,
       }));
-      return { kind: 'person', metricLabel: '점수', extraMetricLabel: '결과', personHeader: '선택자', roomHeader: '상대방', rows, isHiddenPersonal: true };
+      return { kind: 'person', metricLabel: '승패', extraMetricLabel: '결과', personHeader: '선택자', roomHeader: '상대방', rows, isHiddenPersonal: true };
     }
 
     // ── rank-score-game(대회 순위 점수 게임) ─────────────────────
@@ -785,11 +785,11 @@ const events = useMemo(
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={`${tCss.table} ${tCss['kind-' + res.kind]}`}>
                     <colgroup>
-                      <col style={{ width: res.isHiddenPersonal || res.isHiddenFourball ? 46 : 56 }} />
-                      {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '30%' : '50%' }} />}
-                      <col style={res.isHiddenFourball ? { width: '54%' } : undefined} />
-                      {hasExtraMetric && <col style={{ width: res.isHiddenPersonal ? 54 : 58 }} />}
-                      <col style={{ width: res.isHiddenPersonal ? 54 : (res.isHiddenFourball ? 78 : 80) }} />
+                      <col style={{ width: res.isHiddenPersonal || res.isHiddenFourball ? 42 : 56 }} />
+                      {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '24%' : '50%' }} />}
+                      <col style={res.isHiddenFourball ? { width: '54%' } : (res.isHiddenPersonal ? { width: '26%' } : undefined)} />
+                      {hasExtraMetric && <col style={{ width: res.isHiddenPersonal ? 62 : 58 }} />}
+                      <col style={{ width: res.isHiddenPersonal ? 52 : (res.isHiddenFourball ? 78 : 80) }} />
                     </colgroup>
                     <thead>
                       <tr>
