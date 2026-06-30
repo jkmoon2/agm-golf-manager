@@ -305,7 +305,7 @@ export default function Step7() {
         { id: me2.id, fields: makeRoomFields(dstRoom) },
       ]);
       alert(
-        `팀 이동 완료:\n${me1.nickname} / ${me2.nickname} → ${dstRoom}번 방`
+        `팀 이동 완료:\n${me1.nickname} / ${me2.nickname} → ${getRoomLabel(dstRoom)}`
       );
       return;
     }
