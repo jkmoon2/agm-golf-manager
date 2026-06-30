@@ -2644,11 +2644,6 @@ export default function PlayerEventInput(){
             const hiddenCandidates = getHiddenCandidates();
             const adjustment = (mine && selectedOpponent) ? getHiddenHandicapAdjustment(mine, selectedOpponent, hiddenCfg) : 0;
             const rows = Array.isArray(hiddenData?.matchRows) ? hiddenData.matchRows : [];
-            const formatHiddenHandicapPair = (row) => {
-              const left = Number(row?.effectiveHandicap);
-              const right = Number(row?.opponentHandicap);
-              return `${formatDisplayNumber(Number.isFinite(left) ? left : 0)} : ${formatDisplayNumber(Number.isFinite(right) ? right : 0)}`;
-            };
             const focusKey = `${ev.id}:hidden-personal`;
 
             return (
@@ -2720,7 +2715,9 @@ export default function PlayerEventInput(){
                             <tr key={`hidden-personal-${ev.id}-${row.key}`}>
                               <td>{row.name}</td>
                               <td>{row.opponentName}</td>
-                              <td style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap' }}>{formatHiddenHandicapPair(row)}</td>
+                              <td style={{ color: '#2563eb', fontWeight: 900 }}>
+                                {fmtScore(row.effectiveHandicap ?? row.baseHandicap ?? 0)} : {fmtScore(row.opponentHandicap ?? 0)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
