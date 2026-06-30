@@ -269,7 +269,7 @@ const MOUSE_CANCEL_PX = 12;
 
 
 export default function EventManager() {
-  const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, overlayScoresToParticipants } = useContext(EventContext) || {};
+  const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, updateEventInputsTransaction, overlayScoresToParticipants } = useContext(EventContext) || {};
 
   /* ── 대회 연동 ───────────────────────────────────────── */
   const [selectedEvId, setSelectedEvId] = useState(eventId || '');
@@ -841,7 +841,15 @@ if (form.template === 'group-battle') {
       try { diagPush('timeline', { type: 'adminEventManager.clearInputs:remoteFail', eventId: eventId || '', evId: String(ev?.id || ''), error: String(e?.message || e || '') }); } catch {}
     }
 
-    await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false);
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => {
+        const next = { ...(freshBase || {}) };
+        delete next[ev.id];
+        return next;
+      }, { eventInputResets: nextResets });
+    } else {
+      await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false);
+    }
     try {
       diagMerge('adminEventManager', { lastClearInputsAt: Date.now(), eventId: eventId || '', evId: String(ev?.id || ''), resetToken: nextResetToken });
       diagPush('timeline', { type: 'adminEventManager.clearInputs:success', eventId: eventId || '', evId: String(ev?.id || ''), resetToken: nextResetToken });
@@ -1458,7 +1466,11 @@ if (editForm?.template === 'group-battle') {
     }
 
     all[hiddenMonitorEvent.id] = slot;
-    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => ({ ...(freshBase || {}), [hiddenMonitorEvent.id]: slot }));
+    } else {
+      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+    }
     alert(params.fourballMode === 'self'
       ? '포볼 무작위 배정이 완료되었습니다. 기존 배정팀은 유지하고 미배정 참가자만 추가 배정했습니다.'
       : '포볼 히든팀 배정이 완료되었습니다. 공개 전까지 참가자에게는 팀원이 보이지 않습니다.');
@@ -1553,8 +1565,12 @@ if (editForm?.template === 'group-battle') {
     }
 
     all[ev.id] = slot;
-    // ★★★ 핵심 보완: 실시간 반영 트리거 타임스탬프 추가
-    await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    // ★★★ 핵심 보완: 서버 최신 eventInputs 기준으로 병합 저장하여 동시 입력 덮어쓰기를 방지
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => ({ ...(freshBase || {}), [ev.id]: slot }));
+    } else {
+      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    }
     try { broadcastEventSync(eventId, { reason: 'applyQuick' }); } catch {}
     // ★★★ Firestore에도 부분 업데이트 + 트리거 필드
     try {

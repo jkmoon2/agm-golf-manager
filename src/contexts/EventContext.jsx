@@ -17,6 +17,7 @@ import {
   getDocFromServer,
   getDocs,
   getDocsFromServer,
+  runTransaction,
 } from 'firebase/firestore';
 import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
@@ -365,6 +366,9 @@ export function EventProvider({ children }) {
   }, []);
 
   const [allEvents, setAllEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState(null);
+  const [eventsHydratedAt, setEventsHydratedAt] = useState(0);
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
 
@@ -515,6 +519,38 @@ export function EventProvider({ children }) {
   };
 
   // 전체 이벤트 구독
+  const applyEventsSnapshotToState = useCallback((snap) => {
+    const evts = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((evt) => !isDeletedEventId(evt.id));
+    setAllEvents(evts);
+    setEventsHydratedAt(Date.now());
+    setEventsError(null);
+    setEventsLoading(false);
+    return evts;
+  }, [isDeletedEventId]);
+
+  const refreshEventsNow = useCallback(async (reason = 'manual') => {
+    setEventsLoading(true);
+    try {
+      let u = null;
+      try { u = await ensureAuthed(); } catch { u = auth.currentUser || null; }
+      if (!u) throw new Error('auth-not-ready');
+      const colRef = collection(db, 'events');
+      let snap = null;
+      try { snap = await getDocsFromServer(colRef); }
+      catch { snap = await getDocs(colRef); }
+      const evts = applyEventsSnapshotToState(snap);
+      try { diagPush('timeline', { type: 'event.refreshEventsNow:success', reason, count: evts.length }); } catch {}
+      return evts;
+    } catch (e) {
+      setEventsError(String(e?.message || e || 'events-load-failed'));
+      setEventsLoading(false);
+      try { diagPush('timeline', { type: 'event.refreshEventsNow:fail', reason, error: String(e?.message || e || '') }); } catch {}
+      throw e;
+    }
+  }, [applyEventsSnapshotToState]);
+
   useEffect(() => {
     let unsub = null;
     let cancelled = false;
@@ -523,13 +559,6 @@ export function EventProvider({ children }) {
     const clearRetry = () => {
       try { if (retryTimer) clearTimeout(retryTimer); } catch {}
       retryTimer = null;
-    };
-
-    const applyEventsSnap = (snap) => {
-      const evts = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((evt) => !isDeletedEventId(evt.id));
-      setAllEvents(evts);
     };
 
     const scheduleRetry = (delay = 900) => {
@@ -543,6 +572,7 @@ export function EventProvider({ children }) {
 
     const startSubscribe = async () => {
       if (cancelled) return;
+      setEventsLoading(true);
       try { if (unsub) { unsub(); unsub = null; } } catch {}
 
       let u = null;
@@ -552,6 +582,7 @@ export function EventProvider({ children }) {
       // Auth 복원이 아직 끝나지 않았거나 인증코드 익명 세션 생성이 늦는 경우,
       // 여기서 포기하지 않고 짧게 재시도합니다.
       if (!u) {
+        setEventsError('auth-not-ready');
         scheduleRetry(900);
         return;
       }
@@ -561,12 +592,16 @@ export function EventProvider({ children }) {
       // onSnapshot 첫 수신 전 빈 화면이 오래 남지 않도록 서버 getDocs를 1회 보강합니다.
       try {
         const snap = await getDocsFromServer(colRef);
-        if (!cancelled) applyEventsSnap(snap);
-      } catch {
+        if (!cancelled) applyEventsSnapshotToState(snap);
+      } catch (firstErr) {
         try {
           const snap = await getDocs(colRef);
-          if (!cancelled) applyEventsSnap(snap);
-        } catch {}
+          if (!cancelled) applyEventsSnapshotToState(snap);
+        } catch (cacheErr) {
+          if (!cancelled) {
+            setEventsError(String(firstErr?.message || cacheErr?.message || firstErr || cacheErr || 'events-load-failed'));
+          }
+        }
       }
 
       if (cancelled) return;
@@ -574,9 +609,11 @@ export function EventProvider({ children }) {
         colRef,
         (snap) => {
           clearRetry();
-          applyEventsSnap(snap);
+          applyEventsSnapshotToState(snap);
         },
         (err) => {
+          setEventsError(String(err?.message || err || 'events-snapshot-failed'));
+          setEventsLoading(false);
           console.warn('[EventContext] allEvents snapshot failed; retrying:', err);
           try { if (unsub) { unsub(); unsub = null; } } catch {}
           scheduleRetry(1200);
@@ -591,7 +628,7 @@ export function EventProvider({ children }) {
       clearRetry();
       try { if (unsub) unsub(); } catch {}
     };
-  }, [isDeletedEventId, authStateTick]);
+  }, [applyEventsSnapshotToState, authStateTick]);
 
   const applyIncomingEventData = useCallback((raw) => {
     const withPV = normalizePublicView(raw || {});
@@ -1191,6 +1228,36 @@ export function EventProvider({ children }) {
     };
   }, [eventId, isDeletedEventId]);
 
+  // eventInputs 저장은 Player/운영자 여러 화면에서 동시에 발생할 수 있으므로
+  // 루트 eventInputs 전체 덮어쓰기 대신, 항상 서버 최신값을 기준으로 병합하는 공용 트랜잭션으로 통일합니다.
+  const updateEventInputsTransaction = useCallback(async (targetEventId, buildNext, extra = {}) => {
+    const eid = String(targetEventId || eventId || '');
+    if (!eid || typeof buildNext !== 'function') return null;
+    await ensureAuthed();
+    let nextInputs = null;
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, 'events', eid);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('event-not-found');
+      const current = snap.data() || {};
+      const base = (current.eventInputs && typeof current.eventInputs === 'object') ? current.eventInputs : {};
+      const built = buildNext(base, current);
+      nextInputs = (built && typeof built === 'object') ? built : {};
+      tx.update(ref, sanitizeUndefinedDeep({
+        eventInputs: nextInputs,
+        inputsUpdatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        ...(extra && typeof extra === 'object' ? extra : {}),
+      }));
+    });
+    if (String(eid) === String(eventId || '')) {
+      lastEventDataRef.current = { ...(lastEventDataRef.current || {}), eventInputs: nextInputs };
+      setEventData((prev) => (prev ? { ...prev, eventInputs: nextInputs } : { eventInputs: nextInputs }));
+    }
+    try { broadcastEventSync(eid, { reason: 'updateEventInputsTransaction' }); } catch {}
+    return nextInputs;
+  }, [eventId]);
+
   // publicView 저장/로드 (로컬 미러 포함)
   const publicViewStorageKey = (id) => `roomTableSel:${id || eventId || ''}`;
   const savePublicViewToLocal = (pv) => {
@@ -1578,6 +1645,10 @@ export function EventProvider({ children }) {
     <EventContext.Provider
       value={{
         allEvents,
+        eventsLoading,
+        eventsError,
+        eventsHydratedAt,
+        refreshEventsNow,
         eventId,
         eventData,
         setEventId,
@@ -1652,6 +1723,7 @@ export function EventProvider({ children }) {
         updateEventDef,
         removeEventDef,
         setEventInput,
+        updateEventInputsTransaction,
         updatePlayerGate,
         scoresMap,
         scoresReady,
