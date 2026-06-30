@@ -2644,6 +2644,11 @@ export default function PlayerEventInput(){
             const hiddenCandidates = getHiddenCandidates();
             const adjustment = (mine && selectedOpponent) ? getHiddenHandicapAdjustment(mine, selectedOpponent, hiddenCfg) : 0;
             const rows = Array.isArray(hiddenData?.matchRows) ? hiddenData.matchRows : [];
+            const formatHiddenHandicapPair = (row) => {
+              const left = Number(row?.effectiveHandicap);
+              const right = Number(row?.opponentHandicap);
+              return `${formatDisplayNumber(Number.isFinite(left) ? left : 0)} : ${formatDisplayNumber(Number.isFinite(right) ? right : 0)}`;
+            };
             const focusKey = `${ev.id}:hidden-personal`;
 
             return (
@@ -2698,27 +2703,24 @@ export default function PlayerEventInput(){
                     <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`} style={{ marginTop: 10 }}>
                       <table className={tCss.table} style={{ width: '100%', tableLayout: 'fixed' }}>
                         <colgroup>
-                          <col style={{ width: '32%' }} />
-                          <col style={{ width: '32%' }} />
-                          <col style={{ width: '18%' }} />
-                          <col style={{ width: '18%' }} />
+                          <col style={{ width: '39%' }} />
+                          <col style={{ width: '39%' }} />
+                          <col style={{ width: '22%' }} />
                         </colgroup>
                         <thead>
                           <tr>
                             <th>선택자</th>
                             <th>상대방</th>
-                            <th>결과</th>
-                            <th>승패</th>
+                            <th>G핸디</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {!rows.length && <tr><td colSpan={4} style={{ color: '#999' }}>선택된 상대가 없습니다.</td></tr>}
+                          {!rows.length && <tr><td colSpan={3} style={{ color: '#999' }}>선택된 상대가 없습니다.</td></tr>}
                           {rows.map((row) => (
                             <tr key={`hidden-personal-${ev.id}-${row.key}`}>
                               <td>{row.name}</td>
                               <td>{row.opponentName}</td>
-                              <td>{row.value} : {row.opponentValue}</td>
-                              <td style={{ fontWeight: 900, color: row.status === 'win' ? '#1d4ed8' : row.status === 'lose' ? '#be123c' : '#64748b' }}>{row.resultText}</td>
+                              <td style={{ color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap' }}>{formatHiddenHandicapPair(row)}</td>
                             </tr>
                           ))}
                         </tbody>
