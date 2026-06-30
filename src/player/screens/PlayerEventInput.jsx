@@ -2716,7 +2716,7 @@ export default function PlayerEventInput(){
                               <td>{row.name}</td>
                               <td>{row.opponentName}</td>
                               <td style={{ color: '#2563eb', fontWeight: 900 }}>
-                                {fmtScore(row.effectiveHandicap ?? row.baseHandicap ?? 0)} : {fmtScore(row.opponentHandicap ?? 0)}
+                                {formatDisplayNumber(row.effectiveHandicap ?? row.baseHandicap ?? 0)} : {formatDisplayNumber(row.opponentHandicap ?? 0)}
                               </td>
                             </tr>
                           ))}
