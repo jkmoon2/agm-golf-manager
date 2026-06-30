@@ -69,3 +69,18 @@
 @media (max-width: 380px){
   .table { min-width: 340px; }
 }
+
+/* 히든 이벤트(개인) 결과표 정렬 보정
+   - 미니빙고의 우측 결과 라인과 맞추기 위해 표의 우측 여백을 확보
+   - 선택자/상대방 폭을 줄여 상대방·결과·승패 영역이 오른쪽 끝으로 붙지 않도록 함 */
+.hiddenPersonalTable {
+  width: calc(100% - 18px) !important;
+  min-width: 0 !important;
+  margin-right: auto;
+}
+
+.hiddenPersonalTable .cell {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+

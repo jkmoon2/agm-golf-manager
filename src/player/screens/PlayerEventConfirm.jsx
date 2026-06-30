@@ -783,13 +783,13 @@ const events = useMemo(
                 </div>
 
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                  <table className={`${tCss.table} ${tCss['kind-' + res.kind]}`}>
+                  <table className={`${tCss.table} ${tCss['kind-' + res.kind]} ${res.isHiddenPersonal ? tCss.hiddenPersonalTable : ''}`}>
                     <colgroup>
-                      <col style={{ width: res.isHiddenFourball ? 56 : (res.isHiddenPersonal ? 52 : 56) }} />
-                      {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '24%' : '50%' }} />}
-                      <col style={res.isHiddenFourball ? { width: '50%' } : undefined} />
-                      {hasExtraMetric && <col style={{ width: res.isHiddenPersonal ? 52 : 58 }} />}
-                      <col style={{ width: res.isHiddenPersonal ? 52 : (res.isHiddenFourball ? 78 : 80) }} />
+                      <col style={{ width: res.isHiddenPersonal ? 44 : (res.isHiddenFourball ? 46 : 56) }} />
+                      {res.kind === 'person' && <col style={{ width: res.isHiddenPersonal ? '27%' : '50%' }} />}
+                      <col style={res.isHiddenPersonal ? { width: '27%' } : (res.isHiddenFourball ? { width: '54%' } : undefined)} />
+                      {hasExtraMetric && <col style={{ width: res.isHiddenPersonal ? 48 : 58 }} />}
+                      <col style={{ width: res.isHiddenPersonal ? 48 : (res.isHiddenFourball ? 78 : 80) }} />
                     </colgroup>
                     <thead>
                       <tr>
