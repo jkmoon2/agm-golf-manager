@@ -11,7 +11,7 @@ import { getAuth } from 'firebase/auth'; // ✅
 
 export default function EventSelectScreen() {
   const nav = useNavigate();
-  const { allEvents = [], loadEvent, setEventId } = useContext(EventContext) || {};
+  const { allEvents = [], loadEvent, setEventId, eventsLoading = false, eventsError = null, refreshEventsNow } = useContext(EventContext) || {};
   const [cache, setCache] = useState([]);
   const events = useMemo(() => (allEvents?.length ? allEvents : cache), [allEvents, cache]);
 
@@ -39,6 +39,12 @@ export default function EventSelectScreen() {
         if (hasPendingCode && !auth.currentUser) await ensureAnonAfterCode('__event_select__', { timeoutMs: 1200 });
         else if (!auth.currentUser) await waitForAuthRestored(1200);
         if (!getAuth().currentUser) { scheduleRetry(); return; }
+        if (typeof refreshEventsNow === 'function') {
+          const list = await refreshEventsNow('player-event-select');
+          if (!alive) return;
+          setCache(Array.isArray(list) ? list : []);
+          return;
+        }
         let snap = null;
         try { snap = await getDocsFromServer(collection(db, 'events')); }
         catch { snap = await getDocs(collection(db, 'events')); }
@@ -53,7 +59,7 @@ export default function EventSelectScreen() {
     };
     loadEventsOnce();
     return () => { alive = false; clearRetry(); };
-  }, [allEvents]);
+  }, [allEvents, refreshEventsNow]);
 
   useEffect(() => {
     try {

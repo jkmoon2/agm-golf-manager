@@ -11,7 +11,7 @@ import { markPlayerAuthed, writePlayerTicket } from '../utils/playerState';
 
 export default function PlayerEventList() {
   const nav = useNavigate();
-  const { allEvents = [], loadEvent, setEventId } = useContext(EventContext) || {};
+  const { allEvents = [], loadEvent, setEventId, eventsLoading = false, eventsError = null, refreshEventsNow } = useContext(EventContext) || {};
   const [cache, setCache] = useState([]);
   const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState(null);
@@ -83,6 +83,12 @@ export default function PlayerEventList() {
           return;
         }
 
+        if (typeof refreshEventsNow === 'function') {
+          const list = await refreshEventsNow('player-event-list');
+          if (!alive) return;
+          setCache(Array.isArray(list) ? list : []);
+          return;
+        }
         let snap = null;
         try {
           snap = await getDocsFromServer(collection(db, 'events'));
@@ -104,7 +110,7 @@ export default function PlayerEventList() {
       alive = false;
       clearRetry();
     };
-  }, [allEvents, authReady, authUser]);
+  }, [allEvents, authReady, authUser, refreshEventsNow]);
 
   useEffect(() => {
     const auth = getAuth();

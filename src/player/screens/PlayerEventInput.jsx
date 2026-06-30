@@ -529,7 +529,7 @@ async function ensureMembership(eventId, myRoom) {
 export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
-  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
+  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate, updateEventInputsTransaction } = useContext(EventContext) || {};
   const { participant: ctxParticipant, participants: ctxParticipants } = useContext(PlayerContext) || {};
   const effectiveEventData = useEffectivePlayerEventData();
 
@@ -2234,19 +2234,23 @@ export default function PlayerEventInput(){
 
       let merged = {};
       try {
-        await runTransaction(db, async (tx) => {
-          const ref = doc(db, 'events', targetEventId);
-          const snap = await tx.get(ref);
-          const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
-            ? snap.data().eventInputs
-            : {};
-          merged = buildMergedEventInputs(freshBase);
-          tx.update(ref, {
-            eventInputs: merged,
-            inputsUpdatedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+        if (typeof updateEventInputsTransaction === 'function') {
+          merged = await updateEventInputsTransaction(targetEventId, (freshBase) => buildMergedEventInputs(freshBase));
+        } else {
+          await runTransaction(db, async (tx) => {
+            const ref = doc(db, 'events', targetEventId);
+            const snap = await tx.get(ref);
+            const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
+              ? snap.data().eventInputs
+              : {};
+            merged = buildMergedEventInputs(freshBase);
+            tx.update(ref, {
+              eventInputs: merged,
+              inputsUpdatedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
           });
-        });
+        }
       } catch (txErr) {
         console.warn('[PlayerEventInput] eventInputs transaction failed; fallback to direct update:', txErr);
         merged = buildMergedEventInputs(inputsByEventServer || {});
@@ -2256,6 +2260,7 @@ export default function PlayerEventInput(){
           await updateDoc(doc(db, 'events', targetEventId), { eventInputs: merged, inputsUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() });
         }
       }
+      merged = merged || {};
       const savedClone = cloneEventInputs(merged);
       keepSavedDraftVisible(savedClone);
       if (activeEventStorageId) {
