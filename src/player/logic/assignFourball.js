@@ -82,6 +82,15 @@ const roomOf = (p) => {
   const n = Number(raw);
   return Number.isFinite(n) ? n : raw;
 };
+const partnerOf = (p) => {
+  const raw = (p?.partner !== undefined && p?.partner !== null && p?.partner !== '')
+    ? p.partner
+    : ((p?.teammateId !== undefined && p?.teammateId !== null && p?.teammateId !== '')
+        ? p.teammateId
+        : (p?.teammate ?? null));
+  if (raw == null || raw === '') return null;
+  return normId(raw);
+};
 const buildRoomTable = (list = []) => {
   const table = {};
   (list || []).forEach((p) => {
@@ -131,7 +140,7 @@ export async function transactionalAssignFourball({
       group: toInt(p?.group, 0),
       room: roomOf(p),
       roomNumber: roomOf(p),
-      partner: p?.partner != null ? normId(p?.partner) : (p?.teammateId != null ? normId(p?.teammateId) : (p?.teammate != null ? normId(p?.teammate) : null)),
+      partner: partnerOf(p),
     }));
 
     const rc = toInt(roomCount, toInt(data?.roomCount, 4));
@@ -147,7 +156,8 @@ export async function transactionalAssignFourball({
     const self = parts.find((p) => normId(p.id) === pid);
     if (!self) throw new Error('Participant not found');
     if (toInt(self.group) !== 1) throw new Error('group_2_cannot_initiate');
-    if (roomOf(self)) throw new Error('already_assigned');
+    // 방과 파트너가 모두 있으면 이미 완료. 방만 있고 파트너가 없으면 불완전 배정 상태이므로 보정 진행.
+    if (roomOf(self) && partnerOf(self)) throw new Error('already_assigned');
 
     // 2) 신형 호출(selfId/roomCount)일 때는 최신 스냅샷 기준으로 랜덤 선택
     if (!chosenRoom) {
@@ -173,7 +183,7 @@ export async function transactionalAssignFourball({
 
     if (!mateId) {
       const pool = parts.filter(
-        (p) => toInt(p.group) === 2 && !roomOf(p) && !p.partner && normId(p.id) !== pid
+        (p) => toInt(p.group) === 2 && !roomOf(p) && normId(p.id) !== pid
       );
       if (!pool.length) throw new Error('no_free_group2');
       mateId = normId(pool[Math.floor(Math.random() * pool.length)].id);
@@ -183,7 +193,7 @@ export async function transactionalAssignFourball({
       if (normId(p.id) === pid) return { ...p, room: chosenRoom, roomNumber: chosenRoom, partner: mateId || null, teammateId: mateId || null, teammate: mateId || null };
       if (mateId && normId(p.id) === mateId) return { ...p, room: chosenRoom, roomNumber: chosenRoom, partner: pid, teammateId: pid, teammate: pid };
       const r = roomOf(p);
-      const mate = p?.partner ?? p?.teammateId ?? p?.teammate ?? null;
+      const mate = partnerOf(p);
       return { ...p, room: r, roomNumber: r, partner: mate, teammateId: mate, teammate: mate };
     });
 

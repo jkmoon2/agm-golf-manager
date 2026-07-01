@@ -752,8 +752,8 @@ export default function StepFlow() {
   // (추가) 두 사람(1조+2조) 배정을 한 번에 커밋하는 헬퍼
   const assignPairToRoom = async (p1Id, p2Id, roomNo) => {
     await updateParticipantsBulkNow([
-      { id: p1Id, fields: { room: roomNo, roomNumber: roomNo, partner: p2Id } },
-      { id: p2Id, fields: { room: roomNo, roomNumber: roomNo, partner: p1Id } },
+      { id: p1Id, fields: { room: roomNo, roomNumber: roomNo, partner: p2Id, teammateId: p2Id, teammate: p2Id } },
+      { id: p2Id, fields: { room: roomNo, roomNumber: roomNo, partner: p1Id, teammateId: p1Id, teammate: p1Id } },
     ]);
   };
 
@@ -861,11 +861,11 @@ export default function StepFlow() {
     if (target?.partner != null) {
       const pid = target.partner;
       ps = ps.map(p => (p.id === id || p.id === pid)
-        ? { ...p, room: null, roomNumber: null, partner: null }
+        ? { ...p, room: null, roomNumber: null, partner: null, teammateId: null, teammate: null }
         : p
       );
     } else {
-      ps = ps.map(p => p.id === id ? { ...p, room: null, roomNumber: null, partner: null } : p);
+      ps = ps.map(p => p.id === id ? { ...p, room: null, roomNumber: null, partner: null, teammateId: null, teammate: null } : p);
     }
     setParticipants(ps);
     await save({ participants: ps });
@@ -886,7 +886,7 @@ export default function StepFlow() {
       const freeG1 = ps.filter(p => isGroup1(p) && p.room == null);
       for (let i = 0; i < need && freeG1.length; i += 1) {
         const pick = freeG1.splice(Math.floor(Math.random() * freeG1.length), 1)[0];
-        ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, roomNumber: roomNo, partner: null } : p);
+        ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null } : p);
       }
     });
 
@@ -898,8 +898,8 @@ export default function StepFlow() {
         if (!freeG2.length) return;
         const pick = freeG2[Math.floor(Math.random() * freeG2.length)];
         ps = ps.map(p => {
-          if (p.id === p1.id)   return { ...p, partner: pick.id };
-          if (p.id === pick.id) return { ...p, room: roomNo, roomNumber: roomNo, partner: p1.id };
+          if (p.id === p1.id)   return { ...p, partner: pick.id, teammateId: pick.id, teammate: pick.id };
+          if (p.id === pick.id) return { ...p, room: roomNo, roomNumber: roomNo, partner: p1.id, teammateId: p1.id, teammate: p1.id };
           return p;
         });
       });
@@ -914,6 +914,8 @@ export default function StepFlow() {
       score: p.score,
       room: p.room,
       partner: p.partner,
+      teammateId: p.teammateId ?? p.partner ?? null,
+      teammate: p.teammate ?? p.partner ?? null,
       authCode: p.authCode,
       selected: p.selected
     }));
