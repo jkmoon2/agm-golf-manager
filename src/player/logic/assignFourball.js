@@ -22,7 +22,7 @@ export function pickRoomAndPartnerForFourball({
 
   // 아직 방/파트너 미배정인 2조 후보
   const freeG2 = participants.filter(p =>
-    Number(p.group) === 2 && !p.room && p.id !== me.id
+    Number(p.group) === 2 && !roomOf(p) && p.id !== me.id
   );
   if (freeG2.length === 0) {
     return { blocked: true, reason: 'no_free_group2' };
@@ -34,7 +34,7 @@ export function pickRoomAndPartnerForFourball({
     byRoom.set(r, { people: [] });
   }
   for (const p of participants) {
-    const r = Number(p.room);
+    const r = Number(roomOf(p));
     if (r && byRoom.has(r)) byRoom.get(r).people.push(p);
   }
 
@@ -76,6 +76,23 @@ export function pickRoomAndPartnerForFourball({
 const normId = (v) => String(v ?? '').trim();
 const normName = (s) => (s ?? '').toString().normalize('NFC').trim();
 const toInt = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+const roomOf = (p) => {
+  const raw = (p?.room !== undefined && p?.room !== null && p?.room !== '') ? p.room : (p?.roomNumber ?? null);
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : raw;
+};
+const buildRoomTable = (list = []) => {
+  const table = {};
+  (list || []).forEach((p) => {
+    const r = roomOf(p);
+    if (r == null || r === '') return;
+    const key = String(r);
+    if (!table[key]) table[key] = [];
+    table[key].push(p.id);
+  });
+  return table;
+};
 
 export async function transactionalAssignFourball({
   db,
@@ -112,8 +129,9 @@ export async function transactionalAssignFourball({
       id: normId(p?.id ?? i),
       nickname: normName(p?.nickname),
       group: toInt(p?.group, 0),
-      room: p?.room ?? null,
-      partner: p?.partner != null ? normId(p?.partner) : null,
+      room: roomOf(p),
+      roomNumber: roomOf(p),
+      partner: p?.partner != null ? normId(p?.partner) : (p?.teammateId != null ? normId(p?.teammateId) : (p?.teammate != null ? normId(p?.teammate) : null)),
     }));
 
     const rc = toInt(roomCount, toInt(data?.roomCount, 4));
@@ -129,14 +147,14 @@ export async function transactionalAssignFourball({
     const self = parts.find((p) => normId(p.id) === pid);
     if (!self) throw new Error('Participant not found');
     if (toInt(self.group) !== 1) throw new Error('group_2_cannot_initiate');
-    if (self.room) throw new Error('already_assigned');
+    if (roomOf(self)) throw new Error('already_assigned');
 
     // 2) 신형 호출(selfId/roomCount)일 때는 최신 스냅샷 기준으로 랜덤 선택
     if (!chosenRoom) {
       // 방별 인원 수
       const counts = Array.from({ length: rc }, () => 0);
       for (const p of parts) {
-        const r = toInt(p.room, 0);
+        const r = toInt(roomOf(p), 0);
         if (r >= 1 && r <= rc) counts[r - 1] += 1;
       }
       // 여유 2자리 이상 방 후보
@@ -155,16 +173,18 @@ export async function transactionalAssignFourball({
 
     if (!mateId) {
       const pool = parts.filter(
-        (p) => toInt(p.group) === 2 && !p.room && !p.partner && normId(p.id) !== pid
+        (p) => toInt(p.group) === 2 && !roomOf(p) && !p.partner && normId(p.id) !== pid
       );
       if (!pool.length) throw new Error('no_free_group2');
       mateId = normId(pool[Math.floor(Math.random() * pool.length)].id);
     }
 
     const next = parts.map((p) => {
-      if (normId(p.id) === pid) return { ...p, room: chosenRoom, partner: mateId || null };
-      if (mateId && normId(p.id) === mateId) return { ...p, room: chosenRoom, partner: pid };
-      return p;
+      if (normId(p.id) === pid) return { ...p, room: chosenRoom, roomNumber: chosenRoom, partner: mateId || null, teammateId: mateId || null, teammate: mateId || null };
+      if (mateId && normId(p.id) === mateId) return { ...p, room: chosenRoom, roomNumber: chosenRoom, partner: pid, teammateId: pid, teammate: pid };
+      const r = roomOf(p);
+      const mate = p?.partner ?? p?.teammateId ?? p?.teammate ?? null;
+      return { ...p, room: r, roomNumber: r, partner: mate, teammateId: mate, teammate: mate };
     });
 
     tx.set(
@@ -172,7 +192,9 @@ export async function transactionalAssignFourball({
       sanitizeForFirestore({
         participants: next,
         [fieldParts]: next,
+        roomTable: buildRoomTable(next),
         participantsUpdatedAt: serverTimestamp(),
+        participantsUpdatedAtClient: Date.now(),
         updatedAt: serverTimestamp(),
       }),
       { merge: true }

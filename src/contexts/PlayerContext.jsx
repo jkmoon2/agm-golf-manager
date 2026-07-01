@@ -111,7 +111,10 @@ const mergeParticipantsById = (primary = [], legacy = []) => {
 function normalizeParticipantRecord(p, fallbackId = '') {
   const scoreRaw = p?.score;
   const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
-  const room = (p?.room ?? p?.roomNumber ?? null);
+  const room = roomOfParticipant(p);
+  const partner = p?.partner != null
+    ? normId(p.partner)
+    : (p?.teammateId != null ? normId(p.teammateId) : (p?.teammate != null ? normId(p.teammate) : null));
   return {
     ...((p && typeof p === 'object') ? p : {}),
     id: normId(p?.id ?? fallbackId),
@@ -121,7 +124,9 @@ function normalizeParticipantRecord(p, fallbackId = '') {
     authCode: (p?.authCode ?? '').toString(),
     room,
     roomNumber: room,
-    partner: p?.partner != null ? normId(p.partner) : null,
+    partner,
+    teammateId: partner,
+    teammate: partner,
     score: scoreVal,
     selected: !!p?.selected,
   };
@@ -146,6 +151,23 @@ function participantsComparableString(p) {
 // ✅ 모드별 participants 필드 선택(스트로크/포볼 분리 저장)
 function participantsFieldByMode(md = 'stroke') {
   return normalizeMode(md) === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+}
+function roomOfParticipant(p) {
+  const raw = (p?.room !== undefined && p?.room !== null && p?.room !== '') ? p.room : (p?.roomNumber ?? null);
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : raw;
+}
+function buildRoomTable(list = []) {
+  const table = {};
+  (list || []).forEach((p) => {
+    const r = roomOfParticipant(p);
+    if (r == null || r === '') return;
+    const key = String(r);
+    if (!table[key]) table[key] = [];
+    table[key].push(p.id);
+  });
+  return table;
 }
 const makeLabel = (roomNames, num) => {
   const n = Array.isArray(roomNames) && roomNames[num - 1]?.trim()
@@ -687,7 +709,9 @@ if (!idCached) {
       tx.set(eref, sanitizeForFirestore({
         participants: result,
         [field]: result,
+        roomTable: buildRoomTable(result),
         participantsUpdatedAt: serverTimestamp(),
+        participantsUpdatedAtClient: Date.now(),
         updatedAt: serverTimestamp(),
       }), { merge: true });
 
@@ -706,11 +730,11 @@ if (!idCached) {
     const rid = toInt(roomNumber, 0);
     const targetId = normId(id);
     const next = participants.map((p) =>
-      normId(p.id) === targetId ? { ...p, room: rid } : p
+      normId(p.id) === targetId ? { ...p, room: rid, roomNumber: rid } : p
     );
     setParticipants(next);
     if (participant && normId(participant.id) === targetId) {
-      setParticipant((prev) => prev && { ...prev, room: rid });
+      setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid });
     }
     const committed = await writeParticipants(next);
     try { broadcastEventSync(eventId, { reason: 'joinRoom' }); } catch {}
@@ -731,13 +755,13 @@ if (!idCached) {
     const rid = toInt(roomNumber, 0);
     const a = normId(p1), b = normId(p2);
     const next = participants.map((p) => {
-      if (normId(p.id) === a) return { ...p, room: rid, partner: b };
-      if (normId(p.id) === b) return { ...p, room: rid, partner: a };
+      if (normId(p.id) === a) return { ...p, room: rid, roomNumber: rid, partner: b, teammateId: b, teammate: b };
+      if (normId(p.id) === b) return { ...p, room: rid, roomNumber: rid, partner: a, teammateId: a, teammate: a };
       return p;
     });
     setParticipants(next);
-    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, partner: b });
-    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, partner: a });
+    if (participant && normId(participant.id) === a) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: b, teammateId: b, teammate: b });
+    if (participant && normId(participant.id) === b) setParticipant((prev) => prev && { ...prev, room: rid, roomNumber: rid, partner: a, teammateId: a, teammate: a });
     const committed = await writeParticipants(next);
     try { broadcastEventSync(eventId, { reason: 'joinFourBall' }); } catch {}
     if (participant && (normId(participant.id) === a || normId(participant.id) === b)) {
@@ -780,7 +804,7 @@ if (!idCached) {
                  (participant ? parts.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
       if (!me) throw new Error('Participant not found');
 
-      if (isValidRoom(me?.room)) {
+      if (isValidRoom(roomOfParticipant(me))) {
         return { roomNumber: Number(me.room), alreadyAssigned: true, next: parts };
       }
 
@@ -830,15 +854,15 @@ if (!idCached) {
     if (toInt(me.group) !== 1) {
       const partnerNickname =
         (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
-      return { roomNumber: me.room ?? null, partnerNickname };
+      return { roomNumber: roomOfParticipant(me), partnerNickname };
     }
 
     // ✅ 이미 방/파트너가 배정된 1조는 재배정 금지 (중복 클릭/복귀 이슈 방지)
-    if (isValidRoom(me?.room)) {
+    if (isValidRoom(roomOfParticipant(me))) {
       const partnerNickname = me.partner
         ? (participants.find((p) => normId(p.id) === normId(me.partner))?.nickname || '')
         : '';
-      return { roomNumber: Number(me.room), partnerId: me.partner, partnerNickname, alreadyAssigned: true };
+      return { roomNumber: Number(roomOfParticipant(me)), partnerId: me.partner, partnerNickname, alreadyAssigned: true };
     }
 
     if (FOURBALL_USE_TRANSACTION) {
@@ -851,7 +875,7 @@ if (!idCached) {
             setParticipants(result.nextParticipants);
             if (participant && normId(participant.id) === pid) {
               setParticipant((prev) =>
-                prev && { ...prev, room: result.roomNumber, partner: result.partnerId || null }
+                prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber, partner: result.partnerId || null, teammateId: result.partnerId || null, teammate: result.partnerId || null }
               );
             }
           }
@@ -886,8 +910,9 @@ if (!idCached) {
             id: normId(p?.id ?? i),
             nickname: normName(p?.nickname),
             group: toInt(p?.group, 0),
-            room: p?.room ?? null,
-            partner: p?.partner != null ? normId(p?.partner) : null,
+            room: roomOfParticipant(p),
+            roomNumber: roomOfParticipant(p),
+            partner: p?.partner != null ? normId(p?.partner) : (p?.teammateId != null ? normId(p?.teammateId) : (p?.teammate != null ? normId(p?.teammate) : null)),
           }));
           const caps = Array.from({ length: roomCount }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
 
@@ -903,8 +928,8 @@ if (!idCached) {
           const mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
           const next = parts.map((p) => {
-            if (normId(p.id) === pid) return { ...p, room: roomNumber, partner: mateId || null };
-            if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
+            if (normId(p.id) === pid) return { ...p, room: roomNumber, roomNumber: roomNumber, partner: mateId || null, teammateId: mateId || null, teammate: mateId || null };
+            if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, roomNumber: roomNumber, partner: pid, teammateId: pid, teammate: pid };
             return p;
           });
 
@@ -930,7 +955,7 @@ if (!idCached) {
           setParticipants(result.next);
           if (participant && normId(participant.id) === pid) {
             setParticipant((prev) =>
-              prev && { ...prev, room: result.roomNumber, partner: result.mateId || null }
+              prev && { ...prev, room: result.roomNumber, roomNumber: result.roomNumber, partner: result.mateId || null, teammateId: result.mateId || null, teammate: result.mateId || null }
             );
           }
         }
@@ -953,13 +978,13 @@ if (!idCached) {
     mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
     const next = participants.map((p) => {
-      if (normId(p.id) === pid)    return { ...p, room: roomNumber, partner: mateId || null };
-      if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, partner: pid };
+      if (normId(p.id) === pid)    return { ...p, room: roomNumber, roomNumber: roomNumber, partner: mateId || null, teammateId: mateId || null, teammate: mateId || null };
+      if (mateId && normId(p.id) === mateId) return { ...p, room: roomNumber, roomNumber: roomNumber, partner: pid, teammateId: pid, teammate: pid };
       return p;
     });
     setParticipants(next);
     if (participant && normId(participant.id) === pid) {
-      setParticipant((prev) => prev && { ...prev, room: roomNumber, partner: mateId || null });
+      setParticipant((prev) => prev && { ...prev, room: roomNumber, roomNumber: roomNumber, partner: mateId || null, teammateId: mateId || null, teammate: mateId || null });
     }
     const committed = await writeParticipants(next);
     try { broadcastEventSync(eventId, { reason: 'assignFourballFallback' }); } catch {}

@@ -360,22 +360,28 @@ export default function StepFlow() {
       copy.score = Number.isFinite(n) ? n : null;
     }
 
-    const roomVal = copy.roomNumber ?? copy.room ?? null;
+    const roomRaw = (copy.room !== undefined && copy.room !== null && copy.room !== '')
+      ? copy.room
+      : (copy.roomNumber ?? null);
+    const roomNum = roomRaw == null || roomRaw === '' ? null : Number(roomRaw);
+    const roomVal = Number.isFinite(roomNum) ? roomNum : roomRaw;
+    const partnerVal = copy.partner ?? copy.teammateId ?? copy.teammate ?? null;
 
     return {
       ...copy,
       room: roomVal,
       roomNumber: roomVal,
-      teammateId: copy.partner ?? null,
-      teammate: copy.partner ?? null,
+      partner: partnerVal,
+      teammateId: partnerVal,
+      teammate: partnerVal,
     };
   };
 
   const buildRoomTable = (list=[]) => {
     const table = {};
     list.forEach(p => {
-      const r = p.room ?? null;
-      if (r == null) return;
+      const r = (p?.room !== undefined && p?.room !== null && p?.room !== '') ? p.room : (p?.roomNumber ?? null);
+      if (r == null || r === '') return;
       if (!table[r]) table[r] = [];
       table[r].push(p.id);
     });
@@ -721,8 +727,8 @@ export default function StepFlow() {
             const raw = (c.fields && Object.prototype.hasOwnProperty.call(c.fields, 'score')) ? c.fields.score : null;
             const v = raw === '' ? null : Number(raw);
             const me = (next || []).find((p) => p.id === id) || (participantsRef.current || []).find((p) => p.id === id);
-            const room = me?.room ?? me?.roomNumber ?? null;
-            return { id, score: Number.isFinite(v) ? v : null, room };
+            const room = (me?.room !== undefined && me?.room !== null && me?.room !== '') ? me.room : (me?.roomNumber ?? null);
+            return { id, score: Number.isFinite(v) ? v : null, room, roomNumber: room };
           });
 
           // id별 sig 기록(중복 호출 방지)
@@ -764,14 +770,14 @@ export default function StepFlow() {
       if (typeof upsertScores === 'function') {
         try {
           const me = (participantsRef.current || []).find((p) => p.id === id);
-          const room = me?.room ?? me?.roomNumber ?? null;
+          const room = (me?.room !== undefined && me?.room !== null && me?.room !== '') ? me.room : (me?.roomNumber ?? null);
           const sig = `${id}:${(Number.isFinite(v) ? v : null) ?? 'null'}:${room ?? 'null'}`;
 
           const mapSig = lastScoresSigMapRef.current || {};
           if (mapSig[String(id)] !== sig) {
             mapSig[String(id)] = sig;
             lastScoresSigMapRef.current = mapSig;
-            await Promise.resolve(upsertScores([{ id, score: Number.isFinite(v) ? v : null, room }]));
+            await Promise.resolve(upsertScores([{ id, score: Number.isFinite(v) ? v : null, room, roomNumber: room }]));
           }
         } catch (e) {
           console.warn('[StepFlow] upsertScores(score-only single) failed (continue):', e);
@@ -966,14 +972,14 @@ export default function StepFlow() {
     if (typeof upsertScores === 'function') {
       try {
         const me = (participantsRef.current || []).find((p) => p.id === id);
-        const room = me?.room ?? null;
+        const room = (me?.room !== undefined && me?.room !== null && me?.room !== '') ? me.room : (me?.roomNumber ?? null);
         const sig = `${id}:${v ?? 'null'}:${room ?? 'null'}`;
 
         const map = lastScoresSigMapRef.current || {};
         if (map[String(id)] !== sig) {
           map[String(id)] = sig;
           lastScoresSigMapRef.current = map;
-          Promise.resolve(upsertScores([{ id, score: v, room }]))
+          Promise.resolve(upsertScores([{ id, score: v, room, roomNumber: room }]))
             .catch((e) => console.warn('[StepFlow] upsertScores failed (continue):', e));
         }
       } catch (e) {
