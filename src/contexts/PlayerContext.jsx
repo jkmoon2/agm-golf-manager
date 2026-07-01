@@ -112,9 +112,7 @@ function normalizeParticipantRecord(p, fallbackId = '') {
   const scoreRaw = p?.score;
   const scoreVal = (scoreRaw === '' || scoreRaw == null) ? null : toInt(scoreRaw, 0);
   const room = roomOfParticipant(p);
-  const partner = p?.partner != null
-    ? normId(p.partner)
-    : (p?.teammateId != null ? normId(p.teammateId) : (p?.teammate != null ? normId(p.teammate) : null));
+  const partner = partnerOfParticipant(p);
   return {
     ...((p && typeof p === 'object') ? p : {}),
     id: normId(p?.id ?? fallbackId),
@@ -157,6 +155,15 @@ function roomOfParticipant(p) {
   if (raw == null || raw === '') return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : raw;
+}
+function partnerOfParticipant(p) {
+  const raw = (p?.partner !== undefined && p?.partner !== null && p?.partner !== '')
+    ? p.partner
+    : ((p?.teammateId !== undefined && p?.teammateId !== null && p?.teammateId !== '')
+        ? p.teammateId
+        : (p?.teammate ?? null));
+  if (raw == null || raw === '') return null;
+  return normId(raw);
 }
 function buildRoomTable(list = []) {
   const table = {};
@@ -852,17 +859,20 @@ if (!idCached) {
     if (!me) throw new Error('Participant not found');
 
     if (toInt(me.group) !== 1) {
+      const partnerId = partnerOfParticipant(me);
       const partnerNickname =
-        (me.partner ? participants.find((p) => normId(p.id) === normId(me.partner)) : null)?.nickname || '';
-      return { roomNumber: roomOfParticipant(me), partnerNickname };
+        (partnerId ? participants.find((p) => normId(p.id) === normId(partnerId)) : null)?.nickname || '';
+      return { roomNumber: roomOfParticipant(me), partnerId, partnerNickname };
     }
 
-    // ✅ 이미 방/파트너가 배정된 1조는 재배정 금지 (중복 클릭/복귀 이슈 방지)
-    if (isValidRoom(roomOfParticipant(me))) {
-      const partnerNickname = me.partner
-        ? (participants.find((p) => normId(p.id) === normId(me.partner))?.nickname || '')
-        : '';
-      return { roomNumber: Number(roomOfParticipant(me)), partnerId: me.partner, partnerNickname, alreadyAssigned: true };
+    // ✅ 이미 방과 파트너가 모두 배정된 1조만 재배정 금지
+    // - 방만 있고 파트너가 비어 있으면 이전 불완전 배정 상태로 보고, 아래 로직에서 파트너까지 보정합니다.
+    const existingRoom = roomOfParticipant(me);
+    const existingPartnerId = partnerOfParticipant(me);
+    if (isValidRoom(existingRoom) && existingPartnerId) {
+      const partnerNickname =
+        (participants.find((p) => normId(p.id) === normId(existingPartnerId))?.nickname || '');
+      return { roomNumber: Number(existingRoom), partnerId: existingPartnerId, partnerNickname, alreadyAssigned: true };
     }
 
     if (FOURBALL_USE_TRANSACTION) {
@@ -879,8 +889,9 @@ if (!idCached) {
               );
             }
           }
+          const resultPartsForName = Array.isArray(result?.nextParticipants) ? result.nextParticipants : participants;
           const partnerNickname =
-            (participants.find((p) => normId(p.id) === result?.partnerId) || {})?.nickname || '';
+            (resultPartsForName.find((p) => normId(p.id) === normId(result?.partnerId)) || {})?.nickname || '';
           try { broadcastEventSync(eventId, { reason: 'assignFourballTxUtil' }); } catch {}
           return {
             roomNumber: result?.roomNumber ?? null,
@@ -912,7 +923,7 @@ if (!idCached) {
             group: toInt(p?.group, 0),
             room: roomOfParticipant(p),
             roomNumber: roomOfParticipant(p),
-            partner: p?.partner != null ? normId(p?.partner) : (p?.teammateId != null ? normId(p?.teammateId) : (p?.teammate != null ? normId(p?.teammate) : null)),
+            partner: partnerOfParticipant(p),
           }));
           const caps = Array.from({ length: roomCount }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
 
@@ -923,7 +934,7 @@ if (!idCached) {
           const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
           const pool = parts.filter(
-            (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
+            (p) => toInt(p.group) === 2 && !isValidRoom(roomOfParticipant(p)) && normId(p.id) !== pid
           );
           const mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
@@ -959,8 +970,9 @@ if (!idCached) {
             );
           }
         }
+        const resultPartsForName = Array.isArray(result?.next) ? result.next : participants;
         const partnerNickname =
-          (participants.find((p) => normId(p.id) === result?.mateId) || {})?.nickname || '';
+          (resultPartsForName.find((p) => normId(p.id) === normId(result?.mateId)) || {})?.nickname || '';
         try { broadcastEventSync(eventId, { reason: 'assignFourballTx' }); } catch {}
         return { roomNumber: result?.roomNumber ?? null, partnerId: result?.mateId || null, partnerNickname };
       } catch (err) {
@@ -973,7 +985,7 @@ if (!idCached) {
 
     let mateId = '';
     const pool = participants.filter(
-      (p) => toInt(p.group) === 2 && !p.partner && normId(p.id) !== pid
+      (p) => toInt(p.group) === 2 && !isValidRoom(roomOfParticipant(p)) && normId(p.id) !== pid
     );
     mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
@@ -1000,7 +1012,8 @@ if (!idCached) {
       else        await setDoc(fbref, { singles: arrayUnion(pid) }, { merge: true });
     } catch (_) {}
 
-    const partnerNickname = (participants.find((p) => normId(p.id) === mateId) || {})?.nickname || '';
+    const resultPartsForName = Array.isArray(committed) && committed.length ? committed : next;
+    const partnerNickname = (resultPartsForName.find((p) => normId(p.id) === normId(mateId)) || {})?.nickname || '';
     return { roomNumber, partnerId: mateId || null, partnerNickname };
   }
 
