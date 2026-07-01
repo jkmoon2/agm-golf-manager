@@ -1,17 +1,12 @@
 // /src/admin/EventManager.jsx
 
-import React, { useState, useContext } from 'react';
-import ScreenEventManager from '../screens/EventManager';
+import React, { useMemo, useState, useContext } from 'react';
 import { EventContext } from '../contexts/EventContext';
 import { TEMPLATE_REGISTRY } from '../eventTemplates/registry';
 
 const uid = () => Math.random().toString(36).slice(2,10);
 
-export default function EventManager(props) {
-  return <ScreenEventManager {...props} />;
-}
-
-export function LegacyAdminEventManager() {
+export default function EventManager() {
   const { eventData, addEventDef, updateEventDef, removeEventDef } = useContext(EventContext) || {};
   const events = Array.isArray(eventData?.events) ? eventData.events : [];
 
