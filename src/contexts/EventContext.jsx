@@ -230,32 +230,46 @@ function mergeParticipantsById(primary = [], legacy = []) {
 }
 
 // room/roomNumber 혼용(구버전/모드 혼합)으로 인한 동기화 오류 방지
+function resolveParticipantRoom(p) {
+  try {
+    const room = p?.room;
+    const roomNumber = p?.roomNumber;
+    const raw = (room !== undefined && room !== null && room !== '') ? room : roomNumber;
+    if (raw === undefined || raw === null || raw === '') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : raw;
+  } catch {
+    return null;
+  }
+}
 function normalizeParticipantsRoomFields(list) {
   if (!Array.isArray(list)) return [];
   return list.map((p) => {
     if (!p || typeof p !== 'object') return p;
-    const room = p.room;
-    const roomNumber = p.roomNumber;
-    if (room == null && roomNumber != null) return { ...p, room: roomNumber };
-    if (room != null && roomNumber == null) return { ...p, roomNumber: room };
+    let next = { ...p };
+
+    // ✅ [SSOT/SAFE] 방 정보는 항상 room/roomNumber를 같은 값으로 맞춤
+    // - 일부 화면은 room, 일부 화면은 roomNumber를 참조하므로 한쪽만 바뀌면 화면별 불일치가 발생함
+    const roomValue = resolveParticipantRoom(next);
+    next.room = roomValue;
+    next.roomNumber = roomValue;
+
+    // ✅ [SSOT/SAFE] 포볼 파트너 필드도 partner/teammateId/teammate를 같은 값으로 맞춤
+    const partnerValue = next.partner ?? next.teammateId ?? next.teammate ?? null;
+    next.partner = partnerValue;
+    next.teammateId = partnerValue;
+    next.teammate = partnerValue;
+
     // ✅ [SSOT/SAFE] participants에 score/scoreRaw를 저장하지 않음 (점수는 /scores SSOT)
     // - 실시간 동기화 레이스(방배정/접속 상태 덮어쓰기) 확률을 줄이기 위한 안전장치
     try {
-      if (p && typeof p === 'object') {
-        const hasScore = Object.prototype.hasOwnProperty.call(p, 'score');
-        const hasScoreRaw = Object.prototype.hasOwnProperty.call(p, 'scoreRaw');
-        if (hasScore || hasScoreRaw) {
-          const cp = { ...p };
-          if (hasScore) delete cp.score;
-          if (hasScoreRaw) delete cp.scoreRaw;
-          p = cp;
-        }
-      }
+      if (Object.prototype.hasOwnProperty.call(next, 'score')) delete next.score;
+      if (Object.prototype.hasOwnProperty.call(next, 'scoreRaw')) delete next.scoreRaw;
     } catch {}
 
-    return p;
+    return next;
   });
-  }
+}
 
 function ensureModeSplitParticipants(updates, currentMode) {
   try {
@@ -1421,13 +1435,17 @@ export function EventProvider({ children }) {
         payload.map((item) => {
           const it = item || {};
           const hasScore = Object.prototype.hasOwnProperty.call(it, 'score');
-          const hasRoom = Object.prototype.hasOwnProperty.call(it, 'room');
+          const hasRoom = Object.prototype.hasOwnProperty.call(it, 'room') || Object.prototype.hasOwnProperty.call(it, 'roomNumber');
           if (!hasScore && !hasRoom) return Promise.resolve();
 
           const ref = doc(db, 'events', eventId, 'scores', String(it.id));
           const body = { updatedAt: serverTimestamp() };
           if (hasScore) body.score = it.score ?? null;
-          if (hasRoom) body.room = it.room ?? null;
+          if (hasRoom) {
+            const roomValue = (it.room !== undefined && it.room !== null && it.room !== '') ? it.room : (it.roomNumber ?? null);
+            body.room = roomValue ?? null;
+            body.roomNumber = roomValue ?? null;
+          }
           return setDoc(ref, body, { merge: true });
         }),
       );
@@ -1604,14 +1622,14 @@ export function EventProvider({ children }) {
       const eid = eventId;
       if (!eid) return;
       const list = Array.isArray(listOverride)
-        ? listOverride
-        : lastEventDataRef.current?.participants || [];
+        ? normalizeParticipantsRoomFields(listOverride)
+        : normalizeParticipantsRoomFields(lastEventDataRef.current?.participants || []);
       if (!Array.isArray(list)) return;
 
       // 1) participants 배열에서 방별 멤버 맵 구성
       const roomsById = {};
       for (const p of list) {
-        const rm = p?.room;
+        const rm = resolveParticipantRoom(p);
         if (rm === undefined || rm === null || rm === '') continue;
         const key = String(rm);
         if (!roomsById[key]) roomsById[key] = [];
@@ -1620,6 +1638,9 @@ export function EventProvider({ children }) {
           nickname: String(p?.nickname ?? ''),
           group: Number(p?.group ?? 0),
           handicap: Number(p?.handicap ?? 0),
+          room: rm,
+          roomNumber: rm,
+          partner: p?.partner ?? p?.teammateId ?? p?.teammate ?? null,
         });
       }
 

@@ -9,6 +9,28 @@ const roomCapacityAt = (roomCapacities, roomNo) => {
   const safe = Number.isFinite(raw) ? raw : 4;
   return Math.min(4, Math.max(1, safe));
 };
+const normalizeMode = (mode) => {
+  const m = String(mode || '').toLowerCase();
+  return (m === 'fourball' || m === 'agm') ? 'fourball' : 'stroke';
+};
+const participantsFieldByMode = (mode) => normalizeMode(mode) === 'fourball' ? 'participantsFourball' : 'participantsStroke';
+const roomOf = (p) => {
+  const raw = (p?.room !== undefined && p?.room !== null && p?.room !== '') ? p.room : (p?.roomNumber ?? null);
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : raw;
+};
+const buildRoomTable = (list = []) => {
+  const table = {};
+  (list || []).forEach((p) => {
+    const r = roomOf(p);
+    if (r == null || r === '') return;
+    const key = String(r);
+    if (!table[key]) table[key] = [];
+    table[key].push(p.id);
+  });
+  return table;
+};
 
 // 스트로크 방 선택 유틸
 // 규칙: 같은 방에 같은 group(조)은 금지. 그 안에서 "순수 랜덤" (옵션으로 균형랜덤도 지원)
@@ -27,7 +49,7 @@ export function pickRoomForStroke({
     byRoom.set(r, { people: [], groups: new Set() });
   }
   for (const p of (participants || [])) {
-    const rr = Number(p?.room) || 0;
+    const rr = Number(roomOf(p)) || 0;
     if (rr >= 1 && rr <= roomCount) {
       const slot = byRoom.get(rr);
       slot.people.push(p);
@@ -79,21 +101,29 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
     const data = snap.data() || {};
     const roomCount = Number(data.roomCount || 0) || 0;
     const roomCapacities = Array.from({ length: roomCount }, (_, i) => roomCapacityAt(data.roomCapacities, i + 1));
-    const parts = Array.isArray(data.participants) ? data.participants.map((p, i) => ({
-      ...(p && typeof p === 'object' ? p : {}),
-      id: p?.id ?? i,
-      group: Number(p?.group) || 0,
-      room: Number(p?.room) || 0,
-      nickname: p?.nickname || '',
-    })) : [];
+    const fieldParts = participantsFieldByMode(data?.mode || 'stroke');
+    const baseParts = (Array.isArray(data?.[fieldParts]) && data[fieldParts].length)
+      ? data[fieldParts]
+      : (Array.isArray(data.participants) ? data.participants : []);
+    const parts = Array.isArray(baseParts) ? baseParts.map((p, i) => {
+      const room = Number(roomOf(p)) || 0;
+      return {
+        ...(p && typeof p === 'object' ? p : {}),
+        id: p?.id ?? i,
+        group: Number(p?.group) || 0,
+        room,
+        roomNumber: room || null,
+        nickname: p?.nickname || '',
+      };
+    }) : [];
 
     const meIdx = parts.findIndex(p => String(p.id) === String(participantId));
     if (meIdx < 0) throw new Error('participant_not_found');
 
     // 이미 배정되어 있으면 그대로 리턴
     const me = parts[meIdx];
-    if (Number(me.room) > 0) {
-      return { roomNumber: Number(me.room) };
+    if (Number(roomOf(me)) > 0) {
+      return { roomNumber: Number(roomOf(me)) };
     }
 
     // 방 선택 (같은 조 금지 + 균형랜덤)
@@ -109,14 +139,24 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
     if (!chosen) throw new Error('no_room');
 
     // 유효성 재확인: 선택된 방에 동일 조가 있는지, 인원이 정원 미만인지
-    const current = parts.filter(p => Number(p.room) === chosen);
+    const current = parts.filter(p => Number(roomOf(p)) === chosen);
     const hasSameGroup = current.some(p => Number(p.group) === Number(me.group));
     if (hasSameGroup) throw new Error('conflict_same_group');
     if (current.length >= roomCapacityAt(roomCapacities, chosen)) throw new Error('room_full');
 
-    // 커밋
-    parts[meIdx] = { ...me, room: chosen };
-    tx.update(eref, { participants: parts });
+    // 커밋: room/roomNumber + 현재 모드 participants 필드 + roomTable을 같이 맞춤
+    parts[meIdx] = { ...me, room: chosen, roomNumber: chosen };
+    const nextParts = parts.map((p) => {
+      const room = roomOf(p);
+      return { ...p, room, roomNumber: room };
+    });
+    tx.set(eref, {
+      participants: nextParts,
+      [fieldParts]: nextParts,
+      roomTable: buildRoomTable(nextParts),
+      participantsUpdatedAt: new Date(),
+      participantsUpdatedAtClient: Date.now(),
+    }, { merge: true });
 
     return { roomNumber: chosen };
   });
