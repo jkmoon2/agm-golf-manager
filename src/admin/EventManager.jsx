@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useContext } from 'react';
 import { EventContext } from '../contexts/EventContext';
-import { EVENT_TEMPLATES } from '../events/registry';
+import { TEMPLATE_REGISTRY } from '../eventTemplates/registry';
 
 const uid = () => Math.random().toString(36).slice(2,10);
 
@@ -18,7 +18,7 @@ export default function EventManager() {
     paramsJson: JSON.stringify({ aggregator:'sum' }, null, 2)
   });
 
-  const templates = EVENT_TEMPLATES;
+  const templates = TEMPLATE_REGISTRY; // legacy admin route: 실제 운영 화면은 /src/screens/EventManager.jsx
   const onTemplateChange = (t) => {
     const def = templates.find(x => x.type === t);
     setForm(s => ({ ...s, template: t, paramsJson: JSON.stringify(def?.defaultParams||{}, null, 2) }));
