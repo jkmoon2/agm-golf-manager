@@ -1,12 +1,16 @@
 // /src/admin/EventManager.jsx
 
 import React, { useMemo, useState, useContext } from 'react';
+import ScreenEventManager from '../screens/EventManager';
 import { EventContext } from '../contexts/EventContext';
 import { TEMPLATE_REGISTRY } from '../eventTemplates/registry';
 
 const uid = () => Math.random().toString(36).slice(2,10);
 
-export default function EventManager() {
+// ⚠️ LEGACY: 예전 JSON 편집형 이벤트 관리 화면입니다.
+// 실제 운영 화면은 /src/screens/EventManager.jsx 를 사용합니다.
+// 기존 코드 보존을 위해 삭제하지 않고 named export로만 남겨둡니다.
+export function LegacyAdminEventManager() {
   const { eventData, addEventDef, updateEventDef, removeEventDef } = useContext(EventContext) || {};
   const events = Array.isArray(eventData?.events) ? eventData.events : [];
 
@@ -107,4 +111,10 @@ export default function EventManager() {
       </p>
     </div>
   );
+}
+
+// 기본 export는 현재 운영 중인 기존 레이아웃 화면으로 연결합니다.
+// 이 파일을 실수로 import해도 예전 JSON 편집 화면이 노출되지 않도록 하는 안전망입니다.
+export default function EventManager(props) {
+  return <ScreenEventManager {...props} />;
 }
