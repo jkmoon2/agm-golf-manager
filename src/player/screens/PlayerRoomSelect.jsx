@@ -10,6 +10,7 @@ import { doc, onSnapshot, setDoc, serverTimestamp, getDoc } from 'firebase/fires
 import { db, auth, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
 import { writePlayerRoom } from '../utils/playerState';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 
 
 function getPlayerTabId(){
@@ -263,18 +264,19 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   // 운영자 세션에서 참가자 탭을 동시에 사용할 때 UI가 바로 갱신되지 않는 케이스 대비
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
-    useEffect(() => {
-    const r = Number(viewParticipant?.room);
+  useEffect(() => {
+    const r = Number(getAssignmentRoom(viewParticipant));
     if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [viewParticipant?.room]);
+  }, [viewParticipant?.room, viewParticipant?.roomNumber]);
   const isValidRoom = (v) => {
     const n = Number(v);
     return Number.isFinite(n) && n >= 1;
   };
 
-  const done = isValidRoom(viewParticipant?.room) || isValidRoom(optimisticRoom);
-  const assignedRoom = isValidRoom(viewParticipant?.room)
-    ? Number(viewParticipant?.room)
+  const assignedViewRoom = getAssignmentRoom(viewParticipant);
+  const done = isValidRoom(assignedViewRoom) || isValidRoom(optimisticRoom);
+  const assignedRoom = isValidRoom(assignedViewRoom)
+    ? Number(assignedViewRoom)
     : (isValidRoom(optimisticRoom) ? Number(optimisticRoom) : null);
   useEffect(() => {
     const eid = playerEventId || ctxEventId || urlEventId;
@@ -297,11 +299,11 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const isSyncing = participantsLoaded && !isMeReady;
 
   useEffect(() => {
-    if (viewParticipant?.room != null && flowStep === 'idle') {
+    if (getAssignmentRoom(viewParticipant) != null && flowStep === 'idle') {
       setShowTeam(false);
       setFlowStep('show');
     }
-  }, [viewParticipant?.room, flowStep]);
+  }, [viewParticipant?.room, viewParticipant?.roomNumber, flowStep]);
 
   const getLabel = (num) =>
     Array.isArray(effectiveRoomNames) && effectiveRoomNames[num - 1]?.trim()
@@ -312,7 +314,8 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     if (!done || assignedRoom == null || !viewParticipant) return [];
     if (variant === 'fourball') {
       const mine = effectiveParticipants.find((p) => String(p.id) === String(viewParticipant.id));
-      const mate = effectiveParticipants.find((p) => String(mine?.partner || '') === String(p.id));
+      const minePartnerId = getAssignmentPartnerId(mine);
+      const mate = minePartnerId ? effectiveParticipants.find((p) => String(minePartnerId) === String(p.id)) : null;
       const pair = [mine, mate].filter(Boolean);
       pair.sort((a, b) => (Number(a?.group || 99) - Number(b?.group || 99)));
       return pair;
@@ -323,7 +326,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
-    return effectiveParticipants.filter((p) => Number(p.room) === Number(assignedRoom));
+    return effectiveParticipants.filter((p) => Number(getAssignmentRoom(p)) === Number(assignedRoom));
   }, [done, assignedRoom, effectiveParticipants]);
 
   const teamMembers = useMemo(() => {
@@ -344,12 +347,14 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     };
     firstGroup.forEach((p) => {
       if (seen.has(String(p.id))) return;
-      const mate = p?.partner ? byId.get(String(p.partner)) : null;
+      const partnerId = getAssignmentPartnerId(p);
+      const mate = partnerId ? byId.get(String(partnerId)) : null;
       pushPair(p, mate);
     });
     list.forEach((p) => {
       if (seen.has(String(p.id))) return;
-      const mate = p?.partner ? byId.get(String(p.partner)) : null;
+      const partnerId = getAssignmentPartnerId(p);
+      const mate = partnerId ? byId.get(String(partnerId)) : null;
       if (mate && !seen.has(String(mate.id))) {
         const a = Number(p.id); const b = Number(mate.id);
         if (!isNaN(a) && !isNaN(b) && a > b) pushPair(mate, p);
@@ -374,11 +379,11 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     const myGroup = Number(viewParticipant?.group) || 0;
     const sameGroupExists = effectiveParticipants.some(
       (p) =>
-        Number(p.room) === Number(roomNo) &&
+        Number(getAssignmentRoom(p)) === Number(roomNo) &&
         Number(p.group) === myGroup &&
         String(p.id) !== String(viewParticipant?.id)
     );
-    const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
+    const currentCount = effectiveParticipants.filter((p) => Number(getAssignmentRoom(p)) === Number(roomNo)).length;
     const isFull = currentCount >= roomCapacityAt(effectiveRoomCapacities, roomNo);
     return !sameGroupExists && !isFull;
   };
@@ -386,7 +391,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const isValidFourballRoom = (roomNo) => {
     if (variant !== 'fourball') return true;
     if (!roomNo) return false;
-    const currentCount = effectiveParticipants.filter((p) => Number(p.room) === Number(roomNo)).length;
+    const currentCount = effectiveParticipants.filter((p) => Number(getAssignmentRoom(p)) === Number(roomNo)).length;
     return currentCount <= roomCapacityAt(effectiveRoomCapacities, roomNo) - 2;
   };
 
@@ -402,10 +407,11 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   };
 
   useEffect(() => {
-    if (Number.isFinite(Number(viewParticipant?.room))) {
-      saveMyRoom(Number(viewParticipant.room));
+    const room = Number(getAssignmentRoom(viewParticipant));
+    if (Number.isFinite(room)) {
+      saveMyRoom(room);
     }
-  }, [viewParticipant?.room]);
+  }, [viewParticipant?.room, viewParticipant?.roomNumber]);
 
   const ensureAuthAndMembershipBeforeAssign = async (eventId) => {
     try {
@@ -436,9 +442,10 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       setIsAssigning(true);
       await sleep(500);
       setIsAssigning(false);
-      if (viewParticipant?.room != null) {
-        const roomLabel = getLabel(viewParticipant.room);
-        saveMyRoom(Number(viewParticipant.room));
+      const currentRoom = getAssignmentRoom(viewParticipant);
+      if (currentRoom != null) {
+        const roomLabel = getLabel(currentRoom);
+        saveMyRoom(Number(currentRoom));
         setShowTeam(false);
         setFlowStep('show');
         alert(`${viewParticipant.nickname}님은 이미 ${roomLabel}에 배정되었습니다.`);

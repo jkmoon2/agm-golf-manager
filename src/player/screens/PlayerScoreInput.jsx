@@ -10,6 +10,7 @@ import styles from './PlayerScoreInput.module.css';
 import { getEffectiveParticipantsFromEvent, readPlayerParticipant, readPlayerRoom, readPlayerAuthCode } from '../utils/playerState';
 import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 
 function normalizeGate(raw){
   if (!raw || typeof raw !== 'object') return { steps:{}, step1:{ teamConfirmEnabled:true } };
@@ -50,7 +51,8 @@ function orderByPair(list) {
     .filter((p) => Number(p?.group) === 1)
     .forEach((p1) => {
       if (used.has(p1.id)) return;
-      const p2 = (list || []).find((x) => String(x?.id) === String(p1?.partner));
+      const partnerId = getAssignmentPartnerId(p1);
+      const p2 = partnerId ? (list || []).find((x) => String(x?.id) === String(partnerId)) : null;
       if (p2 && !used.has(p2.id)) {
         const pos = slot[0] ? 2 : 0;
         slot[pos] = p1;
@@ -142,10 +144,10 @@ export default function PlayerScoreInput() {
     };
 
     const primary = matchBy(participant);
-    if (primary?.room != null) return primary;
+    if (getAssignmentRoom(primary) != null) return primary;
 
     const cached = matchBy(readPlayerParticipant(eventId, true));
-    if (cached?.room != null) return cached;
+    if (getAssignmentRoom(cached) != null) return cached;
 
     const cachedCode = String(readPlayerAuthCode(eventId, true) || '').trim();
     if (cachedCode) {
@@ -185,12 +187,12 @@ export default function PlayerScoreInput() {
   const nextDisabled = (latestGate?.steps?.[5] !== 'enabled');
 
   const myRoom = useMemo(() => {
-    const direct = Number(viewParticipant?.room ?? null);
+    const direct = Number(getAssignmentRoom(viewParticipant) ?? null);
     if (Number.isFinite(direct) && direct >= 1) return direct;
     const cached = Number(readPlayerRoom(eventId, true));
     if (Number.isFinite(cached) && cached >= 1) return cached;
     return null;
-  }, [viewParticipant?.room, eventId]);
+  }, [viewParticipant?.room, viewParticipant?.roomNumber, eventId]);
 
   useEffect(() => {
     if (eventId && myRoom) { ensureMembership(eventId, myRoom); }
@@ -204,7 +206,7 @@ export default function PlayerScoreInput() {
       : '';
 
   const roomPlayers = useMemo(
-    () => (myRoom ? toSafeParticipants(effectiveParticipants).filter((p) => (p?.room ?? null) === myRoom) : []),
+    () => (myRoom ? toSafeParticipants(effectiveParticipants).filter((p) => Number(getAssignmentRoom(p)) === Number(myRoom)) : []),
     [effectiveParticipants, myRoom]
   );
   const orderedRoomPlayers = useMemo(() => orderByPair(roomPlayers), [roomPlayers]);

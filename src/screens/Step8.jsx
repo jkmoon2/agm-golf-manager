@@ -7,6 +7,7 @@ import styles from './Step8.module.css';
 import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
 import { EventContext } from '../contexts/EventContext';
 import { StepContext } from '../flows/StepFlow';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
 // [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
 //         Step8에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
 
@@ -439,7 +440,7 @@ export default function Step8() {
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participantsWithScore || []).forEach(p => {
-      const rRaw = (p?.roomNumber ?? p?.room);
+      const rRaw = getAssignmentRoom(p);
       if (rRaw == null || rRaw === '') return;
       const r = Number(rRaw);
       if (Number.isFinite(r) && r >= 1 && r <= roomCount) {
@@ -462,7 +463,8 @@ export default function Step8() {
         .filter(p => Number(p?.group) === 1)
         .forEach(p1 => {
           if (used.has(p1.id)) return;
-          const partner = roomArr.find(x => String(x.id) === String(p1.partner));
+          const partnerId = getAssignmentPartnerId(p1);
+          const partner = partnerId ? roomArr.find(x => String(x.id) === String(partnerId)) : null;
           if (partner && !used.has(partner.id)) {
             pairs.push([p1, partner]);
             used.add(p1.id);

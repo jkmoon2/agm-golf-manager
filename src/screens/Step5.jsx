@@ -6,6 +6,7 @@ import { StepContext } from '../flows/StepFlow';          // ✅ 경로 고정 (
 import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (에러 방지)
 import { serverTimestamp } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
 import styles from './Step5.module.css';
+import { getAssignmentRoom } from '../utils/assignmentCompat';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // (util) Firestore에 저장 가능한 형태로 정리
@@ -74,7 +75,7 @@ export default function Step5() {
 
   // room / roomNumber 통합 처리 (스트로크/포볼 공통)
   const getRoomValue = (p) => {
-    const raw = p?.roomNumber ?? p?.room;
+    const raw = getAssignmentRoom(p);
     if (raw === '' || raw === undefined || raw == null) return null;
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
@@ -180,7 +181,7 @@ export default function Step5() {
         // ★ patch: STEP6/STEP8 표에서 방 구성용 roomTable 갱신(점수는 scores 서브컬렉션이 권위 소스)
         const roomTable = {};
         for (const p of sanitized) {
-          const r = p?.roomNumber ?? p?.room;       // 어떤 데이터가 와도 안전하게
+          const r = getRoomValue(p);       // room/roomNumber 중 최신 배정값 우선
           if (!r) continue;
           const key = String(r);
 

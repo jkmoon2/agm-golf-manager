@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { serverTimestamp } from 'firebase/firestore';
 
 import { EventContext } from '../contexts/EventContext';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
 import StepPage from '../components/StepPage';
 import Step1    from '../screens/Step1';
 import Step2    from '../screens/Step2';
@@ -805,20 +806,20 @@ export default function StepFlow() {
 
     if (!isGroup1(target)) {
       return {
-        roomNo: (target.room ?? target.roomNumber ?? null),
+        roomNo: getAssignmentRoom(target),
         nickname: target?.nickname || '',
-        partnerNickname: target?.partner
-          ? (ps.find(p=>p.id===target.partner)?.nickname || null)
+        partnerNickname: getAssignmentPartnerId(target)
+          ? (ps.find(p=>String(p.id)===String(getAssignmentPartnerId(target)))?.nickname || null)
           : null
       };
     }
 
-    roomNo = (target.room ?? target.roomNumber ?? null);
+    roomNo = getAssignmentRoom(target);
     if (roomNo == null) {
       // 같은 그룹1이 한 방에 최대 floor(capacity / 2)명
       const countByRoom = ps
-        .filter(p => isGroup1(p) && (p.room != null || p.roomNumber != null))
-        .reduce((acc, p) => { const rn = (p.room ?? p.roomNumber);
+        .filter(p => isGroup1(p) && getAssignmentRoom(p) != null)
+        .reduce((acc, p) => { const rn = getAssignmentRoom(p);
           acc[rn] = (acc[rn]||0) + 1; return acc; }, {});
       const candidates = Array.from({ length: roomCount }, (_, i) => i+1)
         .filter(r => {
@@ -832,7 +833,7 @@ export default function StepFlow() {
     ps = ps.map(p => p.id === id ? { ...p, room: roomNo, roomNumber: roomNo } : p);
 
     // 파트너는 그룹2 중 미배정자에서 선택
-    const pool2 = ps.filter(p => isGroup2(p) && p.room == null && p.roomNumber == null);
+    const pool2 = ps.filter(p => isGroup2(p) && getAssignmentRoom(p) == null);
     partner = pool2.length ? pool2[Math.floor(Math.random() * pool2.length)] : null;
 
     if (partner && roomNo != null) {
@@ -858,8 +859,9 @@ export default function StepFlow() {
   const handleAgmCancel = async (id) => {
     let ps = [...participants];
     const target = ps.find(p => p.id === id);
-    if (target?.partner != null) {
-      const pid = target.partner;
+    const currentPartnerId = getAssignmentPartnerId(target);
+    if (currentPartnerId != null) {
+      const pid = currentPartnerId;
       ps = ps.map(p => (p.id === id || p.id === pid)
         ? { ...p, room: null, roomNumber: null, partner: null, teammateId: null, teammate: null }
         : p
@@ -878,12 +880,12 @@ export default function StepFlow() {
 
     // 1) 그룹1(리더) 채우기: 방당 최대 floor(capacity / 2)명
     roomsArr.forEach(roomNo => {
-      const g1InRoom = ps.filter(p => isGroup1(p) && p.room === roomNo).length;
+      const g1InRoom = ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === Number(roomNo)).length;
       const pairSlots = Math.floor(getRoomCapacity(roomNo) / 2);
       const need = Math.max(0, pairSlots - g1InRoom);
       if (need <= 0) return;
 
-      const freeG1 = ps.filter(p => isGroup1(p) && p.room == null);
+      const freeG1 = ps.filter(p => isGroup1(p) && getAssignmentRoom(p) == null);
       for (let i = 0; i < need && freeG1.length; i += 1) {
         const pick = freeG1.splice(Math.floor(Math.random() * freeG1.length), 1)[0];
         ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null } : p);
@@ -892,9 +894,9 @@ export default function StepFlow() {
 
     // 2) 그룹1마다 그룹2 파트너 채우기(미배정 그룹2에서)
     roomsArr.forEach(roomNo => {
-      const freeG1 = ps.filter(p => isGroup1(p) && p.room === roomNo && p.partner == null);
+      const freeG1 = ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === Number(roomNo) && getAssignmentPartnerId(p) == null);
       freeG1.forEach(p1 => {
-        const freeG2 = ps.filter(p => isGroup2(p) && p.room == null);
+        const freeG2 = ps.filter(p => isGroup2(p) && getAssignmentRoom(p) == null);
         if (!freeG2.length) return;
         const pick = freeG2[Math.floor(Math.random() * freeG2.length)];
         ps = ps.map(p => {
@@ -912,10 +914,11 @@ export default function StepFlow() {
       nickname: p.nickname,
       handicap: p.handicap,
       score: p.score,
-      room: p.room,
-      partner: p.partner,
-      teammateId: p.teammateId ?? p.partner ?? null,
-      teammate: p.teammate ?? p.partner ?? null,
+      room: getAssignmentRoom(p),
+      roomNumber: getAssignmentRoom(p),
+      partner: getAssignmentPartnerId(p),
+      teammateId: getAssignmentPartnerId(p),
+      teammate: getAssignmentPartnerId(p),
       authCode: p.authCode,
       selected: p.selected
     }));
