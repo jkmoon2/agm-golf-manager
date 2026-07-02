@@ -86,3 +86,72 @@ export function diagSummaryParticipant(participant) {
     group: src?.group ?? null,
   };
 }
+
+// ✅ [6/10] 라이브 운영 진단 보강
+// - 화면/로직에는 영향 없이, 운영 중 문제가 발생했을 때 콘솔에서 상태를 바로 복사할 수 있게 합니다.
+export function diagGetSnapshot(extra = {}) {
+  const root = ensureDiagRoot() || {};
+  const safeTimeline = Array.isArray(root.timeline) ? root.timeline.slice(-120) : [];
+  let storage = {};
+  try {
+    storage = {
+      eventId: localStorage.getItem('eventId') || '',
+      homeViewMode: localStorage.getItem('homeViewMode') || '',
+      installMode: localStorage.getItem('agm.installMode') || '',
+      lastRoute: localStorage.getItem('agm.lastRoute') || '',
+      pendingCode: sessionStorage.getItem('pending_code') ? 'yes' : 'no',
+    };
+  } catch {}
+  return safeClone({
+    at: new Date().toISOString(),
+    href: (typeof window !== 'undefined' && window.location) ? window.location.href : '',
+    userAgent: (typeof navigator !== 'undefined') ? navigator.userAgent : '',
+    storage,
+    eventContext: root.eventContext || null,
+    eventList: root.eventList || null,
+    playerContext: root.playerContext || null,
+    playerEventInput: root.playerEventInput || null,
+    timeline: safeTimeline,
+    ...extra,
+  });
+}
+
+export function diagMarkError(scope, error, extra = {}) {
+  const err = {
+    message: String(error?.message || error || ''),
+    code: String(error?.code || ''),
+    name: String(error?.name || ''),
+  };
+  diagMerge(scope || 'lastError', { lastErrorAt: Date.now(), lastError: err, ...(safeClone(extra) || {}) });
+  diagPush(scope || 'error', { type: `${scope || 'unknown'}.error`, error: err, ...(safeClone(extra) || {}) });
+}
+
+export function installAgmDiagHelpers() {
+  try {
+    if (typeof window === 'undefined') return;
+    const root = ensureDiagRoot();
+    if (!root || root.__helpersInstalled) return;
+    root.__helpersInstalled = true;
+    root.snapshot = (extra = {}) => diagGetSnapshot(extra);
+    root.clear = () => {
+      const next = ensureDiagRoot();
+      if (next) next.timeline = [];
+      return true;
+    };
+    root.print = () => {
+      const snap = diagGetSnapshot();
+      try { console.log('[AGM][DIAG SNAPSHOT]', snap); } catch {}
+      return snap;
+    };
+    root.copy = async () => {
+      const text = JSON.stringify(diagGetSnapshot(), null, 2);
+      try {
+        if (navigator?.clipboard?.writeText) await navigator.clipboard.writeText(text);
+      } catch {}
+      try { console.log(text); } catch {}
+      return text;
+    };
+  } catch {}
+}
+
+installAgmDiagHelpers();
