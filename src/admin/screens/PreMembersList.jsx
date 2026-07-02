@@ -8,6 +8,7 @@ import {
 import { getAuth } from 'firebase/auth';
 import { db } from '../../firebase';
 import { EventContext } from '../../contexts/EventContext';
+import { ADMIN_EMAIL, isRulesAdminUser } from '../../utils/adminAuth';
 import styles from '../../screens/Settings.module.css';
 
 function rowDate(v) {
@@ -32,7 +33,7 @@ export default function PreMembersList() {
 
   const auth = getAuth();
   const user = auth.currentUser;
-  const isAdmin = !!user && (user.email === 'a@a.com'); // 규칙과 동일 기준
+  const isAdmin = isRulesAdminUser(user); // Firestore Rules와 동일 기준
 
   // 이벤트 선택이 비어있으면 첫 이벤트 채우기(기존 컨텍스트/로컬 저장값 우선)
   useEffect(() => {
@@ -165,7 +166,7 @@ export default function PreMembersList() {
           </div>
         </div>
         {!!error && <div className={styles.hint} style={{color:'#b91c1c', marginTop:8}}>오류: {error}</div>}
-        {!isAdmin && <div className={styles.hint} style={{marginTop:6}}>조회만 가능합니다. (관리자 전용: a@a.com)</div>}
+        {!isAdmin && <div className={styles.hint} style={{marginTop:6}}>조회만 가능합니다. (관리자 전용: {ADMIN_EMAIL})</div>}
       </section>
 
       {/* 추가/수정 폼 */}

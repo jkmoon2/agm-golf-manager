@@ -8,6 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth }          from '../contexts/AuthContext';
 import { useNavigate, useLocation }      from 'react-router-dom';
 import styles               from './LoginScreen.module.css';
+import { ADMIN_EMAIL }       from '../utils/adminAuth';
 
 export default function LoginScreen() {
   const [role, setRole]         = useState('admin');
@@ -19,8 +20,7 @@ export default function LoginScreen() {
   const navigate                = useNavigate();
   const { search }              = useLocation();
 
-  // .env.local
-  const ADMIN_EMAIL    = process.env.REACT_APP_ADMIN_EMAIL;
+  // Firestore Rules의 관리자 기준과 동일하게 이메일은 고정하고, 비밀번호만 환경변수로 관리합니다.
   const ADMIN_PASSWORD = process.env.REACT_APP_ADMIN_PASSWORD;
 
   const validAdmin  = email.trim() === ADMIN_EMAIL && password === ADMIN_PASSWORD;

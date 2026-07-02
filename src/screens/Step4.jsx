@@ -19,6 +19,7 @@ import {
 import { db } from "../firebase";
 import * as XLSX from "xlsx";
 import { getAuth } from "firebase/auth";
+import { isRulesAdminUser } from "../utils/adminAuth";
 
 // 구버전 호환 키(사용자 로컬 저장 시 이전 버전과 호환)
 const LEGACY_LAST_SELECTED_FILENAME_KEY = "agm_step4_filename";
@@ -431,7 +432,7 @@ export default function Step4() {
 
   // 관리자만 preMembers 저장 기본 ON
   const [savePII, setSavePII] = useState(
-    () => getAuth().currentUser?.email === "a@a.com"
+    () => isRulesAdminUser(getAuth().currentUser)
   );
 
   // 참가자 지문(필요 시)
@@ -550,7 +551,7 @@ export default function Step4() {
 
       // 5) (선택) preMembers 저장 — 관리자만
       const user = getAuth().currentUser;
-      const isAdmin = !!user && user.email === "a@a.com";
+      const isAdmin = isRulesAdminUser(user);
       if (!savePII || !eventId || !isAdmin || !f) return;
 
       const ab = await f.arrayBuffer();
