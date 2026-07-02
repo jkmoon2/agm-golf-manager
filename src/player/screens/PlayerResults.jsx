@@ -13,6 +13,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
@@ -131,7 +132,8 @@ function orderRoomFourball(roomArr = []) {
     .filter(p => Number(p?.group) === 1)
     .forEach(p1 => {
       if (used.has(p1?.id)) return;
-      const partner = roomArr.find(x => String(x?.id) === String(p1?.partner));
+      const partnerId = getAssignmentPartnerId(p1);
+      const partner = partnerId ? roomArr.find(x => String(x?.id) === String(partnerId)) : null;
       if (partner && !used.has(partner?.id)) {
         pairs.push([p1, partner]);
         used.add(p1?.id); used.add(partner?.id);
@@ -223,12 +225,13 @@ export default function PlayerResults() {
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participants || []).forEach(p => {
-      if (p?.room != null && p.room >= 1 && p.room <= roomCount) {
+      const room = Number(getAssignmentRoom(p));
+      if (Number.isFinite(room) && room >= 1 && room <= roomCount) {
         const pid = String(p.id);
         const merged = (Object.prototype.hasOwnProperty.call(effectiveScoresMap, pid))
-          ? { ...p, score: effectiveScoresMap[pid] }
-          : (effectiveScoresReady ? { ...p, score: null } : p);
-        arr[p.room - 1].push(merged);
+          ? { ...p, room, roomNumber: room, score: effectiveScoresMap[pid] }
+          : (effectiveScoresReady ? { ...p, room, roomNumber: room, score: null } : { ...p, room, roomNumber: room });
+        arr[room - 1].push(merged);
       }
     });
     return arr;

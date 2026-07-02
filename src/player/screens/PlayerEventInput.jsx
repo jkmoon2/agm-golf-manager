@@ -17,6 +17,7 @@ import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellI
 import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
 import { computeHiddenEvent, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 
 
 function getPlayerTabId(){
@@ -381,8 +382,9 @@ function orderSlotsByPairs(roomArr = [], allParticipants = []) {
     .forEach((p1) => {
       const id1 = asNum(p1.id);
       if (used.has(id1)) return;
+      const partnerId = getAssignmentPartnerId(p1);
       const partner = roomArr.find(
-        (x) => Number.isFinite(asNum(x?.id)) && asNum(x.id) === asNum(p1.partner)
+        (x) => Number.isFinite(asNum(x?.id)) && asNum(x.id) === asNum(partnerId)
       );
       if (partner && !used.has(asNum(partner.id))) {
         pairs.push([p1, partner]);
@@ -420,7 +422,7 @@ function inferRoomFromSelf(participants = [], eventData = {}, opt = {}) {
     const pid = String(p?.id ?? '');
     const puid = String(p?.uid ?? '');
     if ((pid && ids.includes(pid)) || (puid && ids.includes(puid))) {
-      const r = Number(p?.room);
+      const r = Number(getAssignmentRoom(p));
       if (Number.isFinite(r) && r >= 1) return r;
     }
   }
@@ -430,7 +432,7 @@ function inferRoomFromSelf(participants = [], eventData = {}, opt = {}) {
     for (const p of participants) {
       const pn = String(p?.nickname || '').trim().toLowerCase();
       if (pn && pn === myNick) {
-        const r = Number(p?.room);
+        const r = Number(getAssignmentRoom(p));
         if (Number.isFinite(r) && r >= 1) return r;
       }
     }
@@ -488,7 +490,7 @@ function inferSelfParticipant(participants = [], eventData = {}, roomNo = NaN, e
   ].filter(Boolean).map((v) => String(v));
 
   const inSameRoom = (participant) => {
-    const room = Number(participant?.room);
+    const room = Number(getAssignmentRoom(participant));
     return !Number.isFinite(Number(roomNo)) || !Number.isFinite(room) || room < 1 || room === Number(roomNo);
   };
 
@@ -652,7 +654,7 @@ export default function PlayerEventInput(){
 
   const allRoomNos = useMemo(() => {
     const s = new Set();
-    participants.forEach(p => { const r = Number(p?.room); if (Number.isFinite(r) && r >= 1) s.add(r); });
+    participants.forEach(p => { const r = Number(getAssignmentRoom(p)); if (Number.isFinite(r) && r >= 1) s.add(r); });
     return Array.from(s).sort((a,b)=>a-b);
   }, [participants]);
 
@@ -694,7 +696,7 @@ export default function PlayerEventInput(){
   const selfParticipantNickname = useMemo(() => String(selfParticipant?.nickname || '').trim().toLowerCase(), [selfParticipant]);
 
   useEffect(() => {
-    if (Number.isFinite(roomIdx) && roomIdx >= 1 && selfParticipant && Number(selfParticipant?.room ?? selfParticipant?.roomNumber) === Number(roomIdx)) {
+    if (Number.isFinite(roomIdx) && roomIdx >= 1 && selfParticipant && Number(getAssignmentRoom(selfParticipant)) === Number(roomIdx)) {
       try { localStorage.setItem(playerStorageKey(eventId, 'currentRoom'), String(roomIdx)); } catch {}
       try { sessionStorage.setItem(`player.currentRoom:${eventId}`, String(roomIdx)); } catch {}
       try { localStorage.setItem(`player.currentRoom:${eventId}`, String(roomIdx)); } catch {}
@@ -761,7 +763,7 @@ export default function PlayerEventInput(){
   };
 
   const roomMembers = useMemo(() => {
-    const inRoom = participants.filter(p => Number(p?.room) === roomIdx);
+    const inRoom = participants.filter(p => Number(getAssignmentRoom(p)) === roomIdx);
     return orderSlotsByPairs(inRoom, participants);
   }, [participants, roomIdx]);
 
@@ -2536,7 +2538,7 @@ export default function PlayerEventInput(){
           const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
           const pickCfg = ev.template === 'pick-lineup' ? getPickLineupConfig(ev) : null;
           const orderedRoomRows = orderSlotsByPairs(
-            participants.filter((p) => Number(p?.room) === (Number.isFinite(roomIdx) ? roomIdx : NaN)),
+            participants.filter((p) => Number(getAssignmentRoom(p)) === (Number.isFinite(roomIdx) ? roomIdx : NaN)),
             participants
           );
 
@@ -2592,7 +2594,7 @@ export default function PlayerEventInput(){
             const hiddenEffectiveSlot = Object.keys(hiddenDraftSlot || {}).length ? hiddenDraftSlot : hiddenServerSlot;
             const hiddenData = computeHiddenEvent(ev, participants, hiddenEffectiveSlot, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
             const hiddenRoomLabel = (p) => {
-              const n = Number(p?.room ?? 0);
+              const n = Number(getAssignmentRoom(p) ?? 0);
               if (!Number.isFinite(n) || n < 1) return '-';
               return (roomNames?.[n - 1] && String(roomNames[n - 1]).trim()) ? String(roomNames[n - 1]).trim() : `${n}번방`;
             };
@@ -2607,7 +2609,7 @@ export default function PlayerEventInput(){
               arr.sort((a, b) => {
                 const groupDiff = (Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999));
                 if (groupDiff) return groupDiff;
-                const roomDiff = (Number(a?.room ?? 999) - Number(b?.room ?? 999));
+                const roomDiff = (Number(getAssignmentRoom(a) ?? 999) - Number(getAssignmentRoom(b) ?? 999));
                 if (roomDiff) return roomDiff;
                 return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
               });

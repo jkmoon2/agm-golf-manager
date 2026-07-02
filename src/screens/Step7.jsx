@@ -2,6 +2,7 @@
 
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import styles from './Step7.module.css';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
@@ -113,7 +114,8 @@ export default function Step7() {
   // ✅ room/partner 호환 필드 헬퍼
   // - 포볼 배정은 Admin STEP8/Player 쪽에서 roomNumber/teammateId를 함께 참조하는 경우가 있어
   //   Step7 강제 이동 시 room만 바뀌고 roomNumber가 옛값으로 남으면 다른 화면에 반영되지 않는다.
-  const getRoomValue = (p) => (p?.room ?? p?.roomNumber ?? null);
+  const getRoomValue = (p) => getAssignmentRoom(p);
+  const getPartnerValue = (p) => getAssignmentPartnerId(p);
   const makeRoomFields = (roomNo) => ({ room: roomNo, roomNumber: roomNo });
   const makePartnerFields = (partnerId) => ({ partner: partnerId, teammateId: partnerId, teammate: partnerId });
 
@@ -151,7 +153,7 @@ export default function Step7() {
   const buildCompatParticipants = (list = []) =>
     (list || []).map((p) => {
       const r = getRoomValue(p);
-      const partner = p?.partner ?? p?.teammateId ?? p?.teammate ?? null;
+      const partner = getPartnerValue(p);
       return {
         ...p,
         room: r,
@@ -179,7 +181,7 @@ export default function Step7() {
   // 완료 여부: 방 + 파트너 둘 다 할당되어 있으면 완료로 간주
   const isCompleted = (id) => {
     const me = participants.find((p) => p.id === id);
-    return !!(me && getRoomValue(me) != null && me.partner != null);
+    return !!(me && getRoomValue(me) != null && getPartnerValue(me) != null);
   };
 
   const findParticipant = (id) =>
@@ -196,7 +198,8 @@ export default function Step7() {
     const g1s = getGroup1InRoom(roomNo);
     return g1s
       .map((g1) => {
-        const g2 = g1.partner ? findParticipant(g1.partner) : null;
+        const partnerId = getPartnerValue(g1);
+        const g2 = partnerId ? findParticipant(partnerId) : null;
         return g2 ? { g1, g2 } : null;
       })
       .filter(Boolean);
@@ -273,7 +276,8 @@ export default function Step7() {
       alert('팀(1조+2조) 이동은 1조만 가능합니다.');
       return;
     }
-    const me2 = me1.partner ? findParticipant(me1.partner) : null;
+    const me2Id = getPartnerValue(me1);
+    const me2 = me2Id ? findParticipant(me2Id) : null;
     if (!me2) {
       alert('해당 1조에 연결된 2조 팀원이 없습니다.');
       return;
@@ -366,7 +370,8 @@ export default function Step7() {
       alert('팀원(1조) 이동은 1조만 가능합니다.');
       return;
     }
-    const me2 = me1.partner ? findParticipant(me1.partner) : null;
+    const me2Id = getPartnerValue(me1);
+    const me2 = me2Id ? findParticipant(me2Id) : null;
     if (!me2) {
       alert('해당 1조에 연결된 2조 팀원이 없습니다.');
       return;
@@ -412,7 +417,8 @@ export default function Step7() {
       dest1 = dstGroup1s[n - 1];
     }
 
-    const dest2 = dest1.partner ? findParticipant(dest1.partner) : null;
+    const dest2Id = getPartnerValue(dest1);
+    const dest2 = dest2Id ? findParticipant(dest2Id) : null;
     if (!dest2) {
       alert('대상 팀의 2조 정보를 찾을 수 없습니다.');
       return;
@@ -620,8 +626,9 @@ export default function Step7() {
         res?.partnerNickname ??
         (() => {
           const p = findParticipant(id);
-          if (!p?.partner) return null;
-          const teammate = findParticipant(p.partner);
+          const partnerId = getPartnerValue(p);
+          if (!partnerId) return null;
+          const teammate = findParticipant(partnerId);
           return teammate?.nickname ?? null;
         })();
 
@@ -713,7 +720,7 @@ export default function Step7() {
       const core = participants.map((p) => ({
         id: p.id,
         room: getRoomValue(p) ?? null,
-        partner: p.partner ?? null,
+        partner: getPartnerValue(p) ?? null,
         score: p.score ?? null,
       }));
       hash = JSON.stringify(core);
@@ -727,8 +734,8 @@ export default function Step7() {
     const compat = participants.map((p) => ({
       ...p,
       roomNumber: getRoomValue(p) ?? null,
-      teammateId: p.partner ?? null,
-      teammate: p.partner ?? null,
+      teammateId: getPartnerValue(p) ?? null,
+      teammate: getPartnerValue(p) ?? null,
     }));
 
     // roomTable 구성 (방 번호 → 참가자 id 배열)

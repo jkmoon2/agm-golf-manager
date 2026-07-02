@@ -3,6 +3,7 @@
 import React, { useContext, useMemo } from 'react';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import styles from './PlayerRoomStatus.module.css';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 
 /**
  * 참가자 STEP2
@@ -22,11 +23,13 @@ export default function PlayerRoomStatus() {
     roomNames = [],
   } = useContext(PlayerContext);
 
-  if (!participant || participant.room == null) {
+  const myRoom = getAssignmentRoom(participant);
+
+  if (!participant || myRoom == null) {
     return <p>아직 방 배정이 되지 않았습니다. STEP1에서 방 배정을 해주세요.</p>;
   }
 
-  const myRoom = participant.room;
+  // room/roomNumber 호환값은 위에서 계산한 myRoom을 사용
   const labelOf = (num) =>
     (Array.isArray(roomNames) && roomNames[num - 1]?.trim())
       ? roomNames[num - 1].trim()
@@ -38,7 +41,7 @@ export default function PlayerRoomStatus() {
   const MAX_PER_ROOM = 4;
 
   const membersInMyRoom = useMemo(() => {
-    return participants.filter(p => p.room === myRoom);
+    return participants.filter(p => Number(getAssignmentRoom(p)) === Number(myRoom));
   }, [participants, myRoom]);
 
   // 빈칸을 포함해 4칸으로 맞춘 배열
@@ -174,7 +177,8 @@ export default function PlayerRoomStatus() {
       .forEach(p1 => {
         const p1id = String(p1.id);
         if (used.has(p1id)) return;
-        const partner = roomArr.find(x => String(x.id) === String(p1.partner));
+        const partnerId = getAssignmentPartnerId(p1);
+        const partner = partnerId ? roomArr.find(x => String(x.id) === String(partnerId)) : null;
         if (partner && !used.has(String(partner.id))) {
           pairs.push([p1, partner]);
           used.add(p1id);

@@ -7,6 +7,7 @@ import styles from './Step6.module.css';
 import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
+import { getAssignmentRoom } from '../utils/assignmentCompat';
 // [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
 //         Step6에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
 
@@ -358,7 +359,7 @@ export default function Step6() {
   const byRoom = useMemo(() => {
     const arr = Array.from({ length: roomCount }, () => []);
     (participantsWithScore || []).forEach(p => {
-      const rRaw = (p?.roomNumber ?? p?.room);
+      const rRaw = getAssignmentRoom(p);
       if (rRaw == null || rRaw === '') return;
       const r = Number(rRaw);
       if (Number.isFinite(r) && r >= 1 && r <= roomCount) {

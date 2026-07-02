@@ -11,6 +11,7 @@ import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../utils/playerState';
+import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -173,7 +174,8 @@ function orderSlotsByPairs(roomArr = []) {
     .filter(p => Number(p?.group) === 1)
     .forEach(p1 => {
       if (used.has(p1.id)) return;
-      const partner = roomArr.find(x => x.id === p1.partner);
+      const partnerId = getAssignmentPartnerId(p1);
+      const partner = partnerId ? roomArr.find(x => String(x.id) === String(partnerId)) : null;
       if (partner && !used.has(partner.id)) {
         pairs.push([p1, partner]);
         used.add(p1.id);
@@ -201,7 +203,7 @@ function buildRoomMatrix(participants, roomNames) {
   const map = new Map();
   for (let i = 1; i <= roomNames.length; i++) map.set(i, []);
   for (const p of participants || []) {
-    const r = Number(p?.room);
+    const r = Number(getAssignmentRoom(p));
     if (Number.isFinite(r) && map.has(r)) map.get(r).push(p);
   }
   const matrices = [];
@@ -279,7 +281,7 @@ export default function PlayerRoomTable() {
 
   const viewParticipant = useMemo(() => resolveViewParticipant(participants, paramId || ctxId || '', ctxParticipant, authCode), [participants, paramId, ctxId, ctxParticipant, authCode]);
   const resolvedCurrentRoom = useMemo(() => {
-    const direct = Number(viewParticipant?.room ?? viewParticipant?.roomNumber ?? ctxCurrentRoom ?? NaN);
+    const direct = Number(getAssignmentRoom(viewParticipant) ?? ctxCurrentRoom ?? NaN);
     if (Number.isFinite(direct) && direct >= 1) return direct;
     return resolveRoomNo(eventData, viewParticipant, paramId || ctxId || '') || null;
   }, [eventData, viewParticipant, ctxCurrentRoom, paramId, ctxId]);
