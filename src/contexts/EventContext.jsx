@@ -21,7 +21,7 @@ import {
 } from 'firebase/firestore';
 import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
-import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
+import { diagMerge, diagPush, diagSummaryEvent, diagMarkError } from '../utils/agmDiag';
 import { ADMIN_EMAIL, isRulesAdminUser } from '../utils/adminAuth';
 
 import {
@@ -383,6 +383,23 @@ export function EventProvider({ children }) {
   const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
   const [eventData, setEventData] = useState(null);
 
+  // ✅ [6/10] 라이브 진단: 대회 목록/선택 이벤트 상태를 콘솔 스냅샷에 남깁니다.
+  // 켜는 법: localStorage.setItem('AGM_DEBUG','1'); location.reload();
+  useEffect(() => {
+    try {
+      diagMerge('eventContext', {
+        route: location?.pathname || '',
+        isPlayerRoute,
+        authStateTick,
+        allEventsCount: Array.isArray(allEvents) ? allEvents.length : 0,
+        eventsLoading: !!eventsLoading,
+        eventsError: eventsError || null,
+        eventsHydratedAt: eventsHydratedAt || 0,
+        eventId: eventId || '',
+      });
+    } catch {}
+  }, [location?.pathname, isPlayerRoute, authStateTick, allEvents, eventsLoading, eventsError, eventsHydratedAt, eventId]);
+
   // ✅ scores 서브컬렉션 SSOT: Admin↔Player 공용 점수 맵(읽기 전용, 루트 문서에 미러링하지 않음)
   const [scoresMap, setScoresMap] = useState({});
   const scoresMapRef = useRef({});
@@ -538,11 +555,16 @@ export function EventProvider({ children }) {
     setEventsHydratedAt(Date.now());
     setEventsError(null);
     setEventsLoading(false);
+    try {
+      diagMerge('eventList', { lastSnapshotAt: Date.now(), count: evts.length, ids: evts.slice(0, 12).map((e) => e.id) });
+      diagPush('timeline', { type: 'event.eventsSnapshot:apply', count: evts.length });
+    } catch {}
     return evts;
   }, [isDeletedEventId]);
 
   const refreshEventsNow = useCallback(async (reason = 'manual') => {
     setEventsLoading(true);
+    try { diagPush('timeline', { type: 'event.refreshEventsNow:start', reason, authUid: auth.currentUser?.uid || '' }); } catch {}
     try {
       let u = null;
       try { u = await ensureAuthed(); } catch { u = auth.currentUser || null; }
@@ -557,7 +579,7 @@ export function EventProvider({ children }) {
     } catch (e) {
       setEventsError(String(e?.message || e || 'events-load-failed'));
       setEventsLoading(false);
-      try { diagPush('timeline', { type: 'event.refreshEventsNow:fail', reason, error: String(e?.message || e || '') }); } catch {}
+      try { diagMarkError('eventList', e, { type: 'event.refreshEventsNow:fail', reason }); } catch {}
       throw e;
     }
   }, [applyEventsSnapshotToState]);
@@ -583,6 +605,7 @@ export function EventProvider({ children }) {
 
     const startSubscribe = async () => {
       if (cancelled) return;
+      try { diagPush('timeline', { type: 'event.eventsSubscribe:start', authStateTick, authUid: auth.currentUser?.uid || '' }); } catch {}
       setEventsLoading(true);
       try { if (unsub) { unsub(); unsub = null; } } catch {}
 
@@ -594,6 +617,7 @@ export function EventProvider({ children }) {
       // 여기서 포기하지 않고 짧게 재시도합니다.
       if (!u) {
         setEventsError('auth-not-ready');
+        try { diagPush('timeline', { type: 'event.eventsSubscribe:auth-not-ready', retryMs: 900 }); } catch {}
         scheduleRetry(900);
         return;
       }
@@ -603,14 +627,21 @@ export function EventProvider({ children }) {
       // onSnapshot 첫 수신 전 빈 화면이 오래 남지 않도록 서버 getDocs를 1회 보강합니다.
       try {
         const snap = await getDocsFromServer(colRef);
-        if (!cancelled) applyEventsSnapshotToState(snap);
+        if (!cancelled) {
+          applyEventsSnapshotToState(snap);
+          try { diagPush('timeline', { type: 'event.eventsSubscribe:firstServerGet:success', count: snap.docs.length }); } catch {}
+        }
       } catch (firstErr) {
         try {
           const snap = await getDocs(colRef);
-          if (!cancelled) applyEventsSnapshotToState(snap);
+          if (!cancelled) {
+            applyEventsSnapshotToState(snap);
+            try { diagPush('timeline', { type: 'event.eventsSubscribe:firstCacheGet:success', count: snap.docs.length, serverError: String(firstErr?.message || firstErr || '') }); } catch {}
+          }
         } catch (cacheErr) {
           if (!cancelled) {
             setEventsError(String(firstErr?.message || cacheErr?.message || firstErr || cacheErr || 'events-load-failed'));
+            try { diagMarkError('eventList', firstErr || cacheErr, { type: 'event.eventsSubscribe:firstGet:fail', cacheError: String(cacheErr?.message || cacheErr || '') }); } catch {}
           }
         }
       }
@@ -621,11 +652,13 @@ export function EventProvider({ children }) {
         (snap) => {
           clearRetry();
           applyEventsSnapshotToState(snap);
+          try { diagPush('timeline', { type: 'event.eventsSubscribe:onSnapshot', count: snap.docs.length, fromCache: !!snap.metadata?.fromCache, pending: !!snap.metadata?.hasPendingWrites }); } catch {}
         },
         (err) => {
           setEventsError(String(err?.message || err || 'events-snapshot-failed'));
           setEventsLoading(false);
           console.warn('[EventContext] allEvents snapshot failed; retrying:', err);
+          try { diagMarkError('eventList', err, { type: 'event.eventsSubscribe:onSnapshot:fail', retryMs: 1200 }); } catch {}
           try { if (unsub) { unsub(); unsub = null; } } catch {}
           scheduleRetry(1200);
         }
@@ -1244,6 +1277,7 @@ export function EventProvider({ children }) {
   const updateEventInputsTransaction = useCallback(async (targetEventId, buildNext, extra = {}) => {
     const eid = String(targetEventId || eventId || '');
     if (!eid || typeof buildNext !== 'function') return null;
+    try { diagPush('timeline', { type: 'event.updateEventInputsTransaction:start', eventId: eid, extraKeys: Object.keys(extra || {}) }); } catch {}
     await ensureAuthed();
     let nextInputs = null;
     await runTransaction(db, async (tx) => {
@@ -1254,6 +1288,14 @@ export function EventProvider({ children }) {
       const base = (current.eventInputs && typeof current.eventInputs === 'object') ? current.eventInputs : {};
       const built = buildNext(base, current);
       nextInputs = (built && typeof built === 'object') ? built : {};
+      try {
+        diagPush('timeline', {
+          type: 'event.updateEventInputsTransaction:built',
+          eventId: eid,
+          beforeEventKeys: Object.keys(base || {}).length,
+          afterEventKeys: Object.keys(nextInputs || {}).length,
+        });
+      } catch {}
       tx.update(ref, sanitizeUndefinedDeep({
         eventInputs: nextInputs,
         inputsUpdatedAt: serverTimestamp(),
@@ -1265,6 +1307,10 @@ export function EventProvider({ children }) {
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), eventInputs: nextInputs };
       setEventData((prev) => (prev ? { ...prev, eventInputs: nextInputs } : { eventInputs: nextInputs }));
     }
+    try {
+      diagMerge('eventContext', { lastEventInputsTxAt: Date.now(), lastEventInputsTxEventId: eid, lastEventInputsTxCount: Object.keys(nextInputs || {}).length });
+      diagPush('timeline', { type: 'event.updateEventInputsTransaction:success', eventId: eid, eventInputsCount: Object.keys(nextInputs || {}).length });
+    } catch {}
     try { broadcastEventSync(eid, { reason: 'updateEventInputsTransaction' }); } catch {}
     return nextInputs;
   }, [eventId]);

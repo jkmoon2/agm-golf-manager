@@ -8,6 +8,7 @@ import { db, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
 import { collection, getDocs, getDocsFromServer, getDoc, doc, setDoc } from 'firebase/firestore'; // ✅
 import styles from './EventSelectScreen.module.css';
 import { getAuth } from 'firebase/auth'; // ✅
+import { diagMerge, diagPush, diagMarkError } from '../../utils/agmDiag';
 
 export default function EventSelectScreen() {
   const nav = useNavigate();
@@ -33,6 +34,7 @@ export default function EventSelectScreen() {
     const loadEventsOnce = async () => {
       if (!alive) return;
       if (allEvents && allEvents.length) return;
+      try { diagPush('timeline', { type: 'eventSelectScreen.loadEvents:start', allEventsCount: Array.isArray(allEvents) ? allEvents.length : 0 }); } catch {}
       try {
         const auth = getAuth();
         const hasPendingCode = !!sessionStorage.getItem('pending_code');
@@ -43,6 +45,10 @@ export default function EventSelectScreen() {
           const list = await refreshEventsNow('player-event-select');
           if (!alive) return;
           setCache(Array.isArray(list) ? list : []);
+          try {
+            diagMerge('eventSelectScreen', { lastLoadAt: Date.now(), source: 'EventContext.refreshEventsNow', count: Array.isArray(list) ? list.length : 0 });
+            diagPush('timeline', { type: 'eventSelectScreen.loadEvents:success', source: 'refreshEventsNow', count: Array.isArray(list) ? list.length : 0 });
+          } catch {}
           return;
         }
         let snap = null;
@@ -52,7 +58,12 @@ export default function EventSelectScreen() {
         const list = [];
         snap.forEach(d => { const v = d.data() || {}; list.push({ id: d.id, ...v }); });
         setCache(list);
+        try {
+          diagMerge('eventSelectScreen', { lastLoadAt: Date.now(), source: 'directFirestore', count: list.length });
+          diagPush('timeline', { type: 'eventSelectScreen.loadEvents:success', source: 'directFirestore', count: list.length });
+        } catch {}
       } catch (e) {
+        try { diagMarkError('eventSelectScreen', e, { type: 'eventSelectScreen.loadEvents:fail' }); } catch {}
         console.warn('[EventSelectScreen] events load failed; retrying:', e);
         scheduleRetry();
       }

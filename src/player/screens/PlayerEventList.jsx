@@ -8,6 +8,7 @@ import { collection, getDocs, getDocsFromServer, getDoc, doc, setDoc } from 'fir
 import styles from './EventSelectScreen.module.css';
 import { getAuth, onAuthStateChanged } from 'firebase/auth'; // ✅ 이메일 로그인 감지
 import { markPlayerAuthed, writePlayerTicket } from '../utils/playerState';
+import { diagMerge, diagPush, diagMarkError } from '../../utils/agmDiag';
 
 export default function PlayerEventList() {
   const nav = useNavigate();
@@ -66,6 +67,7 @@ export default function PlayerEventList() {
     const loadEventsOnce = async () => {
       if (!alive) return;
       if (allEvents && allEvents.length) return;
+      try { diagPush('timeline', { type: 'playerEventList.loadEvents:start', allEventsCount: Array.isArray(allEvents) ? allEvents.length : 0 }); } catch {}
       try {
         // ✅ 인증코드 입장 직후에는 아직 Firebase 사용자가 없을 수 있습니다.
         // Firestore 규칙상 events 읽기는 isAuthed()가 필요하므로,
@@ -87,6 +89,10 @@ export default function PlayerEventList() {
           const list = await refreshEventsNow('player-event-list');
           if (!alive) return;
           setCache(Array.isArray(list) ? list : []);
+          try {
+            diagMerge('playerEventList', { lastLoadAt: Date.now(), source: 'EventContext.refreshEventsNow', count: Array.isArray(list) ? list.length : 0 });
+            diagPush('timeline', { type: 'playerEventList.loadEvents:success', source: 'refreshEventsNow', count: Array.isArray(list) ? list.length : 0 });
+          } catch {}
           return;
         }
         let snap = null;
@@ -99,7 +105,12 @@ export default function PlayerEventList() {
         const list = [];
         snap.forEach(d => { const v = d.data() || {}; list.push({ id: d.id, ...v }); });
         setCache(list);
+        try {
+          diagMerge('playerEventList', { lastLoadAt: Date.now(), source: 'directFirestore', count: list.length });
+          diagPush('timeline', { type: 'playerEventList.loadEvents:success', source: 'directFirestore', count: list.length });
+        } catch {}
       } catch (e) {
+        try { diagMarkError('playerEventList', e, { type: 'playerEventList.loadEvents:fail' }); } catch {}
         console.warn('[PlayerEventList] events load failed; retrying:', e);
         if (alive) scheduleRetry();
       }

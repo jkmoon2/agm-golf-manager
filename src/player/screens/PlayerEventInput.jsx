@@ -882,6 +882,33 @@ export default function PlayerEventInput(){
 
   const hasMeaningfulEventInputs = hasMeaningfulEventInputsRoot;
 
+  // ✅ [6/10] 라이브 진단: STEP3 입력 저장 전/후에 이벤트 수, 개인 입력 수, 삭제 요청 수를 추적합니다.
+  const summarizeEventInputsForDiag = (value = {}) => {
+    const root = (value && typeof value === 'object') ? value : {};
+    let personCount = 0;
+    let sharedCount = 0;
+    Object.values(root).forEach((slot) => {
+      if (slot?.person && typeof slot.person === 'object') personCount += Object.keys(slot.person).length;
+      if (slot?.shared && typeof slot.shared === 'object') sharedCount += Object.keys(slot.shared).length;
+    });
+    return {
+      eventKeys: Object.keys(root).length,
+      personCount,
+      sharedCount,
+      eventIds: Object.keys(root).slice(0, 12),
+    };
+  };
+
+  const summarizeDeleteRefsForDiag = () => {
+    let single = 0;
+    let accum = 0;
+    Object.values(deletedSingleValuesRef.current || {}).forEach((m) => { single += Object.keys(m || {}).length; });
+    Object.values(deletedAccumValuesRef.current || {}).forEach((m) => {
+      Object.values(m || {}).forEach((idxMap) => { accum += Object.keys(idxMap || {}).length; });
+    });
+    return { single, accum };
+  };
+
   const markSingleDeleted = (evId, pid) => {
     const evKey = String(evId || '');
     const pidKey = String(pid ?? '');
@@ -2123,7 +2150,22 @@ export default function PlayerEventInput(){
 
   const saveDraft = async () => {
     try{
-      try { diagPush('timeline', { type: 'playerEventInput.saveDraft:start', eventId: activeEventStorageId || '', dirty: !!dirty }); } catch {}
+      try {
+        diagMerge('playerEventInput', {
+          lastSaveStartAt: Date.now(),
+          eventId: activeEventStorageId || '',
+          draft: summarizeEventInputsForDiag(draft || {}),
+          server: summarizeEventInputsForDiag(inputsByEventServer || {}),
+          deletes: summarizeDeleteRefsForDiag(),
+        });
+        diagPush('timeline', {
+          type: 'playerEventInput.saveDraft:start',
+          eventId: activeEventStorageId || '',
+          dirty: !!dirty,
+          draft: summarizeEventInputsForDiag(draft || {}),
+          deletes: summarizeDeleteRefsForDiag(),
+        });
+      } catch {}
       await ensureMembership((eventId || ctxId), roomIdx);
 
       const targetEventId = eventId || ctxId;
@@ -2244,6 +2286,7 @@ export default function PlayerEventInput(){
           const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
             ? snap.data().eventInputs
             : {};
+          try { diagPush('timeline', { type: 'playerEventInput.saveDraft:freshBase', eventId: targetEventId, base: summarizeEventInputsForDiag(freshBase) }); } catch {}
           merged = buildMergedEventInputs(freshBase);
           tx.update(ref, {
             eventInputs: merged,
@@ -2253,6 +2296,7 @@ export default function PlayerEventInput(){
         });
       } catch (txErr) {
         console.warn('[PlayerEventInput] eventInputs transaction failed; fallback to direct update:', txErr);
+        try { diagPush('timeline', { type: 'playerEventInput.saveDraft:txFallback', eventId: targetEventId, error: String(txErr?.message || txErr || '') }); } catch {}
         merged = buildMergedEventInputs(inputsByEventServer || {});
         if (typeof updateEventImmediate === 'function') {
           await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() }, false);
@@ -2279,8 +2323,18 @@ export default function PlayerEventInput(){
       deletedAccumValuesRef.current = {};
       setDirty(false);
       try {
-        diagMerge('playerEventInput', { lastSaveAt: Date.now(), eventId: activeEventStorageId || '', savedEventInputsCount: Object.keys(savedClone || {}).length });
-        diagPush('timeline', { type: 'playerEventInput.saveDraft:success', eventId: activeEventStorageId || '', savedEventInputsCount: Object.keys(savedClone || {}).length });
+        diagMerge('playerEventInput', {
+          lastSaveAt: Date.now(),
+          eventId: activeEventStorageId || '',
+          savedEventInputsCount: Object.keys(savedClone || {}).length,
+          saved: summarizeEventInputsForDiag(savedClone || {}),
+        });
+        diagPush('timeline', {
+          type: 'playerEventInput.saveDraft:success',
+          eventId: activeEventStorageId || '',
+          savedEventInputsCount: Object.keys(savedClone || {}).length,
+          saved: summarizeEventInputsForDiag(savedClone || {}),
+        });
       } catch {}
       alert('저장되었습니다.');
     }catch(e){

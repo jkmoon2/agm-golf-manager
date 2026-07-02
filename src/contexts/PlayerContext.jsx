@@ -795,6 +795,7 @@ if (!idCached) {
     await ensureAuthReady(eventId);
 
     const pid = normId(participantId || participant?.id);
+    try { diagPush('timeline', { type: 'player.assignStroke:start', eventId, participantId: pid, roomCount }); } catch {}
     const result = await runTransaction(db, async (tx) => {
       const eref = doc(db, 'events', eventId);
       const snap = await tx.get(eref);
@@ -842,6 +843,10 @@ if (!idCached) {
     const latestMe = withScores.find((p) => normId(p?.id) === pid);
     if (latestMe) setParticipant(latestMe);
 
+    try {
+      diagMerge('playerContext', { lastAssignAt: Date.now(), lastAssignType: 'stroke', eventId, participant: diagSummaryParticipant(latestMe || participant), roomNumber: result?.roomNumber ?? null });
+      diagPush('timeline', { type: 'player.assignStroke:success', eventId, participantId: pid, roomNumber: result?.roomNumber ?? null, alreadyAssigned: !!result?.alreadyAssigned });
+    } catch {}
     try { broadcastEventSync(eventId, { reason: 'assignStrokeForOne' }); } catch {}
     return {
       roomNumber: result?.roomNumber ?? null,
@@ -854,6 +859,7 @@ if (!idCached) {
     await ensureAuthReady(eventId);
 
     const pid = normId(participantId || participant?.id);
+    try { diagPush('timeline', { type: 'player.assignFourball:start', eventId, participantId: pid, roomCount, participantsCount: participants.length }); } catch {}
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
@@ -872,6 +878,7 @@ if (!idCached) {
     if (isValidRoom(existingRoom) && existingPartnerId) {
       const partnerNickname =
         (participants.find((p) => normId(p.id) === normId(existingPartnerId))?.nickname || '');
+      try { diagPush('timeline', { type: 'player.assignFourball:alreadyAssigned', eventId, participantId: pid, roomNumber: Number(existingRoom), partnerId: existingPartnerId }); } catch {}
       return { roomNumber: Number(existingRoom), partnerId: existingPartnerId, partnerNickname, alreadyAssigned: true };
     }
 
@@ -892,6 +899,10 @@ if (!idCached) {
           const resultPartsForName = Array.isArray(result?.nextParticipants) ? result.nextParticipants : participants;
           const partnerNickname =
             (resultPartsForName.find((p) => normId(p.id) === normId(result?.partnerId)) || {})?.nickname || '';
+          try {
+            diagMerge('playerContext', { lastAssignAt: Date.now(), lastAssignType: 'fourball-tx-util', eventId, roomNumber: result?.roomNumber ?? null, partnerId: result?.partnerId || null, partnerNickname });
+            diagPush('timeline', { type: 'player.assignFourball:success', source: 'txUtil', eventId, participantId: pid, roomNumber: result?.roomNumber ?? null, partnerId: result?.partnerId || null, hasPartnerName: !!partnerNickname });
+          } catch {}
           try { broadcastEventSync(eventId, { reason: 'assignFourballTxUtil' }); } catch {}
           return {
             roomNumber: result?.roomNumber ?? null,
@@ -900,6 +911,7 @@ if (!idCached) {
           };
         }
       } catch (e) {
+        try { diagPush('timeline', { type: 'player.assignFourball:txUtilFail', eventId, participantId: pid, error: String(e?.message || e || '') }); } catch {}
         console.warn('[fourball tx util] fallback to manual tx:', e?.message);
       }
 
@@ -973,9 +985,14 @@ if (!idCached) {
         const resultPartsForName = Array.isArray(result?.next) ? result.next : participants;
         const partnerNickname =
           (resultPartsForName.find((p) => normId(p.id) === normId(result?.mateId)) || {})?.nickname || '';
+        try {
+          diagMerge('playerContext', { lastAssignAt: Date.now(), lastAssignType: 'fourball-tx-manual', eventId, roomNumber: result?.roomNumber ?? null, partnerId: result?.mateId || null, partnerNickname });
+          diagPush('timeline', { type: 'player.assignFourball:success', source: 'txManual', eventId, participantId: pid, roomNumber: result?.roomNumber ?? null, partnerId: result?.mateId || null, hasPartnerName: !!partnerNickname });
+        } catch {}
         try { broadcastEventSync(eventId, { reason: 'assignFourballTx' }); } catch {}
         return { roomNumber: result?.roomNumber ?? null, partnerId: result?.mateId || null, partnerNickname };
       } catch (err) {
+        try { diagPush('timeline', { type: 'player.assignFourball:txManualFail', eventId, participantId: pid, error: String(err?.message || err || '') }); } catch {}
         console.warn('[fourball tx manual] fallback to non-tx:', err?.message);
       }
     }
@@ -1014,6 +1031,10 @@ if (!idCached) {
 
     const resultPartsForName = Array.isArray(committed) && committed.length ? committed : next;
     const partnerNickname = (resultPartsForName.find((p) => normId(p.id) === normId(mateId)) || {})?.nickname || '';
+    try {
+      diagMerge('playerContext', { lastAssignAt: Date.now(), lastAssignType: 'fourball-fallback', eventId, roomNumber, partnerId: mateId || null, partnerNickname });
+      diagPush('timeline', { type: 'player.assignFourball:success', source: 'fallback', eventId, participantId: pid, roomNumber, partnerId: mateId || null, hasPartnerName: !!partnerNickname });
+    } catch {}
     return { roomNumber, partnerId: mateId || null, partnerNickname };
   }
 
