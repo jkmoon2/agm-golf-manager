@@ -22,6 +22,7 @@ import {
 import { db, waitForAuthRestored, ensureAnonAfterCode } from '../firebase';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 import { diagMerge, diagPush, diagSummaryEvent } from '../utils/agmDiag';
+import { ADMIN_EMAIL, isRulesAdminUser } from '../utils/adminAuth';
 
 import {
   getAuth,
@@ -343,15 +344,11 @@ const ensureAuthed = (() => {
   };
 })();
 
-const ADMIN_EMAIL = 'a@a.com';
-function normalizeEmail(email = '') {
-  return String(email || '').trim().toLowerCase();
-}
 async function assertAdminForEventDelete() {
   const user = auth.currentUser || await waitForAuthRestored(1800);
-  const email = normalizeEmail(user?.email || '');
-  if (!user || email !== ADMIN_EMAIL) {
-    throw new Error(`관리자 권한이 없습니다. (${email || '로그인 없음'}) 로그인 상태를 확인해 주세요.`);
+  if (!isRulesAdminUser(user)) {
+    const email = String(user?.email || '').trim().toLowerCase();
+    throw new Error(`관리자 권한이 없습니다. (${email || '로그인 없음'}) ${ADMIN_EMAIL} 로그인 상태를 확인해 주세요.`);
   }
   try { await user.getIdToken(true); } catch {}
   return user;

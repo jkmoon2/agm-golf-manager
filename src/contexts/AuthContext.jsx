@@ -8,8 +8,7 @@ import {
   signInAnonymously,
   signOut
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { isAdminEmail } from '../utils/adminAuth';
 
 const AuthContext = createContext({
   firebaseUser: null,
@@ -18,9 +17,6 @@ const AuthContext = createContext({
   loginPlayer:  async () => {},
   logout:       async () => {}
 });
-
-const ADMIN_EMAILS = ['a@a.com'];
-const isAdminEmail = (email) => ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase());
 
 export function AuthProvider({ children }) {
   const auth = getAuth();
@@ -53,21 +49,10 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      // 이메일 로그인은 더 이상 무조건 운영자로 보지 않음
-      // 1) 관리자 이메일, 2) users/{uid}.role === 'admin', 3) 현재 세션에서 운영자 로그인으로 들어온 uid만 admin
-      let nextRole = isAdminEmail(user.email) ? 'admin' : 'player';
-      try {
-        const roleSnap = await getDoc(doc(db, 'users', user.uid));
-        const role = String(roleSnap.exists() ? (roleSnap.data()?.role || '') : '').toLowerCase();
-        if (role === 'admin') nextRole = 'admin';
-        // a@a.com은 Auth 계정 재생성으로 users 문서가 비어 있거나 과거 role 값이 남아도
-        // 이메일 기준 관리자 권한을 우선합니다.
-        if (role === 'player' && !isAdminEmail(user.email)) nextRole = 'player';
-      } catch {}
-      try {
-        const adminUid = sessionStorage.getItem('agm.adminLoginUid') || '';
-        if (adminUid && adminUid === user.uid) nextRole = 'admin';
-      } catch {}
+      // Firestore Rules와 동일하게 관리자 여부는 이메일 기준(a@a.com)으로만 판단합니다.
+      // users/{uid}.role 또는 sessionStorage 값으로 admin 처리하면, 화면은 관리자처럼 보이지만
+      // Firestore Rules에서는 permission-denied가 발생할 수 있어 기준을 통일합니다.
+      const nextRole = isAdminEmail(user.email) ? 'admin' : 'player';
       if (alive) setAppRole(nextRole);
     });
     return () => { alive = false; unsub(); };
@@ -76,6 +61,15 @@ export function AuthProvider({ children }) {
   // ▶ 운영자 로그인
   const loginAdmin = async (email, password) => {
     const cred = await signInWithEmailAndPassword(auth, email, password);
+    if (!isAdminEmail(cred?.user?.email)) {
+      try {
+        sessionStorage.removeItem('agm.adminLoginUid');
+        sessionStorage.removeItem('agm.authRole');
+      } catch {}
+      try { await signOut(auth); } catch {}
+      setAppRole(null);
+      throw new Error('관리자 권한이 없습니다. Firestore 규칙 기준 관리자 이메일(a@a.com)로 로그인해 주세요.');
+    }
     try {
       sessionStorage.setItem('agm.adminLoginUid', cred.user.uid);
       sessionStorage.setItem('agm.authRole', 'admin');

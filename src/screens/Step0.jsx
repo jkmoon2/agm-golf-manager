@@ -6,6 +6,7 @@ import { EventContext } from '../contexts/EventContext';
 import styles from './Step0.module.css';
 // ★ patch: 접속 가능 시간 갱신 시각을 남기기 위해 serverTimestamp 사용
 import { serverTimestamp } from 'firebase/firestore';
+import { ADMIN_EMAIL } from '../utils/adminAuth';
 
 export default function Step0() {
   const { createEvent, loadEvent, deleteEvent, allEvents, updateEventById } = useContext(EventContext);
@@ -237,7 +238,7 @@ export default function Step0() {
       if (msg.includes('관리자 권한이 없습니다')) {
         alert(`삭제 실패: ${msg}`);
       } else if (msg.toLowerCase().includes('permission')) {
-        alert('삭제 실패: 관리자 권한이 없습니다. (a@a.com) 로그인 상태를 확인해 주세요.');
+        alert(`삭제 실패: 관리자 권한이 없습니다. (${ADMIN_EMAIL}) 로그인 상태를 확인해 주세요.`);
       } else {
         alert('삭제 실패: 네트워크/권한 문제로 삭제되지 않았습니다. 콘솔 로그를 확인해 주세요.');
       }

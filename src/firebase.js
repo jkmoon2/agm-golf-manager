@@ -16,6 +16,7 @@ import {
   signInAnonymously,
   onAuthStateChanged,
 } from 'firebase/auth';
+import { ADMIN_EMAIL, isAdminEmail } from './utils/adminAuth';
 
 const firebaseConfig = {
   apiKey: "AIzaSyD_9AmDInzzn45aAzfNcjXIHRx27aDO0QY",
@@ -124,11 +125,11 @@ async function ensureUserProfile(user){
     const uid = user.uid;
     const key = `profileEnsured:${uid}`;
     const email = String(user.email || '').trim().toLowerCase();
-    const isAdminEmail = email === 'a@a.com';
+    const isAdminEmailValue = isAdminEmail(email);
     // 일반 회원은 기존처럼 1회만 보강합니다.
     // 단, 운영자(a@a.com)는 Auth 계정 삭제/재생성으로 UID가 바뀌어도
     // users/{새UID}에 관리자 필드가 항상 복구되도록 매 로그인마다 확인합니다.
-    if(!isAdminEmail && localStorage.getItem(key)==='1') return; // 1회만
+    if(!isAdminEmailValue && localStorage.getItem(key)==='1') return; // 1회만
 
     const ref = doc(db, 'users', uid);
     const snap = await getDoc(ref);
@@ -140,15 +141,15 @@ async function ensureUserProfile(user){
     if(!snap.exists()){
       await setDoc(ref, {
         email: user.email || '',
-        name: isAdminEmail ? (user.displayName || '관리자') : (user.displayName || ''),
+        name: isAdminEmailValue ? (user.displayName || '관리자') : (user.displayName || ''),
         createdAt,                     // 실제 가입일 보관
         createdAtSrc: 'auth.metadata', // 진단용
         updatedAt: serverTimestamp(),
-        ...(isAdminEmail ? { role: 'admin', isAdmin: true, approved: true } : {})
+        ...(isAdminEmailValue ? { role: 'admin', isAdmin: true, approved: true } : {})
       }, { merge: true });
-    } else if (isAdminEmail) {
+    } else if (isAdminEmailValue) {
       await setDoc(ref, {
-        email: user.email || 'a@a.com',
+        email: user.email || ADMIN_EMAIL,
         name: user.displayName || snap.data()?.name || '관리자',
         role: 'admin',
         isAdmin: true,
