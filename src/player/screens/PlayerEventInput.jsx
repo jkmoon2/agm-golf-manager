@@ -529,7 +529,7 @@ async function ensureMembership(eventId, myRoom) {
 export default function PlayerEventInput(){
   const nav = useNavigate();
   const { eventId } = useParams();
-  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate } = useContext(EventContext) || {};
+  const { eventId: ctxId, loadEvent, eventData, updateEventImmediate, updateEventInputsTransaction } = useContext(EventContext) || {};
   const { participant: ctxParticipant, participants: ctxParticipants } = useContext(PlayerContext) || {};
   const effectiveEventData = useEffectivePlayerEventData();
 
@@ -1279,7 +1279,26 @@ export default function PlayerEventInput(){
     // setDoc(..., { merge:true })의 중첩 merge를 사용해 다른 참가자의 점수 입력값은 덮어쓰지 않습니다.
     try {
       const targetEventId = eventId || ctxId;
-      if (targetEventId) {
+      if (targetEventId && typeof updateEventInputsTransaction === 'function') {
+        const savedInputs = await updateEventInputsTransaction(targetEventId, (freshBase = {}) => {
+          const merged = cloneEventInputs(freshBase || {});
+          const mSlot = { ...(merged[evId] || {}) };
+          const mShared = { ...(mSlot.shared || {}) };
+          const nextOrders = { ...(mShared.largeBingoOrders || {}) };
+          const nextLeaders = { ...(mShared.largeBingoLeaders || {}) };
+          nextOrders[roomKey] = normalizedOrder;
+          nextLeaders[roomKey] = leaderId;
+          mSlot.shared = { ...mShared, largeBingoOrders: nextOrders, largeBingoLeaders: nextLeaders };
+          merged[evId] = mSlot;
+          return merged;
+        }, { updatedBy: auth?.currentUser?.uid || 'player' });
+        if (savedInputs && activeEventStorageId) {
+          const savedClone = cloneEventInputs(savedInputs);
+          const nextPack = { inputs: savedClone, resetTokens: { ...liveEventInputResetTokens } };
+          setServerInputsCachePack(nextPack);
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+        }
+      } else if (targetEventId) {
         await updateDoc(doc(db, 'events', targetEventId), {
           [`eventInputs.${evId}.shared.largeBingoOrders.${roomKey}`]: normalizedOrder,
           [`eventInputs.${evId}.shared.largeBingoLeaders.${roomKey}`]: leaderId,
@@ -1895,17 +1914,25 @@ export default function PlayerEventInput(){
     setDirty(true);
 
     try {
-      const merged = cloneEventInputs(inputsByEventServer || {});
-      const mSlot = { ...(merged[evId] || {}) };
-      mSlot.person = { ...(mSlot.person || {}), ...((slot.person && typeof slot.person === 'object') ? slot.person : {}) };
-      mSlot.shared = { ...(mSlot.shared || {}), rankScorePairs: pairs };
-      merged[evId] = mSlot;
-      if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged }, false);
-        // 숫자칸 삭제 명시 정리는 saveDraft() 내부 병합 단계에서 처리합니다.
-        // 이 함수는 히든/순위 포볼 팀 선택 저장용이라 targetEventId/buildMergedEventInputs를 사용하지 않습니다.
+      const targetEventId = eventId || ctxId;
+      let savedInputs = null;
+      const mergePairs = (baseSource = {}) => {
+        const merged = cloneEventInputs(baseSource || {});
+        const mSlot = { ...(merged[evId] || {}) };
+        mSlot.person = { ...(mSlot.person || {}), ...((slot.person && typeof slot.person === 'object') ? slot.person : {}) };
+        mSlot.shared = { ...(mSlot.shared || {}), rankScorePairs: pairs };
+        merged[evId] = mSlot;
+        return merged;
+      };
+      if (targetEventId && typeof updateEventInputsTransaction === 'function') {
+        savedInputs = await updateEventInputsTransaction(targetEventId, mergePairs, { updatedBy: auth?.currentUser?.uid || 'player' });
+      } else if (typeof updateEventImmediate === 'function') {
+        savedInputs = mergePairs(inputsByEventServer || {});
+        await updateEventImmediate({ eventInputs: savedInputs }, false);
+      }
 
-        const savedClone = cloneEventInputs(merged);
+      if (savedInputs) {
+        const savedClone = cloneEventInputs(savedInputs);
         pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
         if (activeEventStorageId) {
           const nextPack = {
@@ -2040,15 +2067,25 @@ export default function PlayerEventInput(){
     setDirty(true);
 
     try {
-      const merged = cloneEventInputs(inputsByEventServer || {});
-      const mSlot = { ...(merged[evId] || {}) };
-      mSlot.person = { ...(mSlot.person || {}) };
-      if (!targetId) delete mSlot.person[meId];
-      else mSlot.person[meId] = person[meId];
-      merged[evId] = mSlot;
-      if (typeof updateEventImmediate === 'function') {
-        await updateEventImmediate({ eventInputs: merged, inputsUpdatedAt: Date.now() }, false);
-        const savedClone = cloneEventInputs(merged);
+      const targetEventId = eventId || ctxId;
+      let savedInputs = null;
+      const mergeHiddenOpponent = (baseSource = {}) => {
+        const merged = cloneEventInputs(baseSource || {});
+        const mSlot = { ...(merged[evId] || {}) };
+        mSlot.person = { ...(mSlot.person || {}) };
+        if (!targetId) delete mSlot.person[meId];
+        else mSlot.person[meId] = person[meId];
+        merged[evId] = mSlot;
+        return merged;
+      };
+      if (targetEventId && typeof updateEventInputsTransaction === 'function') {
+        savedInputs = await updateEventInputsTransaction(targetEventId, mergeHiddenOpponent, { updatedBy: auth?.currentUser?.uid || 'player' });
+      } else if (typeof updateEventImmediate === 'function') {
+        savedInputs = mergeHiddenOpponent(inputsByEventServer || {});
+        await updateEventImmediate({ eventInputs: savedInputs, inputsUpdatedAt: Date.now() }, false);
+      }
+      if (savedInputs) {
+        const savedClone = cloneEventInputs(savedInputs);
         pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
         hydrateDraftFromServer(savedClone);
         if (activeEventStorageId) {
@@ -2280,20 +2317,27 @@ export default function PlayerEventInput(){
 
       let merged = {};
       try {
-        await runTransaction(db, async (tx) => {
-          const ref = doc(db, 'events', targetEventId);
-          const snap = await tx.get(ref);
-          const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
-            ? snap.data().eventInputs
-            : {};
-          try { diagPush('timeline', { type: 'playerEventInput.saveDraft:freshBase', eventId: targetEventId, base: summarizeEventInputsForDiag(freshBase) }); } catch {}
-          merged = buildMergedEventInputs(freshBase);
-          tx.update(ref, {
-            eventInputs: merged,
-            inputsUpdatedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+        if (typeof updateEventInputsTransaction === 'function') {
+          merged = await updateEventInputsTransaction(targetEventId, (freshBase = {}) => {
+            try { diagPush('timeline', { type: 'playerEventInput.saveDraft:freshBase', eventId: targetEventId, base: summarizeEventInputsForDiag(freshBase || {}) }); } catch {}
+            return buildMergedEventInputs(freshBase || {});
+          }, { updatedBy: auth?.currentUser?.uid || 'player' }) || {};
+        } else {
+          await runTransaction(db, async (tx) => {
+            const ref = doc(db, 'events', targetEventId);
+            const snap = await tx.get(ref);
+            const freshBase = (snap.exists() && snap.data()?.eventInputs && typeof snap.data().eventInputs === 'object')
+              ? snap.data().eventInputs
+              : {};
+            try { diagPush('timeline', { type: 'playerEventInput.saveDraft:freshBase', eventId: targetEventId, base: summarizeEventInputsForDiag(freshBase) }); } catch {}
+            merged = buildMergedEventInputs(freshBase);
+            tx.update(ref, {
+              eventInputs: merged,
+              inputsUpdatedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
           });
-        });
+        }
       } catch (txErr) {
         console.warn('[PlayerEventInput] eventInputs transaction failed; fallback to direct update:', txErr);
         try { diagPush('timeline', { type: 'playerEventInput.saveDraft:txFallback', eventId: targetEventId, error: String(txErr?.message || txErr || '') }); } catch {}
