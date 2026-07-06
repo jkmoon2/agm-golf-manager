@@ -573,7 +573,7 @@ const events = useMemo(
         value: row.point,
         status: row.status,
         displayText: row.resultText,
-        bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}${row.mutual ? ` / 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmtScore(row.mutualPoint)}` : ''}`,
+        bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}${row.mutual ? ` / 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmtScore(row.mutualPoint)}` : ''}${row.selectionBonusPoint ? ` / ${row.selectionDirection === 'upward' ? '상향' : '하향'} ${row.selectionBonusPoint > 0 ? '+' : ''}${fmtScore(row.selectionBonusPoint)}` : ''}`,
       }));
       return { kind: 'person', metricLabel: '승패', extraMetricLabel: '결과', personHeader: '선택자', roomHeader: '상대방', rows, isHiddenPersonal: true };
     }

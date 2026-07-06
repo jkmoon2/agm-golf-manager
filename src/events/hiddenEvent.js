@@ -25,6 +25,8 @@ export function defaultHiddenEventParams() {
       lose: 0,
       draw: 0.5,
       mutual: 0,
+      upward: 0,
+      downward: 0,
     },
     // 개인 1대1에서 같은 조 참가자만 상대 후보로 허용
     sameGroupOnly: false,
@@ -64,6 +66,8 @@ export function normalizeHiddenPersonalPoints(raw) {
     lose: normalizePointValue(src.lose ?? src.losePoint ?? src.loser ?? src.LOSE, 0),
     draw: normalizePointValue(src.draw ?? src.drawPoint ?? src.tie ?? src.DRAW, 0.5),
     mutual: normalizePointValue(src.mutual ?? src.mutualPoint ?? src.match ?? src.MUTUAL, 0),
+    upward: normalizePointValue(src.upward ?? src.upwardPoint ?? src.up ?? src.UPWARD ?? src.upper ?? src.upperPoint, 0),
+    downward: normalizePointValue(src.downward ?? src.downwardPoint ?? src.down ?? src.DOWNWARD ?? src.lower ?? src.lowerPoint, 0),
   };
 }
 
@@ -184,6 +188,18 @@ export function getHiddenHandicapAdjustment(selector, opponent, params) {
 
   // 높은 번호 조가 낮은 번호 조를 선택하면 본인 G핸디 +@, 반대는 -@
   return from > to ? total : -total;
+}
+
+export function getHiddenSelectionDirection(selector, opponent, params) {
+  const from = clampGroupNo(getParticipantGroupNo(selector));
+  const to = clampGroupNo(getParticipantGroupNo(opponent));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return 'none';
+
+  // 조간 추가 G핸디가 0이면 해당 조끼리의 상향/하향 선택 추가 점수도 반영하지 않음
+  const adjustment = getHiddenHandicapAdjustment(selector, opponent, params);
+  if (!Number.isFinite(Number(adjustment)) || Number(adjustment) === 0) return 'none';
+
+  return from > to ? 'upward' : 'downward';
 }
 
 export function getHiddenOpponentId(slot) {
@@ -341,7 +357,11 @@ function buildPersonalRows(eventDef, participants = [], inputsSlot = {}, opt = {
     const mutual = String(opponentSelectionId || '') === String(selectorId || '');
     const basePoint = status === 'win' ? points.win : status === 'draw' ? points.draw : points.lose;
     const mutualDelta = mutual && status === 'win' ? points.mutual : mutual && status === 'lose' ? -points.mutual : 0;
-    const point = basePoint + mutualDelta;
+    const selectionDirection = getHiddenSelectionDirection(selector, opponent, cfg);
+    const upwardDelta = selectionDirection === 'upward' && status === 'win' ? points.upward : 0;
+    const downwardDelta = selectionDirection === 'downward' && status === 'lose' ? -points.downward : 0;
+    const selectionBonusPoint = upwardDelta + downwardDelta;
+    const point = basePoint + mutualDelta + selectionBonusPoint;
     return {
       key: `${selectorId}-${opponentId}`,
       selectorId: String(selectorId),
@@ -363,6 +383,10 @@ function buildPersonalRows(eventDef, participants = [], inputsSlot = {}, opt = {
       point,
       basePoint,
       mutualPoint: mutualDelta,
+      upwardPoint: upwardDelta,
+      downwardPoint: downwardDelta,
+      selectionBonusPoint,
+      selectionDirection,
       mutual,
       status,
       resultText: status === 'win' ? '승' : status === 'lose' ? '패' : '무',

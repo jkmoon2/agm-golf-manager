@@ -68,7 +68,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
         {cfg.mode === 'personal' && (
           <div style={{ border: '1px solid #e5eaf2', background: '#fbfdff', borderRadius: 14, padding: 12, marginBottom: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c', marginBottom: 8 }}>개인 1대1 점수 설정</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
               <label style={labelStyle}>승리
                 <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.win ?? ''} onChange={(e) => updatePointDraft('win', e.target.value)} />
               </label>
@@ -81,9 +81,15 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
               <label style={labelStyle}>맞지목
                 <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.mutual ?? ''} onChange={(e) => updatePointDraft('mutual', e.target.value)} />
               </label>
+              <label style={labelStyle}>상향 선택
+                <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.upward ?? ''} onChange={(e) => updatePointDraft('upward', e.target.value)} />
+              </label>
+              <label style={labelStyle}>하향 선택
+                <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.downward ?? ''} onChange={(e) => updatePointDraft('downward', e.target.value)} />
+              </label>
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
-              맞지목이면 승리자는 승리점수에 맞지목 점수를 더하고, 패배자는 패배점수에서 맞지목 점수를 차감합니다. 비김은 맞지목 가산/차감 없이 비김 점수만 적용합니다.
+              맞지목이면 승리자는 승리점수에 맞지목 점수를 더하고, 패배자는 패배점수에서 맞지목 점수를 차감합니다. 상향 선택은 높은 번호 조가 낮은 번호 조를 지목해 승리할 때 가산, 하향 선택은 낮은 번호 조가 높은 번호 조를 지목해 패배할 때 감산합니다. 조간 추가 G핸디가 0인 조끼리는 상향/하향 선택 점수를 반영하지 않습니다.
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
               <button type="button" style={primaryStyle} onClick={savePointDraft}>점수 설정 저장</button>
@@ -114,7 +120,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
                   <b style={{ color: row.status === 'win' ? '#1d4ed8' : row.status === 'lose' ? '#be123c' : '#64748b' }}>{row.resultText} · {fmt(row.point)}점</b>
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#667085' }}>
-                  {row.name} 결과 {fmt(row.value)} / {row.opponentName} 결과 {fmt(row.opponentValue)} · 조핸디 {row.adjustment > 0 ? '+' : ''}{fmt(row.adjustment)}{row.mutual ? ` · 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmt(row.mutualPoint)}` : ''}
+                  {row.name} 결과 {fmt(row.value)} / {row.opponentName} 결과 {fmt(row.opponentValue)} · 조핸디 {row.adjustment > 0 ? '+' : ''}{fmt(row.adjustment)}{row.mutual ? ` · 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmt(row.mutualPoint)}` : ''}{row.selectionBonusPoint ? ` · ${row.selectionDirection === 'upward' ? '상향' : '하향'} ${row.selectionBonusPoint > 0 ? '+' : ''}${fmt(row.selectionBonusPoint)}` : ''}
                 </div>
               </div>
             ))}

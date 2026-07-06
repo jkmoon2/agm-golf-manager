@@ -60,6 +60,8 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     lose: rawPointValue(value, 'lose', cfg.personalPoints.lose),
     draw: rawPointValue(value, 'draw', cfg.personalPoints.draw),
     mutual: rawPointValue(value, 'mutual', cfg.personalPoints.mutual),
+    upward: rawPointValue(value, 'upward', cfg.personalPoints.upward),
+    downward: rawPointValue(value, 'downward', cfg.personalPoints.downward),
   }));
   const [limitText, setLimitText] = useState(() => {
     const map = normalizeLimitMap((value && (value.targetLimits || value.receiveLimits || value.targetReceiveLimits)) || cfg.targetLimits);
@@ -83,6 +85,8 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
       lose: rawPointValue(value, 'lose', cfg.personalPoints.lose),
       draw: rawPointValue(value, 'draw', cfg.personalPoints.draw),
       mutual: rawPointValue(value, 'mutual', cfg.personalPoints.mutual),
+      upward: rawPointValue(value, 'upward', cfg.personalPoints.upward),
+      downward: rawPointValue(value, 'downward', cfg.personalPoints.downward),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointSyncKey]);
@@ -196,6 +200,15 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             <label style={labelStyle}>맞지목 점수
               <input style={inputStyle} type="number" inputMode="decimal" value={pointText.mutual} onChange={(e) => emitPoint('mutual', e.target.value)} />
             </label>
+            <label style={labelStyle}>상향 선택
+              <input style={inputStyle} type="number" inputMode="decimal" value={pointText.upward} onChange={(e) => emitPoint('upward', e.target.value)} />
+            </label>
+            <label style={labelStyle}>하향 선택
+              <input style={inputStyle} type="number" inputMode="decimal" value={pointText.downward} onChange={(e) => emitPoint('downward', e.target.value)} />
+            </label>
+          </div>
+          <div style={helpStyle}>
+            상향 선택은 높은 번호 조가 낮은 번호 조를 지목해 승리할 때 가산되고, 하향 선택은 낮은 번호 조가 높은 번호 조를 지목해 패배할 때 감산됩니다. 조간 추가 G핸디가 0인 조끼리는 상향/하향 선택 점수를 반영하지 않습니다.
           </div>
 
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
