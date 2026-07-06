@@ -22,7 +22,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
   const data = computeHiddenEvent(eventDef, participants, inputsByEvent, { roomNames });
   const personalRows = Array.isArray(data?.matchRows) ? data.matchRows : [];
   const teamRows = Array.isArray(data?.teamRows) ? data.teamRows : [];
-  const fourballTitle = cfg.fourballMode === 'self' ? '포볼 참가자 무작위배정' : '포볼 히든팀';
+  const fourballTitle = cfg.fourballMode === 'select' ? '포볼 참가자 직접지목' : (cfg.fourballMode === 'self' ? '포볼 참가자 무작위배정' : '포볼 히든팀');
   const [pointDraft, setPointDraft] = useState(() => normalizeHiddenPersonalPoints(cfg.personalPoints));
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
     const next = normalizeHiddenPersonalPoints(pointDraft);
     if (typeof onSavePersonalPoints === 'function') {
       await onSavePersonalPoints(next);
-      alert('개인 1대1 점수 설정이 저장되었습니다.');
+      alert('히든 이벤트 점수 설정이 저장되었습니다.');
     }
   };
 
@@ -60,15 +60,15 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
           <button type="button" style={cfg.selectionLocked ? dangerStyle : primaryStyle} onClick={() => onToggleLock && onToggleLock(!cfg.selectionLocked)}>
             {cfg.selectionLocked ? '마감 해제' : '마감'}
           </button>
-          {cfg.mode === 'fourball' && (
+          {cfg.mode === 'fourball' && cfg.fourballMode !== 'select' && (
             <button type="button" style={primaryStyle} onClick={onAssignFourball}>포볼 무작위 배정</button>
           )}
         </div>
 
-        {cfg.mode === 'personal' && (
+        {(cfg.mode === 'personal' || (cfg.mode === 'fourball' && cfg.fourballMode === 'select')) && (
           <div style={{ border: '1px solid #e5eaf2', background: '#fbfdff', borderRadius: 14, padding: 12, marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c', marginBottom: 8 }}>개인 1대1 점수 설정</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c', marginBottom: 8 }}>{cfg.mode === 'fourball' ? '포볼 지목 점수 설정' : '개인 1대1 점수 설정'}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
               <label style={labelStyle}>승리
                 <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.win ?? ''} onChange={(e) => updatePointDraft('win', e.target.value)} />
               </label>
@@ -89,7 +89,8 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
               </label>
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
-              맞지목이면 승리자는 승리점수에 맞지목 점수를 더하고, 패배자는 패배점수에서 맞지목 점수를 차감합니다. 상향 선택은 높은 번호 조가 낮은 번호 조를 지목해 승리할 때 가산, 하향 선택은 낮은 번호 조가 높은 번호 조를 지목해 패배할 때 감산합니다. 조간 추가 G핸디가 0인 조끼리는 상향/하향 선택 점수를 반영하지 않습니다.
+              *상향선택 : 높은조→낮은조 선택후 승리(가산)<br />
+              하향선택 : 낮은조→높은조 선택후 패배(감산)
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
               <button type="button" style={primaryStyle} onClick={savePointDraft}>점수 설정 저장</button>
@@ -99,14 +100,14 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
 
         {cfg.mode === 'fourball' ? (
           <div style={{ display: 'grid', gap: 8 }}>
-            {!teamRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>{cfg.fourballMode === 'self' ? '아직 참가자 버튼 무작위 배정 팀원이 없습니다.' : '아직 포볼팀이 배정되지 않았습니다.'}</div>}
+            {!teamRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>{cfg.fourballMode === 'select' ? '아직 참가자 지목 포볼팀이 없습니다.' : (cfg.fourballMode === 'self' ? '아직 참가자 버튼 무작위 배정 팀원이 없습니다.' : '아직 포볼팀이 배정되지 않았습니다.')}</div>}
             {teamRows.map((row, idx) => (
               <div key={row.key} style={{ border: '1px solid #e5eaf2', borderRadius: 12, padding: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <b>{idx + 1}. {row.label}</b>
                   <b style={{ color: '#be123c' }}>{fmt(row.value)}</b>
                 </div>
-                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)} · {cfg.pointType === 'rank' ? '순위점수' : '환산점수'} {fmt(row.eventScore)}</div>
               </div>
             ))}
           </div>
@@ -120,7 +121,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
                   <b style={{ color: row.status === 'win' ? '#1d4ed8' : row.status === 'lose' ? '#be123c' : '#64748b' }}>{row.resultText} · {fmt(row.point)}점</b>
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#667085' }}>
-                  {row.name} 결과 {fmt(row.value)} / {row.opponentName} 결과 {fmt(row.opponentValue)} · 조핸디 {row.adjustment > 0 ? '+' : ''}{fmt(row.adjustment)}{row.mutual ? ` · 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmt(row.mutualPoint)}` : ''}{row.selectionBonusPoint ? ` · ${row.selectionDirection === 'upward' ? '상향' : '하향'} ${row.selectionBonusPoint > 0 ? '+' : ''}${fmt(row.selectionBonusPoint)}` : ''}
+                  {row.name} 결과 {fmt(row.value)} / {row.opponentName} 결과 {fmt(row.opponentValue)} · 조핸디 {row.adjustment > 0 ? '+' : ''}{fmt(row.adjustment)}{row.mutual ? ` · 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmt(row.mutualPoint)}` : ''}{row.selectionPoint ? ` · ${row.selectionPointKind === 'upward' ? '상향' : '하향'} ${row.selectionPoint > 0 ? '+' : ''}${fmt(row.selectionPoint)}` : ''}
                 </div>
               </div>
             ))}

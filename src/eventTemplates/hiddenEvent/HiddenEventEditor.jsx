@@ -19,7 +19,7 @@ function toggleGroup(list = [], groupNo) {
 }
 
 function getModeValue(cfg) {
-  if (cfg.mode === 'fourball') return cfg.fourballMode === 'self' ? 'fourball-self' : 'fourball-random';
+  if (cfg.mode === 'fourball') return cfg.fourballMode === 'select' ? 'fourball-select' : (cfg.fourballMode === 'self' ? 'fourball-self' : 'fourball-random');
   return 'personal';
 }
 
@@ -102,6 +102,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
   const emitMode = (nextModeValue) => {
     if (nextModeValue === 'fourball-random') emit({ mode: 'fourball', fourballMode: 'random' });
     else if (nextModeValue === 'fourball-self') emit({ mode: 'fourball', fourballMode: 'self' });
+    else if (nextModeValue === 'fourball-select') emit({ mode: 'fourball', fourballMode: 'select', excludeSameGroupTargets: cfg.excludeSameGroupTargets !== false });
     else emit({ mode: 'personal', fourballMode: 'random' });
   };
   const emitStep = (key, raw) => {
@@ -150,6 +151,16 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     });
   };
 
+  const emitExcludeSameGroupTargets = (checked) => {
+    emit({
+      excludeSameGroupTargets: !!checked,
+      excludeOwnGroupTargets: !!checked,
+      allowSameGroupTargets: !checked,
+      targetScope: checked ? 'otherGroup' : 'all',
+      opponentScope: checked ? 'otherGroup' : 'all',
+    });
+  };
+
   const limitModeValue = cfg.targetLimitMode === 'personal' || Object.keys(cfg.targetLimits || {}).length ? 'personal' : 'unlimited';
   const participantList = Array.isArray(participants) ? participants : [];
 
@@ -162,6 +173,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
           <option value="personal">개인 · 비밀 1대1 지목전</option>
           <option value="fourball-random">포볼 · 운영자 무작위 2인팀</option>
           <option value="fourball-self">포볼 · 참가자 버튼 무작위 2인팀</option>
+          <option value="fourball-select">포볼 · 참가자 직접 2인팀 지목</option>
         </select>
       </label>
 
@@ -184,9 +196,21 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
         </label>
       )}
 
-      {cfg.mode === 'personal' && (
+      {cfg.mode === 'fourball' && cfg.fourballMode === 'select' && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 900, color: '#16243f' }}>
+          <input
+            type="checkbox"
+            checked={cfg.excludeSameGroupTargets !== false}
+            onChange={(e) => emitExcludeSameGroupTargets(e.target.checked)}
+            style={{ width: 16, height: 16 }}
+          />
+          참가자가 속한 조를 제외한 나머지 조만 오픈
+        </label>
+      )}
+
+      {(cfg.mode === 'personal' || (cfg.mode === 'fourball' && cfg.fourballMode === 'select')) && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>개인 1대1 점수 설정</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>{cfg.mode === 'fourball' ? '포볼 지목 점수 설정' : '개인 1대1 점수 설정'}</div>
           <div style={twoRowStyle}>
             <label style={labelStyle}>승리 점수
               <input style={inputStyle} type="number" inputMode="decimal" value={pointText.win} onChange={(e) => emitPoint('win', e.target.value)} />
@@ -207,9 +231,20 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
               <input style={inputStyle} type="number" inputMode="decimal" value={pointText.downward} onChange={(e) => emitPoint('downward', e.target.value)} />
             </label>
           </div>
+
           <div style={helpStyle}>
-            상향 선택은 높은 번호 조가 낮은 번호 조를 지목해 승리할 때 가산되고, 하향 선택은 낮은 번호 조가 높은 번호 조를 지목해 패배할 때 감산됩니다. 조간 추가 G핸디가 0인 조끼리는 상향/하향 선택 점수를 반영하지 않습니다.
+            *상향선택 : 높은조→낮은조 선택후 승리(가산)<br />
+            하향선택 : 낮은조→높은조 선택후 패배(감산)
           </div>
+
+          {cfg.mode === 'fourball' && (
+            <label style={{ ...labelStyle, marginTop: 14 }}>게임점수방식
+              <select style={inputStyle} value={cfg.pointType === 'rank' ? 'rank' : 'converted'} onChange={(e) => emit({ pointType: e.target.value })}>
+                <option value="converted">환산점수</option>
+                <option value="rank">순위점수</option>
+              </select>
+            </label>
+          )}
 
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
           <div style={rowStyle}>
@@ -224,15 +259,17 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             </label>
           </div>
 
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>지목 받는 횟수 제한</div>
-          <label style={{ ...labelStyle, marginTop: 8 }}>제한 방식
-            <select style={inputStyle} value={limitModeValue} onChange={(e) => emitLimitMode(e.target.value)}>
-              <option value="unlimited">무제한</option>
-              <option value="personal">개인별 제한</option>
-            </select>
-          </label>
+          {cfg.mode === 'personal' && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>지목 받는 횟수 제한</div>
+              <label style={{ ...labelStyle, marginTop: 8 }}>제한 방식
+                <select style={inputStyle} value={limitModeValue} onChange={(e) => emitLimitMode(e.target.value)}>
+                  <option value="unlimited">무제한</option>
+                  <option value="personal">개인별 제한</option>
+                </select>
+              </label>
 
-          {limitModeValue === 'personal' && (
+              {limitModeValue === 'personal' && (
             <div style={{ marginTop: 10, border: '1px solid #e5eaf2', borderRadius: 12, background: '#fff', padding: 8, maxHeight: 220, overflow: 'auto' }}>
               {!participantList.length && <div style={helpStyle}>참가자 목록이 없습니다.</div>}
               {participantList.map((p) => {
@@ -258,11 +295,13 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
                 );
               })}
             </div>
+              )}
+            </>
           )}
         </div>
       )}
 
-      {cfg.mode === 'fourball' && (
+      {cfg.mode === 'fourball' && cfg.fourballMode !== 'select' && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>포볼 그룹 구성</div>
           {['A', 'B'].map((side) => (

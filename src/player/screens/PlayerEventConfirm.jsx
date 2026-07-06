@@ -546,9 +546,10 @@ const events = useMemo(
           key: row.key || String(i),
           rank: row.rank || i + 1,
           label: row.label,
-          value: row.value,
+          value: row.eventScore ?? row.value,
+          bigValue: row.value,
         }));
-        return { kind: 'team', metricLabel: '최종결과', rows, isHiddenFourball: true };
+        return { kind: 'team', metricLabel: hiddenParams.pointType === 'rank' ? '순위점수' : '환산점수', extraMetricLabel: '최종결과', rows, isHiddenFourball: true };
       }
       if (target === 'room') {
         const map = new Map();
@@ -573,7 +574,7 @@ const events = useMemo(
         value: row.point,
         status: row.status,
         displayText: row.resultText,
-        bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}${row.mutual ? ` / 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmtScore(row.mutualPoint)}` : ''}${row.selectionBonusPoint ? ` / ${row.selectionDirection === 'upward' ? '상향' : '하향'} ${row.selectionBonusPoint > 0 ? '+' : ''}${fmtScore(row.selectionBonusPoint)}` : ''}`,
+        bigDisplayText: `${fmtScore(row.value)}:${fmtScore(row.opponentValue)}${row.mutual ? ` / 맞지목 ${row.mutualPoint > 0 ? '+' : ''}${fmtScore(row.mutualPoint)}` : ''}${row.selectionPoint ? ` / ${row.selectionPointKind === 'upward' ? '상향' : '하향'} ${row.selectionPoint > 0 ? '+' : ''}${fmtScore(row.selectionPoint)}` : ''}`,
       }));
       return { kind: 'person', metricLabel: '승패', extraMetricLabel: '결과', personHeader: '선택자', roomHeader: '상대방', rows, isHiddenPersonal: true };
     }

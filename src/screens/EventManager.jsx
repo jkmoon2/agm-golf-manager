@@ -2307,6 +2307,8 @@ if (editForm?.template === 'group-battle') {
                   inputsByEvent={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
                   roomCount={roomCount}
+                  viewTab={viewTab}
+                  rankOrder={viewOrder}
                 />
               ) : (
                 <ol className={css.previewList}>
@@ -2338,6 +2340,16 @@ if (editForm?.template === 'group-battle') {
                   roomNames={roomNames}
                   roomCount={roomCount}
                   viewTab={viewTab}
+                />
+              ) : previewDef.template === 'hidden-event' ? (
+                <HiddenEventPreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                  rankOrder={viewOrder}
                 />
               ) : (
                 <ol className={css.previewList}>
@@ -2423,6 +2435,8 @@ if (editForm?.template === 'group-battle') {
                   inputsByEvent={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
                   roomCount={roomCount}
+                  viewTab={viewTab}
+                  rankOrder={viewOrder}
                 />
               ) : (
               <ol className={css.previewList}>

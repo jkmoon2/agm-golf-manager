@@ -34,6 +34,7 @@ function normalizeTemplateLabel(template = '') {
     case 'group-room-hole-battle': return '그룹/방/개인 홀별 지목전';
     case 'hole-rank-force': return '홀별 강제 순위 점수';
     case 'pick-lineup': return '개인/조 선택 대결';
+    case 'hidden-event': return '히든 이벤트';
     default: return template || '일반 이벤트';
   }
 }
@@ -147,7 +148,18 @@ function isCommittedAssignment(participant = {}) {
     || participant?.roomLocked === true
     || participant?.finalized === true
     || participant?.roomCommitted === true;
-  return flagged || (hasRoom && flagged);
+  return hasRoom || flagged;
+}
+
+function hasParticipantRoomAssignment(participant = {}) {
+  const roomIndex = Number(participant?.roomIndex);
+  if (Number.isFinite(roomIndex)) return true;
+  const roomNo = parseRoomNo(participant?.roomNo ?? participant?.room ?? participant?.roomLabel ?? participant?.roomNumber);
+  return Number.isFinite(roomNo);
+}
+
+function hasAnyParticipantRoomAssignments(participants = []) {
+  return (Array.isArray(participants) ? participants : []).some(hasParticipantRoomAssignment);
 }
 
 function hasAnyScore(participant = {}) {
@@ -287,6 +299,12 @@ function buildByRoom({ participants, roomsEffective, roomCount, roomNames }) {
       idx = (roomIndex >= 1 && roomIndex <= roomCount)
         ? roomIndex - 1
         : ((roomIndex >= 0 && roomIndex < roomCount) ? roomIndex : NaN);
+    }
+    if (!Number.isFinite(idx)) {
+      const directRoomNo = parseRoomNo(participant?.roomNo ?? participant?.room ?? participant?.roomNumber);
+      if (Number.isFinite(directRoomNo) && directRoomNo >= 1 && directRoomNo <= roomCount) {
+        idx = directRoomNo - 1;
+      }
     }
     if (!Number.isFinite(idx)) {
       const mapped = roomNoToIndex(roomNames, participant?.roomNo ?? participant?.room ?? participant?.roomLabel);
@@ -811,10 +829,15 @@ export default function useDashboardSnapshot(selectedEventId) {
     const checkedInCount = presenceActiveCount > 0 ? presenceActiveCount : legacyCheckedInCount;
     const totalParticipants = participantsFromDoc.length || participants.length || 0;
     const roomsEffective = buildRoomsEffective(mode, roomsLive, fourballRoomsLive);
-    const assignedCountFromRooms = Array.isArray(roomsEffective) && roomsEffective.length
+    const participantsHaveRoomAssignments = hasAnyParticipantRoomAssignments(participants);
+    // participants/participantsFourball 배열이 최신 방 배정 SSOT입니다.
+    // rooms/fourballRooms 하위 컬렉션은 과거 arrayUnion 누적으로 stale 멤버가 남을 수 있어,
+    // participants에 방 배정값이 있으면 대시보드 계산에서 보조 소스로만 취급합니다.
+    const roomsForAssignmentSnapshot = participantsHaveRoomAssignments ? [] : roomsEffective;
+    const assignedCountFromRooms = Array.isArray(roomsForAssignmentSnapshot) && roomsForAssignmentSnapshot.length
       ? (() => {
           const seen = new Set();
-          roomsEffective.forEach((roomDoc) => {
+          roomsForAssignmentSnapshot.forEach((roomDoc) => {
             extractMembers(roomDoc).forEach((member, idx) => {
               const pid = typeof member === 'object' ? getParticipantKey(member, idx) : String(member || '');
               if (pid) seen.add(pid);
@@ -834,10 +857,10 @@ export default function useDashboardSnapshot(selectedEventId) {
       ...participants.map((p) => Number(parseRoomNo(p?.roomNo ?? p?.room ?? p?.roomLabel) || 0)),
       0,
     );
-    const byRoom = buildByRoom({ participants, roomsEffective, roomCount: inferredRoomCount, roomNames });
+    const byRoom = buildByRoom({ participants, roomsEffective: roomsForAssignmentSnapshot, roomCount: inferredRoomCount, roomNames });
     const statusCards = buildStatusCards({ participants, totalParticipants, checkedInCount, assignedCount, scoreFilledPeople, activeEvents, eventInputsRoot });
     const roomCards = buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, eventInputsRoot });
-    const eventCards = buildEventCards({ activeEvents, participants, eventInputsRoot, byRoom, roomNames, roomsEffective });
+    const eventCards = buildEventCards({ activeEvents, participants, eventInputsRoot, byRoom, roomNames, roomsEffective: roomsForAssignmentSnapshot });
     const alerts = buildAlerts({ totalParticipants, checkedInCount, assignedCount, scoreFilledPeople, roomCards, eventCards });
     const liveInfo = resolveLiveState(selectedData);
 
