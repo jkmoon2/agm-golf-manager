@@ -1234,6 +1234,45 @@ export default function PlayerEventInput(){
 
   const getBingoPersonState = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles);
   const getBingoPersonStateSaved = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles);
+  const getBingoPersonStateForDisplay = (evId, pid, selectedHoles, boardCellCount) => {
+    const draftState = extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles, boardCellCount);
+    const serverState = extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles, boardCellCount);
+    const touchedCells = getBingoTouchedCellMap(evId, pid);
+    const touchedCellKeys = Object.keys(touchedCells || {}).filter((key) => touchedCells[key]);
+    const boardTouched = isBingoBoardTouched(evId, pid);
+    const draftHasValue = draftState.values.some((x) => String(x ?? '').trim() !== '');
+    const serverHasValue = serverState.values.some((x) => String(x ?? '').trim() !== '');
+    const draftBoard = normalizeBingoBoard(draftState.board, selectedHoles, boardCellCount);
+    const serverBoard = normalizeBingoBoard(serverState.board, selectedHoles, boardCellCount);
+
+    // 저장 버튼 직후에는 Firestore 최신 스냅샷 도착 전까지 방금 저장한 draft 전체를 표시해 깜박임을 방지
+    if (pendingSavedInputsSigRef.current) {
+      return {
+        ...draftState,
+        board: draftBoard.some(Boolean) ? draftBoard : serverBoard,
+        roomShared: !!draftState.roomShared || !!serverState.roomShared,
+      };
+    }
+
+    if (touchedCellKeys.length || boardTouched) {
+      const mergedValues = [...serverState.values];
+      while (mergedValues.length < Math.max(serverState.values.length, draftState.values.length, 18)) mergedValues.push('');
+      touchedCellKeys.forEach((idxKey) => {
+        const idx = Number(idxKey);
+        if (Number.isInteger(idx) && idx >= 0) mergedValues[idx] = draftState.values[idx] ?? '';
+      });
+      return {
+        values: mergedValues,
+        board: boardTouched ? draftBoard : (serverBoard.some(Boolean) ? serverBoard : draftBoard),
+        roomShared: boardTouched ? !!draftState.roomShared : !!serverState.roomShared,
+      };
+    }
+
+    if (!serverHasValue && !serverBoard.some(Boolean) && !serverState.roomShared && (draftHasValue || draftBoard.some(Boolean) || draftState.roomShared)) {
+      return { ...draftState, board: draftBoard };
+    }
+    return { ...serverState, board: serverBoard };
+  };
   const getBingoRoomSharedSaved = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEventServer?.[evId]?.person?.[pid]?.roomShared);
 
   const getBingoEventDef = (evId) => events.find((item) => String(item?.id) === String(evId));
@@ -3392,7 +3431,7 @@ export default function PlayerEventInput(){
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
-                const raw = p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
+                const raw = p ? getBingoInputCellValue(ev.id, p.id, holeNo - 1) : '';
                 const n = Number(raw);
                 if (Number.isFinite(n)) {
                   sum += n;
@@ -3404,8 +3443,8 @@ export default function PlayerEventInput(){
             const bingoRawGrandTotal = bingoRawSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
             const bingoRawGrandHasAny = bingoRawSubtotal.some((item) => item.hasAny);
             const bingoPreviewRows = roomMembers.filter(Boolean).map((p) => {
-              const rowState = getBingoPersonStateSaved(ev.id, p.id, bingoSelectedHoles);
-              const sharedState = getBingoPersonStateSaved(ev.id, bingoEditorPid, bingoSelectedHoles);
+              const rowState = getBingoPersonStateForDisplay(ev.id, p.id, bingoSelectedHoles, bingoBoardCellCount);
+              const sharedState = getBingoPersonStateForDisplay(ev.id, bingoEditorPid, bingoSelectedHoles, bingoBoardCellCount);
               const board = bingoSharedMode ? normalizeBingoBoard(sharedState.board, bingoSelectedHoles, bingoBoardCellCount) : normalizeBingoBoard(rowState.board, bingoSelectedHoles, bingoBoardCellCount);
               const holeValues = getBingoHoleValues(rowState.values, bingoSelectedHoles);
               return {
@@ -3448,7 +3487,7 @@ export default function PlayerEventInput(){
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
+                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? getBingoInputCellValue(ev.id, p.id, holeNo - 1) : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
