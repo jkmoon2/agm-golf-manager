@@ -1234,45 +1234,6 @@ export default function PlayerEventInput(){
 
   const getBingoPersonState = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles);
   const getBingoPersonStateSaved = (evId, pid, selectedHoles) => extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles);
-  const getBingoPersonStateForDisplay = (evId, pid, selectedHoles, boardCellCount) => {
-    const draftState = extractBingoPersonInput(inputsByEvent?.[evId]?.person?.[pid], selectedHoles, boardCellCount);
-    const serverState = extractBingoPersonInput(inputsByEventServer?.[evId]?.person?.[pid], selectedHoles, boardCellCount);
-    const touchedCells = getBingoTouchedCellMap(evId, pid);
-    const touchedCellKeys = Object.keys(touchedCells || {}).filter((key) => touchedCells[key]);
-    const boardTouched = isBingoBoardTouched(evId, pid);
-    const draftHasValue = draftState.values.some((x) => String(x ?? '').trim() !== '');
-    const serverHasValue = serverState.values.some((x) => String(x ?? '').trim() !== '');
-    const draftBoard = normalizeBingoBoard(draftState.board, selectedHoles, boardCellCount);
-    const serverBoard = normalizeBingoBoard(serverState.board, selectedHoles, boardCellCount);
-
-    // 저장 버튼 직후에는 Firestore 최신 스냅샷 도착 전까지 방금 저장한 draft 전체를 표시해 깜박임을 방지
-    if (pendingSavedInputsSigRef.current) {
-      return {
-        ...draftState,
-        board: draftBoard.some(Boolean) ? draftBoard : serverBoard,
-        roomShared: !!draftState.roomShared || !!serverState.roomShared,
-      };
-    }
-
-    if (touchedCellKeys.length || boardTouched) {
-      const mergedValues = [...serverState.values];
-      while (mergedValues.length < Math.max(serverState.values.length, draftState.values.length, 18)) mergedValues.push('');
-      touchedCellKeys.forEach((idxKey) => {
-        const idx = Number(idxKey);
-        if (Number.isInteger(idx) && idx >= 0) mergedValues[idx] = draftState.values[idx] ?? '';
-      });
-      return {
-        values: mergedValues,
-        board: boardTouched ? draftBoard : (serverBoard.some(Boolean) ? serverBoard : draftBoard),
-        roomShared: boardTouched ? !!draftState.roomShared : !!serverState.roomShared,
-      };
-    }
-
-    if (!serverHasValue && !serverBoard.some(Boolean) && !serverState.roomShared && (draftHasValue || draftBoard.some(Boolean) || draftState.roomShared)) {
-      return { ...draftState, board: draftBoard };
-    }
-    return { ...serverState, board: serverBoard };
-  };
   const getBingoRoomSharedSaved = (evId) => getBingoRoomMemberIds().some((pid) => !!inputsByEventServer?.[evId]?.person?.[pid]?.roomShared);
 
   const getBingoEventDef = (evId) => events.find((item) => String(item?.id) === String(evId));
@@ -2655,6 +2616,26 @@ export default function PlayerEventInput(){
               return arr;
             };
 
+            const getHiddenFourballSelectCandidates = (pairs = {}, selectedId = '') => {
+              const selectedKey = String(selectedId || '');
+              const excludeSameGroupTargets = hiddenCfg.excludeSameGroupTargets !== false;
+              const arr = (Array.isArray(participants) ? [...participants] : []).filter((p) => {
+                const pid = String(p?.id ?? '');
+                if (!pid || pid === mineId) return false;
+                if (excludeSameGroupTargets && isSameGroupParticipant(mine, p)) return false;
+                if (pairs[pid] && pid !== selectedKey) return false;
+                return true;
+              });
+              arr.sort((a, b) => {
+                const groupDiff = (Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999));
+                if (groupDiff) return groupDiff;
+                const roomDiff = (Number(getAssignmentRoom(a) ?? 999) - Number(getAssignmentRoom(b) ?? 999));
+                if (roomDiff) return roomDiff;
+                return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
+              });
+              return arr;
+            };
+
             const hiddenSelectStyle = (key) => ({
               height: 38,
               border: hiddenSelectFocusId === key ? '2px solid #2563eb' : '1px solid #d7dfec',
@@ -2669,7 +2650,8 @@ export default function PlayerEventInput(){
 
             if (hiddenCfg.mode === 'fourball') {
               const isSelfFourball = hiddenCfg.fourballMode === 'self';
-              const pairs = isSelfFourball
+              const isSelectFourball = hiddenCfg.fourballMode === 'select';
+              const pairs = (isSelfFourball || isSelectFourball)
                 ? (hiddenData?.pairMap || {})
                 : normalizeHiddenFourballPairs(hiddenEffectiveSlot?.shared?.hiddenFourballPairs || hiddenServerSlot?.shared?.hiddenFourballPairs || {});
               const minePairId = mineId ? pairs[mineId] : '';
@@ -2687,6 +2669,8 @@ export default function PlayerEventInput(){
                 if (pairs[pid]) return false;
                 return getRankScoreGroupSide(p, hiddenPairCfg) && getRankScoreGroupSide(p, hiddenPairCfg) !== mineSide;
               });
+              const hiddenSelectPartnerCandidates = isSelectFourball ? getHiddenFourballSelectCandidates(pairs, minePairId) : [];
+              const directFocusKey = `${ev.id}:hidden-fourball-select`;
 
               return (
                 <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -2696,7 +2680,7 @@ export default function PlayerEventInput(){
 
                   <div style={{ padding: '0 12px 12px' }}>
                     <div style={{ border: '1px solid #dbe7ff', background: '#f5f8ff', borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 1.45, color: '#344054' }}>
-                      <b style={{ color: '#1d4ed8' }}>히든 포볼</b> · {isSelfFourball ? '참가자가 버튼을 누르면 비밀리에 무작위 2인팀 배정' : '운영자가 비밀로 2인1팀 배정한 뒤, 추후 오픈'}
+                      <b style={{ color: '#1d4ed8' }}>히든 포볼</b> · {isSelectFourball ? '참가자가 직접 비밀 팀원을 지목' : (isSelfFourball ? '참가자가 버튼을 누르면 비밀리에 무작위 2인팀 배정' : '운영자가 비밀로 2인1팀 배정한 뒤, 추후 오픈')}
                     </div>
 
                     {isSelfFourball && (
@@ -2724,13 +2708,34 @@ export default function PlayerEventInput(){
                       </div>
                     )}
 
+                    {isSelectFourball && (
+                      <label style={{ display: 'grid', gap: 6, marginTop: 10, fontSize: 12, fontWeight: 900, color: '#344054' }}>
+                        내 히든 포볼 팀원 선택
+                        <select
+                          value={minePairId || ''}
+                          onChange={(e) => patchHiddenOpponent(ev.id, e.target.value)}
+                          onFocus={() => setHiddenSelectFocusId(directFocusKey)}
+                          onBlur={() => setHiddenSelectFocusId('')}
+                          disabled={!mineId || hiddenLocked}
+                          style={hiddenSelectStyle(directFocusKey)}
+                        >
+                          <option value="">팀원 선택</option>
+                          {hiddenSelectPartnerCandidates.map((p) => (
+                            <option key={`hidden-fourball-select-${ev.id}-${p.id}`} value={p.id}>
+                              {getParticipantGroupNo(p) ? `${getParticipantGroupNo(p)}조 · ` : ''}{p.nickname || '-'} {p.room ? `(${hiddenRoomLabel(p)})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
                     {minePair && hiddenCfg.revealed && (
                       <div style={{ marginTop: 8, fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
                         내 팀원: {minePair.nickname || '-'}
                       </div>
                     )}
 
-                    {hiddenLocked && isSelfFourball && (
+                    {hiddenLocked && (isSelfFourball || isSelectFourball) && (
                       <div style={{ marginTop: 8, fontSize: 12, color: '#be123c', fontWeight: 800 }}>
                         선택이 마감되어 더 이상 수정할 수 없습니다.
                       </div>
@@ -2738,7 +2743,7 @@ export default function PlayerEventInput(){
 
                     {!hiddenCfg.revealed && (
                       <div style={{ marginTop: 10, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12, fontSize: 13, color: '#667085' }}>
-                        {minePair ? '비공개 팀 배정 완료, 공개 전까지 팀원은 숨김 처리' : (isSelfFourball ? '아직 포볼팀이 배정되지 않았습니다.' : '아직 운영자 포볼팀 배정 전입니다.')}
+                        {minePair ? '비공개 팀 배정 완료, 공개 전까지 팀원은 숨김 처리' : (isSelectFourball ? '아직 히든 포볼 팀원을 선택하지 않았습니다.' : (isSelfFourball ? '아직 포볼팀이 배정되지 않았습니다.' : '아직 운영자 포볼팀 배정 전입니다.'))}
                       </div>
                     )}
 
@@ -2755,22 +2760,22 @@ export default function PlayerEventInput(){
                             <tr>
                               <th>팀</th>
                               <th>
-                                {pairHeaderA.title}<span style={{ fontWeight: 400 }}> {pairHeaderA.groups}</span>
+                                {isSelectFourball ? '선택자' : (<>{pairHeaderA.title}<span style={{ fontWeight: 400 }}> {pairHeaderA.groups}</span></>)}
                               </th>
                               <th>
-                                {pairHeaderB.title}<span style={{ fontWeight: 400 }}> {pairHeaderB.groups}</span>
+                                {isSelectFourball ? '팀원' : (<>{pairHeaderB.title}<span style={{ fontWeight: 400 }}> {pairHeaderB.groups}</span></>)}
                               </th>
                               <th>G합계</th>
                             </tr>
                           </thead>
                           <tbody>
                             {rows.length === 0 && (
-                              <tr><td colSpan={4} style={{ color: '#999' }}>{isSelfFourball ? '아직 배정된 팀이 없습니다.' : '배정된 팀이 없습니다.'}</td></tr>
+                              <tr><td colSpan={4} style={{ color: '#999' }}>{isSelectFourball ? '아직 지목된 팀이 없습니다.' : (isSelfFourball ? '아직 배정된 팀이 없습니다.' : '배정된 팀이 없습니다.')}</td></tr>
                             )}
                             {rows.map((row, idx) => {
                               const members = Array.isArray(row.members) ? row.members : [];
-                              const left = members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'A') || members[0] || null;
-                              const right = members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'B') || members.find((m) => String(m?.id || '') !== String(left?.id || '')) || null;
+                              const left = isSelectFourball ? (members[0] || null) : (members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'A') || members[0] || null);
+                              const right = isSelectFourball ? (members[1] || null) : (members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'B') || members.find((m) => String(m?.id || '') !== String(left?.id || '')) || null);
                               const hdSum = Number(row?.handicapSum ?? ((Number(left?.handicap || 0) + Number(right?.handicap || 0))));
                               return (
                                 <tr key={`hidden-fourball-${ev.id}-${row.key}`}>
@@ -3431,7 +3436,7 @@ export default function PlayerEventInput(){
               let sum = 0;
               let hasAny = false;
               orderedRoomRows.forEach((p) => {
-                const raw = p ? getBingoInputCellValue(ev.id, p.id, holeNo - 1) : '';
+                const raw = p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : '';
                 const n = Number(raw);
                 if (Number.isFinite(n)) {
                   sum += n;
@@ -3443,8 +3448,8 @@ export default function PlayerEventInput(){
             const bingoRawGrandTotal = bingoRawSubtotal.reduce((acc, item) => acc + (Number.isFinite(item.sum) ? item.sum : 0), 0);
             const bingoRawGrandHasAny = bingoRawSubtotal.some((item) => item.hasAny);
             const bingoPreviewRows = roomMembers.filter(Boolean).map((p) => {
-              const rowState = getBingoPersonStateForDisplay(ev.id, p.id, bingoSelectedHoles, bingoBoardCellCount);
-              const sharedState = getBingoPersonStateForDisplay(ev.id, bingoEditorPid, bingoSelectedHoles, bingoBoardCellCount);
+              const rowState = getBingoPersonStateSaved(ev.id, p.id, bingoSelectedHoles);
+              const sharedState = getBingoPersonStateSaved(ev.id, bingoEditorPid, bingoSelectedHoles);
               const board = bingoSharedMode ? normalizeBingoBoard(sharedState.board, bingoSelectedHoles, bingoBoardCellCount) : normalizeBingoBoard(rowState.board, bingoSelectedHoles, bingoBoardCellCount);
               const holeValues = getBingoHoleValues(rowState.values, bingoSelectedHoles);
               return {
@@ -3487,7 +3492,7 @@ export default function PlayerEventInput(){
                     </thead>
                     <tbody>
                       {orderedRoomRows.map((p, rIdx) => {
-                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? getBingoInputCellValue(ev.id, p.id, holeNo - 1) : ''));
+                        const rowRawValues = bingoInputHoles.map((holeNo) => (p ? (inputsByEventServer?.[ev.id]?.person?.[p.id]?.values?.[holeNo - 1] ?? '') : ''));
                         const rowValues = rowRawValues.map((raw) => {
                           const n = Number(raw);
                           return Number.isFinite(n) ? n : 0;
