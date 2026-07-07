@@ -214,7 +214,11 @@ export function getHiddenFourballDirectHandicapAdjustment(selector, opponent, pa
   const from = clampGroupNo(getParticipantGroupNo(selector));
   const to = clampGroupNo(getParticipantGroupNo(opponent));
   if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
-  if (from === to) return normalizeStepValue(cfg.handicapSteps?.same ?? 0);
+
+  // 포볼 · 참가자 직접 2인팀 지목에서 같은 조를 선택한 경우에는
+  // 조간 방향성과 관계없이 "같은조" 입력값을 최종결과값에 무조건 가산한다.
+  if (from === to) return Math.abs(normalizeStepValue(cfg.handicapSteps?.same ?? 0));
+
   return getHiddenHandicapAdjustment(selector, opponent, cfg);
 }
 
