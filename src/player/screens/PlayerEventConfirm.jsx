@@ -71,11 +71,12 @@ function normalizeResultEventParams(template, params, eventDef = null) {
 
 function normalizeResultEventDef(ev) {
   if (!ev || typeof ev !== 'object') return ev;
+  const hiddenCfg = ev?.template === 'hidden-event' ? normalizeHiddenEventParams(ev?.params) : null;
   return {
     ...ev,
     enabled: ev?.enabled !== false,
-    target: ev?.target || (ev?.template === 'hidden-event' ? (normalizeHiddenEventParams(ev?.params).mode === 'fourball' ? 'team' : 'person') : (ev?.template === 'rank-score-game' ? getRankScoreGameTarget(ev?.params) : (ev?.template === 'group-battle' ? ((ev?.params?.mode || 'group') === 'group' ? 'group' : 'person') : 'person'))),
-    rankOrder: ev?.rankOrder || (ev?.template === 'rank-score-game' ? normalizeRankScoreGameParams(ev?.params).winnerOrder : 'asc'),
+    target: ev?.target || (ev?.template === 'hidden-event' ? (hiddenCfg.mode === 'fourball' ? 'team' : 'person') : (ev?.template === 'rank-score-game' ? getRankScoreGameTarget(ev?.params) : (ev?.template === 'group-battle' ? ((ev?.params?.mode || 'group') === 'group' ? 'group' : 'person') : 'person'))),
+    rankOrder: ev?.rankOrder || (ev?.template === 'hidden-event' ? (hiddenCfg.mode === 'fourball' ? 'asc' : 'desc') : (ev?.template === 'rank-score-game' ? normalizeRankScoreGameParams(ev?.params).winnerOrder : 'asc')),
     params: normalizeResultEventParams(ev?.template, ev?.params, ev),
   };
 }
@@ -542,23 +543,32 @@ const events = useMemo(
         return { kind: hiddenParams.mode === 'fourball' ? 'team' : 'person', metricLabel: '상태', rows: [] };
       }
       if (hiddenParams.mode === 'fourball') {
+        const metricLabel = hiddenParams.pointType === 'converted' ? '환산점수' : '순위점수';
         if (target === 'room') {
-          const rows = (data.roomRows || []).map((row, i) => ({
+          const rows = [...(data.roomRows || [])].sort((a, b) => {
+            const diff = rankOrder === 'desc' ? (Number(b?.value || 0) - Number(a?.value || 0)) : (Number(a?.value || 0) - Number(b?.value || 0));
+            if (diff) return diff;
+            return Number(a?.room || 0) - Number(b?.room || 0);
+          }).map((row, i) => ({
             key: row.key || String(i),
-            rank: row.rank || i + 1,
+            rank: i + 1,
             label: row.label,
             value: row.value,
           }));
-          return { kind: 'room', metricLabel: '순위점수', rows, isHiddenFourball: true };
+          return { kind: 'room', metricLabel, rows, isHiddenFourball: true };
         }
-        const rows = (data.teamRows || []).map((row, i) => ({
+        const rows = [...(data.teamRows || [])].sort((a, b) => {
+          const diff = rankOrder === 'desc' ? (Number(b?.value || 0) - Number(a?.value || 0)) : (Number(a?.value || 0) - Number(b?.value || 0));
+          if (diff) return diff;
+          return String(a?.label || '').localeCompare(String(b?.label || ''), 'ko');
+        }).map((row, i) => ({
           key: row.key || String(i),
-          rank: row.rank || i + 1,
+          rank: i + 1,
           label: row.label,
           value: row.eventScore ?? row.value,
           bigValue: row.value,
         }));
-        return { kind: 'team', metricLabel: '순위점수', extraMetricLabel: '최종결과', rows, isHiddenFourball: true };
+        return { kind: 'team', metricLabel, extraMetricLabel: '최종결과', rows, isHiddenFourball: true };
       }
       if (target === 'room') {
         const map = new Map();
@@ -572,10 +582,18 @@ const events = useMemo(
           const bucket = map.get(roomNo);
           bucket.value += Number(row?.point ?? 0) || 0;
         });
-        const rows = Array.from(map.values()).sort((a, b) => b.value - a.value || a.room - b.room).map((row, i) => ({ ...row, rank: i + 1 }));
+        const rows = Array.from(map.values()).sort((a, b) => {
+          const diff = rankOrder === 'desc' ? (b.value - a.value) : (a.value - b.value);
+          if (diff) return diff;
+          return a.room - b.room;
+        }).map((row, i) => ({ ...row, rank: i + 1 }));
         return { kind: 'room', metricLabel: '합산점수', rows };
       }
-      const rows = (data.matchRows || []).map((row, i) => ({
+      const rows = [...(data.matchRows || [])].sort((a, b) => {
+        const diff = rankOrder === 'desc' ? (Number(b?.point || 0) - Number(a?.point || 0)) : (Number(a?.point || 0) - Number(b?.point || 0));
+        if (diff) return diff;
+        return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+      }).map((row, i) => ({
         key: row.key || String(i),
         rank: i + 1,
         label: row.name,

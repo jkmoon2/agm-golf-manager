@@ -7,6 +7,7 @@ const boxStyle = { border: '1px solid #e5eaf2', borderRadius: 14, padding: 12, b
 const labelStyle = { display: 'grid', gap: 5, fontSize: 12, fontWeight: 800, color: '#25344d', minWidth: 0 };
 const inputStyle = { width: '100%', minWidth: 0, height: 34, border: '1px solid #d7dfec', borderRadius: 9, padding: '0 10px', fontSize: 13, background: '#fff', boxSizing: 'border-box' };
 const rowStyle = { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginTop: 10, width: '100%', maxWidth: '100%', boxSizing: 'border-box' };
+const fourRowStyle = { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginTop: 10, width: '100%', maxWidth: '100%', boxSizing: 'border-box' };
 const twoRowStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginTop: 10, width: '100%', maxWidth: '100%', boxSizing: 'border-box' };
 const helpStyle = { fontSize: 12, color: '#667085', lineHeight: 1.45, marginTop: 8, wordBreak: 'keep-all' };
 
@@ -54,6 +55,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     '1-2': rawStepValue(value, '1-2', cfg.handicapSteps['1-2']),
     '2-3': rawStepValue(value, '2-3', cfg.handicapSteps['2-3']),
     '3-4': rawStepValue(value, '3-4', cfg.handicapSteps['3-4']),
+    same: rawStepValue(value, 'same', cfg.handicapSteps.same),
   }));
   const [pointText, setPointText] = useState(() => ({
     win: rawPointValue(value, 'win', cfg.personalPoints.win),
@@ -74,6 +76,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
       '1-2': rawStepValue(value, '1-2', cfg.handicapSteps['1-2']),
       '2-3': rawStepValue(value, '2-3', cfg.handicapSteps['2-3']),
       '3-4': rawStepValue(value, '3-4', cfg.handicapSteps['3-4']),
+      same: rawStepValue(value, 'same', cfg.handicapSteps.same),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepSyncKey]);
@@ -112,6 +115,9 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
   const emitPoint = (key, raw) => {
     setPointText((prev) => ({ ...prev, [key]: raw }));
     emit({ personalPoints: { ...cfg.personalPoints, [key]: raw === '' ? '' : Number(raw) } });
+  };
+  const emitPointType = (valueText) => {
+    emit({ pointType: valueText === 'converted' ? 'converted' : 'rank' });
   };
   const emitPairGroup = (side, groupNo) => {
     const pairGroups = { ...cfg.pairGroups, [side]: toggleGroup(cfg.pairGroups?.[side], groupNo) };
@@ -291,13 +297,14 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
       {cfg.mode === 'fourball' && cfg.fourballMode === 'select' && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
           <label style={labelStyle}>게임점수방식
-            <select style={inputStyle} value="rank" onChange={() => emit({ pointType: 'rank' })}>
+            <select style={inputStyle} value={cfg.pointType === 'converted' ? 'converted' : 'rank'} onChange={(e) => emitPointType(e.target.value)}>
               <option value="rank">순위점수</option>
+              <option value="converted">환산점수</option>
             </select>
           </label>
 
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
-          <div style={rowStyle}>
+          <div style={fourRowStyle}>
             <label style={labelStyle}>1조~2조
               <input style={inputStyle} type="number" inputMode="numeric" value={stepText['1-2']} onChange={(e) => emitStep('1-2', e.target.value)} />
             </label>
@@ -307,13 +314,23 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             <label style={labelStyle}>3조~4조
               <input style={inputStyle} type="number" inputMode="numeric" value={stepText['3-4']} onChange={(e) => emitStep('3-4', e.target.value)} />
             </label>
+            <label style={labelStyle}>같은조
+              <input style={inputStyle} type="number" inputMode="numeric" value={stepText.same} onChange={(e) => emitStep('same', e.target.value)} />
+            </label>
           </div>
         </div>
       )}
 
       {cfg.mode === 'fourball' && cfg.fourballMode !== 'select' && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>포볼 그룹 구성</div>
+          <label style={labelStyle}>게임점수방식
+            <select style={inputStyle} value={cfg.pointType === 'converted' ? 'converted' : 'rank'} onChange={(e) => emitPointType(e.target.value)}>
+              <option value="rank">순위점수</option>
+              <option value="converted">환산점수</option>
+            </select>
+          </label>
+
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>포볼 그룹 구성</div>
           {['A', 'B'].map((side) => (
             <div key={side} style={{ marginTop: 8 }}>
               <div style={{ fontSize: 12, fontWeight: 900, color: '#344054', marginBottom: 5 }}>{side}그룹</div>
