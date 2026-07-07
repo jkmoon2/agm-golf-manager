@@ -208,9 +208,9 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
         </label>
       )}
 
-      {(cfg.mode === 'personal' || (cfg.mode === 'fourball' && cfg.fourballMode === 'select')) && (
+      {cfg.mode === 'personal' && (
         <div style={{ marginTop: 12, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>{cfg.mode === 'fourball' ? '포볼 지목 점수 설정' : '개인 1대1 점수 설정'}</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c' }}>개인 1대1 점수 설정</div>
           <div style={twoRowStyle}>
             <label style={labelStyle}>승리 점수
               <input style={inputStyle} type="number" inputMode="decimal" value={pointText.win} onChange={(e) => emitPoint('win', e.target.value)} />
@@ -234,17 +234,8 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
 
           <div style={helpStyle}>
             *상향선택 : 높은조→낮은조 선택후 승리(가산)<br />
-            하향선택 : 낮은조→높은조 선택후 패배(감산)
+            *하향선택 : 낮은조→높은조 선택후 패배(감산)
           </div>
-
-          {cfg.mode === 'fourball' && (
-            <label style={{ ...labelStyle, marginTop: 14 }}>게임점수방식
-              <select style={inputStyle} value={cfg.pointType === 'rank' ? 'rank' : 'converted'} onChange={(e) => emit({ pointType: e.target.value })}>
-                <option value="converted">환산점수</option>
-                <option value="rank">순위점수</option>
-              </select>
-            </label>
-          )}
 
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
           <div style={rowStyle}>
@@ -259,17 +250,15 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             </label>
           </div>
 
-          {cfg.mode === 'personal' && (
-            <>
-              <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>지목 받는 횟수 제한</div>
-              <label style={{ ...labelStyle, marginTop: 8 }}>제한 방식
-                <select style={inputStyle} value={limitModeValue} onChange={(e) => emitLimitMode(e.target.value)}>
-                  <option value="unlimited">무제한</option>
-                  <option value="personal">개인별 제한</option>
-                </select>
-              </label>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>지목 받는 횟수 제한</div>
+          <label style={{ ...labelStyle, marginTop: 8 }}>제한 방식
+            <select style={inputStyle} value={limitModeValue} onChange={(e) => emitLimitMode(e.target.value)}>
+              <option value="unlimited">무제한</option>
+              <option value="personal">개인별 제한</option>
+            </select>
+          </label>
 
-              {limitModeValue === 'personal' && (
+          {limitModeValue === 'personal' && (
             <div style={{ marginTop: 10, border: '1px solid #e5eaf2', borderRadius: 12, background: '#fff', padding: 8, maxHeight: 220, overflow: 'auto' }}>
               {!participantList.length && <div style={helpStyle}>참가자 목록이 없습니다.</div>}
               {participantList.map((p) => {
@@ -295,9 +284,30 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
                 );
               })}
             </div>
-              )}
-            </>
           )}
+        </div>
+      )}
+
+      {cfg.mode === 'fourball' && cfg.fourballMode === 'select' && (
+        <div style={{ marginTop: 12, minWidth: 0 }}>
+          <label style={labelStyle}>게임점수방식
+            <select style={inputStyle} value="rank" onChange={() => emit({ pointType: 'rank' })}>
+              <option value="rank">순위점수</option>
+            </select>
+          </label>
+
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
+          <div style={rowStyle}>
+            <label style={labelStyle}>1조~2조
+              <input style={inputStyle} type="number" inputMode="numeric" value={stepText['1-2']} onChange={(e) => emitStep('1-2', e.target.value)} />
+            </label>
+            <label style={labelStyle}>2조~3조
+              <input style={inputStyle} type="number" inputMode="numeric" value={stepText['2-3']} onChange={(e) => emitStep('2-3', e.target.value)} />
+            </label>
+            <label style={labelStyle}>3조~4조
+              <input style={inputStyle} type="number" inputMode="numeric" value={stepText['3-4']} onChange={(e) => emitStep('3-4', e.target.value)} />
+            </label>
+          </div>
         </div>
       )}
 

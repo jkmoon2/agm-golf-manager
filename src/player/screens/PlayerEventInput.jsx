@@ -2616,14 +2616,12 @@ export default function PlayerEventInput(){
               return arr;
             };
 
-            const getHiddenFourballSelectCandidates = (pairs = {}, selectedId = '') => {
-              const selectedKey = String(selectedId || '');
+            const getHiddenFourballSelectCandidates = (_pairs = {}, _selectedId = '') => {
               const excludeSameGroupTargets = hiddenCfg.excludeSameGroupTargets !== false;
               const arr = (Array.isArray(participants) ? [...participants] : []).filter((p) => {
                 const pid = String(p?.id ?? '');
                 if (!pid || pid === mineId) return false;
                 if (excludeSameGroupTargets && isSameGroupParticipant(mine, p)) return false;
-                if (pairs[pid] && pid !== selectedKey) return false;
                 return true;
               });
               arr.sort((a, b) => {

@@ -50,7 +50,7 @@ export default function HiddenEventPreview({ eventDef, participants = [], inputs
     const rows = isRoomView
       ? (Array.isArray(data?.roomRows) ? data.roomRows : [])
       : (Array.isArray(data?.teamRows) ? data.teamRows : []);
-    const pointLabel = cfg.pointType === 'rank' ? '순위점수' : '환산점수';
+    const pointLabel = '순위점수';
 
     if (isRoomView) {
       return (

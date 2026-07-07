@@ -72,12 +72,12 @@ function getParticipantKey(p = {}, fallbackIndex = 0) {
 }
 
 function getParticipantsFromEvent(eventData = {}) {
-  const primary = Array.isArray(eventData?.participants) ? eventData.participants : [];
-  if (primary.length) return primary;
   const mode = eventData?.mode === 'fourball' || eventData?.mode === 'agm' ? 'fourball' : 'stroke';
-  return mode === 'fourball'
+  const modeSpecific = mode === 'fourball'
     ? (Array.isArray(eventData?.participantsFourball) ? eventData.participantsFourball : [])
     : (Array.isArray(eventData?.participantsStroke) ? eventData.participantsStroke : []);
+  if (modeSpecific.length) return modeSpecific;
+  return Array.isArray(eventData?.participants) ? eventData.participants : [];
 }
 
 function hasCodeJoinSignal(p = {}) {
@@ -236,7 +236,26 @@ function mergeParticipants(base = [], live = []) {
   const merged = base.map((p, i) => {
     const key = getParticipantKey(p, i);
     const override = liveMap.get(key);
-    return override ? { ...p, ...override } : p;
+    if (!override) return p;
+    const room = p?.room ?? p?.roomNumber ?? p?.roomNo ?? override?.room ?? override?.roomNumber ?? override?.roomNo ?? null;
+    const roomNumber = p?.roomNumber ?? p?.room ?? p?.roomNo ?? override?.roomNumber ?? override?.room ?? override?.roomNo ?? null;
+    return {
+      ...override,
+      ...p,
+      room,
+      roomNumber,
+      roomNo: p?.roomNo ?? override?.roomNo,
+      roomIndex: p?.roomIndex ?? override?.roomIndex,
+      partner: p?.partner ?? p?.partnerId ?? override?.partner ?? override?.partnerId ?? null,
+      partnerId: p?.partnerId ?? p?.partner ?? override?.partnerId ?? override?.partner ?? null,
+      codeEntered: override?.codeEntered ?? p?.codeEntered,
+      entered: override?.entered ?? p?.entered,
+      checkedIn: override?.checkedIn ?? p?.checkedIn,
+      enterCodeAt: override?.enterCodeAt ?? p?.enterCodeAt,
+      enteredAt: override?.enteredAt ?? p?.enteredAt,
+      joinedAt: override?.joinedAt ?? p?.joinedAt,
+      checkedInAt: override?.checkedInAt ?? p?.checkedInAt,
+    };
   });
 
   live.forEach((lp, i) => {
@@ -338,7 +357,7 @@ function buildStatusCards({ participants, totalParticipants, checkedInCount, ass
   };
 }
 
-function buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, eventInputsRoot }) {
+function buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, eventInputsRoot, mode }) {
   return byRoom.map((members, index) => {
     const groupCount = {};
     members.forEach((member) => {
@@ -347,12 +366,17 @@ function buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, event
       groupCount[group] = (groupCount[group] || 0) + 1;
     });
 
-    const duplicateGroup = Object.values(groupCount).some((count) => Number(count) > 1);
+    const duplicateGroup = mode === 'fourball'
+      ? Object.values(groupCount).some((count) => Number(count) > 2)
+      : Object.values(groupCount).some((count) => Number(count) > 1);
     const missingScoreCount = members.filter((member) => !hasAnyScore(member)).length;
     const eventDelayCount = members.filter((member) => activeEvents.some((event) => !hasParticipantEventInput(event?.id, member?.id, eventInputsRoot))).length;
+    const capacity = Number(roomCapacities[index] || 4);
+    const shortageCount = members.length > 0 && members.length < capacity ? capacity - members.length : 0;
 
     const flags = [];
     if (duplicateGroup) flags.push({ label: '중복조', variant: 'critical' });
+    if (shortageCount > 0) flags.push({ label: `인원부족 ${shortageCount}`, variant: 'warn' });
     if (missingScoreCount > 0) flags.push({ label: `점수미입력 ${missingScoreCount}`, variant: 'warn' });
     if (eventDelayCount > 0 && activeEvents.length > 0) flags.push({ label: `이벤트지연 ${eventDelayCount}`, variant: 'warn' });
     if (!flags.length) flags.push({ label: '정상', variant: 'normal' });
@@ -362,7 +386,7 @@ function buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, event
       roomName: roomNames[index] || `${index + 1}번방`,
       occupancy: {
         current: members.length,
-        capacity: Number(roomCapacities[index] || 4),
+        capacity,
       },
       members: members.map((member, mi) => ({
         id: getParticipantKey(member, mi),
@@ -814,9 +838,10 @@ export default function useDashboardSnapshot(selectedEventId) {
         : (Array.isArray(playerStatesLive) && playerStatesLive.length ? playerStatesLive : null));
 
     const mergedParticipants = mergeParticipants(participantsFromDoc, livePeople || []);
+    const authoritativeParticipants = participantsFromDoc.length ? participantsFromDoc : mergedParticipants;
     const participants = typeof overlayScoresToParticipants === 'function'
-      ? overlayScoresToParticipants(mergedParticipants)
-      : mergedParticipants;
+      ? overlayScoresToParticipants(authoritativeParticipants)
+      : authoritativeParticipants;
 
     const eventInputsRoot = {
       ...((selectedData?.eventInputs && typeof selectedData.eventInputs === 'object') ? selectedData.eventInputs : {}),
@@ -859,7 +884,7 @@ export default function useDashboardSnapshot(selectedEventId) {
     );
     const byRoom = buildByRoom({ participants, roomsEffective: roomsForAssignmentSnapshot, roomCount: inferredRoomCount, roomNames });
     const statusCards = buildStatusCards({ participants, totalParticipants, checkedInCount, assignedCount, scoreFilledPeople, activeEvents, eventInputsRoot });
-    const roomCards = buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, eventInputsRoot });
+    const roomCards = buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, eventInputsRoot, mode });
     const eventCards = buildEventCards({ activeEvents, participants, eventInputsRoot, byRoom, roomNames, roomsEffective: roomsForAssignmentSnapshot });
     const alerts = buildAlerts({ totalParticipants, checkedInCount, assignedCount, scoreFilledPeople, roomCards, eventCards });
     const liveInfo = resolveLiveState(selectedData);

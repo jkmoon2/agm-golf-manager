@@ -28,8 +28,8 @@ export function defaultHiddenEventParams() {
       upward: 1,
       downward: 1,
     },
-    // 포볼 지목전 점수 방식: rank(순위점수) | converted(환산점수)
-    pointType: 'converted',
+    // 포볼 지목전 점수 방식: rank(순위점수) 고정
+    pointType: 'rank',
     // 포볼 지목전에서 내 조를 제외한 참가자만 후보로 노출(기본 체크)
     excludeSameGroupTargets: true,
     // 개인 1대1에서 같은 조 참가자만 상대 후보로 허용
@@ -151,7 +151,7 @@ export function normalizeHiddenEventParams(raw) {
     else if (rawFourballMode === 'self' || rawMode === 'fourball-self') fourballMode = 'self';
     else fourballMode = 'random';
   }
-  const pointType = src.pointType === 'rank' ? 'rank' : 'converted';
+  const pointType = 'rank';
   const excludeSameGroupTargets = src.excludeSameGroupTargets === false || src.excludeOwnGroupTargets === false || src.allowSameGroupTargets === true ? false : true;
   return {
     ...base,
@@ -359,6 +359,19 @@ export function getHiddenFourballPairsFromPerson(personSlot = {}) {
   return normalizeHiddenFourballPairs(pairs);
 }
 
+export function getHiddenFourballDirectSelectionsFromPerson(personSlot = {}) {
+  const src = (personSlot && typeof personSlot === 'object') ? personSlot : {};
+  const selections = {};
+  Object.entries(src).forEach(([selectorId, slot]) => {
+    const opponentId = getHiddenOpponentId(slot);
+    const aId = String(selectorId || '');
+    const bId = String(opponentId || '');
+    if (!aId || !bId || aId === bId) return;
+    selections[aId] = bId;
+  });
+  return selections;
+}
+
 function buildPersonalRows(eventDef, participants = [], inputsSlot = {}, opt = {}) {
   const cfg = normalizeHiddenEventParams(eventDef?.params);
   const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id), p]));
@@ -434,7 +447,7 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
   const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id), p]));
   const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
   const roomCount = Number(opt.roomCount || 0) || Math.max(0, ...(Array.isArray(participants) ? participants : []).map((p) => Number(p?.room || p?.roomNumber || 0) || 0));
-  const pointType = cfg.pointType === 'rank' ? 'rank' : 'converted';
+  const pointType = 'rank';
   const rows = [];
 
   const pushTeam = (aId, bId, keyPrefix = '') => {
@@ -475,12 +488,20 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     });
   };
 
-  if (cfg.fourballMode === 'self' || cfg.fourballMode === 'select') {
+  if (cfg.fourballMode === 'select') {
+    const selections = getHiddenFourballDirectSelectionsFromPerson(inputsSlot?.person || {});
+    Object.entries(selections).forEach(([aId, bId]) => {
+      const aKey = String(aId || '');
+      const bKey = String(bId || '');
+      if (!aKey || !bKey) return;
+      // 참가자 직접 2인팀 지목은 선택자가 독립적으로 본인 기준 포볼팀을 갖는다.
+      // 따라서 상대가 다른 사람에게 선택되었거나 직접 선택했더라도 중복 제거하지 않는다.
+      pushTeam(aKey, bKey, 'select-');
+    });
+  } else if (cfg.fourballMode === 'self') {
     const personPairs = getHiddenFourballPairsFromPerson(inputsSlot?.person || {});
     const sharedPairs = normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {});
-    const pairs = cfg.fourballMode === 'select'
-      ? normalizeHiddenFourballPairs(personPairs)
-      : normalizeHiddenFourballPairs({ ...sharedPairs, ...personPairs });
+    const pairs = normalizeHiddenFourballPairs({ ...sharedPairs, ...personPairs });
     const seen = new Set();
     Object.entries(pairs).forEach(([aId, bId]) => {
       const aKey = String(aId || '');
@@ -519,11 +540,9 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     }
     row.rank = rank;
   });
-  const validCount = rows.length;
   rows.forEach((row) => {
     row.rankScore = row.rank || null;
-    row.convertedScore = row.rank ? Math.max(0, validCount - row.rank + 1) : null;
-    row.eventScore = pointType === 'rank' ? row.rankScore : row.convertedScore;
+    row.eventScore = row.rankScore;
     row.pointType = pointType;
   });
 
@@ -540,18 +559,17 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     bucket.teamCount += 1;
     bucket.teams.push(row);
   });
-  const roomSortOrder = pointType === 'rank' ? 'asc' : 'desc';
   const roomRows = Array.from(roomMap.values())
     .filter((row) => row.teamCount > 0 || roomCount > 0)
     .sort((a, b) => {
-      const diff = roomSortOrder === 'desc' ? (b.value - a.value) : (a.value - b.value);
+      const diff = a.value - b.value;
       if (diff) return diff;
       return a.room - b.room;
     })
     .map((row, idx) => ({ ...row, rank: idx + 1 }));
 
   const pairMap = cfg.fourballMode === 'select'
-    ? normalizeHiddenFourballPairs(getHiddenFourballPairsFromPerson(inputsSlot?.person || {}))
+    ? getHiddenFourballDirectSelectionsFromPerson(inputsSlot?.person || {})
     : (cfg.fourballMode === 'self'
       ? normalizeHiddenFourballPairs({
           ...normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {}),
