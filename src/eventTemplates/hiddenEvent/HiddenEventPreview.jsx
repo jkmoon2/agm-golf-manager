@@ -47,10 +47,17 @@ export default function HiddenEventPreview({ eventDef, participants = [], inputs
 
   if (cfg.mode === 'fourball') {
     const isRoomView = viewTab === 'room';
-    const rows = isRoomView
+    const baseRows = isRoomView
       ? (Array.isArray(data?.roomRows) ? data.roomRows : [])
       : (Array.isArray(data?.teamRows) ? data.teamRows : []);
-    const pointLabel = '순위점수';
+    const rows = [...baseRows].sort((a, b) => {
+      const av = Number(isRoomView ? a?.value : a?.value);
+      const bv = Number(isRoomView ? b?.value : b?.value);
+      const diff = rankOrder === 'desc' ? (bv - av) : (av - bv);
+      if (diff) return diff;
+      return String(a?.label || '').localeCompare(String(b?.label || ''), 'ko');
+    }).map((row, idx) => ({ ...row, rank: idx + 1 }));
+    const pointLabel = cfg.pointType === 'converted' ? '환산점수' : '순위점수';
 
     if (isRoomView) {
       return (
@@ -124,7 +131,11 @@ export default function HiddenEventPreview({ eventDef, participants = [], inputs
     );
   }
 
-  const rows = Array.isArray(data?.matchRows) ? data.matchRows : [];
+  const rows = [...(Array.isArray(data?.matchRows) ? data.matchRows : [])].sort((a, b) => {
+    const diff = rankOrder === 'asc' ? (Number(a?.point || 0) - Number(b?.point || 0)) : (Number(b?.point || 0) - Number(a?.point || 0));
+    if (diff) return diff;
+    return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+  }).map((row, idx) => ({ ...row, rank: idx + 1 }));
   if (viewTab === 'room') {
     const roomRows = makeHiddenPersonalRoomRows(rows, roomNames, roomCount, rankOrder || 'desc');
     return (

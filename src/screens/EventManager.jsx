@@ -1392,7 +1392,7 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== hiddenMonitorEvent.id) return e;
       const params = normalizeHiddenEventParams({ ...(e.params || {}), personalPoints: safe });
-      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: params.mode === 'fourball' ? 'asc' : 'desc' };
+      return { ...e, params, target: normalizeHiddenPreviewTarget(params, e.target), rankOrder: normalizeHiddenPreviewOrder(params, e.rankOrder) };
     });
     await commitEventsList(next);
   };
@@ -1433,7 +1433,7 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== hiddenMonitorEvent.id) return e;
       const params = normalizeHiddenEventParams({ ...(e.params || {}), revealed: !!revealed });
-      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: params.mode === 'fourball' ? 'asc' : 'desc' };
+      return { ...e, params, target: normalizeHiddenPreviewTarget(params, e.target), rankOrder: normalizeHiddenPreviewOrder(params, e.rankOrder) };
     });
     await commitEventsList(next);
   };
@@ -1445,7 +1445,7 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== ev.id) return e;
       const params = normalizeHiddenEventParams({ ...(e.params || {}), selectionLocked: nextLocked });
-      return { ...e, params, target: params.mode === 'fourball' ? 'team' : 'person', rankOrder: params.mode === 'fourball' ? 'asc' : 'desc' };
+      return { ...e, params, target: normalizeHiddenPreviewTarget(params, e.target), rankOrder: normalizeHiddenPreviewOrder(params, e.rankOrder) };
     });
     await commitEventsList(next);
     setOpenMenuId(null);

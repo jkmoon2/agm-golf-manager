@@ -23,6 +23,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
   const personalRows = Array.isArray(data?.matchRows) ? data.matchRows : [];
   const teamRows = Array.isArray(data?.teamRows) ? data.teamRows : [];
   const fourballTitle = cfg.fourballMode === 'select' ? '포볼 참가자 직접지목' : (cfg.fourballMode === 'self' ? '포볼 참가자 무작위배정' : '포볼 히든팀');
+  const fourballPointLabel = cfg.pointType === 'converted' ? '환산점수' : '순위점수';
   const [pointDraft, setPointDraft] = useState(() => normalizeHiddenPersonalPoints(cfg.personalPoints));
 
   useEffect(() => {
@@ -107,7 +108,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
                   <b>{idx + 1}. {row.label}</b>
                   <b style={{ color: '#be123c' }}>{fmt(row.value)}</b>
                 </div>
-                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)} · 순위점수 {fmt(row.eventScore)}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)}{row.directAdjustment ? ` · 조간보정 ${row.directAdjustment > 0 ? '+' : ''}${fmt(row.directAdjustment)}` : ''} · {fourballPointLabel} {fmt(row.eventScore)}</div>
               </div>
             ))}
           </div>

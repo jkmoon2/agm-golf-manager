@@ -267,6 +267,51 @@ function mergeParticipants(base = [], live = []) {
   return merged;
 }
 
+function sortRoomMembersForDisplay(members = [], mode = 'stroke', globalOrder = new Map()) {
+  const list = Array.isArray(members) ? [...members] : [];
+  if (mode !== 'fourball' || list.length <= 1) {
+    return list.sort((a, b) => (Number(globalOrder.get(getParticipantKey(a)) ?? 9999) - Number(globalOrder.get(getParticipantKey(b)) ?? 9999)));
+  }
+
+  const byId = new Map(list.map((m, i) => [getParticipantKey(m, i), m]));
+  const used = new Set();
+  const pairs = [];
+  const singles = [];
+
+  list.forEach((m, i) => {
+    const id = getParticipantKey(m, i);
+    if (!id || used.has(id)) return;
+    const partnerId = String(m?.partner ?? m?.partnerId ?? '');
+    const partner = partnerId ? byId.get(partnerId) : null;
+    if (partner && !used.has(partnerId)) {
+      const first = Number(m?.group || 0) <= Number(partner?.group || 0) ? m : partner;
+      const second = first === m ? partner : m;
+      pairs.push({
+        first,
+        second,
+        order: Math.min(
+          Number(globalOrder.get(getParticipantKey(first)) ?? 9999),
+          Number(globalOrder.get(getParticipantKey(second)) ?? 9999),
+        ),
+      });
+      used.add(id);
+      used.add(partnerId);
+      return;
+    }
+    singles.push({ member: m, order: Number(globalOrder.get(id) ?? 9999) });
+    used.add(id);
+  });
+
+  pairs.sort((a, b) => a.order - b.order);
+  singles.sort((a, b) => {
+    const groupDiff = Number(a.member?.group || 0) - Number(b.member?.group || 0);
+    if (groupDiff) return groupDiff;
+    return a.order - b.order;
+  });
+
+  return [...pairs.flatMap((pair) => [pair.first, pair.second]), ...singles.map((x) => x.member)];
+}
+
 function buildRoomsEffective(mode, roomsLive, fourballRoomsLive) {
   if (mode === 'fourball') {
     return Array.isArray(fourballRoomsLive) && fourballRoomsLive.length ? fourballRoomsLive : [];
@@ -274,9 +319,10 @@ function buildRoomsEffective(mode, roomsLive, fourballRoomsLive) {
   return Array.isArray(roomsLive) && roomsLive.length ? roomsLive : [];
 }
 
-function buildByRoom({ participants, roomsEffective, roomCount, roomNames }) {
+function buildByRoom({ participants, roomsEffective, roomCount, roomNames, mode }) {
   const arr = Array.from({ length: Math.max(0, roomCount) }, () => []);
   const participantIndex = new Map(participants.map((p, i) => [getParticipantKey(p, i), p]));
+  const globalOrder = new Map(participants.map((p, i) => [getParticipantKey(p, i), i]));
 
   if (Array.isArray(roomsEffective) && roomsEffective.length) {
     roomsEffective.forEach((roomDoc) => {
@@ -307,7 +353,7 @@ function buildByRoom({ participants, roomsEffective, roomCount, roomNames }) {
         arr[idx].push(base);
       });
     });
-    return arr;
+    return arr.map((members) => sortRoomMembersForDisplay(members, mode, globalOrder));
   }
 
   participants.forEach((participant) => {
@@ -333,7 +379,7 @@ function buildByRoom({ participants, roomsEffective, roomCount, roomNames }) {
     arr[idx].push(participant);
   });
 
-  return arr;
+  return arr.map((members) => sortRoomMembersForDisplay(members, mode, globalOrder));
 }
 
 function buildStatusCards({ participants, totalParticipants, checkedInCount, assignedCount, scoreFilledPeople, activeEvents, eventInputsRoot }) {
@@ -882,7 +928,7 @@ export default function useDashboardSnapshot(selectedEventId) {
       ...participants.map((p) => Number(parseRoomNo(p?.roomNo ?? p?.room ?? p?.roomLabel) || 0)),
       0,
     );
-    const byRoom = buildByRoom({ participants, roomsEffective: roomsForAssignmentSnapshot, roomCount: inferredRoomCount, roomNames });
+    const byRoom = buildByRoom({ participants, roomsEffective: roomsForAssignmentSnapshot, roomCount: inferredRoomCount, roomNames, mode });
     const statusCards = buildStatusCards({ participants, totalParticipants, checkedInCount, assignedCount, scoreFilledPeople, activeEvents, eventInputsRoot });
     const roomCards = buildRoomCards({ byRoom, roomNames, roomCapacities, activeEvents, eventInputsRoot, mode });
     const eventCards = buildEventCards({ activeEvents, participants, eventInputsRoot, byRoom, roomNames, roomsEffective: roomsForAssignmentSnapshot });

@@ -14,6 +14,7 @@ export function defaultHiddenEventParams() {
       '1-2': 3,
       '2-3': 3,
       '3-4': 3,
+      same: 0,
     },
     pairGroups: {
       A: [1, 2],
@@ -28,7 +29,7 @@ export function defaultHiddenEventParams() {
       upward: 1,
       downward: 1,
     },
-    // 포볼 지목전 점수 방식: rank(순위점수) 고정
+    // 포볼 점수 방식: rank(순위점수) | converted(환산점수)
     pointType: 'rank',
     // 포볼 지목전에서 내 조를 제외한 참가자만 후보로 노출(기본 체크)
     excludeSameGroupTargets: true,
@@ -111,6 +112,7 @@ export function normalizeHiddenHandicapSteps(raw) {
     '1-2': normalizeStepValue(src['1-2'] ?? src['1_2'] ?? src.g12 ?? src.step12 ?? 3),
     '2-3': normalizeStepValue(src['2-3'] ?? src['2_3'] ?? src.g23 ?? src.step23 ?? 3),
     '3-4': normalizeStepValue(src['3-4'] ?? src['3_4'] ?? src.g34 ?? src.step34 ?? 3),
+    same: normalizeStepValue(src.same ?? src.sameGroup ?? src['same-group'] ?? src.sameStep ?? 0),
   };
 }
 
@@ -151,7 +153,7 @@ export function normalizeHiddenEventParams(raw) {
     else if (rawFourballMode === 'self' || rawMode === 'fourball-self') fourballMode = 'self';
     else fourballMode = 'random';
   }
-  const pointType = 'rank';
+  const pointType = ['converted', 'rank'].includes(src.pointType) ? src.pointType : base.pointType;
   const excludeSameGroupTargets = src.excludeSameGroupTargets === false || src.excludeOwnGroupTargets === false || src.allowSameGroupTargets === true ? false : true;
   return {
     ...base,
@@ -206,6 +208,15 @@ export function getHiddenHandicapAdjustment(selector, opponent, params) {
   return from > to ? total : -total;
 }
 
+
+export function getHiddenFourballDirectHandicapAdjustment(selector, opponent, params) {
+  const cfg = normalizeHiddenEventParams(params);
+  const from = clampGroupNo(getParticipantGroupNo(selector));
+  const to = clampGroupNo(getParticipantGroupNo(opponent));
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  if (from === to) return normalizeStepValue(cfg.handicapSteps?.same ?? 0);
+  return getHiddenHandicapAdjustment(selector, opponent, cfg);
+}
 
 export function getHiddenSelectionPointDelta(selector, opponent, status, params) {
   const cfg = normalizeHiddenEventParams(params);
@@ -427,8 +438,10 @@ function buildPersonalRows(eventDef, participants = [], inputsSlot = {}, opt = {
     };
   }).filter(Boolean);
 
+  const rankOrder = String(eventDef?.rankOrder || cfg.rankOrder || 'desc') === 'asc' ? 'asc' : 'desc';
   matchRows.sort((a, b) => {
-    if (b.point !== a.point) return b.point - a.point;
+    const pointDiff = rankOrder === 'asc' ? (a.point - b.point) : (b.point - a.point);
+    if (pointDiff) return pointDiff;
     if (a.value !== b.value) return a.value - b.value;
     return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
   });
@@ -447,7 +460,8 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
   const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id), p]));
   const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
   const roomCount = Number(opt.roomCount || 0) || Math.max(0, ...(Array.isArray(participants) ? participants : []).map((p) => Number(p?.room || p?.roomNumber || 0) || 0));
-  const pointType = 'rank';
+  const pointType = cfg.pointType === 'converted' ? 'converted' : 'rank';
+  const rankOrder = String(eventDef?.rankOrder || cfg.rankOrder || 'asc') === 'desc' ? 'desc' : 'asc';
   const rows = [];
 
   const pushTeam = (aId, bId, keyPrefix = '') => {
@@ -463,8 +477,10 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     const aHandicap = getHiddenParticipantHandicap(a, cfg);
     const bHandicap = getHiddenParticipantHandicap(b, cfg);
     const handicapSum = aHandicap + bHandicap;
-    // 최종결과값 = 팀별 참가자 합산점수 - 팀 G합
-    const value = scoreSum - handicapSum;
+    const directAdjustment = cfg.fourballMode === 'select' ? getHiddenFourballDirectHandicapAdjustment(a, b, cfg) : 0;
+    // 최종결과값 = 팀별 참가자 합산점수 - 팀 G합 + 직접지목 조간 보정
+    // 직접 2인팀 지목은 개인 1대1과 반대로 적용: 낮은조→높은조 선택 시 감산, 높은조→낮은조 선택 시 가산
+    const value = scoreSum - handicapSum + directAdjustment;
     rows.push({
       key: `${keyPrefix}${aKey}-${bKey}`,
       memberIds: [aKey, bKey],
@@ -474,6 +490,7 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
       value,
       scoreSum,
       handicapSum,
+      directAdjustment,
       members: [a, b].map((p) => ({
         id: String(p?.id ?? ''),
         name: String(p?.nickname || ''),
@@ -525,7 +542,7 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
   }
 
   rows.sort((a, b) => {
-    if (a.value !== b.value) return a.value - b.value;
+    if (a.value !== b.value) return rankOrder === 'desc' ? (b.value - a.value) : (a.value - b.value);
     if (a.handicapSum !== b.handicapSum) return a.handicapSum - b.handicapSum;
     return String(a.label || '').localeCompare(String(b.label || ''), 'ko');
   });
@@ -540,9 +557,11 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     }
     row.rank = rank;
   });
+  const validCount = rows.filter((row) => Number.isFinite(Number(row.value))).length;
   rows.forEach((row) => {
     row.rankScore = row.rank || null;
-    row.eventScore = row.rankScore;
+    row.convertedScore = row.rank ? Math.max(0, validCount - row.rank + 1) : null;
+    row.eventScore = pointType === 'converted' ? row.convertedScore : row.rankScore;
     row.pointType = pointType;
   });
 
