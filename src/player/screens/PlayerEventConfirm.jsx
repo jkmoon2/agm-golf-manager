@@ -542,6 +542,15 @@ const events = useMemo(
         return { kind: hiddenParams.mode === 'fourball' ? 'team' : 'person', metricLabel: '상태', rows: [] };
       }
       if (hiddenParams.mode === 'fourball') {
+        if (target === 'room') {
+          const rows = (data.roomRows || []).map((row, i) => ({
+            key: row.key || String(i),
+            rank: row.rank || i + 1,
+            label: row.label,
+            value: row.value,
+          }));
+          return { kind: 'room', metricLabel: '순위점수', rows, isHiddenFourball: true };
+        }
         const rows = (data.teamRows || []).map((row, i) => ({
           key: row.key || String(i),
           rank: row.rank || i + 1,
@@ -549,7 +558,7 @@ const events = useMemo(
           value: row.eventScore ?? row.value,
           bigValue: row.value,
         }));
-        return { kind: 'team', metricLabel: hiddenParams.pointType === 'rank' ? '순위점수' : '환산점수', extraMetricLabel: '최종결과', rows, isHiddenFourball: true };
+        return { kind: 'team', metricLabel: '순위점수', extraMetricLabel: '최종결과', rows, isHiddenFourball: true };
       }
       if (target === 'room') {
         const map = new Map();
@@ -798,7 +807,7 @@ const events = useMemo(
                         {res.kind === 'person' && <th className={tCss.cell}>{res.personHeader || '닉네임'}</th>}
                         <th className={tCss.cell}>{res.roomHeader || (res.kind === 'room' ? '방' : res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '방' : '방')))}</th>
                         {hasExtraMetric && <th className={tCss.cell} style={{ color: '#2563eb' }}>{res.extraMetricLabel}</th>}
-                        <th className={tCss.cell} style={res.isHiddenFourball ? { whiteSpace: 'nowrap', wordBreak: 'keep-all', fontSize: 12, paddingLeft: 4, paddingRight: 4 } : undefined}>{res.metricLabel || '점수'}</th>
+                        <th className={tCss.cell}>{res.metricLabel || '점수'}</th>
                       </tr>
                     </thead>
                     <tbody>

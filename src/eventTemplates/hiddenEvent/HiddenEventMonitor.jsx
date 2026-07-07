@@ -65,9 +65,9 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
           )}
         </div>
 
-        {(cfg.mode === 'personal' || (cfg.mode === 'fourball' && cfg.fourballMode === 'select')) && (
+        {cfg.mode === 'personal' && (
           <div style={{ border: '1px solid #e5eaf2', background: '#fbfdff', borderRadius: 14, padding: 12, marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c', marginBottom: 8 }}>{cfg.mode === 'fourball' ? '포볼 지목 점수 설정' : '개인 1대1 점수 설정'}</div>
+            <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c', marginBottom: 8 }}>개인 1대1 점수 설정</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
               <label style={labelStyle}>승리
                 <input style={inputStyle} type="number" inputMode="decimal" value={pointDraft.win ?? ''} onChange={(e) => updatePointDraft('win', e.target.value)} />
@@ -90,7 +90,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
             </div>
             <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
               *상향선택 : 높은조→낮은조 선택후 승리(가산)<br />
-              하향선택 : 낮은조→높은조 선택후 패배(감산)
+              *하향선택 : 낮은조→높은조 선택후 패배(감산)
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
               <button type="button" style={primaryStyle} onClick={savePointDraft}>점수 설정 저장</button>
@@ -107,7 +107,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
                   <b>{idx + 1}. {row.label}</b>
                   <b style={{ color: '#be123c' }}>{fmt(row.value)}</b>
                 </div>
-                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)} · {cfg.pointType === 'rank' ? '순위점수' : '환산점수'} {fmt(row.eventScore)}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)} · 순위점수 {fmt(row.eventScore)}</div>
               </div>
             ))}
           </div>

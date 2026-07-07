@@ -256,6 +256,20 @@ function normalizeEventDefForAdmin(ev) {
   };
 }
 
+function normalizeHiddenPreviewTarget(params, currentTarget = '') {
+  const cfg = normalizeHiddenEventParams(params || {});
+  const target = String(currentTarget || '');
+  if (cfg.mode === 'fourball') return (target === 'room' || target === 'team') ? target : 'team';
+  return (target === 'room' || target === 'person') ? target : 'person';
+}
+
+function normalizeHiddenPreviewOrder(params, currentOrder = '') {
+  const cfg = normalizeHiddenEventParams(params || {});
+  const order = String(currentOrder || '');
+  if (order === 'asc' || order === 'desc') return order;
+  return cfg.mode === 'fourball' ? 'asc' : 'desc';
+}
+
 function getClientPoint(evt){
   const touch = evt?.touches?.[0] || evt?.changedTouches?.[0] || null;
   if (touch) return { clientX: Number(touch.clientX || 0), clientY: Number(touch.clientY || 0) };
@@ -291,8 +305,8 @@ export default function EventManager() {
     return {
       ...ev,
       params,
-      target: params.mode === 'fourball' ? 'team' : 'person',
-      rankOrder: params.mode === 'fourball' ? 'asc' : 'desc',
+      target: normalizeHiddenPreviewTarget(params, ev.target),
+      rankOrder: normalizeHiddenPreviewOrder(params, ev.rankOrder),
       sameGroupOnly: !!params.sameGroupOnly,
       sameGroupTargetOnly: !!params.sameGroupOnly,
       targetScope: params.targetScope || (params.sameGroupOnly ? 'sameGroup' : 'all'),
@@ -488,8 +502,8 @@ if (form.template === 'group-battle') {
         template: form.template,
         params: hiddenParams || rankScoreParams || pickLineupParams || parsed,
         ...(isHiddenEvent ? { sameGroupOnly: !!hiddenParams.sameGroupOnly, sameGroupTargetOnly: !!hiddenParams.sameGroupOnly, targetScope: hiddenParams.targetScope || 'all', opponentScope: hiddenParams.opponentScope || 'all' } : {}),
-        target: isHiddenEvent ? (hiddenParams.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'))),
-        rankOrder: isHiddenEvent ? (hiddenParams.mode === 'fourball' ? 'asc' : 'desc') : (isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : 'asc')),
+        target: isHiddenEvent ? normalizeHiddenPreviewTarget(hiddenParams) : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'))),
+        rankOrder: isHiddenEvent ? normalizeHiddenPreviewOrder(hiddenParams) : (isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : 'asc')),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -1007,8 +1021,8 @@ if (editForm?.template === 'group-battle') {
         template: editForm.template,
         params: hiddenParamsEdit || rankScoreParamsEdit || parsed,
         ...(isHiddenEventEdit ? { sameGroupOnly: !!hiddenParamsEdit.sameGroupOnly, sameGroupTargetOnly: !!hiddenParamsEdit.sameGroupOnly, targetScope: hiddenParamsEdit.targetScope || 'all', opponentScope: hiddenParamsEdit.opponentScope || 'all' } : {}),
-        target: isHiddenEventEdit ? (hiddenParamsEdit.mode === 'fourball' ? 'team' : 'person') : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target))),
-        rankOrder: isHiddenEventEdit ? (hiddenParamsEdit.mode === 'fourball' ? 'asc' : 'desc') : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder))),
+        target: isHiddenEventEdit ? normalizeHiddenPreviewTarget(hiddenParamsEdit, e.target) : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target))),
+        rankOrder: isHiddenEventEdit ? normalizeHiddenPreviewOrder(hiddenParamsEdit, e.rankOrder) : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder))),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
