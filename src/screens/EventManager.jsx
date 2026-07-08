@@ -1513,6 +1513,48 @@ if (editForm?.template === 'group-battle') {
     await saveRankScorePairs(rankScoreMonitorEvent, pairs);
   };
 
+  const assignRankScoreRandomPairs = async () => {
+    if (!rankScoreMonitorEvent) return;
+    const params = normalizeRankScoreGameParams(rankScoreMonitorEvent.params);
+    if (params.gameType !== 'randomPair') return;
+
+    const slot = getInputsSlot(rankScoreMonitorEvent.id);
+    const pairs = normalizeRankScorePairs(slot?.shared?.rankScorePairs || {});
+    const alreadyPaired = new Set();
+    Object.entries(pairs || {}).forEach(([a, b]) => {
+      if (!a || !b) return;
+      alreadyPaired.add(String(a));
+      alreadyPaired.add(String(b));
+    });
+
+    const shuffleLocal = (arr) => [...arr].sort(() => Math.random() - 0.5);
+    const unpairedA = shuffleLocal((participants || []).filter((p) => {
+      const pid = String(p?.id ?? '');
+      return pid && !alreadyPaired.has(pid) && getRankScoreGroupSide(p, params) === 'A';
+    }));
+    const unpairedB = shuffleLocal((participants || []).filter((p) => {
+      const pid = String(p?.id ?? '');
+      return pid && !alreadyPaired.has(pid) && getRankScoreGroupSide(p, params) === 'B';
+    }));
+
+    const count = Math.min(unpairedA.length, unpairedB.length);
+    if (!count) {
+      alert('무작위 배정할 미배정 참가자가 없습니다.');
+      return;
+    }
+
+    for (let i = 0; i < count; i += 1) {
+      const aId = String(unpairedA[i]?.id ?? '');
+      const bId = String(unpairedB[i]?.id ?? '');
+      if (!aId || !bId) continue;
+      pairs[aId] = bId;
+      pairs[bId] = aId;
+    }
+
+    await saveRankScorePairs(rankScoreMonitorEvent, pairs);
+    alert(`${count}팀이 무작위 배정되었습니다.`);
+  };
+
   const cancelRankScorePair = async (me) => {
     if (!rankScoreMonitorEvent || !me) return;
     const slot = getInputsSlot(rankScoreMonitorEvent.id);
@@ -2620,6 +2662,7 @@ if (editForm?.template === 'group-battle') {
             onToggleReveal={toggleRankScoreReveal}
             onAssignPair={assignRankScorePair}
             onCancelPair={cancelRankScorePair}
+            onRandomAssign={assignRankScoreRandomPairs}
           />
         )}
 
