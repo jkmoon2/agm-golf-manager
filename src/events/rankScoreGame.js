@@ -17,6 +17,8 @@ export function defaultRankScoreGameParams() {
     roomRankSlots: [1, 4],         // 방대방 계산 시 방 내부 순위 중 선택할 2개 위치
     roomAddTarget: 'all',          // add일 때 all(방 전체) | slots(기준순위 2명)
     randomSeed: '',
+    // 관리자 '히든/배정/취소' 메뉴에서 포볼팀 공개 여부 제어
+    revealed: true,
   };
 }
 
@@ -90,6 +92,7 @@ export function normalizeRankScoreGameParams(raw) {
     roomRankSlots,
     roomAddTarget,
     randomSeed: String(src.randomSeed || ''),
+    revealed: src.revealed === false || src.hidden === true ? false : true,
   };
 }
 
@@ -404,5 +407,6 @@ export function getRankScoreGameMetaText(params) {
     : '방대방 게임';
   const calcTextMap = { add: '더하기', subtract: '빼기', multiply: '곱하기', divide: '나누기' };
   const calcText = calcTextMap[safe.calculationMethod] || '더하기';
-  return `rank-score · ${sourceText} · ${pointText} · ${gameText} · 계산 ${calcText}`;
+  const revealText = safe.revealed === false ? '비공개' : '공개';
+  return `rank-score · ${sourceText} · ${pointText} · ${gameText} · 계산 ${calcText} · ${revealText}`;
 }

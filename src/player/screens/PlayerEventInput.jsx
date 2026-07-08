@@ -2067,41 +2067,8 @@ export default function PlayerEventInput(){
     all[evId] = slot;
     applyDraft(all);
     setDirty(true);
-
-    try {
-      const targetEventId = eventId || ctxId;
-      let savedInputs = null;
-      const mergeHiddenOpponent = (baseSource = {}) => {
-        const merged = cloneEventInputs(baseSource || {});
-        const mSlot = { ...(merged[evId] || {}) };
-        mSlot.person = { ...(mSlot.person || {}) };
-        if (!targetId) delete mSlot.person[meId];
-        else mSlot.person[meId] = person[meId];
-        merged[evId] = mSlot;
-        return merged;
-      };
-      if (targetEventId && typeof updateEventInputsTransaction === 'function') {
-        savedInputs = await updateEventInputsTransaction(targetEventId, mergeHiddenOpponent, { updatedBy: auth?.currentUser?.uid || 'player' });
-      } else if (typeof updateEventImmediate === 'function') {
-        savedInputs = mergeHiddenOpponent(inputsByEventServer || {});
-        await updateEventImmediate({ eventInputs: savedInputs, inputsUpdatedAt: Date.now() }, false);
-      }
-      if (savedInputs) {
-        const savedClone = cloneEventInputs(savedInputs);
-        pendingSavedInputsSigRef.current = stringifyEventInputs(savedClone);
-        hydrateDraftFromServer(savedClone);
-        if (activeEventStorageId) {
-          const nextPack = { inputs: savedClone, resetTokens: { ...liveEventInputResetTokens } };
-          setServerInputsCachePack(nextPack);
-          writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
-          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', savedClone);
-        }
-        setDirty(false);
-      }
-    } catch (e) {
-      console.warn('[PlayerEventInput] hidden opponent save failed:', e);
-      alert('히든 상대 선택 저장 중 오류가 발생했습니다.');
-    }
+    // 히든 이벤트의 상대 선택은 즉시 서버 저장하지 않고, 하단 "저장" 버튼으로 확정합니다.
+    // 참가자가 선택을 바꿀 때마다 임시 draft만 바꾸고, 저장 버튼을 눌러야 실제 결정됩니다.
   };
 
 
@@ -2732,6 +2699,11 @@ export default function PlayerEventInput(){
                         내 팀원: {minePair.nickname || '-'}
                       </div>
                     )}
+                    {isSelectFourball && minePair && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', fontWeight: 800 }}>
+                        {dirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
+                      </div>
+                    )}
 
                     {hiddenLocked && (isSelfFourball || isSelectFourball) && (
                       <div style={{ marginTop: 8, fontSize: 12, color: '#be123c', fontWeight: 800 }}>
@@ -2832,8 +2804,9 @@ export default function PlayerEventInput(){
                   </label>
 
                   {selectedOpponent && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
-                      선택 완료: <b>{selectedOpponent.nickname}</b> · 조간 추가 G핸디 <b>{adjustment > 0 ? '+' : ''}{adjustment}</b>
+                    <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', lineHeight: 1.45, fontWeight: dirty ? 800 : 400 }}>
+                      선택 완료: <b>{selectedOpponent.nickname}</b> · 조간 추가 G핸디 <b>{adjustment > 0 ? '+' : ''}{adjustment}</b><br />
+                      {dirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
                     </div>
                   )}
 
@@ -2985,9 +2958,14 @@ export default function PlayerEventInput(){
                       </button>
                     </div>
 
-                    {minePair && (
+                    {minePair && rankCfg.revealed !== false && (
                       <div style={{ margin: '0 12px 8px', fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
                         내 팀원: {minePair.nickname || '-'}
+                      </div>
+                    )}
+                    {minePair && rankCfg.revealed === false && (
+                      <div style={{ margin: '0 12px 8px', fontSize: 12, color: '#667085', fontWeight: 700 }}>
+                        포볼팀 배정 완료, 공개 전까지 팀원은 숨김 처리됩니다.
                       </div>
                     )}
 
@@ -3025,8 +3003,8 @@ export default function PlayerEventInput(){
                             return (
                               <tr key={`rank-pair-${ev.id}-${idx}`}>
                                 <td>{idx + 1}</td>
-                                <td>{left?.nickname || '-'}</td>
-                                <td>{right?.nickname || '-'}</td>
+                                <td>{rankCfg.revealed === false ? '비공개' : (left?.nickname || '-')}</td>
+                                <td>{rankCfg.revealed === false ? '비공개' : (right?.nickname || '-')}</td>
                                 <td style={{ color: '#d00000', fontWeight: 800 }}>{Number.isFinite(hdSum) ? hdSum : '-'}</td>
                               </tr>
                             );
