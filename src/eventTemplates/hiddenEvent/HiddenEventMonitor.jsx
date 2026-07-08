@@ -1,6 +1,6 @@
 // /src/eventTemplates/hiddenEvent/HiddenEventMonitor.jsx
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { computeHiddenEvent, normalizeHiddenEventParams, normalizeHiddenPersonalPoints } from '../../events/hiddenEvent';
 
 const fmt = (value) => {
@@ -25,6 +25,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
   const fourballTitle = cfg.fourballMode === 'select' ? '포볼 참가자 직접지목' : (cfg.fourballMode === 'self' ? '포볼 참가자 무작위배정' : '포볼 히든팀');
   const fourballPointLabel = cfg.pointType === 'converted' ? '환산점수' : '순위점수';
   const [pointDraft, setPointDraft] = useState(() => normalizeHiddenPersonalPoints(cfg.personalPoints));
+  const [directionFilter, setDirectionFilter] = useState('');
 
   useEffect(() => {
     setPointDraft(normalizeHiddenPersonalPoints(cfg.personalPoints));
@@ -42,6 +43,28 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
       alert('히든 이벤트 점수 설정이 저장되었습니다.');
     }
   };
+
+
+  const getFourballDirection = (row) => {
+    const members = Array.isArray(row?.members) ? row.members : [];
+    const from = Number(members?.[0]?.group ?? 0);
+    const to = Number(members?.[1]?.group ?? 0);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || !from || !to || from === to) return '';
+    return from > to ? 'upward' : 'downward';
+  };
+
+  const visiblePersonalRows = useMemo(() => {
+    if (!directionFilter) return personalRows;
+    return personalRows.filter((row) => row?.selectionPointKind === directionFilter);
+  }, [personalRows, directionFilter]);
+
+  const visibleTeamRows = useMemo(() => {
+    if (!directionFilter) return teamRows;
+    return teamRows.filter((row) => getFourballDirection(row) === directionFilter);
+  }, [teamRows, directionFilter]);
+
+  const showDirectionButtons = cfg.mode === 'personal' || (cfg.mode === 'fourball' && cfg.fourballMode === 'select');
+  const directionButtonStyle = (key) => directionFilter === key ? primaryStyle : btnStyle;
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -63,6 +86,24 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
           </button>
           {cfg.mode === 'fourball' && cfg.fourballMode !== 'select' && (
             <button type="button" style={primaryStyle} onClick={onAssignFourball}>포볼 무작위 배정</button>
+          )}
+          {showDirectionButtons && (
+            <>
+              <button
+                type="button"
+                style={directionButtonStyle('upward')}
+                onClick={() => setDirectionFilter((prev) => prev === 'upward' ? '' : 'upward')}
+              >
+                상향
+              </button>
+              <button
+                type="button"
+                style={directionButtonStyle('downward')}
+                onClick={() => setDirectionFilter((prev) => prev === 'downward' ? '' : 'downward')}
+              >
+                하향
+              </button>
+            </>
           )}
         </div>
 
@@ -101,21 +142,21 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
 
         {cfg.mode === 'fourball' ? (
           <div style={{ display: 'grid', gap: 8 }}>
-            {!teamRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>{cfg.fourballMode === 'select' ? '아직 참가자 지목 포볼팀이 없습니다.' : (cfg.fourballMode === 'self' ? '아직 참가자 버튼 무작위 배정 팀원이 없습니다.' : '아직 포볼팀이 배정되지 않았습니다.')}</div>}
-            {teamRows.map((row, idx) => (
+            {!visibleTeamRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>{cfg.fourballMode === 'select' ? '아직 참가자 지목 포볼팀이 없습니다.' : (cfg.fourballMode === 'self' ? '아직 참가자 버튼 무작위 배정 팀원이 없습니다.' : '아직 포볼팀이 배정되지 않았습니다.')}</div>}
+            {visibleTeamRows.map((row, idx) => (
               <div key={row.key} style={{ border: '1px solid #e5eaf2', borderRadius: 12, padding: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <b>{idx + 1}. {row.label}</b>
                   <b style={{ color: '#be123c' }}>{fmt(row.value)}</b>
                 </div>
-                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)}{row.directAdjustment ? ` · 조간보정 ${row.directAdjustment > 0 ? '+' : ''}${fmt(row.directAdjustment)}` : ''} · {fourballPointLabel} {fmt(row.eventScore)}</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#2563eb', fontWeight: 800 }}>G합 {fmt(row.handicapSum)}{row.directAdjustment ? ` · 조간보정 ${row.directAdjustment > 0 ? '+' : ''}${fmt(row.directAdjustment)}` : ''}{getFourballDirection(row) ? ` · ${getFourballDirection(row) === 'upward' ? '상향' : '하향'}` : ''} · {fourballPointLabel} {fmt(row.eventScore)}</div>
               </div>
             ))}
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
-            {!personalRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>아직 참가자 선택이 없습니다.</div>}
-            {personalRows.map((row, idx) => (
+            {!visiblePersonalRows.length && <div style={{ color: '#999', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>아직 참가자 선택이 없습니다.</div>}
+            {visiblePersonalRows.map((row, idx) => (
               <div key={row.key} style={{ border: '1px solid #e5eaf2', borderRadius: 12, padding: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                   <b>{idx + 1}. {row.name} → {row.opponentName}</b>

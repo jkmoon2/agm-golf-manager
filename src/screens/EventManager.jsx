@@ -28,6 +28,7 @@ import PickLineupPreview from '../eventTemplates/pickLineup/PickLineupPreview';
 import PickLineupSelectionMonitor from '../eventTemplates/pickLineup/PickLineupSelectionMonitor';
 import RankScoreGameEditor from '../eventTemplates/rankScoreGame/RankScoreGameEditor';
 import RankScoreGamePreview from '../eventTemplates/rankScoreGame/RankScoreGamePreview';
+import RankScoreGameMonitor from '../eventTemplates/rankScoreGame/RankScoreGameMonitor';
 import HiddenEventEditor from '../eventTemplates/hiddenEvent/HiddenEventEditor';
 import HiddenEventPreview from '../eventTemplates/hiddenEvent/HiddenEventPreview';
 import HiddenEventMonitor from '../eventTemplates/hiddenEvent/HiddenEventMonitor';
@@ -35,7 +36,7 @@ import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHole
 import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
-import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../events/rankScoreGame';
+import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, getRankScoreGroupSide, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../events/rankScoreGame';
 import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs, normalizeHiddenPersonalPoints } from '../events/hiddenEvent';
 
 
@@ -526,6 +527,7 @@ if (form.template === 'group-battle') {
 
   /* ── 목록 햄버거 메뉴 ─────────────────────────────────── */
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [rankScoreMonitorId, setRankScoreMonitorId] = useState(null);
   const [menuUpId, setMenuUpId] = useState(null); // ★ 아래 공간 부족시 위로 열기
   const menuRef = useRef(null);
   useEffect(() => {
@@ -1375,6 +1377,11 @@ if (editForm?.template === 'group-battle') {
     return (normalizedEventsOfSelected || []).find((e) => e.id === hiddenMonitorId) || null;
   }, [normalizedEventsOfSelected, hiddenMonitorId]);
 
+  const rankScoreMonitorEvent = useMemo(() => {
+    if (!rankScoreMonitorId) return null;
+    return (normalizedEventsOfSelected || []).find((e) => e.id === rankScoreMonitorId) || null;
+  }, [normalizedEventsOfSelected, rankScoreMonitorId]);
+
   const saveHandicapOverrides = async (overridesMap) => {
     if (!handicapEditEvent) return;
     const safe = (overridesMap && typeof overridesMap === 'object') ? overridesMap : {};
@@ -1450,6 +1457,71 @@ if (editForm?.template === 'group-battle') {
     await commitEventsList(next);
     setOpenMenuId(null);
     setMenuUpId(null);
+  };
+
+  const toggleRankScoreReveal = async (revealed) => {
+    if (!rankScoreMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== rankScoreMonitorEvent.id) return e;
+      const params = normalizeRankScoreGameParams({ ...(e.params || {}), revealed: !!revealed });
+      return { ...e, params, target: getRankScoreGameTarget(params), rankOrder: params.winnerOrder };
+    });
+    await commitEventsList(next);
+  };
+
+  const saveRankScorePairs = async (ev, pairs) => {
+    if (!ev) return;
+    const all = { ...(inputsAll || {}) };
+    const slot = { ...(all[ev.id] || {}) };
+    slot.shared = { ...(slot.shared || {}), rankScorePairs: normalizeRankScorePairs(pairs || {}), assignedAt: Date.now(), assignedBy: 'admin' };
+    all[ev.id] = slot;
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => {
+        const next = { ...(freshBase || {}) };
+        const freshSlot = { ...(next[ev.id] || {}) };
+        freshSlot.shared = { ...(freshSlot.shared || {}), ...slot.shared };
+        next[ev.id] = freshSlot;
+        return next;
+      });
+    } else {
+      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    }
+    try { broadcastEventSync(eventId, { reason: 'rankScorePairs' }); } catch {}
+  };
+
+  const assignRankScorePair = async (me, partner) => {
+    if (!rankScoreMonitorEvent || !me || !partner) return;
+    const params = normalizeRankScoreGameParams(rankScoreMonitorEvent.params);
+    if (params.gameType !== 'randomPair') return;
+    const meSide = getRankScoreGroupSide(me, params);
+    const partnerSide = getRankScoreGroupSide(partner, params);
+    if (!meSide || !partnerSide || meSide === partnerSide) {
+      alert('포볼 배정은 A/B그룹이 서로 다른 참가자끼리만 가능합니다.');
+      return;
+    }
+    const slot = getInputsSlot(rankScoreMonitorEvent.id);
+    const pairs = normalizeRankScorePairs(slot?.shared?.rankScorePairs || {});
+    const meId = String(me.id);
+    const partnerId = String(partner.id);
+    [meId, partnerId].forEach((pid) => {
+      const prev = pairs[pid];
+      if (prev != null) delete pairs[String(prev)];
+      delete pairs[pid];
+    });
+    pairs[meId] = partnerId;
+    pairs[partnerId] = meId;
+    await saveRankScorePairs(rankScoreMonitorEvent, pairs);
+  };
+
+  const cancelRankScorePair = async (me) => {
+    if (!rankScoreMonitorEvent || !me) return;
+    const slot = getInputsSlot(rankScoreMonitorEvent.id);
+    const pairs = normalizeRankScorePairs(slot?.shared?.rankScorePairs || {});
+    const meId = String(me.id);
+    const partnerId = String(pairs[meId] || '');
+    if (partnerId) delete pairs[partnerId];
+    delete pairs[meId];
+    await saveRankScorePairs(rankScoreMonitorEvent, pairs);
   };
 
   const assignHiddenFourball = async () => {
@@ -1948,6 +2020,17 @@ if (editForm?.template === 'group-battle') {
                                   }}
                                 >
                                   입력 현황/마감
+                                </button>
+                              )}
+                              {ev?.template === 'rank-score-game' && (
+                                <button
+                                  onClick={() => {
+                                    setRankScoreMonitorId(ev.id);
+                                    setOpenMenuId(null);
+                                    setMenuUpId(null);
+                                  }}
+                                >
+                                  히든/배정/취소
                                 </button>
                               )}
                               {ev?.template === 'hidden-event' && (
@@ -2527,6 +2610,18 @@ if (editForm?.template === 'group-battle') {
           />
         )}
 
+
+        {rankScoreMonitorEvent?.template === 'rank-score-game' && (
+          <RankScoreGameMonitor
+            eventDef={rankScoreMonitorEvent}
+            participants={participants}
+            inputsByEvent={getInputsSlot(rankScoreMonitorEvent.id)}
+            onClose={() => setRankScoreMonitorId(null)}
+            onToggleReveal={toggleRankScoreReveal}
+            onAssignPair={assignRankScorePair}
+            onCancelPair={cancelRankScorePair}
+          />
+        )}
 
         {hiddenMonitorEvent?.template === 'hidden-event' && (
           <HiddenEventMonitor
