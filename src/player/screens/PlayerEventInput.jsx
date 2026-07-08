@@ -2454,6 +2454,14 @@ export default function PlayerEventInput(){
               if (!eq(draftBoard[i], baseBoard[i])) return true;
             }
             if (!!draftState.roomShared !== !!baseState.roomShared) return true;
+          } else if (ev.template === 'hidden-event') {
+            const hiddenCfg = normalizeHiddenEventParams(ev?.params);
+            const shouldCompareOpponent = hiddenCfg.mode === 'personal' || (hiddenCfg.mode === 'fourball' && hiddenCfg.fourballMode === 'select');
+            if (shouldCompareOpponent) {
+              const baseOpponent = getHiddenOpponentId(sSlot?.[pid]);
+              const draftOpponent = getHiddenOpponentId(dSlot?.[pid]);
+              if (!eq(String(baseOpponent || ''), String(draftOpponent || ''))) return true;
+            }
           } else if (isAccum) {
             const baseArr = getServerAccum(evId, pid, attempts);
             const dVals = (() => {
@@ -2804,7 +2812,7 @@ export default function PlayerEventInput(){
                   </label>
 
                   {selectedOpponent && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', lineHeight: 1.45, fontWeight: dirty ? 800 : 400 }}>
+                    <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', lineHeight: 1.45, fontWeight: 800 }}>
                       선택 완료: <b>{selectedOpponent.nickname}</b> · 조간 추가 G핸디 <b>{adjustment > 0 ? '+' : ''}{adjustment}</b><br />
                       {dirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
                     </div>

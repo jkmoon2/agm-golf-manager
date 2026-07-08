@@ -26,6 +26,7 @@ export default function RankScoreGameMonitor({
   onToggleReveal,
   onAssignPair,
   onCancelPair,
+  onRandomAssign,
 }) {
   const cfg = normalizeRankScoreGameParams(eventDef?.params);
   const pairs = useMemo(() => normalizeRankScorePairs(inputsByEvent?.shared?.rankScorePairs || {}), [inputsByEvent]);
@@ -96,6 +97,11 @@ export default function RankScoreGameMonitor({
           <button type="button" style={cfg.revealed === false ? primaryStyle : dangerStyle} onClick={() => onToggleReveal && onToggleReveal(!(cfg.revealed !== false))}>
             {cfg.revealed === false ? '공개로 전환' : '비공개로 전환'}
           </button>
+          {cfg.gameType === 'randomPair' && (
+            <button type="button" style={primaryStyle} onClick={() => onRandomAssign && onRandomAssign()}>
+              무작위 배정
+            </button>
+          )}
         </div>
 
         {cfg.gameType !== 'randomPair' ? (
