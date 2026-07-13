@@ -2139,13 +2139,17 @@ export default function PlayerEventInput(){
     const hiddenEventDef = getHiddenEventById(evId);
     const hiddenCfg = normalizeHiddenEventParams(hiddenEventDef?.params);
 
+    if (hasHiddenSavedSelectionForEvent(evId)) {
+      alert('이미 선택이 저장되어 변경할 수 없습니다.');
+      return;
+    }
+
     const pendingHiddenSelection = getPendingHiddenSelectionInfo();
     if (pendingHiddenSelection) {
       const pendingEventId = String(pendingHiddenSelection.ev?.id || '');
-      const pendingTargetId = String(pendingHiddenSelection.opponentId || '');
-      // 저장 전 임시 선택이 있으면 다른 상대/다른 이벤트 선택으로 바꿀 수 없게 막습니다.
-      // 이전/다음으로 빠져나가서 다시 뽑는 방식도 footer guard에서 함께 차단합니다.
-      if (pendingEventId !== String(evId || '') || pendingTargetId !== targetId) {
+      // 저장 전 임시 선택은 같은 이벤트 안에서는 저장 전까지 다른 상대/팀원으로 변경할 수 있습니다.
+      // 단, 다른 히든 이벤트로 이동해서 추가 선택하는 것은 저장 누락을 막기 위해 차단합니다.
+      if (pendingEventId !== String(evId || '')) {
         alertPendingHiddenSelection();
         return;
       }
@@ -2754,7 +2758,7 @@ export default function PlayerEventInput(){
               const directFocusKey = `${ev.id}:hidden-fourball-select`;
               const hiddenSelectionDirty = isHiddenSelectionDirtyForEvent(ev.id);
               const hiddenSelectionSaved = hasHiddenSavedSelectionForEvent(ev.id);
-              const hiddenSelectionFixed = !!minePairId || hiddenSelectionDirty || hiddenSelectionSaved;
+              const hiddenSelectionFixed = hiddenSelectionSaved;
 
               return (
                 <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -2905,7 +2909,7 @@ export default function PlayerEventInput(){
             const focusKey = `${ev.id}:hidden-personal`;
             const hiddenSelectionDirty = isHiddenSelectionDirtyForEvent(ev.id);
             const hiddenSelectionSaved = hasHiddenSavedSelectionForEvent(ev.id);
-            const hiddenSelectionFixed = !!selectedOpponentId || hiddenSelectionDirty || hiddenSelectionSaved;
+            const hiddenSelectionFixed = hiddenSelectionSaved;
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
