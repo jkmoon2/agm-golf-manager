@@ -414,6 +414,10 @@ export function EventProvider({ children }) {
   const eventInputsSubRef = useRef({});
 
   const lastEventDataRef = useRef(null);
+  // ✅ [EVENT-SSOT] loadEvent 중복 호출 방지
+  // Player STEP3/STEP6에서 loadEvent가 반복 호출되면 eventData를 null로 비우는 순간 때문에
+  // 이벤트/결과 화면이 보였다가 사라지는 현상이 발생할 수 있습니다.
+  const loadEventInFlightRef = useRef({});
   const queuedUpdatesRef = useRef(null);
   const debounceTimerRef = useRef(null);
   const lastEventSnapshotAtRef = useRef(0);
@@ -1033,51 +1037,86 @@ export function EventProvider({ children }) {
     };
   }, [eventId, isPlayerRoute, refreshEventNow, refreshScoresNow]);
 
-  const loadEvent = async (id) => {
+  const loadEvent = useCallback(async (id) => {
     if (!id) return null;
     const targetId = String(id);
-    if (isDeletedEventId(targetId)) {
+
+    const writeSelectedEventStorage = () => {
       try {
-        await ensureAuthed();
-        const snap = await getDocFromServer(doc(db, 'events', targetId));
-        if (!snap.exists()) {
+        // ✅ Player 라우트는 Admin 선택 대회(localStorage.eventId)를 절대 덮어쓰지 않습니다.
+        if (isPlayerRoute) localStorage.setItem('player.eventId', targetId);
+        else localStorage.setItem('eventId', targetId);
+      } catch {}
+    };
+
+    // ✅ 이미 같은 대회 데이터가 로딩되어 있으면 eventData를 null로 비우지 않습니다.
+    // - PlayerApp/각 STEP 화면에서 loadEvent가 여러 번 호출되어도 화면이 사라지지 않게 하는 핵심 가드입니다.
+    const loadedId = String(lastEventDataRef.current?.__eventId || lastEventDataRef.current?.id || '');
+    if (String(eventId || '') === targetId && loadedId === targetId && lastEventDataRef.current) {
+      writeSelectedEventStorage();
+      return targetId;
+    }
+
+    // ✅ 같은 eventId에 대한 prefetch가 진행 중이면 중복 실행하지 않습니다.
+    if (loadEventInFlightRef.current?.[targetId]) {
+      return loadEventInFlightRef.current[targetId];
+    }
+
+    const task = (async () => {
+      if (isDeletedEventId(targetId)) {
+        try {
+          await ensureAuthed();
+          const snap = await getDocFromServer(doc(db, 'events', targetId));
+          if (!snap.exists()) {
+            clearCurrentEventSelection(targetId);
+            return null;
+          }
+          unmarkDeletedEventId(targetId);
+        } catch {
           clearCurrentEventSelection(targetId);
           return null;
         }
-        unmarkDeletedEventId(targetId);
-      } catch {
-        clearCurrentEventSelection(targetId);
-        return null;
       }
-    }
 
-    // ✅ [EVENT-SSOT] 대회 전환 직후 이전 대회 eventData가 남아 있는 동안
-    // StepFlow가 저장되면 1부 title/participants가 2부 문서에 덮이는 치명 오류가 발생할 수 있습니다.
-    // 전환 즉시 현재 데이터를 비우고, target 문서를 먼저 읽어 targetId 태그를 붙여 둡니다.
-    setEventData(null);
-    lastEventDataRef.current = null;
-    setScoresMap({});
-    scoresMapRef.current = {};
-    setScoresReady(false);
-    scoresReadyRef.current = false;
+      const isSwitchingEvent = String(eventId || '') !== targetId;
 
-    setEventId(targetId);
+      // ✅ [EVENT-SSOT] 실제로 다른 대회로 전환할 때만 현재 데이터를 비웁니다.
+      // 같은 대회를 다시 loadEvent 하는 경우까지 비우면 Player STEP3/STEP6가 깜박이거나 사라집니다.
+      if (isSwitchingEvent) {
+        setEventData(null);
+        lastEventDataRef.current = null;
+        setScoresMap({});
+        scoresMapRef.current = {};
+        setScoresReady(false);
+        scoresReadyRef.current = false;
+      }
+
+      setEventId((prev) => (String(prev || '') === targetId ? prev : targetId));
+      writeSelectedEventStorage();
+
+      try {
+        await ensureAuthed();
+        let snap = null;
+        try { snap = await getDocFromServer(doc(db, 'events', targetId)); }
+        catch { snap = await getDoc(doc(db, 'events', targetId)); }
+        if (snap && snap.exists()) applyIncomingEventData(snap.data() || {}, targetId);
+      } catch (e) {
+        console.warn('[EventContext] loadEvent prefetch failed:', e);
+      }
+      return targetId;
+    })();
+
+    loadEventInFlightRef.current = { ...(loadEventInFlightRef.current || {}), [targetId]: task };
     try {
-      if (isPlayerRoute) localStorage.setItem('player.eventId', targetId);
-      else localStorage.setItem('eventId', targetId);
-    } catch {}
-
-    try {
-      await ensureAuthed();
-      let snap = null;
-      try { snap = await getDocFromServer(doc(db, 'events', targetId)); }
-      catch { snap = await getDoc(doc(db, 'events', targetId)); }
-      if (snap && snap.exists()) applyIncomingEventData(snap.data() || {}, targetId);
-    } catch (e) {
-      console.warn('[EventContext] loadEvent prefetch failed:', e);
+      return await task;
+    } finally {
+      try {
+        const next = { ...(loadEventInFlightRef.current || {}) };
+        delete next[targetId];
+        loadEventInFlightRef.current = next;
+      } catch {}
     }
-    return targetId;
-  };
+  }, [eventId, isPlayerRoute, isDeletedEventId, clearCurrentEventSelection, unmarkDeletedEventId, applyIncomingEventData]);
 
   // 공용 업데이트(디바운스)
   const updateEvent = async (updates, opts = {}) => {
