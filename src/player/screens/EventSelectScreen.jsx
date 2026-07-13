@@ -122,7 +122,9 @@ export default function EventSelectScreen() {
 
   const goNext = async (ev) => {
     setEventId?.(ev.id);
-    try { localStorage.setItem('eventId', ev.id); } catch {}
+    // ✅ Player 대회 선택은 Admin 선택 대회(localStorage.eventId)를 덮어쓰지 않습니다.
+    // 같은 브라우저/PWA에서 1부 Admin 운영 중 2부 Player가 대회를 선택해도 Admin 대회가 흔들리지 않게 분리합니다.
+    try { localStorage.setItem('player.eventId', ev.id); } catch {}
 
     if (sessionStorage.getItem(`auth_${ev.id}`) === 'true') {
       await ensureAnonymousAndMembership(ev.id); // ✅
