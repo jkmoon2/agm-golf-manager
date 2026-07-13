@@ -247,7 +247,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             *하향선택 : 낮은조→높은조 선택후 패배(감산)
           </div>
 
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조간 추가 핸디</div>
           <div style={rowStyle}>
             <label style={labelStyle}>1조~2조
               <input style={inputStyle} type="number" inputMode="numeric" value={stepText['1-2']} onChange={(e) => emitStep('1-2', e.target.value)} />
@@ -307,7 +307,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             </select>
           </label>
 
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조 간 추가 G핸디</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>조간 추가 핸디</div>
           <div style={fourRowStyle}>
             <label style={labelStyle}>1조~2조
               <input style={inputStyle} type="number" inputMode="numeric" value={stepText['1-2']} onChange={(e) => emitStep('1-2', e.target.value)} />

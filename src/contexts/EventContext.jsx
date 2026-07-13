@@ -517,6 +517,15 @@ export function EventProvider({ children }) {
   }, []);
 
 
+  const isCurrentLoadedEventSafeForWrite = useCallback((targetId) => {
+    if (!targetId) return false;
+    const loaded = lastEventDataRef.current;
+    if (!loaded) return true;
+    const loadedId = String(loaded?.__eventId || loaded?.id || '');
+    return !loadedId || loadedId === String(targetId);
+  }, []);
+
+
   const normalizePublicView = (data) => {
     const d = data || {};
     const pv = d.publicView || {};
@@ -1122,6 +1131,10 @@ export function EventProvider({ children }) {
   const updateEvent = async (updates, opts = {}) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
     const targetEventId = String(eventId);
+    if (!isCurrentLoadedEventSafeForWrite(targetEventId)) {
+      console.warn('[EventContext] skip updateEvent: loaded eventData does not match target eventId', { targetEventId, loadedEventId: lastEventDataRef.current?.__eventId || lastEventDataRef.current?.id });
+      return;
+    }
     if (isDeletedEventId(targetEventId)) {
       clearCurrentEventSelection(targetEventId);
       return;
@@ -1175,6 +1188,10 @@ export function EventProvider({ children }) {
   const updateEventImmediate = async (updates, ifChanged = true) => {
     if (!eventId || !updates || typeof updates !== 'object') return;
     const targetEventId = String(eventId);
+    if (!isCurrentLoadedEventSafeForWrite(targetEventId)) {
+      console.warn('[EventContext] skip updateEventImmediate: loaded eventData does not match target eventId', { targetEventId, loadedEventId: lastEventDataRef.current?.__eventId || lastEventDataRef.current?.id });
+      return;
+    }
     if (isDeletedEventId(targetEventId)) {
       clearCurrentEventSelection(targetEventId);
       return;

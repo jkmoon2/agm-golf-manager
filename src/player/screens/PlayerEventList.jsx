@@ -360,7 +360,7 @@ export default function PlayerEventList() {
   const goNext = async (ev) => {
     if (!isAccessAllowed(ev)) { alert('대회 기간이 아닙니다.'); return; }
     setEventId?.(ev.id);
-    try { localStorage.setItem('eventId', ev.id); } catch {}
+    try { localStorage.setItem('player.eventId', ev.id); } catch {}
 
     const auth = getAuth();
     const restoredUser = await waitForAuthRestored(1200);
