@@ -2009,6 +2009,43 @@ export default function PlayerEventInput(){
     return count;
   };
 
+  const getPendingHiddenSelectionInfo = () => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    const meId = String(mine?.id ?? '');
+    if (!meId) return null;
+
+    for (const ev of (events || [])) {
+      if (ev?.template !== 'hidden-event') continue;
+      const cfg = normalizeHiddenEventParams(ev?.params);
+      const isTargetSelectionMode = cfg.mode === 'personal'
+        || (cfg.mode === 'fourball' && (cfg.fourballMode === 'self' || cfg.fourballMode === 'select'));
+      if (!isTargetSelectionMode) continue;
+
+      const draftOpponent = getHiddenOpponentId(draft?.[ev.id]?.person?.[meId]);
+      const serverOpponent = getHiddenOpponentId(inputsByEventServer?.[ev.id]?.person?.[meId]);
+      const draftKey = String(draftOpponent || '');
+      const serverKey = String(serverOpponent || '');
+
+      // 상대를 고른 뒤 저장하지 않은 상태만 이동/재선택을 막습니다.
+      // 빈 값 삭제 draft는 기존 입력 흐름을 해치지 않기 위해 여기서는 제외합니다.
+      if (draftKey && draftKey !== serverKey) {
+        return { ev, cfg, selectorId: meId, opponentId: draftKey, serverOpponentId: serverKey };
+      }
+    }
+    return null;
+  };
+
+  const alertPendingHiddenSelection = () => {
+    alert('상대 선택이 저장되지 않았습니다.\n저장 버튼을 눌러 선택을 확정해 주세요.');
+  };
+
+  const blockIfPendingHiddenSelection = () => {
+    const pending = getPendingHiddenSelectionInfo();
+    if (!pending) return false;
+    alertPendingHiddenSelection();
+    return true;
+  };
+
   const canSelectHiddenTarget = (evId, targetId, selectorId, hiddenCfg = null) => {
     const targetKey = String(targetId ?? '');
     if (!targetKey) return true;
@@ -2052,6 +2089,19 @@ export default function PlayerEventInput(){
 
     const hiddenEventDef = getHiddenEventById(evId);
     const hiddenCfg = normalizeHiddenEventParams(hiddenEventDef?.params);
+
+    const pendingHiddenSelection = getPendingHiddenSelectionInfo();
+    if (pendingHiddenSelection) {
+      const pendingEventId = String(pendingHiddenSelection.ev?.id || '');
+      const pendingTargetId = String(pendingHiddenSelection.opponentId || '');
+      // 저장 전 임시 선택이 있으면 다른 상대/다른 이벤트 선택으로 바꿀 수 없게 막습니다.
+      // 이전/다음으로 빠져나가서 다시 뽑는 방식도 footer guard에서 함께 차단합니다.
+      if (pendingEventId !== String(evId || '') || pendingTargetId !== targetId) {
+        alertPendingHiddenSelection();
+        return;
+      }
+    }
+
     if (targetId && hiddenEventDef?.template === 'hidden-event' && hiddenCfg.mode === 'personal' && !canSelectHiddenTarget(evId, targetId, meId, hiddenCfg)) {
       const target = participantById.get(targetId);
       alert(`${target?.nickname || '해당 참가자'}님은 이미 지정된 지목 가능 횟수가 모두 사용되었습니다.`);
@@ -2080,6 +2130,7 @@ export default function PlayerEventInput(){
       alert('선택이 마감되어 더 이상 수정할 수 없습니다.');
       return;
     }
+    if (blockIfPendingHiddenSelection()) return;
     const mineId = String(mine.id || '');
     const hiddenDraftSlot = (inputsByEvent?.[ev.id] && typeof inputsByEvent[ev.id] === 'object') ? inputsByEvent[ev.id] : {};
     const hiddenServerSlot = (inputsByEventServer?.[ev.id] && typeof inputsByEventServer[ev.id] === 'object') ? inputsByEventServer[ev.id] : {};
@@ -4321,7 +4372,13 @@ export default function PlayerEventInput(){
         })}
 
         <div className={baseCss.footerNav}>
-          <button className={`${baseCss.navBtn} ${baseCss.navPrev}`} onClick={()=>nav(`/player/home/${eventId}/2`)}>← 이전</button>
+          <button
+            className={`${baseCss.navBtn} ${baseCss.navPrev}`}
+            onClick={() => {
+              if (blockIfPendingHiddenSelection()) return;
+              nav(`/player/home/${eventId}/2`);
+            }}
+          >← 이전</button>
           <button
             className={`${baseCss.navBtn}`}
             onClick={saveDraft}
@@ -4336,7 +4393,11 @@ export default function PlayerEventInput(){
           </button>
           <button
             className={`${baseCss.navBtn} ${baseCss.navNext}`}
-            onClick={()=>{ if (!nextDisabled) nav(`/player/home/${eventId}/4`); }}
+            onClick={() => {
+              if (nextDisabled) return;
+              if (blockIfPendingHiddenSelection()) return;
+              nav(`/player/home/${eventId}/4`);
+            }}
             disabled={nextDisabled}
             aria-disabled={nextDisabled}
             data-disabled={nextDisabled ? '1' : '0'}
