@@ -81,6 +81,14 @@ const normalizeFlowMode = (m) => {
   return (raw === 'fourball' || raw === 'agm' || raw === 'agm-fourball' || raw === 'agm_fourball') ? 'fourball' : 'stroke';
 };
 
+// ✅ [EVENT-SSOT] 현재 EventContext.eventData가 지금 선택한 eventId의 데이터인지 확인
+// - 대회 전환 직후 이전 대회의 eventData가 한 틱 남아 있으면 title/participants가 교차 저장될 수 있음
+const isEventDataForCurrentEvent = (eventData, eventId) => {
+  const taggedId = String(eventData?.__eventId || eventData?.id || '');
+  if (!taggedId || !eventId) return true;
+  return taggedId === String(eventId);
+};
+
 // ✅ [ADD] save() 직렬화(순서 보장) - reset/점수 저장 레이스 방지
 const saveChainRef = { current: Promise.resolve() };
 
@@ -227,6 +235,10 @@ export default function StepFlow() {
   // ---------- [보완] eventData가 변경될 때 "실제로 달라졌을 때만" setState ----------
   useEffect(() => {
     if (!eventData) return;
+    if (!isEventDataForCurrentEvent(eventData, eventId)) {
+      console.warn('[StepFlow] ignore stale eventData snapshot:', { currentEventId: eventId, eventDataId: eventData?.__eventId || eventData?.id });
+      return;
+    }
 
     // mode
     if (mode !== eventData.mode) setMode(eventData.mode);
@@ -393,6 +405,10 @@ export default function StepFlow() {
   // 저장 헬퍼: 함수 값을 제거하고 순수 JSON만 전달
   // ★ patch-start: make save async and await remote write to ensure persistence before route changes
   const saveOnce = async (updates) => {
+    if (eventId && eventData && !isEventDataForCurrentEvent(eventData, eventId)) {
+      console.warn('[StepFlow] skip save because eventData belongs to another event:', { currentEventId: eventId, eventDataId: eventData?.__eventId || eventData?.id });
+      return;
+    }
     const clean = {};
     // ✅ rooms 컬렉션 스냅샷 생성에 사용할 participants (있을 때만)
     let participantsForRooms = null;
@@ -587,7 +603,7 @@ export default function StepFlow() {
   const goNext = async () => {
     // ✅ eventData 로딩 전에 저장/이동하면 mode 기본값('stroke')이 Firestore에 덮어써지며
     //    포볼 대회가 스트로크 탭으로 "이동"되는 현상이 발생할 수 있음
-    if (eventId && !eventData) {
+    if (eventId && (!eventData || !isEventDataForCurrentEvent(eventData, eventId))) {
       alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
       return;
     }
@@ -599,7 +615,7 @@ export default function StepFlow() {
   };
 
   const goPrev = async () => {
-    if (eventId && !eventData) {
+    if (eventId && (!eventData || !isEventDataForCurrentEvent(eventData, eventId))) {
       alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
       return;
     }
@@ -612,7 +628,7 @@ export default function StepFlow() {
 
   // ★ FIX: 하단 메뉴/아이콘으로 step 강제 이동할 때도 먼저 저장(점수 0 덮어쓰기 방지)
   const setStep = async (n) => {
-    if (eventId && !eventData) {
+    if (eventId && (!eventData || !isEventDataForCurrentEvent(eventData, eventId))) {
       alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
       return;
     }

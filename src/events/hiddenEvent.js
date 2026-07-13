@@ -31,6 +31,9 @@ export function defaultHiddenEventParams() {
     },
     // 포볼 점수 방식: rank(순위점수) | converted(환산점수)
     pointType: 'rank',
+    // 포볼 참가자 버튼 무작위 2인팀에서 어느 그룹이 포볼선택 버튼을 누를 수 있는지
+    // - A | B | both (기본 A: 기존 안내 문구/운영 흐름 유지)
+    selfPickSide: 'A',
     // 포볼 지목전에서 내 조를 제외한 참가자만 후보로 노출(기본 체크)
     excludeSameGroupTargets: true,
     // 개인 1대1에서 같은 조 참가자만 상대 후보로 허용
@@ -154,6 +157,8 @@ export function normalizeHiddenEventParams(raw) {
     else fourballMode = 'random';
   }
   const pointType = ['converted', 'rank'].includes(src.pointType) ? src.pointType : base.pointType;
+  const rawSelfPickSide = String(src.selfPickSide || src.selfPickerSide || src.pickSide || base.selfPickSide || 'A').toUpperCase();
+  const selfPickSide = rawSelfPickSide === 'B' ? 'B' : (rawSelfPickSide === 'BOTH' || rawSelfPickSide === 'ALL' ? 'both' : 'A');
   const excludeSameGroupTargets = src.excludeSameGroupTargets === false || src.excludeOwnGroupTargets === false || src.allowSameGroupTargets === true ? false : true;
   return {
     ...base,
@@ -166,6 +171,9 @@ export function normalizeHiddenEventParams(raw) {
     selectionLocked: !!(src.selectionLocked || src.locked),
     personalPoints: normalizeHiddenPersonalPoints(src.personalPoints || src.points),
     pointType,
+    selfPickSide,
+    selfPickerSide: selfPickSide,
+    pickSide: selfPickSide,
     excludeSameGroupTargets,
     excludeOwnGroupTargets: excludeSameGroupTargets,
     allowSameGroupTargets: !excludeSameGroupTargets,

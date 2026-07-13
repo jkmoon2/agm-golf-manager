@@ -380,7 +380,13 @@ export function EventProvider({ children }) {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState(null);
   const [eventsHydratedAt, setEventsHydratedAt] = useState(0);
-  const [eventId, setEventId] = useState(localStorage.getItem('eventId') || null);
+  // ✅ [EVENT-SSOT] Player 라우트는 Admin 선택 대회(localStorage.eventId)를 공유하지 않습니다.
+  // - 기존에는 /player/* 화면에서도 loadEvent()가 localStorage.eventId를 갱신해서,
+  //   같은 브라우저/탭에서 1부 운영 중 2부 참가자 화면을 열면 Admin 선택 대회가 흔들릴 수 있었습니다.
+  // - Player는 player.eventId만 사용하고, Admin은 eventId만 사용하도록 분리합니다.
+  const [eventId, setEventId] = useState(() => {
+    try { return isPlayerRoute ? null : (localStorage.getItem('eventId') || null); } catch { return null; }
+  });
   const [eventData, setEventData] = useState(null);
 
   // ✅ [6/10] 라이브 진단: 대회 목록/선택 이벤트 상태를 콘솔 스냅샷에 남깁니다.
@@ -674,7 +680,8 @@ export function EventProvider({ children }) {
     };
   }, [applyEventsSnapshotToState, authStateTick]);
 
-  const applyIncomingEventData = useCallback((raw) => {
+  const applyIncomingEventData = useCallback((raw, sourceEventId = eventId) => {
+    const eventKey = String(sourceEventId || eventId || '');
     const withPV = normalizePublicView(raw || {});
     const withGate = normalizePlayerGate(withPV);
 
@@ -699,22 +706,23 @@ export function EventProvider({ children }) {
       withGate.eventInputsSub = { ...subInputs };
     } catch {}
 
-    setEventData(withGate);
-    lastEventDataRef.current = withGate;
+    const tagged = { ...withGate, __eventId: eventKey, id: withGate?.id || eventKey };
+    setEventData(tagged);
+    lastEventDataRef.current = tagged;
     try {
       diagMerge('eventContext', {
         lastApplyIncomingAt: Date.now(),
-        eventId: eventId || '',
-        event: diagSummaryEvent(eventId, withGate),
+        eventId: eventKey || '',
+        event: diagSummaryEvent(eventKey, tagged),
       });
       diagPush('timeline', {
         type: 'event.applyIncomingEventData',
-        eventId: eventId || '',
-        participantsCount: Array.isArray(withGate?.participants) ? withGate.participants.length : 0,
-        eventInputsCount: (withGate?.eventInputs && typeof withGate.eventInputs === 'object') ? Object.keys(withGate.eventInputs).length : 0,
+        eventId: eventKey || '',
+        participantsCount: Array.isArray(tagged?.participants) ? tagged.participants.length : 0,
+        eventInputsCount: (tagged?.eventInputs && typeof tagged.eventInputs === 'object') ? Object.keys(tagged.eventInputs).length : 0,
       });
     } catch {}
-    return withGate;
+    return tagged;
   }, [eventId]);
 
   const refreshEventNow = useCallback(async (opts = {}) => {
@@ -736,7 +744,7 @@ export function EventProvider({ children }) {
       const snap = await getDocFromServer(doc(db, 'events', eventId));
       if (snap.exists()) {
         lastEventSnapshotAtRef.current = Date.now();
-        applyIncomingEventData(snap.data() || {});
+        applyIncomingEventData(snap.data() || {}, eventId);
       }
     } catch (e) {
       try {
@@ -744,7 +752,7 @@ export function EventProvider({ children }) {
         if (snap.exists()) {
           lastEventSnapshotAtRef.current = Date.now();
           const nextData = snap.data() || {};
-          applyIncomingEventData(nextData);
+          applyIncomingEventData(nextData, eventId);
           try {
             diagMerge('eventContext', { lastRefreshEventAt: Date.now(), eventId, event: diagSummaryEvent(eventId, nextData) });
             diagPush('timeline', { type: 'event.refreshEventNow:success', eventId, source: 'server' });
@@ -836,7 +844,7 @@ export function EventProvider({ children }) {
         const snap = await getDocFromServer(docRef);
         if (!cancelled && snap.exists()) {
           lastEventSnapshotAtRef.current = Date.now();
-          applyIncomingEventData(snap.data() || {});
+          applyIncomingEventData(snap.data() || {}, eventId);
         }
       } catch {}
 
@@ -851,7 +859,7 @@ export function EventProvider({ children }) {
             return;
           }
           lastEventSnapshotAtRef.current = Date.now();
-          applyIncomingEventData(snap.data());
+          applyIncomingEventData(snap.data(), eventId);
         },
         (err) => {
           console.warn('[EventContext] event snapshot failed; retrying:', err);
@@ -877,7 +885,7 @@ export function EventProvider({ children }) {
     if (isPlayerRoute) {
       if (Object.keys(eventInputsSubRef.current || {}).length) {
         eventInputsSubRef.current = {};
-        if (lastEventDataRef.current) applyIncomingEventData(lastEventDataRef.current);
+        if (lastEventDataRef.current) applyIncomingEventData(lastEventDataRef.current, eventId);
       }
       return;
     }
@@ -895,7 +903,7 @@ export function EventProvider({ children }) {
         });
         eventInputsSubRef.current = next;
         if (lastEventDataRef.current) {
-          applyIncomingEventData(lastEventDataRef.current);
+          applyIncomingEventData(lastEventDataRef.current, eventId);
         }
       });
     });
@@ -1027,23 +1035,48 @@ export function EventProvider({ children }) {
 
   const loadEvent = async (id) => {
     if (!id) return null;
-    if (isDeletedEventId(id)) {
+    const targetId = String(id);
+    if (isDeletedEventId(targetId)) {
       try {
         await ensureAuthed();
-        const snap = await getDocFromServer(doc(db, 'events', id));
+        const snap = await getDocFromServer(doc(db, 'events', targetId));
         if (!snap.exists()) {
-          clearCurrentEventSelection(id);
+          clearCurrentEventSelection(targetId);
           return null;
         }
-        unmarkDeletedEventId(id);
+        unmarkDeletedEventId(targetId);
       } catch {
-        clearCurrentEventSelection(id);
+        clearCurrentEventSelection(targetId);
         return null;
       }
     }
-    setEventId(id);
-    localStorage.setItem('eventId', id);
-    return id;
+
+    // ✅ [EVENT-SSOT] 대회 전환 직후 이전 대회 eventData가 남아 있는 동안
+    // StepFlow가 저장되면 1부 title/participants가 2부 문서에 덮이는 치명 오류가 발생할 수 있습니다.
+    // 전환 즉시 현재 데이터를 비우고, target 문서를 먼저 읽어 targetId 태그를 붙여 둡니다.
+    setEventData(null);
+    lastEventDataRef.current = null;
+    setScoresMap({});
+    scoresMapRef.current = {};
+    setScoresReady(false);
+    scoresReadyRef.current = false;
+
+    setEventId(targetId);
+    try {
+      if (isPlayerRoute) localStorage.setItem('player.eventId', targetId);
+      else localStorage.setItem('eventId', targetId);
+    } catch {}
+
+    try {
+      await ensureAuthed();
+      let snap = null;
+      try { snap = await getDocFromServer(doc(db, 'events', targetId)); }
+      catch { snap = await getDoc(doc(db, 'events', targetId)); }
+      if (snap && snap.exists()) applyIncomingEventData(snap.data() || {}, targetId);
+    } catch (e) {
+      console.warn('[EventContext] loadEvent prefetch failed:', e);
+    }
+    return targetId;
   };
 
   // 공용 업데이트(디바운스)
