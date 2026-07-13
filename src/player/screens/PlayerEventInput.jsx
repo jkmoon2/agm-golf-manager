@@ -2046,6 +2046,55 @@ export default function PlayerEventInput(){
     return true;
   };
 
+  // 히든 이벤트 상대 선택은 이벤트별로 저장 전 상태를 판단해야 합니다.
+  // 전체 dirty 값을 쓰면 A 이벤트 선택 중 B 이벤트 안내문까지 빨간색으로 바뀌는 문제가 생깁니다.
+  const isHiddenSelectionDirtyForEvent = (evId) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    const meId = String(mine?.id ?? '');
+    if (!evId || !meId) return false;
+    const draftOpponent = getHiddenOpponentId(draft?.[evId]?.person?.[meId]);
+    const serverOpponent = getHiddenOpponentId(inputsByEventServer?.[evId]?.person?.[meId]);
+    const draftKey = String(draftOpponent || '');
+    const serverKey = String(serverOpponent || '');
+    return !!draftKey && draftKey !== serverKey;
+  };
+
+  const hasHiddenSavedSelectionForEvent = (evId) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    const meId = String(mine?.id ?? '');
+    if (!evId || !meId) return false;
+    return !!String(getHiddenOpponentId(inputsByEventServer?.[evId]?.person?.[meId]) || '');
+  };
+
+  // 하단 '참가자' 탭처럼 화면 밖 링크로 빠져나가는 경우에도 저장 전 히든 선택을 막습니다.
+  useEffect(() => {
+    const onCaptureClick = (e) => {
+      const anchor = e.target && typeof e.target.closest === 'function' ? e.target.closest('a[href]') : null;
+      if (!anchor) return;
+      const pending = getPendingHiddenSelectionInfo();
+      if (!pending) return;
+      try {
+        const href = anchor.getAttribute('href') || '';
+        const url = new URL(href, window.location.origin);
+        const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        const next = `${url.pathname}${url.search}${url.hash}`;
+        if (next && next !== current) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+          alertPendingHiddenSelection();
+        }
+      } catch {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        alertPendingHiddenSelection();
+      }
+    };
+    document.addEventListener('click', onCaptureClick, true);
+    return () => document.removeEventListener('click', onCaptureClick, true);
+  }, [draft, inputsByEventServer, events, selfParticipant, selfParticipantId]);
+
   const canSelectHiddenTarget = (evId, targetId, selectorId, hiddenCfg = null) => {
     const targetKey = String(targetId ?? '');
     if (!targetKey) return true;
@@ -2664,16 +2713,18 @@ export default function PlayerEventInput(){
               return arr;
             };
 
-            const hiddenSelectStyle = (key) => ({
+            const hiddenSelectStyle = (key, disabledFixed = false) => ({
               height: 38,
               border: hiddenSelectFocusId === key ? '2px solid #2563eb' : '1px solid #d7dfec',
               borderRadius: 10,
               padding: '0 10px',
               fontSize: 14,
-              background: '#fff',
+              background: disabledFixed ? '#f2f4f7' : '#fff',
               outline: 'none',
               boxSizing: 'border-box',
               width: '100%',
+              color: disabledFixed ? '#344054' : undefined,
+              opacity: disabledFixed ? 1 : undefined,
             });
 
             if (hiddenCfg.mode === 'fourball') {
@@ -2701,6 +2752,9 @@ export default function PlayerEventInput(){
               });
               const hiddenSelectPartnerCandidates = isSelectFourball ? getHiddenFourballSelectCandidates(pairs, minePairId) : [];
               const directFocusKey = `${ev.id}:hidden-fourball-select`;
+              const hiddenSelectionDirty = isHiddenSelectionDirtyForEvent(ev.id);
+              const hiddenSelectionSaved = hasHiddenSavedSelectionForEvent(ev.id);
+              const hiddenSelectionFixed = !!minePairId || hiddenSelectionDirty || hiddenSelectionSaved;
 
               return (
                 <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -2745,8 +2799,8 @@ export default function PlayerEventInput(){
                     )}
 
                     {isSelfFourball && minePair && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', fontWeight: 800 }}>
-                        {dirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
+                      <div style={{ marginTop: 8, fontSize: 12, color: hiddenSelectionDirty ? '#be123c' : '#667085', fontWeight: 800 }}>
+                        {hiddenSelectionDirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
                       </div>
                     )}
 
@@ -2758,8 +2812,8 @@ export default function PlayerEventInput(){
                           onChange={(e) => patchHiddenOpponent(ev.id, e.target.value)}
                           onFocus={() => setHiddenSelectFocusId(directFocusKey)}
                           onBlur={() => setHiddenSelectFocusId('')}
-                          disabled={!mineId || hiddenLocked}
-                          style={hiddenSelectStyle(directFocusKey)}
+                          disabled={!mineId || hiddenLocked || hiddenSelectionFixed}
+                          style={hiddenSelectStyle(directFocusKey, hiddenSelectionFixed)}
                         >
                           <option value="">팀원 선택</option>
                           {hiddenSelectPartnerCandidates.map((p) => (
@@ -2777,8 +2831,8 @@ export default function PlayerEventInput(){
                       </div>
                     )}
                     {isSelectFourball && minePair && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', fontWeight: 800 }}>
-                        {dirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
+                      <div style={{ marginTop: 8, fontSize: 12, color: hiddenSelectionDirty ? '#be123c' : '#667085', fontWeight: 800 }}>
+                        {hiddenSelectionDirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
                       </div>
                     )}
 
@@ -2849,6 +2903,9 @@ export default function PlayerEventInput(){
             const adjustment = (mine && selectedOpponent) ? getHiddenHandicapAdjustment(mine, selectedOpponent, hiddenCfg) : 0;
             const rows = Array.isArray(hiddenData?.matchRows) ? hiddenData.matchRows : [];
             const focusKey = `${ev.id}:hidden-personal`;
+            const hiddenSelectionDirty = isHiddenSelectionDirtyForEvent(ev.id);
+            const hiddenSelectionSaved = hasHiddenSavedSelectionForEvent(ev.id);
+            const hiddenSelectionFixed = !!selectedOpponentId || hiddenSelectionDirty || hiddenSelectionSaved;
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -2868,8 +2925,8 @@ export default function PlayerEventInput(){
                       onChange={(e) => patchHiddenOpponent(ev.id, e.target.value)}
                       onFocus={() => setHiddenSelectFocusId(focusKey)}
                       onBlur={() => setHiddenSelectFocusId('')}
-                      disabled={!mineId || hiddenLocked}
-                      style={hiddenSelectStyle(focusKey)}
+                      disabled={!mineId || hiddenLocked || hiddenSelectionFixed}
+                      style={hiddenSelectStyle(focusKey, hiddenSelectionFixed)}
                     >
                       <option value="">상대 선택</option>
                       {hiddenCandidates.map((p) => (
@@ -2881,9 +2938,9 @@ export default function PlayerEventInput(){
                   </label>
 
                   {selectedOpponent && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', lineHeight: 1.45, fontWeight: 800 }}>
+                    <div style={{ marginTop: 8, fontSize: 12, color: hiddenSelectionDirty ? '#be123c' : '#667085', lineHeight: 1.45, fontWeight: 800 }}>
                       선택 완료: <b>{selectedOpponent.nickname}</b> · 조간 추가 G핸디 <b>{adjustment > 0 ? '+' : ''}{adjustment}</b><br />
-                      {dirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
+                      {hiddenSelectionDirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
                     </div>
                   )}
 
