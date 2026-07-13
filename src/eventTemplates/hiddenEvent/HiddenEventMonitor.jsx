@@ -26,6 +26,7 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
   const fourballPointLabel = cfg.pointType === 'converted' ? '환산점수' : '순위점수';
   const [pointDraft, setPointDraft] = useState(() => normalizeHiddenPersonalPoints(cfg.personalPoints));
   const [directionFilter, setDirectionFilter] = useState('');
+  const [showUnregistered, setShowUnregistered] = useState(false);
 
   useEffect(() => {
     setPointDraft(normalizeHiddenPersonalPoints(cfg.personalPoints));
@@ -63,8 +64,31 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
     return teamRows.filter((row) => getFourballDirection(row) === directionFilter);
   }, [teamRows, directionFilter]);
 
+  const registeredIdSet = useMemo(() => {
+    const set = new Set();
+    if (cfg.mode === 'personal') {
+      visiblePersonalRows.forEach((row) => { if (row?.selectorId) set.add(String(row.selectorId)); });
+    } else if (cfg.mode === 'fourball' && (cfg.fourballMode === 'self' || cfg.fourballMode === 'select')) {
+      visibleTeamRows.forEach((row) => {
+        const ids = Array.isArray(row?.memberIds) ? row.memberIds : [];
+        ids.forEach((id) => { if (id != null && id !== '') set.add(String(id)); });
+      });
+    }
+    return set;
+  }, [cfg.mode, cfg.fourballMode, visiblePersonalRows, visibleTeamRows]);
+
+  const unregisteredParticipants = useMemo(() => {
+    if (!(cfg.mode === 'personal' || (cfg.mode === 'fourball' && (cfg.fourballMode === 'self' || cfg.fourballMode === 'select')))) return [];
+    return (Array.isArray(participants) ? participants : []).filter((p) => {
+      const pid = String(p?.id ?? '');
+      return pid && !registeredIdSet.has(pid);
+    });
+  }, [cfg.mode, cfg.fourballMode, participants, registeredIdSet]);
+
   const showDirectionButtons = cfg.mode === 'personal' || (cfg.mode === 'fourball' && cfg.fourballMode === 'select');
+  const showUnregisteredButton = cfg.mode === 'personal' || (cfg.mode === 'fourball' && (cfg.fourballMode === 'self' || cfg.fourballMode === 'select'));
   const directionButtonStyle = (key) => directionFilter === key ? primaryStyle : btnStyle;
+  const unregisteredButtonStyle = showUnregistered ? primaryStyle : btnStyle;
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -92,20 +116,45 @@ export default function HiddenEventMonitor({ eventDef, participants = [], inputs
               <button
                 type="button"
                 style={directionButtonStyle('upward')}
-                onClick={() => setDirectionFilter((prev) => prev === 'upward' ? '' : 'upward')}
+                onClick={() => { setShowUnregistered(false); setDirectionFilter((prev) => prev === 'upward' ? '' : 'upward'); }}
               >
                 상향
               </button>
               <button
                 type="button"
                 style={directionButtonStyle('downward')}
-                onClick={() => setDirectionFilter((prev) => prev === 'downward' ? '' : 'downward')}
+                onClick={() => { setShowUnregistered(false); setDirectionFilter((prev) => prev === 'downward' ? '' : 'downward'); }}
               >
                 하향
               </button>
             </>
           )}
+          {showUnregisteredButton && (
+            <button
+              type="button"
+              style={unregisteredButtonStyle}
+              onClick={() => { setDirectionFilter(''); setShowUnregistered((prev) => !prev); }}
+            >
+              미등록 {unregisteredParticipants.length}
+            </button>
+          )}
         </div>
+
+        {showUnregistered && (
+          <div style={{ border: '1px solid #e5eaf2', background: '#fbfdff', borderRadius: 14, padding: 12, marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c', marginBottom: 8 }}>미등록 참가자</div>
+            {!unregisteredParticipants.length && <div style={{ color: '#667085', fontSize: 13 }}>미등록 참가자가 없습니다.</div>}
+            {!!unregisteredParticipants.length && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                {unregisteredParticipants.map((p) => (
+                  <div key={`hidden-unregistered-${p?.id}`} style={{ border: '1px solid #eef2f7', borderRadius: 10, padding: '8px 10px', fontSize: 13, fontWeight: 900, color: '#16243f' }}>
+                    {p?.nickname || '-'} <span style={{ color: '#667085', fontWeight: 700 }}>{p?.group ? `${p.group}조` : ''}{p?.room ? ` · ${p.room}번방` : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {cfg.mode === 'personal' && (
           <div style={{ border: '1px solid #e5eaf2', background: '#fbfdff', borderRadius: 14, padding: 12, marginBottom: 12 }}>

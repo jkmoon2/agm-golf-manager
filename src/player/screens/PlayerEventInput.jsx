@@ -2093,6 +2093,13 @@ export default function PlayerEventInput(){
       alert('포볼 선택은 운영자가 지정한 A/B 그룹 참가자만 사용할 수 있습니다.');
       return;
     }
+    const allowedSide = cfg.selfPickSide || 'A';
+    const canPickFromThisSide = allowedSide === 'both' || mySide === allowedSide;
+    if (!canPickFromThisSide) {
+      alert(`포볼선택은 ${allowedSide === 'B' ? 'B그룹' : 'A그룹'} 참가자만 사용할 수 있습니다.`);
+      return;
+    }
+
     const targetSide = mySide === 'A' ? 'B' : 'A';
     const candidates = (participants || []).filter((p) => {
       const pid = String(p?.id ?? '');
@@ -2106,11 +2113,8 @@ export default function PlayerEventInput(){
     }
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     await patchHiddenOpponent(ev.id, pick.id);
-    if (cfg.revealed) {
-      alert(`${mine.nickname || '참가자'}님은 ${pick.nickname || '상대'}님과 히든 포볼팀으로 배정되었습니다.`);
-    } else {
-      alert('히든 포볼팀 배정이 완료되었습니다. 공개 전까지 팀원은 숨김 처리됩니다.');
-    }
+    // 즉시 서버 저장/완료 알림 금지: 하단 저장 버튼을 눌러야 확정됩니다.
+    // 기존에는 여기서 알림이 떠서 저장된 것처럼 보였지만, 페이지 이동 후 draft가 사라질 수 있었습니다.
   };
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
@@ -2456,7 +2460,7 @@ export default function PlayerEventInput(){
             if (!!draftState.roomShared !== !!baseState.roomShared) return true;
           } else if (ev.template === 'hidden-event') {
             const hiddenCfg = normalizeHiddenEventParams(ev?.params);
-            const shouldCompareOpponent = hiddenCfg.mode === 'personal' || (hiddenCfg.mode === 'fourball' && hiddenCfg.fourballMode === 'select');
+            const shouldCompareOpponent = hiddenCfg.mode === 'personal' || (hiddenCfg.mode === 'fourball' && (hiddenCfg.fourballMode === 'select' || hiddenCfg.fourballMode === 'self'));
             if (shouldCompareOpponent) {
               const baseOpponent = getHiddenOpponentId(sSlot?.[pid]);
               const draftOpponent = getHiddenOpponentId(dSlot?.[pid]);
@@ -2636,7 +2640,9 @@ export default function PlayerEventInput(){
               const pairHeaderA = splitRankScorePairLabel(pairLabelA);
               const pairHeaderB = splitRankScorePairLabel(pairLabelB);
               const mineSide = mine ? getRankScoreGroupSide(mine, hiddenPairCfg) : '';
-              const hasHiddenPairCandidates = isSelfFourball && mine && !!mineSide && !minePairId && !hiddenLocked && (participants || []).some((p) => {
+              const selfPickSide = hiddenCfg.selfPickSide || 'A';
+              const canUseSelfPickButton = selfPickSide === 'both' || mineSide === selfPickSide;
+              const hasHiddenPairCandidates = isSelfFourball && mine && !!mineSide && canUseSelfPickButton && !minePairId && !hiddenLocked && (participants || []).some((p) => {
                 const pid = String(p?.id ?? '');
                 if (!pid || pid === String(mine.id)) return false;
                 if (pairs[pid]) return false;
@@ -2678,6 +2684,18 @@ export default function PlayerEventInput(){
                         >
                           {minePair ? '배정완료' : '포볼선택'}
                         </button>
+                      </div>
+                    )}
+
+                    {isSelfFourball && mine && !!mineSide && !canUseSelfPickButton && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: '#667085', fontWeight: 800 }}>
+                        포볼선택은 {selfPickSide === 'B' ? 'B그룹' : 'A그룹'} 참가자만 사용할 수 있습니다.
+                      </div>
+                    )}
+
+                    {isSelfFourball && minePair && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: dirty ? '#be123c' : '#667085', fontWeight: 800 }}>
+                        {dirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '선택이 저장되어 있습니다.'}
                       </div>
                     )}
 

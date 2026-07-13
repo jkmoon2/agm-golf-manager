@@ -104,7 +104,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
   const emit = (patch) => onChange && onChange({ ...cfg, ...patch });
   const emitMode = (nextModeValue) => {
     if (nextModeValue === 'fourball-random') emit({ mode: 'fourball', fourballMode: 'random' });
-    else if (nextModeValue === 'fourball-self') emit({ mode: 'fourball', fourballMode: 'self' });
+    else if (nextModeValue === 'fourball-self') emit({ mode: 'fourball', fourballMode: 'self', selfPickSide: cfg.selfPickSide || 'A' });
     else if (nextModeValue === 'fourball-select') emit({ mode: 'fourball', fourballMode: 'select', excludeSameGroupTargets: cfg.excludeSameGroupTargets !== false });
     else emit({ mode: 'personal', fourballMode: 'random' });
   };
@@ -118,6 +118,10 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
   };
   const emitPointType = (valueText) => {
     emit({ pointType: valueText === 'converted' ? 'converted' : 'rank' });
+  };
+  const emitSelfPickSide = (valueText) => {
+    const side = valueText === 'B' ? 'B' : (valueText === 'both' ? 'both' : 'A');
+    emit({ selfPickSide: side, selfPickerSide: side, pickSide: side });
   };
   const emitPairGroup = (side, groupNo) => {
     const pairGroups = { ...cfg.pairGroups, [side]: toggleGroup(cfg.pairGroups?.[side], groupNo) };
@@ -330,6 +334,15 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             </select>
           </label>
 
+          {cfg.fourballMode === 'self' && (
+            <label style={{ ...labelStyle, marginTop: 10 }}>포볼선택 가능 그룹
+              <select style={inputStyle} value={cfg.selfPickSide || 'A'} onChange={(e) => emitSelfPickSide(e.target.value)}>
+                <option value="A">A그룹만 포볼선택</option>
+                <option value="B">B그룹만 포볼선택</option>
+              </select>
+            </label>
+          )}
+
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>포볼 그룹 구성</div>
           {['A', 'B'].map((side) => (
             <div key={side} style={{ marginTop: 8 }}>
@@ -361,7 +374,7 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
           ))}
           <div style={helpStyle}>
             {cfg.fourballMode === 'self'
-              ? '참가자가 Player STEP3에서 포볼선택 버튼을 누르면 A그룹 1명과 B그룹 1명이 무작위로 묶입니다. 운영자가 공개하기 전까지 전체 팀 결과는 숨김 처리됩니다.'
+              ? '참가자가 Player STEP3에서 포볼선택 버튼을 누른 뒤 저장해야 A그룹 1명과 B그룹 1명이 무작위로 묶입니다. 위 설정에서 선택한 그룹만 포볼선택 버튼을 사용할 수 있습니다.'
               : 'A그룹 참가자 1명과 B그룹 참가자 1명을 운영자가 무작위로 묶어 2인 1팀을 만듭니다.'}
           </div>
         </div>
