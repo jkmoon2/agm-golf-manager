@@ -14,7 +14,7 @@ export function defaultRankScoreGameParams() {
     adjustments: {},               // { [participantId]: number }
     pairGroups: { A: [1, 2], B: [3, 4] }, // 포볼게임 A/B 그룹 조합
     selfPickSide: 'A',             // randomPair: 포볼선택 버튼 사용 그룹(A|B)
-    directExcludeSameGroupTargets: true, // directPair: 본인 조 제외 여부
+    directExcludeSameGroupTargets: false, // directPair: 본인 조 제외 여부
     calculationMethod: 'add',      // add | subtract | multiply | divide
     roomRankSlots: [1, 4],         // 방대방 계산 시 방 내부 순위 중 선택할 2개 위치
     roomAddTarget: 'all',          // add일 때 all(방 전체) | slots(기준순위 2명)
@@ -95,7 +95,7 @@ export function normalizeRankScoreGameParams(raw) {
     roomAddTarget,
     randomSeed: String(src.randomSeed || ''),
     selfPickSide: src.selfPickSide === 'B' ? 'B' : (src.selfPickSide === 'both' ? 'both' : base.selfPickSide),
-    directExcludeSameGroupTargets: src.directExcludeSameGroupTargets === false || src.excludeSameGroupTargets === false ? false : true,
+    directExcludeSameGroupTargets: src.directExcludeSameGroupTargets === true || src.excludeSameGroupTargets === true ? true : false,
     revealed: src.revealed === false || src.hidden === true ? false : true,
   };
 }

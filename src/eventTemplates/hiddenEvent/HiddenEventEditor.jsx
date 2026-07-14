@@ -372,11 +372,6 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
               </div>
             </div>
           ))}
-          <div style={helpStyle}>
-            {cfg.fourballMode === 'self'
-              ? '참가자가 Player STEP3에서 포볼선택 버튼을 누른 뒤 저장해야 A그룹 1명과 B그룹 1명이 무작위로 묶입니다. 위 설정에서 선택한 그룹만 포볼선택 버튼을 사용할 수 있습니다.'
-              : 'A그룹 참가자 1명과 B그룹 참가자 1명을 운영자가 무작위로 묶어 2인 1팀을 만듭니다.'}
-          </div>
         </div>
       )}
     </div>
