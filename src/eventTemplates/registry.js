@@ -183,6 +183,8 @@ export const TEMPLATE_REGISTRY = [
       winnerOrder: 'desc',
       adjustments: {},
       pairGroups: { A: [1, 2], B: [3, 4] },
+      selfPickSide: 'A',
+      directExcludeSameGroupTargets: true,
       calculationMethod: 'add',
       roomRankSlots: [1, 4],
       randomSeed: '',

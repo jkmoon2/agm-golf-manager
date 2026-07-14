@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   getRankScoreGroupSide,
   getRankScorePairGroupLabel,
+  normalizeRankScoreDirectPairs,
   normalizeRankScoreGameParams,
   normalizeRankScorePairs,
 } from '../../events/rankScoreGame';
@@ -27,9 +28,15 @@ export default function RankScoreGameMonitor({
   onAssignPair,
   onCancelPair,
   onRandomAssign,
+  onAssignDirectPair,
+  onCancelDirectPair,
 }) {
   const cfg = normalizeRankScoreGameParams(eventDef?.params);
-  const pairs = useMemo(() => normalizeRankScorePairs(inputsByEvent?.shared?.rankScorePairs || {}), [inputsByEvent]);
+  const isDirectPairGame = cfg.gameType === 'directPair';
+  const isRandomPairGame = cfg.gameType === 'randomPair';
+  const pairs = useMemo(() => isDirectPairGame
+    ? normalizeRankScoreDirectPairs(inputsByEvent?.shared?.rankScoreDirectPairs || {})
+    : normalizeRankScorePairs(inputsByEvent?.shared?.rankScorePairs || {}), [inputsByEvent, isDirectPairGame]);
   const safeParticipants = Array.isArray(participants) ? participants : [];
   const [draftById, setDraftById] = useState({});
 
@@ -45,6 +52,21 @@ export default function RankScoreGameMonitor({
     safeParticipants.forEach((me) => {
       const meId = String(me?.id ?? '');
       if (!meId) return;
+
+      if (isDirectPairGame) {
+        const myGroup = Number(me?.group ?? me?.groupNo ?? me?.groupNumber ?? me?.jo ?? me?.joNo);
+        map[meId] = safeParticipants.filter((p) => {
+          const pid = String(p?.id ?? '');
+          if (!pid || pid === meId) return false;
+          if (cfg.directExcludeSameGroupTargets !== false) {
+            const targetGroup = Number(p?.group ?? p?.groupNo ?? p?.groupNumber ?? p?.jo ?? p?.joNo);
+            if (Number.isFinite(myGroup) && Number.isFinite(targetGroup) && myGroup === targetGroup) return false;
+          }
+          return true;
+        });
+        return;
+      }
+
       const mySide = getRankScoreGroupSide(me, cfg);
       const targetSide = mySide === 'A' ? 'B' : mySide === 'B' ? 'A' : '';
       map[meId] = safeParticipants.filter((p) => {
@@ -56,9 +78,11 @@ export default function RankScoreGameMonitor({
       });
     });
     return map;
-  }, [safeParticipants, cfg, pairs]);
+  }, [safeParticipants, cfg, pairs, isDirectPairGame]);
 
-  const pairedCount = Object.keys(pairs || {}).filter((id) => String(id) < String(pairs[id] || '')).length;
+  const pairedCount = isDirectPairGame
+    ? Object.keys(pairs || {}).length
+    : Object.keys(pairs || {}).filter((id) => String(id) < String(pairs[id] || '')).length;
 
   const assignOne = async (me) => {
     const meId = String(me?.id ?? '');
@@ -72,11 +96,19 @@ export default function RankScoreGameMonitor({
       alert('선택한 상대를 찾을 수 없습니다.');
       return;
     }
+    if (isDirectPairGame) {
+      if (typeof onAssignDirectPair === 'function') await onAssignDirectPair(me, partner);
+      return;
+    }
     if (typeof onAssignPair === 'function') await onAssignPair(me, partner);
   };
 
   const cancelOne = async (me) => {
     if (!me) return;
+    if (isDirectPairGame) {
+      if (typeof onCancelDirectPair === 'function') await onCancelDirectPair(me);
+      return;
+    }
     if (typeof onCancelPair === 'function') await onCancelPair(me);
   };
 
@@ -87,7 +119,7 @@ export default function RankScoreGameMonitor({
           <div>
             <div style={{ fontSize: 17, fontWeight: 950, color: '#16243f' }}>{eventDef?.title || '대회 순위 점수 게임'}</div>
             <div style={{ fontSize: 12, color: '#667085', marginTop: 2 }}>
-              {cfg.gameType === 'randomPair' ? `포볼 · ${groupLabelA} ↔ ${groupLabelB}` : '방대방'} · {cfg.revealed === false ? '비공개' : '공개'} · 배정 {pairedCount}팀
+              {isRandomPairGame ? `포볼 · ${groupLabelA} ↔ ${groupLabelB}` : (isDirectPairGame ? '포볼 선택' : '방대방')} · {cfg.revealed === false ? '비공개' : '공개'} · 배정 {pairedCount}팀
             </div>
           </div>
           <button type="button" style={btnStyle} onClick={onClose}>닫기</button>
@@ -97,14 +129,14 @@ export default function RankScoreGameMonitor({
           <button type="button" style={cfg.revealed === false ? primaryStyle : dangerStyle} onClick={() => onToggleReveal && onToggleReveal(!(cfg.revealed !== false))}>
             {cfg.revealed === false ? '공개로 전환' : '비공개로 전환'}
           </button>
-          {cfg.gameType === 'randomPair' && (
+          {isRandomPairGame && (
             <button type="button" style={primaryStyle} onClick={() => onRandomAssign && onRandomAssign()}>
               무작위 배정
             </button>
           )}
         </div>
 
-        {cfg.gameType !== 'randomPair' ? (
+        {!isRandomPairGame && !isDirectPairGame ? (
           <div style={{ color: '#667085', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>
             방대방 게임은 참가자별 포볼 배정 대상이 아닙니다. 공개/비공개만 사용할 수 있습니다.
           </div>
@@ -114,14 +146,14 @@ export default function RankScoreGameMonitor({
               const pid = String(p?.id ?? '');
               const partnerId = String(pairs?.[pid] || '');
               const partner = partnerId ? safeParticipants.find((x) => String(x?.id ?? '') === partnerId) : null;
-              const side = getRankScoreGroupSide(p, cfg) || '-';
+              const side = isDirectPairGame ? `${Number(p?.group ?? 0) || '-'}조` : (getRankScoreGroupSide(p, cfg) || '-');
               const candidates = candidatesById[pid] || [];
               return (
                 <div key={`rank-score-monitor-${pid}`} style={{ border: '1px solid #e5eaf2', borderRadius: 12, padding: 10, display: 'grid', gap: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                     <div style={{ minWidth: 0 }}>
                       <b style={{ color: '#16243f' }}>{getName(p)}</b>
-                      <span style={{ marginLeft: 6, color: '#667085', fontSize: 12 }}>{side}그룹</span>
+                      <span style={{ marginLeft: 6, color: '#667085', fontSize: 12 }}>{isDirectPairGame ? side : `${side}그룹`}</span>
                     </div>
                     <div style={{ color: partner ? '#1d4ed8' : '#999', fontSize: 12, fontWeight: 900 }}>
                       {partner ? `배정: ${getName(partner)}` : '미배정'}

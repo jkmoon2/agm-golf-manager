@@ -9,10 +9,12 @@ export function defaultRankScoreGameParams() {
   return {
     rankingSource: 'result',       // result | adjusted | manual
     pointType: 'converted',        // converted | rank
-    gameType: 'room',              // randomPair | room
+    gameType: 'room',              // randomPair | directPair | room
     winnerOrder: 'desc',           // desc(높은 점수 승) | asc(낮은 점수 승)
     adjustments: {},               // { [participantId]: number }
     pairGroups: { A: [1, 2], B: [3, 4] }, // 포볼게임 A/B 그룹 조합
+    selfPickSide: 'A',             // randomPair: 포볼선택 버튼 사용 그룹(A|B)
+    directExcludeSameGroupTargets: true, // directPair: 본인 조 제외 여부
     calculationMethod: 'add',      // add | subtract | multiply | divide
     roomRankSlots: [1, 4],         // 방대방 계산 시 방 내부 순위 중 선택할 2개 위치
     roomAddTarget: 'all',          // add일 때 all(방 전체) | slots(기준순위 2명)
@@ -63,7 +65,7 @@ export function normalizeRankScoreGameParams(raw) {
   const src = (raw && typeof raw === 'object') ? raw : {};
   const rankingSource = ['result', 'adjusted', 'manual'].includes(src.rankingSource) ? src.rankingSource : base.rankingSource;
   const pointType = ['converted', 'rank'].includes(src.pointType) ? src.pointType : base.pointType;
-  const gameType = ['randomPair', 'room'].includes(src.gameType) ? src.gameType : base.gameType;
+  const gameType = ['randomPair', 'directPair', 'room'].includes(src.gameType) ? src.gameType : base.gameType;
   const winnerOrder = ['asc', 'desc'].includes(src.winnerOrder) ? src.winnerOrder : base.winnerOrder;
   const pairGroups = normalizeRankScorePairGroups(src.pairGroups);
   const calculationMethod = ['add', 'subtract', 'multiply', 'divide'].includes(src.calculationMethod) ? src.calculationMethod : base.calculationMethod;
@@ -92,6 +94,8 @@ export function normalizeRankScoreGameParams(raw) {
     roomRankSlots,
     roomAddTarget,
     randomSeed: String(src.randomSeed || ''),
+    selfPickSide: src.selfPickSide === 'B' ? 'B' : (src.selfPickSide === 'both' ? 'both' : base.selfPickSide),
+    directExcludeSameGroupTargets: src.directExcludeSameGroupTargets === false || src.excludeSameGroupTargets === false ? false : true,
     revealed: src.revealed === false || src.hidden === true ? false : true,
   };
 }
@@ -304,6 +308,7 @@ export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {
   const byId = new Map(personBaseRows.map((row) => [String(row.id), row]));
 
   const pairMap = normalizeRankScorePairs(inputsSlot?.shared?.rankScorePairs);
+  const directPairMap = normalizeRankScoreDirectPairs(inputsSlot?.shared?.rankScoreDirectPairs || inputsSlot?.shared?.rankScoreSelectPairs);
 
   const roomRows = sortByWinner(Array.from({ length: Math.max(0, roomCount) }, (_, idx) => {
     const roomNo = idx + 1;
@@ -334,30 +339,54 @@ export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {
   const pairedIds = new Set();
   const teamBaseRows = [];
 
-  Object.entries(pairMap).forEach(([aId, bId]) => {
-    const aKey = String(aId);
-    const bKey = String(bId);
-    if (!aKey || !bKey) return;
-    if (pairedIds.has(aKey) || pairedIds.has(bKey)) return;
-    const a = byId.get(aKey);
-    const b = byId.get(bKey);
-    if (!a || !b) return;
-    pairedIds.add(aKey);
-    pairedIds.add(bKey);
-    const members = [a, b];
-    const label = members.map((row) => row.name).filter(Boolean).join(' + ') || `팀${teamBaseRows.length + 1}`;
-    const values = members.map((row) => row.eventScore);
-    const completeMembers = members.every((row) => Number.isFinite(Number(row?.eventScore)));
-    teamBaseRows.push({
-      key: `pair-${aKey}-${bKey}`,
-      label,
-      name: label,
-      value: completeMembers ? calculateRankScoreValues(values, params.calculationMethod) : null,
-      members,
-      roomLabel: members.map((row) => row.roomLabel).filter(Boolean).join(' / '),
+  if (params.gameType === 'directPair') {
+    Object.entries(directPairMap).forEach(([selectorId, partnerId]) => {
+      const aKey = String(selectorId);
+      const bKey = String(partnerId);
+      if (!aKey || !bKey || aKey === bKey) return;
+      const a = byId.get(aKey);
+      const b = byId.get(bKey);
+      if (!a || !b) return;
+      const members = [a, b];
+      const label = members.map((row) => row.name).filter(Boolean).join(' + ') || `팀${teamBaseRows.length + 1}`;
+      const values = members.map((row) => row.eventScore);
+      const completeMembers = members.every((row) => Number.isFinite(Number(row?.eventScore)));
+      teamBaseRows.push({
+        key: `direct-${aKey}-${bKey}`,
+        selectorId: aKey,
+        partnerId: bKey,
+        label,
+        name: label,
+        value: completeMembers ? calculateRankScoreValues(values, params.calculationMethod) : null,
+        members,
+        roomLabel: a.roomLabel || members.map((row) => row.roomLabel).filter(Boolean).join(' / '),
+      });
     });
-  });
-
+  } else {
+    Object.entries(pairMap).forEach(([aId, bId]) => {
+      const aKey = String(aId);
+      const bKey = String(bId);
+      if (!aKey || !bKey) return;
+      if (pairedIds.has(aKey) || pairedIds.has(bKey)) return;
+      const a = byId.get(aKey);
+      const b = byId.get(bKey);
+      if (!a || !b) return;
+      pairedIds.add(aKey);
+      pairedIds.add(bKey);
+      const members = [a, b];
+      const label = members.map((row) => row.name).filter(Boolean).join(' + ') || `팀${teamBaseRows.length + 1}`;
+      const values = members.map((row) => row.eventScore);
+      const completeMembers = members.every((row) => Number.isFinite(Number(row?.eventScore)));
+      teamBaseRows.push({
+        key: `pair-${aKey}-${bKey}`,
+        label,
+        name: label,
+        value: completeMembers ? calculateRankScoreValues(values, params.calculationMethod) : null,
+        members,
+        roomLabel: members.map((row) => row.roomLabel).filter(Boolean).join(' / '),
+      });
+    });
+  }
 
   const teamRows = sortByWinner(teamBaseRows, params);
 
@@ -372,7 +401,7 @@ export function computeRankScoreGame(eventDef, participants = [], inputsSlot = {
 
 export function getRankScoreGameTarget(params) {
   const safe = normalizeRankScoreGameParams(params);
-  if (safe.gameType === 'randomPair') return 'team';
+  if (safe.gameType === 'randomPair' || safe.gameType === 'directPair') return 'team';
   return 'room';
 }
 
@@ -385,6 +414,22 @@ export function normalizeRankScorePairs(raw) {
     if (!a || !b || a === b) return;
     out[a] = b;
     out[b] = a;
+  });
+  return out;
+}
+
+export function normalizeRankScoreDirectPairs(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const out = {};
+  Object.entries(src).forEach(([key, value]) => {
+    const selectorId = String(key || '').trim();
+    let partnerRaw = value;
+    if (partnerRaw && typeof partnerRaw === 'object' && !Array.isArray(partnerRaw)) {
+      partnerRaw = partnerRaw.partnerId ?? partnerRaw.opponentId ?? partnerRaw.targetId ?? partnerRaw.id;
+    }
+    const partnerId = String(partnerRaw || '').trim();
+    if (!selectorId || !partnerId || selectorId === partnerId) return;
+    out[selectorId] = partnerId;
   });
   return out;
 }
@@ -404,7 +449,7 @@ export function getRankScoreGameMetaText(params) {
   const pointText = safe.pointType === 'rank' ? '순위점수' : '환산점수';
   const gameText = safe.gameType === 'randomPair'
     ? `포볼 게임(${getRankScorePairGroupLabel(safe.pairGroups, 'A')} ↔ ${getRankScorePairGroupLabel(safe.pairGroups, 'B')})`
-    : '방대방 게임';
+    : (safe.gameType === 'directPair' ? '포볼 게임(선택)' : '방대방 게임');
   const calcTextMap = { add: '더하기', subtract: '빼기', multiply: '곱하기', divide: '나누기' };
   const calcText = calcTextMap[safe.calculationMethod] || '더하기';
   const revealText = safe.revealed === false ? '비공개' : '공개';

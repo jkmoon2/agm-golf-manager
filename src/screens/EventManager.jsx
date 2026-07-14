@@ -36,7 +36,7 @@ import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHole
 import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig } from '../events/pickLineup';
-import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, getRankScoreGroupSide, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../events/rankScoreGame';
+import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, getRankScoreGroupSide, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../events/rankScoreGame';
 import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs, normalizeHiddenPersonalPoints } from '../events/hiddenEvent';
 
 
@@ -1489,6 +1489,26 @@ if (editForm?.template === 'group-battle') {
     try { broadcastEventSync(eventId, { reason: 'rankScorePairs' }); } catch {}
   };
 
+  const saveRankScoreDirectPairs = async (ev, pairs) => {
+    if (!ev) return;
+    const all = { ...(inputsAll || {}) };
+    const slot = { ...(all[ev.id] || {}) };
+    slot.shared = { ...(slot.shared || {}), rankScoreDirectPairs: normalizeRankScoreDirectPairs(pairs || {}), assignedAt: Date.now(), assignedBy: 'admin' };
+    all[ev.id] = slot;
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => {
+        const next = { ...(freshBase || {}) };
+        const freshSlot = { ...(next[ev.id] || {}) };
+        freshSlot.shared = { ...(freshSlot.shared || {}), ...slot.shared };
+        next[ev.id] = freshSlot;
+        return next;
+      });
+    } else {
+      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+    }
+    try { broadcastEventSync(eventId, { reason: 'rankScoreDirectPairs' }); } catch {}
+  };
+
   const assignRankScorePair = async (me, partner) => {
     if (!rankScoreMonitorEvent || !me || !partner) return;
     const params = normalizeRankScoreGameParams(rankScoreMonitorEvent.params);
@@ -1511,6 +1531,31 @@ if (editForm?.template === 'group-battle') {
     pairs[meId] = partnerId;
     pairs[partnerId] = meId;
     await saveRankScorePairs(rankScoreMonitorEvent, pairs);
+  };
+
+  const assignRankScoreDirectPair = async (me, partner) => {
+    if (!rankScoreMonitorEvent || !me || !partner) return;
+    const params = normalizeRankScoreGameParams(rankScoreMonitorEvent.params);
+    if (params.gameType !== 'directPair') return;
+    if (params.directExcludeSameGroupTargets !== false && getPreviewGroupNo(me) === getPreviewGroupNo(partner)) {
+      alert('현재 설정에서는 같은 조 참가자를 선택할 수 없습니다.');
+      return;
+    }
+    const slot = getInputsSlot(rankScoreMonitorEvent.id);
+    const pairs = normalizeRankScoreDirectPairs(slot?.shared?.rankScoreDirectPairs || {});
+    const meId = String(me.id);
+    const partnerId = String(partner.id);
+    if (!meId || !partnerId || meId === partnerId) return;
+    pairs[meId] = partnerId;
+    await saveRankScoreDirectPairs(rankScoreMonitorEvent, pairs);
+  };
+
+  const cancelRankScoreDirectPair = async (me) => {
+    if (!rankScoreMonitorEvent || !me) return;
+    const slot = getInputsSlot(rankScoreMonitorEvent.id);
+    const pairs = normalizeRankScoreDirectPairs(slot?.shared?.rankScoreDirectPairs || {});
+    delete pairs[String(me.id)];
+    await saveRankScoreDirectPairs(rankScoreMonitorEvent, pairs);
   };
 
   const assignRankScoreRandomPairs = async () => {
@@ -2663,6 +2708,8 @@ if (editForm?.template === 'group-battle') {
             onAssignPair={assignRankScorePair}
             onCancelPair={cancelRankScorePair}
             onRandomAssign={assignRankScoreRandomPairs}
+            onAssignDirectPair={assignRankScoreDirectPair}
+            onCancelDirectPair={cancelRankScoreDirectPair}
           />
         )}
 

@@ -617,8 +617,8 @@ const events = useMemo(
         const rows = (data.teamRows || []).map((r, i) => ({
           key: r.key || String(i),
           rank: r.displayRank || i + 1,
-          label: rankParams.revealed === false && rankParams.gameType === 'randomPair' ? '비공개' : (r.label || r.name),
-          value: rankParams.revealed === false && rankParams.gameType === 'randomPair' ? '-' : r.value,
+          label: rankParams.revealed === false && (rankParams.gameType === 'randomPair' || rankParams.gameType === 'directPair') ? '비공개' : (r.label || r.name),
+          value: rankParams.revealed === false && (rankParams.gameType === 'randomPair' || rankParams.gameType === 'directPair') ? '-' : r.value,
         }));
         return { kind: 'team', metricLabel, rows };
       }

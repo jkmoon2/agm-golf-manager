@@ -3,15 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getRankScorePairGroupLabel, normalizeRankScoreGameParams, normalizeRankScorePairGroups } from '../../events/rankScoreGame';
 
 const LONG_PRESS_MS = 450;
-const PAIR_GROUP_OPTIONS = [
-  [1, 2],
-  [1, 3],
-  [1, 4],
-  [2, 3],
-  [2, 4],
-  [3, 4],
-];
-
 const CALC_METHOD_OPTIONS = [
   { value: 'add', label: '더하기' },
   { value: 'subtract', label: '빼기' },
@@ -20,6 +11,14 @@ const CALC_METHOD_OPTIONS = [
 ];
 
 const ROOM_RANK_SLOT_OPTIONS = [1, 2, 3, 4];
+
+function toggleGroup(list = [], groupNo) {
+  const n = Number(groupNo);
+  const set = new Set((Array.isArray(list) ? list : []).map(Number).filter(Number.isFinite));
+  if (set.has(n)) set.delete(n);
+  else set.add(n);
+  return Array.from(set).sort((a, b) => a - b);
+}
 
 export default function RankScoreGameEditor({ participants = [], value, onChange }) {
   const safe = normalizeRankScoreGameParams(value);
@@ -62,15 +61,29 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
     });
   }, [participantsSafe, adjustDraft]);
 
-  const pairGroupValue = pairGroups.A.join(',');
+  const emitPairGroup = (side, groupNo) => {
+    const nextGroups = { ...pairGroups, [side]: toggleGroup(pairGroups?.[side], groupNo) };
+    const other = side === 'A' ? 'B' : 'A';
+    const sideSet = new Set(nextGroups[side]);
+    nextGroups[other] = (nextGroups[other] || []).filter((g) => !sideSet.has(Number(g)));
+    if (!nextGroups[other].length) nextGroups[other] = [1, 2, 3, 4].filter((g) => !sideSet.has(g));
+    emit({ pairGroups: nextGroups });
+  };
 
-  const onPairGroupChange = (valueText) => {
-    const a = String(valueText || '')
-      .split(',')
-      .map((v) => Number(v))
-      .filter((n) => Number.isFinite(n));
-    const b = [1, 2, 3, 4].filter((n) => !a.includes(n));
-    emit({ pairGroups: { A: a, B: b } });
+  const emitSelfPickSide = (valueText) => {
+    const side = valueText === 'B' ? 'B' : (valueText === 'both' ? 'both' : 'A');
+    emit({ selfPickSide: side, selfPickerSide: side, pickSide: side });
+  };
+
+  const emitDirectExcludeSameGroup = (checked) => {
+    emit({
+      directExcludeSameGroupTargets: !!checked,
+      excludeSameGroupTargets: !!checked,
+      excludeOwnGroupTargets: !!checked,
+      allowSameGroupTargets: !checked,
+      targetScope: checked ? 'otherGroup' : 'all',
+      opponentScope: checked ? 'otherGroup' : 'all',
+    });
   };
 
   const onRoomRankSlotChange = (idx, valueText) => {
@@ -152,6 +165,7 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
           <span style={fieldLabelStyle}>게임 방식</span>
           <select value={safe.gameType} onChange={(e) => emit({ gameType: e.target.value })} style={selectStyle}>
             <option value="randomPair">포볼 게임</option>
+            <option value="directPair">포볼 게임(선택)</option>
             <option value="room">방대방 게임</option>
           </select>
         </label>
@@ -200,22 +214,61 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
       {safe.gameType === 'randomPair' && (
         <div style={pairBoxStyle}>
           <div style={pairTitleStyle}>포볼 그룹 구성</div>
+
           <label style={labelStyle}>
-            <span style={fieldLabelStyle}>A그룹 조합</span>
-            <select value={pairGroupValue} onChange={(e) => onPairGroupChange(e.target.value)} style={selectStyle}>
-              {PAIR_GROUP_OPTIONS.map((arr) => {
-                const b = [1, 2, 3, 4].filter((n) => !arr.includes(n));
-                const valueText = arr.join(',');
-                return (
-                  <option key={valueText} value={valueText}>
-                    A그룹 {arr.map((n) => `${n}조`).join('+')} / B그룹 {b.map((n) => `${n}조`).join('+')}
-                  </option>
-                );
-              })}
+            <span style={fieldLabelStyle}>포볼선택 가능 그룹</span>
+            <select value={safe.selfPickSide || 'A'} onChange={(e) => emitSelfPickSide(e.target.value)} style={selectStyle}>
+              <option value="A">A그룹만 포볼선택</option>
+              <option value="B">B그룹만 포볼선택</option>
             </select>
           </label>
+
+          {['A', 'B'].map((side) => (
+            <div key={`rank-pair-side-${side}`}>
+              <div style={pairTitleStyle}>{side}그룹</div>
+              <div style={groupButtonWrapStyle}>
+                {[1, 2, 3, 4].map((g) => {
+                  const active = (pairGroups?.[side] || []).includes(g);
+                  return (
+                    <button
+                      key={`rank-pair-${side}-${g}`}
+                      type="button"
+                      onClick={() => emitPairGroup(side, g)}
+                      style={{
+                        ...groupButtonStyle,
+                        border: active ? '1px solid #2563eb' : '1px solid #d7dfec',
+                        background: active ? '#eaf2ff' : '#fff',
+                        color: active ? '#1d4ed8' : '#344054',
+                      }}
+                    >
+                      {g}조
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
           <div style={smallTextStyle}>
             현재 구성: {getRankScorePairGroupLabel(pairGroups, 'A')} ↔ {getRankScorePairGroupLabel(pairGroups, 'B')}
+          </div>
+        </div>
+      )}
+
+      {safe.gameType === 'directPair' && (
+        <div style={pairBoxStyle}>
+          <div style={pairTitleStyle}>포볼 게임(선택) 설정</div>
+          <label style={checkRowStyle}>
+            <input
+              type="checkbox"
+              checked={safe.directExcludeSameGroupTargets !== false}
+              onChange={(e) => emitDirectExcludeSameGroup(e.target.checked)}
+              style={{ width: 16, height: 16 }}
+            />
+            참가자가 속한 조를 제외한 조만 오픈
+          </label>
+          <div style={smallTextStyle}>
+            Player STEP3에서 참가자가 본인 기준 포볼 팀원을 직접 선택한 뒤, 저장 버튼을 눌러 확정합니다. 저장 전에는 같은 이벤트 안에서 선택을 바꿀 수 있고, 저장 후에는 변경할 수 없습니다.
           </div>
         </div>
       )}
@@ -271,6 +324,9 @@ const selectStyle = { width: '100%', height: 42, borderRadius: 10, border: '1px 
 const smallTextStyle = { fontSize: 12, color: '#667085', lineHeight: 1.35 };
 const pairBoxStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, display: 'grid', gap: 8, background: '#fbfdff' };
 const pairTitleStyle = { fontSize: 13, fontWeight: 800, color: '#183153' };
+const groupButtonWrapStyle = { display: 'flex', gap: 6, flexWrap: 'wrap' };
+const groupButtonStyle = { borderRadius: 999, padding: '7px 10px', fontSize: 12, fontWeight: 900 };
+const checkRowStyle = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 900, color: '#16243f' };
 const roomRankGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 };
 const adjustBoxStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, display: 'grid', gap: 8 };
 const adjustListStyle = { display: 'grid', gap: 6, maxHeight: 260, overflow: 'auto', paddingRight: 2 };
