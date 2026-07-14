@@ -267,9 +267,6 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
             />
             참가자가 속한 조를 제외한 조만 오픈
           </label>
-          <div style={smallTextStyle}>
-            Player STEP3에서 참가자가 본인 기준 포볼 팀원을 직접 선택한 뒤, 저장 버튼을 눌러 확정합니다. 저장 전에는 같은 이벤트 안에서 선택을 바꿀 수 있고, 저장 후에는 변경할 수 없습니다.
-          </div>
         </div>
       )}
 
