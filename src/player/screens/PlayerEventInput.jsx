@@ -14,7 +14,7 @@ import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, get
 import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
-import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
+import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
 import { computeHiddenEvent, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
@@ -1893,6 +1893,21 @@ export default function PlayerEventInput(){
     return rows;
   };
 
+  const getRankScoreDirectPairMap = (evId) => {
+    const draftPairs = inputsByEvent?.[evId]?.shared?.rankScoreDirectPairs;
+    const serverPairs = inputsByEventServer?.[evId]?.shared?.rankScoreDirectPairs;
+    return normalizeRankScoreDirectPairs(draftPairs || serverPairs || {});
+  };
+
+  const getRankScoreDirectPairRows = (evId) => {
+    const pairs = getRankScoreDirectPairMap(evId);
+    return Object.entries(pairs).map(([selectorId, partnerId]) => {
+      const selector = participantById.get(String(selectorId || ''));
+      const partner = participantById.get(String(partnerId || ''));
+      return selector && partner ? { a: selector, b: partner } : null;
+    }).filter(Boolean);
+  };
+
   const patchRankScorePair = async (evId, me, partner) => {
     if (!evId || !me || !partner) return;
     const meId = String(me.id);
@@ -1951,6 +1966,40 @@ export default function PlayerEventInput(){
     }
   };
 
+  const patchRankScoreDirectPair = (evId, partnerId) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    if (!evId || !mine) return;
+    const meId = String(mine.id ?? '');
+    const targetId = String(partnerId || '');
+    if (!meId) return;
+
+    if (hasRankScoreSavedDirectSelectionForEvent(evId)) {
+      alert('이미 선택이 저장되어 변경할 수 없습니다.');
+      return;
+    }
+
+    const pending = getPendingPlayerSelectionInfo();
+    if (pending) {
+      const pendingEventId = String(pending.ev?.id || '');
+      if (pendingEventId !== String(evId || '') || pending.ev?.template !== 'rank-score-game') {
+        alertPendingHiddenSelection();
+        return;
+      }
+    }
+
+    const all = cloneEventInputs(draft || {});
+    const slot = { ...(all[evId] || {}) };
+    const shared = { ...(slot.shared || {}) };
+    const pairs = normalizeRankScoreDirectPairs(shared.rankScoreDirectPairs || {});
+    if (!targetId) delete pairs[meId];
+    else pairs[meId] = targetId;
+    shared.rankScoreDirectPairs = pairs;
+    slot.shared = shared;
+    all[evId] = slot;
+    applyDraft(all);
+    setDirty(true);
+  };
+
   const handleRankScorePairPick = (evId, rankCfg) => {
     const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
     if (!mine) return;
@@ -1962,6 +2011,13 @@ export default function PlayerEventInput(){
       alert('포볼 선택은 운영자가 지정한 A/B 그룹 참가자만 사용할 수 있습니다.');
       return;
     }
+    const allowedSide = rankCfg.selfPickSide || 'A';
+    const canPickFromThisSide = allowedSide === 'both' || mySide === allowedSide;
+    if (!canPickFromThisSide) {
+      alert(`포볼선택은 ${allowedSide === 'B' ? 'B그룹' : 'A그룹'} 참가자만 사용할 수 있습니다.`);
+      return;
+    }
+
     const targetSide = mySide === 'A' ? 'B' : 'A';
     const candidates = (participants || []).filter((p) => {
       const pid = String(p?.id ?? '');
@@ -2035,12 +2091,34 @@ export default function PlayerEventInput(){
     return null;
   };
 
+  const getPendingRankScoreDirectSelectionInfo = () => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    const meId = String(mine?.id ?? '');
+    if (!meId) return null;
+
+    for (const ev of (events || [])) {
+      if (ev?.template !== 'rank-score-game') continue;
+      const cfg = normalizeRankScoreGameParams(ev?.params);
+      if (cfg.gameType !== 'directPair') continue;
+      const draftPairs = normalizeRankScoreDirectPairs(draft?.[ev.id]?.shared?.rankScoreDirectPairs || {});
+      const serverPairs = normalizeRankScoreDirectPairs(inputsByEventServer?.[ev.id]?.shared?.rankScoreDirectPairs || {});
+      const draftKey = String(draftPairs?.[meId] || '');
+      const serverKey = String(serverPairs?.[meId] || '');
+      if (draftKey && draftKey !== serverKey) {
+        return { ev, cfg, selectorId: meId, partnerId: draftKey, serverPartnerId: serverKey };
+      }
+    }
+    return null;
+  };
+
+  const getPendingPlayerSelectionInfo = () => getPendingHiddenSelectionInfo() || getPendingRankScoreDirectSelectionInfo();
+
   const alertPendingHiddenSelection = () => {
     alert('상대 선택이 저장되지 않았습니다.\n저장 버튼을 눌러 선택을 확정해 주세요.');
   };
 
   const blockIfPendingHiddenSelection = () => {
-    const pending = getPendingHiddenSelectionInfo();
+    const pending = getPendingPlayerSelectionInfo();
     if (!pending) return false;
     alertPendingHiddenSelection();
     return true;
@@ -2066,12 +2144,33 @@ export default function PlayerEventInput(){
     return !!String(getHiddenOpponentId(inputsByEventServer?.[evId]?.person?.[meId]) || '');
   };
 
-  // 하단 '참가자' 탭처럼 화면 밖 링크로 빠져나가는 경우에도 저장 전 히든 선택을 막습니다.
+  const isRankScoreDirectSelectionDirtyForEvent = (evId) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    const meId = String(mine?.id ?? '');
+    if (!evId || !meId) return false;
+    const draftPairs = normalizeRankScoreDirectPairs(draft?.[evId]?.shared?.rankScoreDirectPairs || {});
+    const serverPairs = normalizeRankScoreDirectPairs(inputsByEventServer?.[evId]?.shared?.rankScoreDirectPairs || {});
+    const draftKey = String(draftPairs?.[meId] || '');
+    const serverKey = String(serverPairs?.[meId] || '');
+    return !!draftKey && draftKey !== serverKey;
+  };
+
+  const hasRankScoreSavedDirectSelectionForEvent = (evId) => {
+    const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
+    const meId = String(mine?.id ?? '');
+    if (!evId || !meId) return false;
+    const serverPairs = normalizeRankScoreDirectPairs(inputsByEventServer?.[evId]?.shared?.rankScoreDirectPairs || {});
+    if (String(serverPairs?.[meId] || '')) return true;
+    const draftPairs = normalizeRankScoreDirectPairs(inputsByEvent?.[evId]?.shared?.rankScoreDirectPairs || {});
+    return !!String(draftPairs?.[meId] || '') && !isRankScoreDirectSelectionDirtyForEvent(evId) && !dirty;
+  };
+
+  // 하단 '참가자' 탭처럼 화면 밖 링크로 빠져나가는 경우에도 저장 전 선택을 막습니다.
   useEffect(() => {
     const onCaptureClick = (e) => {
       const anchor = e.target && typeof e.target.closest === 'function' ? e.target.closest('a[href]') : null;
       if (!anchor) return;
-      const pending = getPendingHiddenSelectionInfo();
+      const pending = getPendingPlayerSelectionInfo();
       if (!pending) return;
       try {
         const href = anchor.getAttribute('href') || '';
@@ -2144,12 +2243,12 @@ export default function PlayerEventInput(){
       return;
     }
 
-    const pendingHiddenSelection = getPendingHiddenSelectionInfo();
-    if (pendingHiddenSelection) {
-      const pendingEventId = String(pendingHiddenSelection.ev?.id || '');
+    const pendingPlayerSelection = getPendingPlayerSelectionInfo();
+    if (pendingPlayerSelection) {
+      const pendingEventId = String(pendingPlayerSelection.ev?.id || '');
       // 저장 전 임시 선택은 같은 이벤트 안에서는 저장 전까지 다른 상대/팀원으로 변경할 수 있습니다.
-      // 단, 다른 히든 이벤트로 이동해서 추가 선택하는 것은 저장 누락을 막기 위해 차단합니다.
-      if (pendingEventId !== String(evId || '')) {
+      // 단, 다른 이벤트로 이동해서 추가 선택하는 것은 저장 누락을 막기 위해 차단합니다.
+      if (pendingEventId !== String(evId || '') || pendingPlayerSelection.ev?.template !== 'hidden-event') {
         alertPendingHiddenSelection();
         return;
       }
@@ -2526,6 +2625,21 @@ export default function PlayerEventInput(){
             }
           }
           continue;
+        }
+
+        if (ev.template === 'rank-score-game') {
+          const draftShared = draft?.[evId]?.shared || {};
+          const serverShared = inputsByEventServer?.[evId]?.shared || {};
+          if (Object.prototype.hasOwnProperty.call(draftShared, 'rankScorePairs')) {
+            const draftPairs = JSON.stringify(normalizeRankScorePairs(draftShared.rankScorePairs || {}));
+            const serverPairs = JSON.stringify(normalizeRankScorePairs(serverShared.rankScorePairs || {}));
+            if (!eq(draftPairs, serverPairs)) return true;
+          }
+          if (Object.prototype.hasOwnProperty.call(draftShared, 'rankScoreDirectPairs')) {
+            const draftDirectPairs = JSON.stringify(normalizeRankScoreDirectPairs(draftShared.rankScoreDirectPairs || {}));
+            const serverDirectPairs = JSON.stringify(normalizeRankScoreDirectPairs(serverShared.rankScoreDirectPairs || {}));
+            if (!eq(draftDirectPairs, serverDirectPairs)) return true;
+          }
         }
 
         for (const pid of roomPids) {
@@ -2998,23 +3112,47 @@ export default function PlayerEventInput(){
           if (ev.template === 'rank-score-game') {
             const rankCfg = normalizeRankScoreGameParams(ev?.params);
             const isManualRank = rankCfg.rankingSource === 'manual';
-            const isPairGame = rankCfg.gameType === 'randomPair';
-            const rankPairs = getRankScorePairMap(ev.id);
+            const isRandomPairGame = rankCfg.gameType === 'randomPair';
+            const isDirectPairGame = rankCfg.gameType === 'directPair';
+            const isPairGame = isRandomPairGame || isDirectPairGame;
+            const rankPairs = isDirectPairGame ? getRankScoreDirectPairMap(ev.id) : getRankScorePairMap(ev.id);
             const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
             const minePairId = mine ? rankPairs[String(mine.id)] : '';
             const minePair = minePairId ? participantById.get(String(minePairId)) : null;
             const mineSide = mine ? getRankScoreGroupSide(mine, rankCfg) : '';
-            const pairRows = getRankScorePairRows(ev.id);
+            const pairRows = isDirectPairGame ? getRankScoreDirectPairRows(ev.id) : getRankScorePairRows(ev.id);
             const pairLabelA = getRankScorePairGroupLabel(rankCfg.pairGroups, 'A');
             const pairLabelB = getRankScorePairGroupLabel(rankCfg.pairGroups, 'B');
             const pairHeaderA = splitRankScorePairLabel(pairLabelA);
             const pairHeaderB = splitRankScorePairLabel(pairLabelB);
-            const hasPairCandidates = mine && !minePairId && (participants || []).some((p) => {
+            const rankDirectFocusKey = `${ev.id}:rank-score-direct`;
+            const rankDirectDirty = isDirectPairGame ? isRankScoreDirectSelectionDirtyForEvent(ev.id) : false;
+            const rankDirectSaved = isDirectPairGame ? hasRankScoreSavedDirectSelectionForEvent(ev.id) : false;
+            const rankDirectCandidates = isDirectPairGame ? (participants || []).filter((p) => {
+              const pid = String(p?.id ?? '');
+              if (!mine || !pid || pid === String(mine.id)) return false;
+              if (rankCfg.directExcludeSameGroupTargets !== false && isSameGroupParticipant(mine, p)) return false;
+              return true;
+            }).sort((a, b) => {
+              const groupDiff = (Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999));
+              if (groupDiff) return groupDiff;
+              const roomDiff = (Number(getAssignmentRoom(a) ?? 999) - Number(getAssignmentRoom(b) ?? 999));
+              if (roomDiff) return roomDiff;
+              return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
+            }) : [];
+            const selfPickSide = rankCfg.selfPickSide || 'A';
+            const canUseRankRandomPickButton = !isRandomPairGame || selfPickSide === 'both' || mineSide === selfPickSide;
+            const hasPairCandidates = isRandomPairGame && mine && !minePairId && !!mineSide && canUseRankRandomPickButton && (participants || []).some((p) => {
               const pid = String(p?.id ?? '');
               if (!pid || pid === String(mine.id)) return false;
               if (rankPairs[pid]) return false;
               return getRankScoreGroupSide(p, rankCfg) && getRankScoreGroupSide(p, rankCfg) !== mineSide;
             });
+            const rankScoreRoomLabel = (p) => {
+              const n = Number(getAssignmentRoom(p) ?? 0);
+              if (!Number.isFinite(n) || n < 1) return '-';
+              return (roomNames?.[n - 1] && String(roomNames[n - 1]).trim()) ? String(roomNames[n - 1]).trim() : `${n}번방`;
+            };
 
             return (
               <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
@@ -3074,36 +3212,76 @@ export default function PlayerEventInput(){
                   <div style={{ padding: isManualRank ? '10px 0 0' : '0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 12px 8px', paddingTop: 4 }}>
                       <div style={{ fontSize: 15, fontWeight: 900, color: '#183153' }}>포볼팀 배정 현황</div>
-                      <button
-                        type="button"
-                        onClick={() => handleRankScorePairPick(ev.id, rankCfg)}
-                        disabled={!mine || !!minePairId || !hasPairCandidates}
-                        style={{
-                          width: 92,
-                          height: 32,
-                          borderRadius: 10,
-                          marginTop: 4,
-                          border: '1px solid #bcd0ff',
-                          background: '#eef4ff',
-                          color: '#2457d6',
-                          fontSize: 12,
-                          fontWeight: 800,
-                          opacity: (!mine || !!minePairId || !hasPairCandidates) ? 0.5 : 1,
-                          pointerEvents: (!mine || !!minePairId || !hasPairCandidates) ? 'none' : undefined,
-                        }}
-                      >
-                        {minePair ? '배정완료' : '포볼선택'}
-                      </button>
+                      {isRandomPairGame && (
+                        <button
+                          type="button"
+                          onClick={() => handleRankScorePairPick(ev.id, rankCfg)}
+                          disabled={!mine || !!minePairId || !hasPairCandidates}
+                          style={{
+                            width: 92,
+                            height: 32,
+                            borderRadius: 10,
+                            marginTop: 4,
+                            border: '1px solid #bcd0ff',
+                            background: '#eef4ff',
+                            color: '#2457d6',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            opacity: (!mine || !!minePairId || !hasPairCandidates) ? 0.5 : 1,
+                            pointerEvents: (!mine || !!minePairId || !hasPairCandidates) ? 'none' : undefined,
+                          }}
+                        >
+                          {minePair ? '배정완료' : '포볼선택'}
+                        </button>
+                      )}
                     </div>
 
+                    {isRandomPairGame && mine && !!mineSide && !canUseRankRandomPickButton && (
+                      <div style={{ margin: '0 12px 8px', fontSize: 12, color: '#667085', fontWeight: 800 }}>
+                        포볼선택은 {selfPickSide === 'B' ? 'B그룹' : 'A그룹'} 참가자만 사용할 수 있습니다.
+                      </div>
+                    )}
+
+                    {isDirectPairGame && (
+                      <label style={{ display: 'grid', gap: 6, margin: '0 12px 8px', fontSize: 12, fontWeight: 900, color: '#344054' }}>
+                        내 포볼 팀원 선택
+                        <select
+                          value={minePairId || ''}
+                          onChange={(e) => patchRankScoreDirectPair(ev.id, e.target.value)}
+                          onFocus={() => setHiddenSelectFocusId(rankDirectFocusKey)}
+                          onBlur={() => setHiddenSelectFocusId('')}
+                          disabled={!mine || rankDirectSaved}
+                          style={{
+                            height: 38,
+                            border: hiddenSelectFocusId === rankDirectFocusKey ? '2px solid #2563eb' : '1px solid #d7dfec',
+                            borderRadius: 10,
+                            padding: '0 10px',
+                            fontSize: 14,
+                            background: rankDirectSaved ? '#f2f4f7' : '#fff',
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                            width: '100%',
+                            color: rankDirectSaved ? '#344054' : undefined,
+                          }}
+                        >
+                          <option value="">팀원 선택</option>
+                          {rankDirectCandidates.map((p) => (
+                            <option key={`rank-direct-candidate-${ev.id}-${p.id}`} value={p.id}>
+                              {getParticipantGroupNo(p) ? `${getParticipantGroupNo(p)}조 · ` : ''}{p.nickname || '-'} {p.room ? `(${rankScoreRoomLabel(p)})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
                     {minePair && rankCfg.revealed !== false && (
-                      <div style={{ margin: '0 12px 8px', fontSize: 12, color: '#1d4ed8', fontWeight: 700 }}>
-                        내 팀원: {minePair.nickname || '-'}
+                      <div style={{ margin: '0 12px 8px', fontSize: 12, color: isDirectPairGame && rankDirectDirty ? '#be123c' : '#1d4ed8', fontWeight: 800 }}>
+                        내 팀원: {minePair.nickname || '-'}{isDirectPairGame ? (rankDirectDirty ? ' · 저장 버튼을 눌러 선택을 확정하세요.' : ' · 선택이 저장되어 있습니다.') : ''}
                       </div>
                     )}
                     {minePair && rankCfg.revealed === false && (
-                      <div style={{ margin: '0 12px 8px', fontSize: 12, color: '#667085', fontWeight: 700 }}>
-                        포볼팀 배정 완료, 공개 전까지 팀원은 숨김 처리됩니다.
+                      <div style={{ margin: '0 12px 8px', fontSize: 12, color: isDirectPairGame && rankDirectDirty ? '#be123c' : '#667085', fontWeight: 800 }}>
+                        {isDirectPairGame && rankDirectDirty ? '저장 버튼을 눌러 선택을 확정하세요.' : '포볼팀 배정 완료, 공개 전까지 팀원은 숨김 처리됩니다.'}
                       </div>
                     )}
 
@@ -3119,10 +3297,10 @@ export default function PlayerEventInput(){
                           <tr>
                             <th>팀</th>
                             <th>
-                              {pairHeaderA.title}<span style={{ fontWeight: 400 }}> {pairHeaderA.groups}</span>
+                              {isDirectPairGame ? '선택자' : (<>{pairHeaderA.title}<span style={{ fontWeight: 400 }}> {pairHeaderA.groups}</span></>)}
                             </th>
                             <th>
-                              {pairHeaderB.title}<span style={{ fontWeight: 400 }}> {pairHeaderB.groups}</span>
+                              {isDirectPairGame ? '팀원' : (<>{pairHeaderB.title}<span style={{ fontWeight: 400 }}> {pairHeaderB.groups}</span></>)}
                             </th>
                             <th>G합계</th>
                           </tr>
@@ -3135,8 +3313,8 @@ export default function PlayerEventInput(){
                           )}
                           {pairRows.map((row, idx) => {
                             const aSide = getRankScoreGroupSide(row.a, rankCfg);
-                            const left = aSide === 'A' ? row.a : row.b;
-                            const right = aSide === 'A' ? row.b : row.a;
+                            const left = isDirectPairGame ? row.a : (aSide === 'A' ? row.a : row.b);
+                            const right = isDirectPairGame ? row.b : (aSide === 'A' ? row.b : row.a);
                             const hdSum = Number(left?.handicap || 0) + Number(right?.handicap || 0);
                             return (
                               <tr key={`rank-pair-${ev.id}-${idx}`}>
