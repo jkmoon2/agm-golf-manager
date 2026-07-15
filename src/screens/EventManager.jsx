@@ -58,6 +58,15 @@ function getPreviewGroupNo(p) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function getMonitorOpponentId(slot) {
+  if (!slot) return '';
+  if (typeof slot === 'string' || typeof slot === 'number') return String(slot || '');
+  if (slot.opponentId != null) return String(slot.opponentId || '');
+  if (slot.partnerId != null) return String(slot.partnerId || '');
+  if (slot.targetId != null) return String(slot.targetId || '');
+  return '';
+}
+
 function buildJoRoomRows(personRowsBase = [], participants = [], roomCount = 0, roomNames = [], rankOrder = 'desc') {
   const byId = new Map((participants || []).map((p) => [String(p?.id), p]));
   const groupBuckets = new Map();
@@ -1611,6 +1620,124 @@ if (editForm?.template === 'group-battle') {
     await saveRankScorePairs(rankScoreMonitorEvent, pairs);
   };
 
+  const saveHiddenMonitorInputs = async (ev, slot, reason = 'hiddenMonitor') => {
+    if (!ev) return;
+    const all = { ...(inputsAll || {}) };
+    all[ev.id] = slot;
+    const now = Date.now();
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => {
+        const next = { ...(freshBase || {}) };
+        next[ev.id] = slot;
+        return next;
+      });
+    } else {
+      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+    }
+    try { broadcastEventSync(eventId, { reason }); } catch {}
+  };
+
+  const assignHiddenSelection = async (me, partner) => {
+    if (!hiddenMonitorEvent || !me || !partner) return;
+    const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
+    const meId = String(me.id ?? '');
+    const partnerId = String(partner.id ?? '');
+    if (!meId || !partnerId || meId === partnerId) return;
+
+    if (params.mode === 'personal') {
+      const sameGroupOnly = !!(params.sameGroupOnly || params.sameGroupTargetOnly || params.sameGroupTargetsOnly || params.onlySameGroup || params.targetScope === 'sameGroup');
+      if (sameGroupOnly && getPreviewGroupNo(me) !== getPreviewGroupNo(partner)) {
+        alert('현재 설정에서는 같은 조 참가자만 지목할 수 있습니다.');
+        return;
+      }
+    }
+    if (params.mode === 'fourball' && params.fourballMode === 'select' && params.excludeSameGroupTargets !== false && getPreviewGroupNo(me) === getPreviewGroupNo(partner)) {
+      alert('현재 설정에서는 같은 조 참가자를 선택할 수 없습니다.');
+      return;
+    }
+    if (params.mode === 'fourball' && params.fourballMode !== 'select') {
+      const meSide = getRankScoreGroupSide(me, { pairGroups: params.pairGroups });
+      const partnerSide = getRankScoreGroupSide(partner, { pairGroups: params.pairGroups });
+      if (!meSide || !partnerSide || meSide === partnerSide) {
+        alert('포볼 배정은 A/B그룹이 서로 다른 참가자끼리만 가능합니다.');
+        return;
+      }
+    }
+
+    const currentSlot = (inputsAll && typeof inputsAll === 'object') ? (inputsAll[hiddenMonitorEvent.id] || {}) : {};
+    const slot = { ...(currentSlot || {}) };
+    const now = Date.now();
+
+    if (params.mode === 'personal' || (params.mode === 'fourball' && (params.fourballMode === 'select' || params.fourballMode === 'self'))) {
+      const person = { ...(slot.person || {}) };
+      person[meId] = { ...((person && person[meId]) || {}), opponentId: partnerId, selectedAt: now, assignedBy: 'admin' };
+      if (params.mode === 'fourball' && params.fourballMode === 'self') {
+        // 참가자 버튼 무작위 방식은 실제 포볼팀이므로 상대방이 이미 다른 팀이면 정리합니다.
+        Object.entries(person).forEach(([pid, rec]) => {
+          if (pid !== meId && getMonitorOpponentId(rec) === partnerId) delete person[pid];
+        });
+        const sharedPairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
+        [meId, partnerId].forEach((pid) => {
+          const prev = sharedPairs[pid];
+          if (prev != null) delete sharedPairs[String(prev)];
+          delete sharedPairs[pid];
+        });
+        slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: sharedPairs, assignedAt: now, assignedMode: 'admin-edit' };
+      }
+      slot.person = person;
+    } else if (params.mode === 'fourball') {
+      const pairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
+      [meId, partnerId].forEach((pid) => {
+        const prev = pairs[pid];
+        if (prev != null) delete pairs[String(prev)];
+        delete pairs[pid];
+      });
+      pairs[meId] = partnerId;
+      pairs[partnerId] = meId;
+      slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'admin-edit' };
+    }
+
+    await saveHiddenMonitorInputs(hiddenMonitorEvent, slot, 'hiddenSelectionAssign');
+  };
+
+  const cancelHiddenSelection = async (me) => {
+    if (!hiddenMonitorEvent || !me) return;
+    const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
+    const meId = String(me.id ?? '');
+    if (!meId) return;
+
+    const currentSlot = (inputsAll && typeof inputsAll === 'object') ? (inputsAll[hiddenMonitorEvent.id] || {}) : {};
+    const slot = { ...(currentSlot || {}) };
+    const now = Date.now();
+
+    if (params.mode === 'personal' || (params.mode === 'fourball' && (params.fourballMode === 'select' || params.fourballMode === 'self'))) {
+      const person = { ...(slot.person || {}) };
+      const partnerId = getMonitorOpponentId(person[meId]);
+      delete person[meId];
+      if (params.mode === 'fourball' && params.fourballMode === 'self' && partnerId) {
+        Object.entries(person).forEach(([pid, rec]) => {
+          if (pid === partnerId || getMonitorOpponentId(rec) === meId) delete person[pid];
+        });
+        const sharedPairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
+        [meId, partnerId].forEach((pid) => {
+          const prev = sharedPairs[pid];
+          if (prev != null) delete sharedPairs[String(prev)];
+          delete sharedPairs[pid];
+        });
+        slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: sharedPairs, assignedAt: now, assignedMode: 'admin-edit' };
+      }
+      slot.person = person;
+    } else if (params.mode === 'fourball') {
+      const pairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
+      const partnerId = String(pairs[meId] || '');
+      if (partnerId) delete pairs[partnerId];
+      delete pairs[meId];
+      slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'admin-edit' };
+    }
+
+    await saveHiddenMonitorInputs(hiddenMonitorEvent, slot, 'hiddenSelectionCancel');
+  };
+
   const assignHiddenFourball = async () => {
     if (!hiddenMonitorEvent) return;
     const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
@@ -2703,6 +2830,8 @@ if (editForm?.template === 'group-battle') {
             eventDef={rankScoreMonitorEvent}
             participants={participants}
             inputsByEvent={getInputsSlot(rankScoreMonitorEvent.id)}
+            roomNames={roomNames}
+            roomCount={roomCount}
             onClose={() => setRankScoreMonitorId(null)}
             onToggleReveal={toggleRankScoreReveal}
             onAssignPair={assignRankScorePair}
@@ -2723,6 +2852,8 @@ if (editForm?.template === 'group-battle') {
             onToggleReveal={toggleHiddenReveal}
             onToggleLock={(locked) => toggleHiddenLock(hiddenMonitorEvent, locked)}
             onAssignFourball={assignHiddenFourball}
+            onAssignSelection={assignHiddenSelection}
+            onCancelSelection={cancelHiddenSelection}
             onSavePersonalPoints={saveHiddenPersonalPoints}
           />
         )}
