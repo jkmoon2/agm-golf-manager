@@ -4,8 +4,6 @@ import React, { useState, useEffect, useContext } from "react";
 import styles from "./Step2.module.css";
 import { StepContext } from "../flows/StepFlow";
 import { EventContext } from "../contexts/EventContext";
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 
 const normalizeRoomCapacities = (count, caps) => {
   const rc = Math.max(1, Number(count) || 0);
@@ -159,18 +157,18 @@ export default function Step2() {
       if (!ok) return;
     }
 
-    // 1) Firestore 업데이트
-    await updateDoc(doc(db, 'events', eventId), {
+    // 1) Context 업데이트
+    setRoomCount(localRoomCount);
+    setRoomNames(localRoomNames);
+    setRoomCapacities(finalCaps);
+
+    // 2) 다음 STEP 이동 전 StepFlow의 안전 저장 경로로 방 정보를 함께 저장
+    //    직접 updateDoc를 쓰면 대회 전환 직후 eventId 검증/디바운스 flush 가드를 우회할 수 있어 사용하지 않습니다.
+    await goNext({
       roomCount: localRoomCount,
       roomNames: localRoomNames,
       roomCapacities: finalCaps,
     });
-    // 2) Context 업데이트
-    setRoomCount(localRoomCount);
-    setRoomNames(localRoomNames);
-    setRoomCapacities(finalCaps);
-    // 3) 다음 STEP
-    goNext();
   };
 
   return (

@@ -293,7 +293,23 @@ const MOUSE_CANCEL_PX = 12;
 
 
 export default function EventManager() {
-  const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, updateEventInputsTransaction, overlayScoresToParticipants } = useContext(EventContext) || {};
+  const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, updateEventInputsTransaction, overlayScoresToParticipants, isCurrentEventReadyForWrite } = useContext(EventContext) || {};
+
+  const isEventDataReadyForManagerWrite = useCallback(() => {
+    if (!eventId || !eventData) return false;
+    const loadedId = String(eventData?.__eventId || eventData?.id || '');
+    if (loadedId && loadedId !== String(eventId)) return false;
+    if (typeof isCurrentEventReadyForWrite === 'function') return isCurrentEventReadyForWrite(eventId);
+    return true;
+  }, [eventId, eventData, isCurrentEventReadyForWrite]);
+
+  const safeUpdateEventImmediate = useCallback(async (updates, ifChanged = true) => {
+    if (!isEventDataReadyForManagerWrite()) {
+      alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+      return null;
+    }
+    return updateEventImmediate(updates, ifChanged);
+  }, [isEventDataReadyForManagerWrite, updateEventImmediate]);
 
   /* ── 대회 연동 ───────────────────────────────────────── */
   const [selectedEvId, setSelectedEvId] = useState(eventId || '');
@@ -326,8 +342,8 @@ export default function EventManager() {
 
   const commitEventsList = useCallback(async (nextEvents, reason = 'events') => {
     const list = Array.isArray(nextEvents) ? nextEvents.map(normalizeEventForSave) : [];
-    await updateEventImmediate({ events: list, eventsUpdatedAt: Date.now(), eventsUpdatedReason: reason }, false);
-  }, [normalizeEventForSave, updateEventImmediate]);
+    await safeUpdateEventImmediate({ events: list, eventsUpdatedAt: Date.now(), eventsUpdatedReason: reason }, false);
+  }, [normalizeEventForSave, safeUpdateEventImmediate]);
 
 
   const [dragEvents, setDragEvents] = useState(null);
@@ -891,7 +907,7 @@ if (form.template === 'group-battle') {
         return next;
       }, { eventInputResets: nextResets });
     } else {
-      await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false);
     }
     try {
       diagMerge('adminEventManager', { lastClearInputsAt: Date.now(), eventId: eventId || '', evId: String(ev?.id || ''), resetToken: nextResetToken });
@@ -1493,7 +1509,7 @@ if (editForm?.template === 'group-battle') {
         return next;
       });
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
     }
     try { broadcastEventSync(eventId, { reason: 'rankScorePairs' }); } catch {}
   };
@@ -1513,7 +1529,7 @@ if (editForm?.template === 'group-battle') {
         return next;
       });
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
     }
     try { broadcastEventSync(eventId, { reason: 'rankScoreDirectPairs' }); } catch {}
   };
@@ -1632,7 +1648,7 @@ if (editForm?.template === 'group-battle') {
         return next;
       });
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
     }
     try { broadcastEventSync(eventId, { reason }); } catch {}
   };
@@ -1787,7 +1803,7 @@ if (editForm?.template === 'group-battle') {
     if (typeof updateEventInputsTransaction === 'function') {
       await updateEventInputsTransaction(eventId, (freshBase) => ({ ...(freshBase || {}), [hiddenMonitorEvent.id]: slot }));
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
     }
     alert(params.fourballMode === 'self'
       ? '포볼 무작위 배정이 완료되었습니다. 기존 배정팀은 유지하고 미배정 참가자만 추가 배정했습니다.'
@@ -1887,7 +1903,7 @@ if (editForm?.template === 'group-battle') {
     if (typeof updateEventInputsTransaction === 'function') {
       await updateEventInputsTransaction(eventId, (freshBase) => ({ ...(freshBase || {}), [ev.id]: slot }));
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
     }
     try { broadcastEventSync(eventId, { reason: 'applyQuick' }); } catch {}
     // ✅ [4/5] 루트 eventInputs는 updateEventInputsTransaction 한 경로로만 저장합니다.
