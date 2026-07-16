@@ -889,10 +889,12 @@ export default function useDashboardSnapshot(selectedEventId) {
       ? overlayScoresToParticipants(authoritativeParticipants)
       : authoritativeParticipants;
 
-    const eventInputsRoot = {
-      ...((selectedData?.eventInputs && typeof selectedData.eventInputs === 'object') ? selectedData.eventInputs : {}),
-      ...((eventInputsLive && typeof eventInputsLive === 'object') ? eventInputsLive : {}),
-    };
+    // 라이브 안정화: Player/Admin STEP3의 단일 기준은 events/{eventId}.eventInputs(root)입니다.
+    // 과거 eventInputs 하위 컬렉션 값은 오래된 데이터가 남아 대시보드만 다르게 보일 수 있으므로
+    // 집계에는 섞지 않고, 아래 debug legacyEventInputsDocsCount에서 진단용 개수만 확인합니다.
+    const eventInputsRoot = (selectedData?.eventInputs && typeof selectedData.eventInputs === 'object')
+      ? selectedData.eventInputs
+      : {};
 
     const checkedInSet = buildCheckedInSet(participantsLive, playersLive, playerStatesLive);
     const legacyCheckedInCount = participants.reduce((acc, participant) => acc + (isCheckedIn(participant, checkedInSet) ? 1 : 0), 0);
@@ -974,6 +976,7 @@ export default function useDashboardSnapshot(selectedEventId) {
           activeEvents: activeEvents.length,
           roomCount: inferredRoomCount,
           hasEventInputs: Object.keys(eventInputsRoot).length,
+          legacyEventInputsDocsCount: eventInputsLive && typeof eventInputsLive === 'object' ? Object.keys(eventInputsLive).length : 0,
           presenceDocsCount: Array.isArray(presenceLive) ? presenceLive.length : 0,
           presenceActiveCount: countActivePresence(presenceLive),
           presenceLatestFreshAt: Array.isArray(presenceLive) && presenceLive.length
