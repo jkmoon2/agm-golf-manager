@@ -4,8 +4,6 @@ import React, { useState, useEffect, useContext } from "react";
 import styles from "./Step2.module.css";
 import { StepContext } from "../flows/StepFlow";
 import { EventContext } from "../contexts/EventContext";
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 
 const normalizeRoomCapacities = (count, caps) => {
   const rc = Math.max(1, Number(count) || 0);
@@ -51,8 +49,8 @@ export default function Step2() {
     mode,
   } = useContext(StepContext);
 
-  // EventContext에서 현재 eventId 가져오기
-  const { eventId } = useContext(EventContext);
+  // EventContext에서 현재 eventId와 안전 저장 함수를 가져오기
+  const { eventId, updateEventImmediate } = useContext(EventContext);
 
   // 로컬 상태: 방 개수, 방 이름 목록
   const defaultCount = Number(roomCount) >= 3 ? roomCount : 4;
@@ -160,11 +158,18 @@ export default function Step2() {
     }
 
     // 1) Firestore 업데이트
-    await updateDoc(doc(db, 'events', eventId), {
+    //    직접 updateDoc 대신 EventContext의 안전 저장 경로를 사용합니다.
+    //    - 대회 전환 직후 stale eventData 저장 방지
+    //    - EventContext 내부 mode/participants 보호 로직 유지
+    if (typeof updateEventImmediate !== 'function') {
+      alert('대회 저장 함수가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    await updateEventImmediate({
       roomCount: localRoomCount,
       roomNames: localRoomNames,
       roomCapacities: finalCaps,
-    });
+    }, false);
     // 2) Context 업데이트
     setRoomCount(localRoomCount);
     setRoomNames(localRoomNames);
