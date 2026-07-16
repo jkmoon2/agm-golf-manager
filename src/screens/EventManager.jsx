@@ -324,10 +324,40 @@ export default function EventManager() {
     };
   }, []);
 
+  // ✅ 라이브 안정화 2단계: EventManager 저장 직전 대회 ID 검증
+  // - EventManager는 이벤트 생성/수정/삭제/마감/입력초기화 등 저장 작업이 많기 때문에,
+  //   대회 전환 직후 예전 eventData가 남아 있으면 다른 대회에 저장될 위험이 있습니다.
+  // - Admin STEP3/STEP4 흐름은 건드리지 않고, EventManager 내부 저장 직전에만 차단합니다.
+  const ensureEventWriteReady = useCallback((actionName = '저장') => {
+    const targetId = String(eventId || '').trim();
+    if (!targetId) {
+      alert('대회를 먼저 선택해 주세요.');
+      return false;
+    }
+    if (!eventData) {
+      alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+      return false;
+    }
+    const loadedId = String(eventData?.__eventId || eventData?.id || targetId || '').trim();
+    if (loadedId && loadedId !== targetId) {
+      console.warn('[EventManager] skip write: event mismatch', { actionName, targetId, loadedId });
+      alert('대회 전환 중입니다. 잠시 후 다시 시도해 주세요.');
+      return false;
+    }
+    return true;
+  }, [eventId, eventData]);
+
+  const safeUpdateEventImmediate = useCallback(async (updates, ifChanged = false, actionName = '저장') => {
+    if (!ensureEventWriteReady(actionName)) return false;
+    if (typeof updateEventImmediate !== 'function') return false;
+    await updateEventImmediate(updates, ifChanged);
+    return true;
+  }, [ensureEventWriteReady, updateEventImmediate]);
+
   const commitEventsList = useCallback(async (nextEvents, reason = 'events') => {
     const list = Array.isArray(nextEvents) ? nextEvents.map(normalizeEventForSave) : [];
-    await updateEventImmediate({ events: list, eventsUpdatedAt: Date.now(), eventsUpdatedReason: reason }, false);
-  }, [normalizeEventForSave, updateEventImmediate]);
+    return safeUpdateEventImmediate({ events: list, eventsUpdatedAt: Date.now(), eventsUpdatedReason: reason }, false, reason);
+  }, [normalizeEventForSave, safeUpdateEventImmediate]);
 
 
   const [dragEvents, setDragEvents] = useState(null);
@@ -857,6 +887,7 @@ if (form.template === 'group-battle') {
 
   // ★ 입력 초기화(해당 이벤트의 person/room/team 입력을 비움)
   const clearInputs = async (ev) => {
+    if (!ensureEventWriteReady('입력 초기화')) return;
     if (!askConfirm('이 이벤트의 입력값을 모두 초기화할까요?')) return;
     try { diagPush('timeline', { type: 'adminEventManager.clearInputs:start', eventId: eventId || '', evId: String(ev?.id || ''), existingEventInputsCount: Object.keys(inputsAll || {}).length }); } catch {}
     const all = { ...(inputsAll || {}) };
@@ -891,7 +922,7 @@ if (form.template === 'group-battle') {
         return next;
       }, { eventInputResets: nextResets });
     } else {
-      await updateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, eventInputResets: nextResets }, false, '입력 초기화');
     }
     try {
       diagMerge('adminEventManager', { lastClearInputsAt: Date.now(), eventId: eventId || '', evId: String(ev?.id || ''), resetToken: nextResetToken });
@@ -1480,6 +1511,7 @@ if (editForm?.template === 'group-battle') {
 
   const saveRankScorePairs = async (ev, pairs) => {
     if (!ev) return;
+    if (!ensureEventWriteReady('대회 순위 점수 게임 배정 저장')) return;
     const all = { ...(inputsAll || {}) };
     const slot = { ...(all[ev.id] || {}) };
     slot.shared = { ...(slot.shared || {}), rankScorePairs: normalizeRankScorePairs(pairs || {}), assignedAt: Date.now(), assignedBy: 'admin' };
@@ -1493,13 +1525,14 @@ if (editForm?.template === 'group-battle') {
         return next;
       });
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false, '이벤트 입력 저장');
     }
     try { broadcastEventSync(eventId, { reason: 'rankScorePairs' }); } catch {}
   };
 
   const saveRankScoreDirectPairs = async (ev, pairs) => {
     if (!ev) return;
+    if (!ensureEventWriteReady('대회 순위 점수 게임 선택 저장')) return;
     const all = { ...(inputsAll || {}) };
     const slot = { ...(all[ev.id] || {}) };
     slot.shared = { ...(slot.shared || {}), rankScoreDirectPairs: normalizeRankScoreDirectPairs(pairs || {}), assignedAt: Date.now(), assignedBy: 'admin' };
@@ -1513,7 +1546,7 @@ if (editForm?.template === 'group-battle') {
         return next;
       });
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false, '이벤트 입력 저장');
     }
     try { broadcastEventSync(eventId, { reason: 'rankScoreDirectPairs' }); } catch {}
   };
@@ -1622,6 +1655,7 @@ if (editForm?.template === 'group-battle') {
 
   const saveHiddenMonitorInputs = async (ev, slot, reason = 'hiddenMonitor') => {
     if (!ev) return;
+    if (!ensureEventWriteReady('히든 이벤트 배정 저장')) return;
     const all = { ...(inputsAll || {}) };
     all[ev.id] = slot;
     const now = Date.now();
@@ -1632,7 +1666,7 @@ if (editForm?.template === 'group-battle') {
         return next;
       });
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false, '이벤트 입력 저장');
     }
     try { broadcastEventSync(eventId, { reason }); } catch {}
   };
@@ -1740,6 +1774,7 @@ if (editForm?.template === 'group-battle') {
 
   const assignHiddenFourball = async () => {
     if (!hiddenMonitorEvent) return;
+    if (!ensureEventWriteReady('히든 포볼 무작위 배정')) return;
     const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
     if (params.mode !== 'fourball') return;
 
@@ -1787,7 +1822,7 @@ if (editForm?.template === 'group-battle') {
     if (typeof updateEventInputsTransaction === 'function') {
       await updateEventInputsTransaction(eventId, (freshBase) => ({ ...(freshBase || {}), [hiddenMonitorEvent.id]: slot }));
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false, '이벤트 입력 저장');
     }
     alert(params.fourballMode === 'self'
       ? '포볼 무작위 배정이 완료되었습니다. 기존 배정팀은 유지하고 미배정 참가자만 추가 배정했습니다.'
@@ -1851,6 +1886,8 @@ if (editForm?.template === 'group-battle') {
     setEditAttemptsText(String(Number(ev.attempts||4)));
   };
   const applyQuick = async (ev) => {
+    if (!ev) return;
+    if (!ensureEventWriteReady('관리자 빠른 입력')) return;
     if (!quickKey) { alert('대상을 선택하세요.'); return; }
     try { diagPush('timeline', { type: 'adminEventManager.applyQuick:start', eventId: eventId || '', evId: String(ev?.id || ''), target: String(quickTarget || ''), key: String(quickKey || '') }); } catch {}
     const all = { ...(inputsAll || {}) };
@@ -1887,7 +1924,7 @@ if (editForm?.template === 'group-battle') {
     if (typeof updateEventInputsTransaction === 'function') {
       await updateEventInputsTransaction(eventId, (freshBase) => ({ ...(freshBase || {}), [ev.id]: slot }));
     } else {
-      await updateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false);
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: Date.now() }, false, '이벤트 입력 저장');
     }
     try { broadcastEventSync(eventId, { reason: 'applyQuick' }); } catch {}
     // ✅ [4/5] 루트 eventInputs는 updateEventInputsTransaction 한 경로로만 저장합니다.
