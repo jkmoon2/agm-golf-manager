@@ -600,7 +600,7 @@ export default function StepFlow() {
   const flow       = effectiveMode === 'stroke' ? strokeFlow : agmFlow;
 
   // ★ FIX: 저장을 await 후 이동(레이스 제거) + participantsRef로 항상 최신 값 사용
-  const goNext = async (extraUpdates = {}) => {
+  const goNext = async () => {
     // ✅ eventData 로딩 전에 저장/이동하면 mode 기본값('stroke')이 Firestore에 덮어써지며
     //    포볼 대회가 스트로크 탭으로 "이동"되는 현상이 발생할 수 있음
     if (eventId && (!eventData || !isEventDataForCurrentEvent(eventData, eventId))) {
@@ -608,32 +608,32 @@ export default function StepFlow() {
       return;
     }
     const latest = participantsRef.current || participants;
-    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd, ...(extraUpdates || {}) });
+    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const next = flow[(idx + 1) % flow.length];
     navigate(`/admin/home/${next}`);
   };
 
-  const goPrev = async (extraUpdates = {}) => {
+  const goPrev = async () => {
     if (eventId && (!eventData || !isEventDataForCurrentEvent(eventData, eventId))) {
       alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
       return;
     }
     const latest = participantsRef.current || participants;
-    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd, ...(extraUpdates || {}) });
+    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd });
     const idx  = flow.indexOf(curr);
     const prev = flow[(idx - 1 + flow.length) % flow.length];
     navigate(prev === 0 ? '/admin/home/0' : `/admin/home/${prev}`);
   };
 
   // ★ FIX: 하단 메뉴/아이콘으로 step 강제 이동할 때도 먼저 저장(점수 0 덮어쓰기 방지)
-  const setStep = async (n, extraUpdates = {}) => {
+  const setStep = async (n) => {
     if (eventId && (!eventData || !isEventDataForCurrentEvent(eventData, eventId))) {
       alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
       return;
     }
     const latest = participantsRef.current || participants;
-    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd, ...(extraUpdates || {}) });
+    await save({ title, roomCount, roomNames, roomCapacities, uploadMethod, participants: latest, dateStart, dateEnd });
     navigate(`/admin/home/${n}`);
   };
 
