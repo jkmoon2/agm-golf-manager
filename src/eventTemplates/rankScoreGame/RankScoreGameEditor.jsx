@@ -180,36 +180,34 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
         </label>
       </div>
 
-      {safe.gameType === 'room' && (
-        <div style={pairBoxStyle}>
-          <div style={pairTitleStyle}>방대방 계산 기준</div>
-          {safe.calculationMethod === 'add' && (
+      <div style={pairBoxStyle}>
+        <div style={pairTitleStyle}>방대방 계산 기준</div>
+        {safe.calculationMethod === 'add' && (
+          <label style={labelStyle}>
+            <span style={fieldLabelStyle}>더하기 대상</span>
+            <select value={safe.roomAddTarget === 'slots' ? 'slots' : 'all'} onChange={(e) => onRoomAddTargetChange(e.target.value)} style={selectStyle}>
+              <option value="all">방인원 전체</option>
+              <option value="slots">기준순위 2명</option>
+            </select>
+          </label>
+        )}
+        {(safe.calculationMethod !== 'add' || safe.roomAddTarget === 'slots') && (
+          <div style={roomRankGridStyle}>
             <label style={labelStyle}>
-              <span style={fieldLabelStyle}>더하기 대상</span>
-              <select value={safe.roomAddTarget === 'slots' ? 'slots' : 'all'} onChange={(e) => onRoomAddTargetChange(e.target.value)} style={selectStyle}>
-                <option value="all">방인원 전체</option>
-                <option value="slots">기준순위 2명</option>
+              <span style={fieldLabelStyle}>기준 순위 1</span>
+              <select value={safe.roomRankSlots?.[0] || 1} onChange={(e) => onRoomRankSlotChange(0, e.target.value)} style={selectStyle}>
+                {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-a-${n}`} value={n}>{n}위</option>)}
               </select>
             </label>
-          )}
-          {(safe.calculationMethod !== 'add' || safe.roomAddTarget === 'slots') && (
-            <div style={roomRankGridStyle}>
-              <label style={labelStyle}>
-                <span style={fieldLabelStyle}>기준 순위 1</span>
-                <select value={safe.roomRankSlots?.[0] || 1} onChange={(e) => onRoomRankSlotChange(0, e.target.value)} style={selectStyle}>
-                  {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-a-${n}`} value={n}>{n}위</option>)}
-                </select>
-              </label>
-              <label style={labelStyle}>
-                <span style={fieldLabelStyle}>기준 순위 2</span>
-                <select value={safe.roomRankSlots?.[1] || 4} onChange={(e) => onRoomRankSlotChange(1, e.target.value)} style={selectStyle}>
-                  {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-b-${n}`} value={n}>{n}위</option>)}
-                </select>
-              </label>
-            </div>
-          )}
-        </div>
-      )}
+            <label style={labelStyle}>
+              <span style={fieldLabelStyle}>기준 순위 2</span>
+              <select value={safe.roomRankSlots?.[1] || 4} onChange={(e) => onRoomRankSlotChange(1, e.target.value)} style={selectStyle}>
+                {ROOM_RANK_SLOT_OPTIONS.map((n) => <option key={`room-rank-b-${n}`} value={n}>{n}위</option>)}
+              </select>
+            </label>
+          </div>
+        )}
+      </div>
 
       {safe.gameType === 'randomPair' && (
         <div style={pairBoxStyle}>
