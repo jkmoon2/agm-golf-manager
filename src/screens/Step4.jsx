@@ -471,14 +471,9 @@ export default function Step4() {
         sessionStorage.setItem(LEGACY_LAST_SELECTED_FILENAME_KEY, name);
       } catch {}
 
-      // 2) 이벤트 문서에도 파일명 저장
-      if (typeof rememberUploadFilename === "function") {
-        try {
-          await rememberUploadFilename(mode, name);
-        } catch {}
-      }
-
-      
+      // 2) 이벤트 문서 파일명 저장은 applyNewRoster에서 participants와 함께 처리
+      //    - 파일명만 먼저 저장하면 그 스냅샷이 늦게 도착하면서 업로드 직후 participants 화면을 흔들 수 있음
+      //    - 따라서 화면/명단을 먼저 확정하고 마지막에 participants + 파일명을 한 번에 저장함
 
       // ★ patch: 업로드 roster를 Step4에서 직접 파싱하여 즉시 반영
       //   - STEP4에서 G핸디를 수정해도, 같은 파일을 다시 업로드하면 "업로드 파일 기준"으로 복귀
@@ -523,9 +518,12 @@ export default function Step4() {
         rosterFromFile = null;
       }
 
-      // 3) 기존 파서(상태 반영은 기존 handleFile에 위임)
-      if (typeof handleFile === "function") {
-        // React SyntheticEvent 풀링 문제를 피하기 위해 순수 객체로 다시 감싸서 전달
+      // 3) 기존 StepFlow.handleFile 재호출은 생략
+      //    - 이 화면에서 이미 같은 엑셀을 직접 파싱하여 setParticipants까지 완료함
+      //    - handleFile을 다시 호출하면 StepFlow 저장 가드/디바운스 저장과 중복되어
+      //      라이브 안정화 패치 이후 업로드 명단이 다시 빈 값처럼 보일 수 있음
+      //    - rosterFromFile 파싱 실패 시에만 기존 파서를 마지막 fallback으로 사용
+      if (!rosterFromFile && typeof handleFile === "function") {
         await handleFile({ target: { files: [f] } });
       }
 
