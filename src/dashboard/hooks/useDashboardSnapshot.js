@@ -889,15 +889,10 @@ export default function useDashboardSnapshot(selectedEventId) {
       ? overlayScoresToParticipants(authoritativeParticipants)
       : authoritativeParticipants;
 
-    // ✅ [EVENT-INPUTS SSOT] 대시보드도 Player/Admin STEP3와 동일하게 루트 eventInputs만 사용합니다.
-    // legacy subcollection(eventInputsLive)은 오래된 값이 남아 입력 현황을 되살릴 수 있으므로
-    // 집계에는 병합하지 않고 진단용 개수만 남깁니다.
-    const eventInputsRoot = (selectedData?.eventInputs && typeof selectedData.eventInputs === 'object')
-      ? selectedData.eventInputs
-      : {};
-    const legacyEventInputsCount = eventInputsLive && typeof eventInputsLive === 'object'
-      ? Object.keys(eventInputsLive).length
-      : 0;
+    const eventInputsRoot = {
+      ...((selectedData?.eventInputs && typeof selectedData.eventInputs === 'object') ? selectedData.eventInputs : {}),
+      ...((eventInputsLive && typeof eventInputsLive === 'object') ? eventInputsLive : {}),
+    };
 
     const checkedInSet = buildCheckedInSet(participantsLive, playersLive, playerStatesLive);
     const legacyCheckedInCount = participants.reduce((acc, participant) => acc + (isCheckedIn(participant, checkedInSet) ? 1 : 0), 0);
@@ -979,7 +974,6 @@ export default function useDashboardSnapshot(selectedEventId) {
           activeEvents: activeEvents.length,
           roomCount: inferredRoomCount,
           hasEventInputs: Object.keys(eventInputsRoot).length,
-          legacyEventInputsSubCount: legacyEventInputsCount,
           presenceDocsCount: Array.isArray(presenceLive) ? presenceLive.length : 0,
           presenceActiveCount: countActivePresence(presenceLive),
           presenceLatestFreshAt: Array.isArray(presenceLive) && presenceLive.length

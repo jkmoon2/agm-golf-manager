@@ -466,85 +466,6 @@ export function EventProvider({ children }) {
     return deletedEventIdsRef.current.has(String(targetId));
   }, []);
 
-  // ✅ [LIVE-GUARD] 디바운스 저장 큐를 eventId별 payload로 보관합니다.
-  // - 기존 단일 객체 큐는 1부 저장 대기 중 2부로 전환될 때 현재 eventId 기준으로 flush될 수 있어
-  //   대회명/참가자/이벤트가 교차 저장되는 위험이 있었습니다.
-  // - 이제 pending은 항상 { eventId, payload } 형태로 저장/flush되어 자기 대회 문서에만 기록됩니다.
-  const getPendingEventWrite = useCallback(() => {
-    const pending = queuedUpdatesRef.current;
-    if (!pending) return null;
-    if (pending && typeof pending === 'object' && Object.prototype.hasOwnProperty.call(pending, 'payload')) {
-      const eid = String(pending.eventId || '');
-      const payload = pending.payload && typeof pending.payload === 'object' ? pending.payload : null;
-      return eid && payload ? { eventId: eid, payload } : null;
-    }
-    // 구버전 큐 객체가 남아있는 경우 현재 eventId로만 해석(마이그레이션 안전장치)
-    const eid = String(eventId || '');
-    return eid && typeof pending === 'object' ? { eventId: eid, payload: pending } : null;
-  }, [eventId]);
-
-  const clearPendingEventWrite = useCallback((targetId = '') => {
-    const pending = getPendingEventWrite();
-    if (!pending) return false;
-    if (targetId && String(pending.eventId) !== String(targetId)) return false;
-    try {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    } catch {}
-    queuedUpdatesRef.current = null;
-    return true;
-  }, [getPendingEventWrite]);
-
-  const flushPendingEventWrites = useCallback(async (reason = 'manual', opts = {}) => {
-    const pending = getPendingEventWrite();
-    if (!pending || !pending.eventId || !pending.payload) return false;
-    const onlyTargetId = opts?.targetId ? String(opts.targetId) : '';
-    if (onlyTargetId && String(pending.eventId) !== onlyTargetId) return false;
-
-    try {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    } catch {}
-    queuedUpdatesRef.current = null;
-
-    if (isDeletedEventId(pending.eventId)) return false;
-    try {
-      await ensureAuthed();
-      await updateDoc(doc(db, 'events', pending.eventId), sanitizeUndefinedDeep(pending.payload));
-      if (String(pending.eventId) === String(eventId || '')) {
-        lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...pending.payload };
-        setEventData((prev) => (prev ? { ...prev, ...pending.payload } : { ...pending.payload, __eventId: pending.eventId, id: pending.eventId }));
-      }
-      try {
-        diagPush('timeline', {
-          type: 'event.flushPendingEventWrites:success',
-          eventId: pending.eventId,
-          reason,
-          keys: Object.keys(pending.payload || {}),
-        });
-      } catch {}
-      try { broadcastEventSync(pending.eventId, { reason: `flush:${reason}` }); } catch {}
-      return true;
-    } catch (e) {
-      console.warn('[EventContext] flushPendingEventWrites failed:', e, { reason, eventId: pending.eventId });
-      try { diagMarkError('eventContext', e, { type: 'event.flushPendingEventWrites:fail', reason, eventId: pending.eventId }); } catch {}
-      return false;
-    }
-  }, [eventId, getPendingEventWrite, isDeletedEventId]);
-
-  const isCurrentEventReadyForWrite = useCallback((targetId = eventId) => {
-    if (!targetId) return false;
-    if (isDeletedEventId(targetId)) return false;
-    const loaded = lastEventDataRef.current;
-    if (!loaded) return true;
-    const loadedId = String(loaded?.__eventId || loaded?.id || '');
-    return !loadedId || loadedId === String(targetId);
-  }, [eventId, isDeletedEventId]);
-
   const markDeletedEventId = useCallback((targetId) => {
     if (!targetId) return;
     const next = new Set(deletedEventIdsRef.current || []);
@@ -562,13 +483,25 @@ export function EventProvider({ children }) {
   }, []);
 
   const cancelPendingEventWrites = useCallback((targetId) => {
-    if (!targetId) return;
-    clearPendingEventWrite(targetId);
-  }, [clearPendingEventWrite]);
+    if (!targetId || String(targetId) !== String(eventId || '')) return;
+    try {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    } catch {}
+    queuedUpdatesRef.current = null;
+  }, [eventId]);
 
   const clearCurrentEventSelection = useCallback((targetId) => {
     if (!targetId) return;
-    clearPendingEventWrite(targetId);
+    try {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    } catch {}
+    queuedUpdatesRef.current = null;
     setEventData(null);
     lastEventDataRef.current = null;
     scoresMapRef.current = {};
@@ -581,12 +514,16 @@ export function EventProvider({ children }) {
         localStorage.removeItem('eventId');
       }
     } catch {}
-  }, [clearPendingEventWrite]);
+  }, []);
 
 
   const isCurrentLoadedEventSafeForWrite = useCallback((targetId) => {
-    return isCurrentEventReadyForWrite(targetId);
-  }, [isCurrentEventReadyForWrite]);
+    if (!targetId) return false;
+    const loaded = lastEventDataRef.current;
+    if (!loaded) return true;
+    const loadedId = String(loaded?.__eventId || loaded?.id || '');
+    return !loadedId || loadedId === String(targetId);
+  }, []);
 
 
   const normalizePublicView = (data) => {
@@ -1155,9 +1092,6 @@ export function EventProvider({ children }) {
       // ✅ [EVENT-SSOT] 실제로 다른 대회로 전환할 때만 현재 데이터를 비웁니다.
       // 같은 대회를 다시 loadEvent 하는 경우까지 비우면 Player STEP3/STEP6가 깜박이거나 사라집니다.
       if (isSwitchingEvent) {
-        // ✅ [LIVE-GUARD] 다른 대회로 전환하기 전에 남아있는 디바운스 저장은
-        // 반드시 원래 eventId 문서로 먼저 flush합니다.
-        await flushPendingEventWrites('before-loadEvent-switch');
         setEventData(null);
         lastEventDataRef.current = null;
         setScoresMap({});
@@ -1191,7 +1125,7 @@ export function EventProvider({ children }) {
         loadEventInFlightRef.current = next;
       } catch {}
     }
-  }, [eventId, isPlayerRoute, isDeletedEventId, clearCurrentEventSelection, unmarkDeletedEventId, applyIncomingEventData, flushPendingEventWrites]);
+  }, [eventId, isPlayerRoute, isDeletedEventId, clearCurrentEventSelection, unmarkDeletedEventId, applyIncomingEventData]);
 
   // 공용 업데이트(디바운스)
   const updateEvent = async (updates, opts = {}) => {
@@ -1224,27 +1158,18 @@ export function EventProvider({ children }) {
       }
       if (!changed) return;
     }
-    const pendingBefore = getPendingEventWrite();
-    if (pendingBefore && String(pendingBefore.eventId) !== targetEventId) {
-      await flushPendingEventWrites('before-updateEvent-other-event');
-    }
-    const currentPending = getPendingEventWrite();
-    const basePayload = currentPending && String(currentPending.eventId) === targetEventId ? currentPending.payload : {};
-    queuedUpdatesRef.current = { eventId: targetEventId, payload: { ...(basePayload || {}), ...enriched } };
+    queuedUpdatesRef.current = { ...(queuedUpdatesRef.current || {}), ...enriched };
     clearTimeout(debounceTimerRef.current);
     await new Promise((resolve) => {
       debounceTimerRef.current = setTimeout(async () => {
-        const pending = getPendingEventWrite();
-        if (!pending || String(pending.eventId) !== targetEventId) { resolve(); return; }
-        const toWrite = pending.payload || {};
+        const toWrite = queuedUpdatesRef.current;
         queuedUpdatesRef.current = null;
-        debounceTimerRef.current = null;
         try {
           if (isDeletedEventId(targetEventId)) return;
           const ref = doc(db, 'events', targetEventId);
           await updateDoc(ref, sanitizeUndefinedDeep(toWrite));
           lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...toWrite };
-          setEventData((prev) => (prev ? { ...prev, ...toWrite } : { ...toWrite, __eventId: targetEventId, id: targetEventId }));
+          setEventData((prev) => (prev ? { ...prev, ...toWrite } : toWrite));
           try { broadcastEventSync(targetEventId, { reason: 'updateEvent' }); } catch {}
         } catch (e) {
           if (isMissingDocError(e)) {
@@ -1279,21 +1204,11 @@ export function EventProvider({ children }) {
     // ✅ participants 저장 시, 모드별 필드(participantsStroke/participantsFourball)에도 같이 저장
     ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
 
-    const pendingBeforeImmediate = getPendingEventWrite();
-    if (pendingBeforeImmediate && String(pendingBeforeImmediate.eventId) !== targetEventId) {
-      await flushPendingEventWrites('before-updateEventImmediate-other-event');
-    }
-    const pendingSameEvent = getPendingEventWrite();
-    const effectiveUpdates = pendingSameEvent && String(pendingSameEvent.eventId) === targetEventId
-      ? { ...(pendingSameEvent.payload || {}), ...enriched }
-      : enriched;
-    clearPendingEventWrite(targetEventId);
-
     const before = lastEventDataRef.current || {};
     if (ifChanged) {
       let changed = false;
-      for (const k of Object.keys(effectiveUpdates)) {
-        if (!deepEqual(before?.[k], effectiveUpdates[k])) {
+      for (const k of Object.keys(enriched)) {
+        if (!deepEqual(before?.[k], enriched[k])) {
           changed = true;
           break;
         }
@@ -1303,13 +1218,22 @@ export function EventProvider({ children }) {
     try {
       if (isDeletedEventId(targetEventId)) return;
       const ref = doc(db, 'events', targetEventId);
-      await updateDoc(ref, sanitizeUndefinedDeep(effectiveUpdates));
+      await updateDoc(ref, sanitizeUndefinedDeep(enriched));
 
-      lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...effectiveUpdates };
-      setEventData((prev) => (prev ? { ...prev, ...effectiveUpdates } : { ...effectiveUpdates, __eventId: targetEventId, id: targetEventId }));
+      // 즉시 저장 후 디바운스 큐/타이머 정리
       try {
-        diagMerge('eventContext', { lastUpdateEventAt: Date.now(), eventId: targetEventId, lastUpdateKeys: Object.keys(effectiveUpdates || {}) });
-        diagPush('timeline', { type: 'event.updateEventImmediate:success', eventId: targetEventId, keys: Object.keys(effectiveUpdates || {}) });
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+        queuedUpdatesRef.current = null;
+      } catch {}
+
+      lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...enriched };
+      setEventData((prev) => (prev ? { ...prev, ...enriched } : enriched));
+      try {
+        diagMerge('eventContext', { lastUpdateEventAt: Date.now(), eventId: targetEventId, lastUpdateKeys: Object.keys(enriched || {}) });
+        diagPush('timeline', { type: 'event.updateEventImmediate:success', eventId: targetEventId, keys: Object.keys(enriched || {}) });
       } catch {}
       try { broadcastEventSync(targetEventId, { reason: 'updateEventImmediate' }); } catch {}
     } catch (e) {
@@ -1381,7 +1305,11 @@ export function EventProvider({ children }) {
         if (isPlayerRoute) return;
         if (!eventId) return;
         if (isDeletedEventId(eventId)) return;
-        flushPendingEventWrites('pagehide-or-hidden').catch(() => {});
+        const pending = queuedUpdatesRef.current;
+        if (pending) {
+          queuedUpdatesRef.current = null;
+          updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(pending)).catch(() => {});
+        }
       } catch {}
     };
     const onVis = () => {
@@ -1395,18 +1323,43 @@ export function EventProvider({ children }) {
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', flush);
     };
-  }, [eventId, isPlayerRoute, isDeletedEventId, flushPendingEventWrites]);
+  }, [eventId, isPlayerRoute, isDeletedEventId]);
 
   // 언마운트 플러시 + stale 필드 필터링
   useEffect(() => {
     return () => {
       try {
-        flushPendingEventWrites('provider-unmount').catch(() => {});
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+        const pending = queuedUpdatesRef.current;
+        if (pending && eventId && !isDeletedEventId(eventId)) {
+          queuedUpdatesRef.current = null;
+
+          // 최신값과 다른 구버전 participants/roomTable은 저장에서 제외
+          let toWrite = { ...pending };
+          try {
+            const current = lastEventDataRef.current || {};
+            if ('participants' in toWrite && !deepEqual(toWrite.participants, current.participants)) {
+              const { participants, ...rest } = toWrite;
+              toWrite = rest;
+            }
+            if ('roomTable' in toWrite && !deepEqual(toWrite.roomTable, current.roomTable)) {
+              const { roomTable, ...rest2 } = toWrite;
+              toWrite = rest2;
+            }
+          } catch {}
+
+          if (Object.keys(toWrite).length > 0) {
+            updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(toWrite)).catch(() => {});
+          }
+        }
       } catch (e) {
         console.warn('[EventContext] unmount flush error:', e);
       }
     };
-  }, [flushPendingEventWrites]);
+  }, [eventId, isDeletedEventId]);
 
   // eventInputs 저장은 Player/운영자 여러 화면에서 동시에 발생할 수 있으므로
   // 루트 eventInputs 전체 덮어쓰기 대신, 항상 서버 최신값을 기준으로 병합하는 공용 트랜잭션으로 통일합니다.
@@ -1915,8 +1868,6 @@ export function EventProvider({ children }) {
         updateEvent,
         updateEventImmediate,
         updateEventById,
-        isCurrentEventReadyForWrite,
-        flushPendingEventWrites,
         deleteEvent,
         updatePublicView,
         savePublicViewToLocal,
