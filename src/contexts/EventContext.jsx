@@ -482,8 +482,66 @@ export function EventProvider({ children }) {
     writeDeletedEventIdsToLocal(next);
   }, []);
 
+  const getPendingWriteEventId = useCallback(() => {
+    try {
+      const pending = queuedUpdatesRef.current;
+      if (!pending) return '';
+      return String(pending.eventId || eventId || '');
+    } catch {
+      return String(eventId || '');
+    }
+  }, [eventId]);
+
+  const flushPendingEventWrite = useCallback(async (reason = '') => {
+    const pending = queuedUpdatesRef.current;
+    if (!pending) return false;
+
+    const pendingEventId = String(pending.eventId || '');
+    const pendingPayload = pending.payload && typeof pending.payload === 'object'
+      ? pending.payload
+      : (pending && typeof pending === 'object' ? pending : null);
+
+    if (!pendingEventId || !pendingPayload || isDeletedEventId(pendingEventId)) {
+      queuedUpdatesRef.current = null;
+      try {
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+      } catch {}
+      return false;
+    }
+
+    queuedUpdatesRef.current = null;
+    try {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    } catch {}
+
+    try {
+      await updateDoc(doc(db, 'events', pendingEventId), sanitizeUndefinedDeep(pendingPayload));
+      try {
+        diagPush('timeline', {
+          type: 'event.flushPendingEventWrite:success',
+          eventId: pendingEventId,
+          reason,
+          keys: Object.keys(pendingPayload || {}),
+        });
+      } catch {}
+      try { broadcastEventSync(pendingEventId, { reason: 'flushPendingEventWrite' }); } catch {}
+      return true;
+    } catch (e) {
+      console.warn('[EventContext] flushPendingEventWrite failed:', e, { eventId: pendingEventId, reason, payload: pendingPayload });
+      return false;
+    }
+  }, [eventId, isDeletedEventId]);
+
   const cancelPendingEventWrites = useCallback((targetId) => {
-    if (!targetId || String(targetId) !== String(eventId || '')) return;
+    if (!targetId) return;
+    const pendingEventId = getPendingWriteEventId();
+    if (pendingEventId && String(pendingEventId) !== String(targetId)) return;
     try {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
@@ -491,17 +549,20 @@ export function EventProvider({ children }) {
       }
     } catch {}
     queuedUpdatesRef.current = null;
-  }, [eventId]);
+  }, [getPendingWriteEventId]);
 
   const clearCurrentEventSelection = useCallback((targetId) => {
     if (!targetId) return;
     try {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
+      const pendingEventId = getPendingWriteEventId();
+      if (!pendingEventId || String(pendingEventId) === String(targetId)) {
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+        queuedUpdatesRef.current = null;
       }
     } catch {}
-    queuedUpdatesRef.current = null;
     setEventData(null);
     lastEventDataRef.current = null;
     scoresMapRef.current = {};
@@ -1089,6 +1150,10 @@ export function EventProvider({ children }) {
 
       const isSwitchingEvent = String(eventId || '') !== targetId;
 
+      if (isSwitchingEvent) {
+        await flushPendingEventWrite('loadEvent:switch');
+      }
+
       // ✅ [EVENT-SSOT] 실제로 다른 대회로 전환할 때만 현재 데이터를 비웁니다.
       // 같은 대회를 다시 loadEvent 하는 경우까지 비우면 Player STEP3/STEP6가 깜박이거나 사라집니다.
       if (isSwitchingEvent) {
@@ -1125,7 +1190,7 @@ export function EventProvider({ children }) {
         loadEventInFlightRef.current = next;
       } catch {}
     }
-  }, [eventId, isPlayerRoute, isDeletedEventId, clearCurrentEventSelection, unmarkDeletedEventId, applyIncomingEventData]);
+  }, [eventId, isPlayerRoute, isDeletedEventId, clearCurrentEventSelection, unmarkDeletedEventId, applyIncomingEventData, flushPendingEventWrite]);
 
   // 공용 업데이트(디바운스)
   const updateEvent = async (updates, opts = {}) => {
@@ -1148,6 +1213,11 @@ export function EventProvider({ children }) {
     ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
 
     const before = lastEventDataRef.current || {};
+    const pendingBefore = queuedUpdatesRef.current;
+    const pendingBeforeEventId = String(pendingBefore?.eventId || '');
+    if (pendingBefore && pendingBeforeEventId && pendingBeforeEventId !== targetEventId) {
+      await flushPendingEventWrite('updateEvent:before-new-event');
+    }
     if (ifChanged) {
       let changed = false;
       for (const k of Object.keys(enriched)) {
@@ -1158,11 +1228,17 @@ export function EventProvider({ children }) {
       }
       if (!changed) return;
     }
-    queuedUpdatesRef.current = { ...(queuedUpdatesRef.current || {}), ...enriched };
+    const prevPending = queuedUpdatesRef.current;
+    const prevPayload = (prevPending && String(prevPending.eventId || '') === targetEventId && prevPending.payload && typeof prevPending.payload === 'object')
+      ? prevPending.payload
+      : {};
+    queuedUpdatesRef.current = { eventId: targetEventId, payload: { ...prevPayload, ...enriched } };
     clearTimeout(debounceTimerRef.current);
     await new Promise((resolve) => {
       debounceTimerRef.current = setTimeout(async () => {
-        const toWrite = queuedUpdatesRef.current;
+        const pending = queuedUpdatesRef.current;
+        if (!pending || String(pending.eventId || '') !== targetEventId) { resolve(); return; }
+        const toWrite = pending.payload || {};
         queuedUpdatesRef.current = null;
         try {
           if (isDeletedEventId(targetEventId)) return;
@@ -1205,6 +1281,11 @@ export function EventProvider({ children }) {
     ensureModeSplitParticipants(enriched, lastEventDataRef.current?.mode || 'stroke');
 
     const before = lastEventDataRef.current || {};
+    const pendingBefore = queuedUpdatesRef.current;
+    const pendingBeforeEventId = String(pendingBefore?.eventId || '');
+    if (pendingBefore && pendingBeforeEventId && pendingBeforeEventId !== targetEventId) {
+      await flushPendingEventWrite('updateEventImmediate:before-new-event');
+    }
     if (ifChanged) {
       let changed = false;
       for (const k of Object.keys(enriched)) {
@@ -1220,13 +1301,16 @@ export function EventProvider({ children }) {
       const ref = doc(db, 'events', targetEventId);
       await updateDoc(ref, sanitizeUndefinedDeep(enriched));
 
-      // 즉시 저장 후 디바운스 큐/타이머 정리
+      // 즉시 저장 후 같은 대회 디바운스 큐/타이머만 정리
       try {
-        if (debounceTimerRef.current) {
-          clearTimeout(debounceTimerRef.current);
-          debounceTimerRef.current = null;
+        const pendingAfter = queuedUpdatesRef.current;
+        if (pendingAfter && String(pendingAfter.eventId || '') === targetEventId) {
+          if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+            debounceTimerRef.current = null;
+          }
+          queuedUpdatesRef.current = null;
         }
-        queuedUpdatesRef.current = null;
       } catch {}
 
       lastEventDataRef.current = { ...(lastEventDataRef.current || {}), ...enriched };
@@ -1303,13 +1387,19 @@ export function EventProvider({ children }) {
     const flush = () => {
       try {
         if (isPlayerRoute) return;
-        if (!eventId) return;
-        if (isDeletedEventId(eventId)) return;
         const pending = queuedUpdatesRef.current;
-        if (pending) {
-          queuedUpdatesRef.current = null;
-          updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(pending)).catch(() => {});
-        }
+        const pendingEventId = String(pending?.eventId || '');
+        const pendingPayload = pending?.payload || null;
+        if (!pendingEventId || !pendingPayload) return;
+        if (isDeletedEventId(pendingEventId)) return;
+        queuedUpdatesRef.current = null;
+        try {
+          if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+            debounceTimerRef.current = null;
+          }
+        } catch {}
+        updateDoc(doc(db, 'events', pendingEventId), sanitizeUndefinedDeep(pendingPayload)).catch(() => {});
       } catch {}
     };
     const onVis = () => {
@@ -1334,25 +1424,28 @@ export function EventProvider({ children }) {
           debounceTimerRef.current = null;
         }
         const pending = queuedUpdatesRef.current;
-        if (pending && eventId && !isDeletedEventId(eventId)) {
+        const pendingEventId = String(pending?.eventId || '');
+        if (pending && pendingEventId && !isDeletedEventId(pendingEventId)) {
           queuedUpdatesRef.current = null;
 
           // 최신값과 다른 구버전 participants/roomTable은 저장에서 제외
-          let toWrite = { ...pending };
+          let toWrite = { ...(pending.payload || {}) };
           try {
             const current = lastEventDataRef.current || {};
-            if ('participants' in toWrite && !deepEqual(toWrite.participants, current.participants)) {
-              const { participants, ...rest } = toWrite;
-              toWrite = rest;
-            }
-            if ('roomTable' in toWrite && !deepEqual(toWrite.roomTable, current.roomTable)) {
-              const { roomTable, ...rest2 } = toWrite;
-              toWrite = rest2;
+            if (String(pendingEventId) === String(eventId || '')) {
+              if ('participants' in toWrite && !deepEqual(toWrite.participants, current.participants)) {
+                const { participants, ...rest } = toWrite;
+                toWrite = rest;
+              }
+              if ('roomTable' in toWrite && !deepEqual(toWrite.roomTable, current.roomTable)) {
+                const { roomTable, ...rest2 } = toWrite;
+                toWrite = rest2;
+              }
             }
           } catch {}
 
           if (Object.keys(toWrite).length > 0) {
-            updateDoc(doc(db, 'events', eventId), sanitizeUndefinedDeep(toWrite)).catch(() => {});
+            updateDoc(doc(db, 'events', pendingEventId), sanitizeUndefinedDeep(toWrite)).catch(() => {});
           }
         }
       } catch (e) {
