@@ -21,6 +21,7 @@ export function defaultRankScoreGameParams() {
     randomSeed: '',
     // 관리자 '히든/배정/취소' 메뉴에서 포볼팀 공개 여부 제어
     revealed: true,
+    selectionLocked: false,
   };
 }
 
@@ -97,6 +98,7 @@ export function normalizeRankScoreGameParams(raw) {
     selfPickSide: src.selfPickSide === 'B' ? 'B' : (src.selfPickSide === 'both' ? 'both' : base.selfPickSide),
     directExcludeSameGroupTargets: src.directExcludeSameGroupTargets === true || src.excludeSameGroupTargets === true ? true : false,
     revealed: src.revealed === false || src.hidden === true ? false : true,
+    selectionLocked: src.selectionLocked === true || src.locked === true ? true : false,
   };
 }
 
