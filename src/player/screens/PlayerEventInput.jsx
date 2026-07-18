@@ -15,7 +15,7 @@ import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount,
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
-import { computeHiddenEvent, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
+import { computeHiddenEvent, getHiddenFourballPairsFromPerson, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 
@@ -798,6 +798,7 @@ export default function PlayerEventInput(){
     return inputsByEventServer ? JSON.parse(JSON.stringify(inputsByEventServer)) : {};
   });
   const [dirty, setDirty] = useState(false);
+  const [hiddenFourballPickingId, setHiddenFourballPickingId] = useState('');
   const eventInputRefs = useRef({});
   const longPressTimersRef = useRef({});
   // 숫자 입력 삭제는 draft에서 키가 사라질 수 있어, 저장 병합 단계까지 삭제 의사를 별도로 보관합니다.
@@ -1936,8 +1937,20 @@ export default function PlayerEventInput(){
       const mergePairs = (baseSource = {}) => {
         const merged = cloneEventInputs(baseSource || {});
         const mSlot = { ...(merged[evId] || {}) };
+        const freshPairs = normalizeRankScorePairs(mSlot?.shared?.rankScorePairs || {});
+        const alreadyMe = freshPairs[meId];
+        const alreadyPartner = freshPairs[partnerId];
+        if (alreadyMe && String(alreadyMe) !== partnerId) throw new Error('already-assigned');
+        if (alreadyPartner && String(alreadyPartner) !== meId) throw new Error('partner-already-assigned');
+        [meId, partnerId].forEach((pid) => {
+          const prev = freshPairs[pid];
+          if (prev != null) delete freshPairs[String(prev)];
+          delete freshPairs[pid];
+        });
+        freshPairs[meId] = partnerId;
+        freshPairs[partnerId] = meId;
         mSlot.person = { ...(mSlot.person || {}), ...((slot.person && typeof slot.person === 'object') ? slot.person : {}) };
-        mSlot.shared = { ...(mSlot.shared || {}), rankScorePairs: pairs };
+        mSlot.shared = { ...(mSlot.shared || {}), rankScorePairs: freshPairs };
         merged[evId] = mSlot;
         return merged;
       };
@@ -1963,6 +1976,10 @@ export default function PlayerEventInput(){
       }
     } catch (e) {
       console.warn('[PlayerEventInput] rank-score pair save failed:', e);
+      const msg = String(e?.message || e || '');
+      if (msg.includes('partner-already-assigned')) alert('선택한 상대는 방금 다른 참가자와 배정되었습니다. 다시 시도해 주세요.');
+      else if (msg.includes('already-assigned')) alert('이미 포볼팀이 배정되어 있습니다.');
+      else alert('포볼팀 배정 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
     }
   };
 
@@ -1972,6 +1989,13 @@ export default function PlayerEventInput(){
     const meId = String(mine.id ?? '');
     const targetId = String(partnerId || '');
     if (!meId) return;
+
+    const rankEventDef = (events || []).find((item) => String(item?.id || '') === String(evId || ''));
+    const rankCfg = normalizeRankScoreGameParams(rankEventDef?.params);
+    if (rankCfg.selectionLocked) {
+      alert('선택이 마감되어 더 이상 수정할 수 없습니다.');
+      return;
+    }
 
     if (hasRankScoreSavedDirectSelectionForEvent(evId)) {
       alert('이미 선택이 저장되어 변경할 수 없습니다.');
@@ -2001,6 +2025,10 @@ export default function PlayerEventInput(){
   };
 
   const handleRankScorePairPick = (evId, rankCfg) => {
+    if (rankCfg?.selectionLocked) {
+      alert('선택이 마감되어 더 이상 수정할 수 없습니다.');
+      return;
+    }
     const mine = selfParticipant || participantById.get(String(selfParticipantId ?? ''));
     if (!mine) return;
     const mineId = String(mine.id);
@@ -2284,12 +2312,7 @@ export default function PlayerEventInput(){
     }
     if (blockIfPendingHiddenSelection()) return;
     const mineId = String(mine.id || '');
-    const hiddenDraftSlot = (inputsByEvent?.[ev.id] && typeof inputsByEvent[ev.id] === 'object') ? inputsByEvent[ev.id] : {};
-    const hiddenServerSlot = (inputsByEventServer?.[ev.id] && typeof inputsByEventServer[ev.id] === 'object') ? inputsByEventServer[ev.id] : {};
-    const hiddenEffectiveSlot = Object.keys(hiddenDraftSlot || {}).length ? hiddenDraftSlot : hiddenServerSlot;
-    const hiddenData = computeHiddenEvent(ev, participants, hiddenEffectiveSlot, { roomNames, roomCount: allRoomNos.length || roomNames.length || 0 });
-    const pairs = hiddenData?.pairMap || {};
-    if (pairs[mineId]) return;
+    if (!mineId) return;
 
     const mySide = getRankScoreGroupSide(mine, { pairGroups: cfg.pairGroups });
     if (!mySide) {
@@ -2304,20 +2327,91 @@ export default function PlayerEventInput(){
     }
 
     const targetSide = mySide === 'A' ? 'B' : 'A';
-    const candidates = (participants || []).filter((p) => {
-      const pid = String(p?.id ?? '');
-      if (!pid || pid === mineId) return false;
-      if (pairs[pid]) return false;
-      return getRankScoreGroupSide(p, { pairGroups: cfg.pairGroups }) === targetSide;
-    });
-    if (!candidates.length) {
-      alert('선택 가능한 상대 그룹 참가자가 없습니다.');
+    const targetEventId = eventId || ctxId;
+    if (!targetEventId || typeof updateEventInputsTransaction !== 'function') {
+      alert('대회 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
       return;
     }
-    const pick = candidates[Math.floor(Math.random() * candidates.length)];
-    await patchHiddenOpponent(ev.id, pick.id);
-    // 즉시 서버 저장/완료 알림 금지: 하단 저장 버튼을 눌러야 확정됩니다.
-    // 기존에는 여기서 알림이 떠서 저장된 것처럼 보였지만, 페이지 이동 후 draft가 사라질 수 있었습니다.
+
+    setHiddenFourballPickingId(String(ev.id || ''));
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      let pickedName = '';
+      const now = Date.now();
+      const savedInputs = await updateEventInputsTransaction(targetEventId, (freshBase = {}) => {
+        const next = cloneEventInputs(freshBase || {});
+        const freshSlot = { ...(next[ev.id] || {}) };
+        const freshPerson = { ...((freshSlot.person && typeof freshSlot.person === 'object') ? freshSlot.person : {}) };
+        const freshShared = { ...((freshSlot.shared && typeof freshSlot.shared === 'object') ? freshSlot.shared : {}) };
+        const freshPairs = normalizeHiddenFourballPairs({
+          ...normalizeHiddenFourballPairs(freshShared.hiddenFourballPairs || freshShared.pairs || {}),
+          ...getHiddenFourballPairsFromPerson(freshPerson),
+        });
+
+        if (freshPairs[mineId]) {
+          throw new Error('already-assigned');
+        }
+
+        const candidates = (participants || []).filter((p) => {
+          const pid = String(p?.id ?? '');
+          if (!pid || pid === mineId) return false;
+          if (freshPairs[pid]) return false;
+          return getRankScoreGroupSide(p, { pairGroups: cfg.pairGroups }) === targetSide;
+        });
+        if (!candidates.length) {
+          throw new Error('no-candidate');
+        }
+
+        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        const pickId = String(pick?.id ?? '');
+        if (!pickId) throw new Error('no-candidate');
+        pickedName = pick?.nickname || '상대';
+
+        // 라이브 동시 선택 보호: A/B 1대1 매칭은 서버 최신값 기준으로 확정한다.
+        // 이미 다른 참가자가 같은 상대를 가져갔으면 후보에서 제외되므로 중복 배정되지 않는다.
+        freshPerson[mineId] = {
+          ...((freshPerson && freshPerson[mineId]) || {}),
+          opponentId: pickId,
+          selectedAt: now,
+          pickedAt: now,
+          autoAssigned: true,
+        };
+        freshPairs[mineId] = pickId;
+        freshPairs[pickId] = mineId;
+        freshSlot.person = freshPerson;
+        freshSlot.shared = { ...freshShared, hiddenFourballPairs: freshPairs, assignedAt: now, assignedMode: 'self-player' };
+        next[ev.id] = freshSlot;
+        return next;
+      }, { updatedBy: auth?.currentUser?.uid || 'player' });
+
+      if (savedInputs) {
+        const savedClone = cloneEventInputs(savedInputs);
+        keepSavedDraftVisible(savedClone);
+        if (activeEventStorageId) {
+          const nextPack = {
+            inputs: savedClone,
+            resetTokens: { ...liveEventInputResetTokens },
+          };
+          setServerInputsCachePack(nextPack);
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsServerCachePack', nextPack);
+          writePlayerScopedJson(activeEventStorageId, 'eventInputsDraftCache', savedClone);
+        }
+        setDirty(false);
+      }
+      alert(`${mine.nickname || '참가자'}님은 ${pickedName}님과 포볼팀으로 배정되었습니다.`);
+    } catch (e) {
+      const msg = String(e?.message || e || '');
+      if (msg.includes('already-assigned')) {
+        alert('이미 포볼팀이 배정되어 있습니다.');
+      } else if (msg.includes('no-candidate')) {
+        alert('선택 가능한 상대 그룹 참가자가 없습니다.');
+      } else {
+        console.warn('[PlayerEventInput] hidden fourball random pick failed:', e);
+        alert('포볼팀 배정 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      }
+    } finally {
+      setHiddenFourballPickingId('');
+    }
   };
 
   const getGroupRoomBattleCellIds = (evId, rowKey, holeNo, allowedIds = []) => {
@@ -2476,6 +2570,45 @@ export default function PlayerEventInput(){
                     if (isBingoSharedTouched(evId, roomKey)) prevMap[roomKey] = roomVal;
                   });
                   mergedShared[sharedKey] = prevMap;
+                } else {
+                  mergedShared[sharedKey] = sharedVal;
+                }
+              });
+              mSlot.shared = mergedShared;
+            } else if (evDef?.template === 'rank-score-game') {
+              const mergedShared = { ...(mSlot.shared || {}) };
+              Object.entries(clonedShared).forEach(([sharedKey, sharedVal]) => {
+                if (sharedKey === 'rankScoreDirectPairs') {
+                  const meKey = String(selfParticipant?.id ?? selfParticipantId ?? '');
+                  const prevPairs = normalizeRankScoreDirectPairs(mergedShared.rankScoreDirectPairs || {});
+                  const draftPairs = normalizeRankScoreDirectPairs(sharedVal || {});
+                  if (meKey) {
+                    if (Object.prototype.hasOwnProperty.call(draftPairs, meKey)) {
+                      prevPairs[meKey] = String(draftPairs[meKey] || '');
+                    } else if (sharedVal && typeof sharedVal === 'object' && Object.prototype.hasOwnProperty.call(sharedVal, meKey)) {
+                      delete prevPairs[meKey];
+                    }
+                  } else {
+                    Object.assign(prevPairs, draftPairs);
+                  }
+                  mergedShared.rankScoreDirectPairs = prevPairs;
+                } else if (sharedKey === 'rankScorePairs') {
+                  const meKey = String(selfParticipant?.id ?? selfParticipantId ?? '');
+                  const prevPairs = normalizeRankScorePairs(mergedShared.rankScorePairs || {});
+                  const draftPairs = normalizeRankScorePairs(sharedVal || {});
+                  const partnerKey = meKey ? String(draftPairs[meKey] || '') : '';
+                  if (meKey && partnerKey) {
+                    [meKey, partnerKey].forEach((pid) => {
+                      const prev = prevPairs[pid];
+                      if (prev != null) delete prevPairs[String(prev)];
+                      delete prevPairs[pid];
+                    });
+                    prevPairs[meKey] = partnerKey;
+                    prevPairs[partnerKey] = meKey;
+                  } else if (!meKey) {
+                    Object.assign(prevPairs, draftPairs);
+                  }
+                  mergedShared.rankScorePairs = prevPairs;
                 } else {
                   mergedShared[sharedKey] = sharedVal;
                 }
@@ -2891,7 +3024,7 @@ export default function PlayerEventInput(){
                         <button
                           type="button"
                           onClick={() => handleHiddenFourballRandomPick(ev, hiddenCfg)}
-                          disabled={!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked}
+                          disabled={!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked || hiddenFourballPickingId === String(ev.id || '')}
                           style={{
                             width: 92,
                             height: 32,
@@ -2901,11 +3034,11 @@ export default function PlayerEventInput(){
                             color: '#2457d6',
                             fontSize: 12,
                             fontWeight: 800,
-                            opacity: (!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked) ? 0.5 : 1,
-                            pointerEvents: (!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked) ? 'none' : undefined,
+                            opacity: (!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked || hiddenFourballPickingId === String(ev.id || '')) ? 0.5 : 1,
+                            pointerEvents: (!mine || !!minePairId || !hasHiddenPairCandidates || hiddenLocked || hiddenFourballPickingId === String(ev.id || '')) ? 'none' : undefined,
                           }}
                         >
-                          {minePair ? '배정완료' : '포볼선택'}
+                          {hiddenFourballPickingId === String(ev.id || '') ? '배정중...' : (minePair ? '배정완료' : '포볼선택')}
                         </button>
                       </div>
                     )}
@@ -2923,7 +3056,7 @@ export default function PlayerEventInput(){
                     )}
 
                     {isSelectFourball && (
-                      <label style={{ display: 'grid', gap: 6, marginTop: 10, fontSize: 12, fontWeight: 900, color: '#344054' }}>
+                      <label style={{ display: 'grid', gap: 6, marginTop: 10, fontSize: 13, fontWeight: 950, color: '#1d4ed8' }}>
                         내 히든 포볼 팀원 선택
                         <select
                           value={minePairId || ''}
@@ -3036,7 +3169,7 @@ export default function PlayerEventInput(){
                     <b style={{ color: '#1d4ed8' }}>히든 1대1</b> · 상대를 비밀리에 선택, 운영자가 공개전 까지 숨김처리
                   </div>
 
-                  <label style={{ display: 'grid', gap: 6, marginTop: 10, fontSize: 12, fontWeight: 900, color: '#344054' }}>
+                  <label style={{ display: 'grid', gap: 6, marginTop: 10, fontSize: 13, fontWeight: 950, color: '#1d4ed8' }}>
                     내 히든 상대 선택
                     <select
                       value={selectedOpponentId}
@@ -3216,7 +3349,7 @@ export default function PlayerEventInput(){
                         <button
                           type="button"
                           onClick={() => handleRankScorePairPick(ev.id, rankCfg)}
-                          disabled={!mine || !!minePairId || !hasPairCandidates}
+                          disabled={!mine || !!minePairId || !hasPairCandidates || rankCfg.selectionLocked}
                           style={{
                             width: 92,
                             height: 32,
@@ -3227,11 +3360,11 @@ export default function PlayerEventInput(){
                             color: '#2457d6',
                             fontSize: 12,
                             fontWeight: 800,
-                            opacity: (!mine || !!minePairId || !hasPairCandidates) ? 0.5 : 1,
-                            pointerEvents: (!mine || !!minePairId || !hasPairCandidates) ? 'none' : undefined,
+                            opacity: (!mine || !!minePairId || !hasPairCandidates || rankCfg.selectionLocked) ? 0.5 : 1,
+                            pointerEvents: (!mine || !!minePairId || !hasPairCandidates || rankCfg.selectionLocked) ? 'none' : undefined,
                           }}
                         >
-                          {minePair ? '배정완료' : '포볼선택'}
+                          {hiddenFourballPickingId === String(ev.id || '') ? '배정중...' : (minePair ? '배정완료' : '포볼선택')}
                         </button>
                       )}
                     </div>
@@ -3243,25 +3376,25 @@ export default function PlayerEventInput(){
                     )}
 
                     {isDirectPairGame && (
-                      <label style={{ display: 'grid', gap: 6, margin: '0 12px 8px', fontSize: 12, fontWeight: 900, color: '#344054' }}>
+                      <label style={{ display: 'grid', gap: 6, margin: '0 12px 8px', fontSize: 13, fontWeight: 950, color: '#1d4ed8' }}>
                         내 포볼 팀원 선택
                         <select
                           value={minePairId || ''}
                           onChange={(e) => patchRankScoreDirectPair(ev.id, e.target.value)}
                           onFocus={() => setHiddenSelectFocusId(rankDirectFocusKey)}
                           onBlur={() => setHiddenSelectFocusId('')}
-                          disabled={!mine || rankDirectSaved}
+                          disabled={!mine || rankDirectSaved || rankCfg.selectionLocked}
                           style={{
                             height: 38,
                             border: hiddenSelectFocusId === rankDirectFocusKey ? '2px solid #2563eb' : '1px solid #d7dfec',
                             borderRadius: 10,
                             padding: '0 10px',
                             fontSize: 14,
-                            background: rankDirectSaved ? '#f2f4f7' : '#fff',
+                            background: (rankDirectSaved || rankCfg.selectionLocked) ? '#f2f4f7' : '#fff',
                             outline: 'none',
                             boxSizing: 'border-box',
                             width: '100%',
-                            color: rankDirectSaved ? '#344054' : undefined,
+                            color: (rankDirectSaved || rankCfg.selectionLocked) ? '#344054' : undefined,
                           }}
                         >
                           <option value="">팀원 선택</option>

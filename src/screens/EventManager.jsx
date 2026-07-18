@@ -1509,6 +1509,16 @@ if (editForm?.template === 'group-battle') {
     await commitEventsList(next);
   };
 
+  const toggleRankScoreLock = async (locked) => {
+    if (!rankScoreMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== rankScoreMonitorEvent.id) return e;
+      const params = normalizeRankScoreGameParams({ ...(e.params || {}), selectionLocked: !!locked });
+      return { ...e, params, target: getRankScoreGameTarget(params), rankOrder: params.winnerOrder };
+    });
+    await commitEventsList(next);
+  };
+
   const saveRankScorePairs = async (ev, pairs) => {
     if (!ev) return;
     if (!ensureEventWriteReady('대회 순위 점수 게임 배정 저장')) return;
@@ -2871,6 +2881,7 @@ if (editForm?.template === 'group-battle') {
             roomCount={roomCount}
             onClose={() => setRankScoreMonitorId(null)}
             onToggleReveal={toggleRankScoreReveal}
+            onToggleLock={toggleRankScoreLock}
             onAssignPair={assignRankScorePair}
             onCancelPair={cancelRankScorePair}
             onRandomAssign={assignRankScoreRandomPairs}

@@ -37,6 +37,7 @@ export default function RankScoreGameMonitor({
   onAssignPair,
   onCancelPair,
   onRandomAssign,
+  onToggleLock,
   onAssignDirectPair,
   onCancelDirectPair,
 }) {
@@ -231,7 +232,7 @@ export default function RankScoreGameMonitor({
           <div>
             <div style={{ fontSize: 17, fontWeight: 950, color: '#16243f' }}>{eventDef?.title || '대회 순위 점수 게임'}</div>
             <div style={{ fontSize: 12, color: '#667085', marginTop: 2 }}>
-              {isRandomPairGame ? `포볼 · ${groupLabelA} ↔ ${groupLabelB}` : (isDirectPairGame ? '포볼 선택' : '방대방')} · {cfg.revealed === false ? '비공개' : '공개'} · 배정 {pairedCount}팀
+              {isRandomPairGame ? `포볼 · ${groupLabelA} ↔ ${groupLabelB}` : (isDirectPairGame ? '포볼 선택' : '방대방')} · {cfg.revealed === false ? '비공개' : '공개'} · {cfg.selectionLocked ? '마감' : '진행중'} · 배정 {pairedCount}팀
             </div>
           </div>
           <button type="button" style={btnStyle} onClick={onClose}>닫기</button>
@@ -249,6 +250,11 @@ export default function RankScoreGameMonitor({
           {(isRandomPairGame || isDirectPairGame) && (
             <button type="button" style={showUnregistered ? primaryStyle : btnStyle} onClick={() => setShowUnregistered((prev) => !prev)}>
               미등록 {unregisteredParticipants.length}
+            </button>
+          )}
+          {(isRandomPairGame || isDirectPairGame) && (
+            <button type="button" style={cfg.selectionLocked ? primaryStyle : btnStyle} onClick={() => onToggleLock && onToggleLock(!cfg.selectionLocked)}>
+              {cfg.selectionLocked ? '마감 해제' : '마감'}
             </button>
           )}
           {isRandomPairGame && editMode && (
