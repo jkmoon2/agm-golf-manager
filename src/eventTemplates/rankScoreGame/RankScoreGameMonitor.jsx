@@ -20,6 +20,27 @@ function getName(p) {
   return String(p?.nickname || p?.name || '-');
 }
 
+function getParticipantRoomLabel(p, roomNames = []) {
+  const rawRoom = p?.room ?? p?.roomNo ?? p?.roomNumber ?? p?.roomId;
+  const explicit = p?.roomName ?? p?.roomLabel;
+  if (explicit != null && String(explicit).trim()) return String(explicit).trim();
+
+  const roomNo = Number(rawRoom);
+  if (Number.isFinite(roomNo) && roomNo >= 1) {
+    const customName = Array.isArray(roomNames) ? roomNames[roomNo - 1] : '';
+    return String(customName || '').trim() || `${roomNo}번방`;
+  }
+
+  return rawRoom != null && String(rawRoom).trim() ? String(rawRoom).trim() : '';
+}
+
+function getParticipantMeta(p, roomNames = []) {
+  const groupNo = p?.group ?? p?.groupNo ?? p?.groupNumber ?? p?.jo ?? p?.joNo;
+  const groupText = groupNo != null && String(groupNo).trim() ? `${groupNo}조` : '';
+  const roomText = getParticipantRoomLabel(p, roomNames);
+  return [groupText, roomText].filter(Boolean).join(' · ');
+}
+
 function fmt(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '-';
@@ -155,7 +176,7 @@ export default function RankScoreGameMonitor({
         <div style={{ display: 'grid', gap: 6 }}>
           {unregisteredParticipants.map((p) => (
             <div key={`rank-score-unregistered-${p?.id}`} style={{ border: '1px solid #eef2f7', borderRadius: 10, padding: '8px 10px', fontSize: 13, fontWeight: 900, color: '#16243f' }}>
-              {getName(p)} <span style={{ color: '#667085', fontWeight: 700 }}>{p?.group ? `${p.group}조` : ''}{p?.room ? ` · ${p.room}번방` : ''}</span>
+              {getName(p)} <span style={{ color: '#667085', fontWeight: 700 }}>{getParticipantMeta(p, roomNames)}</span>
             </div>
           ))}
         </div>
