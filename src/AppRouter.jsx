@@ -56,6 +56,8 @@ function PwaRouteRememberer() {
   useEffect(() => {
     try {
       const full = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+      const params = new URLSearchParams(location.search || '');
+      const qRole = (params.get('role') || '').toLowerCase();
 
       // ✅ PWA가 start_url 때문에 '/' 또는 '/login'으로 시작한 순간에는
       //    기존에 저장해 둔 참가자 경로(/player/events)를 덮어쓰지 않습니다.
@@ -74,8 +76,21 @@ function PwaRouteRememberer() {
         localStorage.setItem('agm.lastMode', 'admin');
         localStorage.setItem('agm.installMode', 'admin');
       } else if (location.pathname.startsWith('/login')) {
-        // 로그인 화면은 운영자/참가자 공용 진입점으로 쓰일 수 있으므로 installMode는 바꾸지 않습니다.
+        // ✅ 운영자 링크(/ 또는 /login?role=admin)에서 홈화면 추가 시에도
+        //    설치 모드를 admin으로 고정해야 iOS PWA 실행 때 참가자 로그인으로 밀리지 않습니다.
+        if (qRole === 'player') {
+          localStorage.setItem('agm.lastMode', 'player');
+          localStorage.setItem('agm.installMode', 'player');
+        } else {
+          localStorage.setItem('agm.lastMode', 'admin');
+          localStorage.setItem('agm.installMode', 'admin');
+        }
+      } else if (location.pathname === '/') {
+        // ✅ develop--agm-golf-manager.netlify.app/ 루트는 운영자 진입 링크입니다.
+        //    Safari에서 루트 접속 후 홈화면 추가하면 iOS가 start_url='/'로 실행할 수 있으므로
+        //    이 시점에도 운영자 설치 모드를 남겨둡니다.
         localStorage.setItem('agm.lastMode', 'admin');
+        localStorage.setItem('agm.installMode', 'admin');
       }
     } catch (e) {
       // ignore
@@ -96,11 +111,32 @@ function PwaStartRedirect() {
 
     // ✅ (대안B) iOS 홈화면에서 같은 도메인(origin)을 공유하면
     // "마지막에 사용했던 경로(lastRoute)"가 운영자/참가자 사이에서 서로 덮어써지는 경우가 있어
-    // 참가자 아이콘인데도 운영자 로그인(/login)부터 뜨는 현상이 발생할 수 있음.
+    // 운영자 아이콘인데도 참가자 로그인(/player/login-or-code)부터 뜨는 현상이 발생할 수 있음.
     //
-    // 해결: pwa-player.html / pwa-admin.html에서 installMode를 한 번 저장해두고
-    // PWA로 시작할 때 '/' 또는 '/login'이면 installMode 기준으로 "최초 진입"을 우선 결정한다.
+    // 해결: 루트(/)와 /login?role=admin은 admin 설치 모드로 기록하고,
+    // PWA로 시작할 때 '/' 또는 '/login'이면 installMode/role/lastMode 순서로 최초 진입을 결정한다.
     // (레이아웃/CSS에는 영향 없음)
+    const params = new URLSearchParams(location.search || '');
+    const qRole = (params.get('role') || '').toLowerCase();
+
+    // URL이 role을 명시하면 기존 installMode보다 URL 의도를 우선합니다.
+    if (qRole === 'admin') {
+      try {
+        localStorage.setItem('agm.lastMode', 'admin');
+        localStorage.setItem('agm.installMode', 'admin');
+      } catch (e) {}
+      navigate('/login?role=admin', { replace: true });
+      return;
+    }
+    if (qRole === 'player') {
+      try {
+        localStorage.setItem('agm.lastMode', 'player');
+        localStorage.setItem('agm.installMode', 'player');
+      } catch (e) {}
+      navigate('/player/login-or-code', { replace: true });
+      return;
+    }
+
     let installMode = null;
     try {
       installMode = localStorage.getItem('agm.installMode');
@@ -116,9 +152,8 @@ function PwaStartRedirect() {
 
     if (installMode === 'admin') {
       // 운영자 전용 기기/아이콘: '/' 또는 '/login'으로 시작해도 운영자 로그인으로 고정
-      // (LoginScreen이 role 파라미터를 쓰는 경우가 있어도, 기존 구조를 건드리지 않기 위해 /login만 사용)
-      if (location.pathname !== '/login') {
-        navigate('/login', { replace: true });
+      if (location.pathname !== '/login' || location.search !== '?role=admin') {
+        navigate('/login?role=admin', { replace: true });
       }
       return;
     }
@@ -137,8 +172,16 @@ function PwaStartRedirect() {
       navigate(last, { replace: true });
       return;
     }
+    if (last && last.startsWith('/admin')) {
+      navigate(last, { replace: true });
+      return;
+    }
     if (lastMode === 'player') {
       navigate('/player/events', { replace: true });
+      return;
+    }
+    if (lastMode === 'admin') {
+      navigate('/login?role=admin', { replace: true });
       return;
     }
     if (last && last !== location.pathname && last !== '/' && last !== '/login') {
@@ -146,10 +189,9 @@ function PwaStartRedirect() {
       return;
     }
 
-    // 설치 모드를 알 수 없는 홈화면 앱은 참가자 링크 사용 비중이 높으므로
-    // 운영자 로그인으로 떨어지기보다 참가자 로그인/이벤트 목록으로 우선 복원합니다.
-    navigate('/player/events', { replace: true });
-  }, [location.pathname, navigate]);
+    // 설치 모드를 알 수 없는 경우 develop 루트는 운영자 링크이므로 운영자 로그인으로 고정합니다.
+    navigate('/login?role=admin', { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   return null;
 }
