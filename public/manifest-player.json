@@ -1,5 +1,5 @@
 {
-  "id": "/player/events?source=pwa-player",
+  "id": "/player/login-or-code?pwa=player",
   "short_name": "AGM 참가",
   "name": "AGM Golf Manager (참가자)",
   "icons": [
@@ -19,7 +19,7 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": "/player/events",
+  "start_url": "/player/login-or-code?pwa=player",
   "scope": "/player/",
   "display": "standalone",
   "theme_color": "#000000",

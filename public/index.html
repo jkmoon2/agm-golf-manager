@@ -4,10 +4,45 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- AGM: iOS 홈화면(PWA)에서 참가자/운영자 아이콘이 같은 도메인이라 섞이는 문제 완화용 가드 -->
+    <!-- AGM: 운영자/참가자 PWA 분리 가드
+      - 같은 도메인에서 운영자 아이콘과 참가자 아이콘을 각각 홈화면에 추가할 때
+        브라우저가 잘못된 start_url/manifest를 잡아 반대 로그인으로 열리는 문제를 막기 위한 초기 스크립트입니다.
+      - React가 실행되기 전에 현재 URL 기준으로 manifest를 먼저 지정하고, PWA 실행 시 role/pwa 파라미터를 최우선으로 보정합니다.
+    -->
     <script>
       (function () {
         try {
+          var path = (location && location.pathname) || '/';
+          var search = (location && location.search) || '';
+          var params = new URLSearchParams(search);
+          var qRole = (params.get('role') || '').toLowerCase();
+          var qPwa = (params.get('pwa') || '').toLowerCase();
+
+          var mode = null;
+          if (qPwa === 'player' || qRole === 'player' || path.indexOf('/player') === 0) {
+            mode = 'player';
+          } else if (qPwa === 'admin' || qRole === 'admin' || path.indexOf('/admin') === 0 || path === '/' || path.indexOf('/login') === 0) {
+            mode = 'admin';
+          }
+
+          if (mode) {
+            try {
+              document.cookie = 'agm_mode=' + encodeURIComponent(mode) + '; Max-Age=31536000; Path=/; SameSite=Lax';
+            } catch (e) {}
+            try {
+              localStorage.setItem('agm.installMode', mode);
+              localStorage.setItem('agm.lastMode', mode);
+            } catch (e) {}
+          }
+
+          var manifestFile = mode === 'player' ? 'manifest-player.json' : 'manifest-admin.json';
+          var publicUrl = '%PUBLIC_URL%';
+          if (!publicUrl || publicUrl === '%PUBLIC_URL%') publicUrl = '';
+          var manifestHref = publicUrl + '/' + manifestFile + '?v=20260731-pwa-role-2';
+
+          // 브라우저가 manifest를 읽기 전에 현재 경로에 맞는 manifest를 head에 먼저 삽입합니다.
+          document.write('<link rel="manifest" href="' + manifestHref + '" />');
+
           var isStandalone = false;
           try {
             isStandalone =
@@ -16,22 +51,25 @@
           } catch (e) {}
           if (!isStandalone) return;
 
-          // Cookie에서 agm_mode 읽기 (player/admin)
-          var m = document.cookie.match(/(?:^|;\s*)agm_mode=([^;]+)/);
-          var mode = m ? decodeURIComponent(m[1]) : '';
-          if (!mode) return;
-
-          var path = (location && location.pathname) || '/';
-
-          // 참가자 모드인데 /player가 아니면 참가자 로그인으로 즉시 보정
-          if (mode === 'player' && !path.startsWith('/player')) {
-            location.replace('/player/login-or-code');
+          // start_url에 명시된 role/pwa가 있으면 그 값을 최우선으로 사용합니다.
+          if ((qPwa === 'player' || qRole === 'player') && path.indexOf('/player') !== 0) {
+            location.replace('/player/login-or-code?pwa=player');
+            return;
+          }
+          if ((qPwa === 'admin' || qRole === 'admin') && path.indexOf('/player') === 0) {
+            location.replace('/login?role=admin&pwa=admin');
             return;
           }
 
-          // 운영자 모드인데 /player로 열렸으면 운영자 로그인으로 보정
-          if (mode === 'admin' && path.startsWith('/player')) {
-            location.replace('/login');
+          // role/pwa가 없는 구형 홈화면 아이콘 또는 캐시된 아이콘 보정용 fallback입니다.
+          var m = document.cookie.match(/(?:^|;\s*)agm_mode=([^;]+)/);
+          var savedMode = m ? decodeURIComponent(m[1]) : '';
+          if (savedMode === 'player' && path.indexOf('/player') !== 0) {
+            location.replace('/player/login-or-code?pwa=player');
+            return;
+          }
+          if (savedMode === 'admin' && path.indexOf('/player') === 0) {
+            location.replace('/login?role=admin&pwa=admin');
             return;
           }
         } catch (e) {}
@@ -48,7 +86,7 @@
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
     -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <!-- manifest는 위 초기 스크립트에서 현재 경로에 맞게 동적으로 삽입합니다. -->
     <!--
       Notice the use of %PUBLIC_URL% in the tags above.
       It will be replaced with the URL of the `public` folder during the build.

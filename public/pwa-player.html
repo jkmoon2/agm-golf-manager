@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AGM 참가자 모드</title>
+    <link rel="manifest" href="/manifest-player.json?v=20260731-pwa-role-2" />
   </head>
   <body>
     <script>
@@ -15,7 +16,7 @@
             'agm_mode=player; Max-Age=31536000; Path=/; SameSite=Lax';
         } catch (e) {}
         // 참가자 로그인 라우트로 이동
-        location.replace('/player/login-or-code');
+        location.replace('/player/login-or-code?pwa=player');
       })();
     </script>
   </body>
