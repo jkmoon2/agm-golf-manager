@@ -1,5 +1,5 @@
 {
-  "id": "/?source=pwa-admin",
+  "id": "/login?role=admin&pwa=admin",
   "short_name": "AGM 운영",
   "name": "AGM Golf Manager (운영자)",
   "icons": [
@@ -19,7 +19,7 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": "/",
+  "start_url": "/login?role=admin&pwa=admin",
   "scope": "/",
   "display": "standalone",
   "theme_color": "#000000",

@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AGM 운영자 모드</title>
+    <link rel="manifest" href="/manifest-admin.json?v=20260731-pwa-role-2" />
   </head>
   <body>
     <script>
@@ -14,7 +15,7 @@
           document.cookie =
             'agm_mode=admin; Max-Age=31536000; Path=/; SameSite=Lax';
         } catch (e) {}
-        location.replace('/login');
+        location.replace('/login?role=admin&pwa=admin');
       })();
     </script>
   </body>

@@ -50,20 +50,64 @@ function isStandalonePWA() {
   }
 }
 
+
+function getPwaIntentFromLocation(location) {
+  try {
+    const params = new URLSearchParams(location.search || '');
+    const qRole = (params.get('role') || '').toLowerCase();
+    const qPwa  = (params.get('pwa')  || '').toLowerCase();
+
+    if (qPwa === 'player' || qRole === 'player') return 'player';
+    if (qPwa === 'admin'  || qRole === 'admin')  return 'admin';
+    if ((location.pathname || '').startsWith('/player')) return 'player';
+    if ((location.pathname || '').startsWith('/admin'))  return 'admin';
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function updatePwaManifestForRoute(location) {
+  try {
+    if (typeof document === 'undefined') return;
+    const intent = getPwaIntentFromLocation(location);
+    const href = intent === 'player'
+      ? '/manifest-player.json?v=20260731-pwa-role-2'
+      : '/manifest-admin.json?v=20260731-pwa-role-2';
+
+    let link = document.querySelector('link[rel="manifest"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.setAttribute('rel', 'manifest');
+      document.head.appendChild(link);
+    }
+    if (link.getAttribute('href') !== href) {
+      link.setAttribute('href', href);
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
 function PwaRouteRememberer() {
   const location = useLocation();
 
   useEffect(() => {
     try {
       const full = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+      updatePwaManifestForRoute(location);
+
       const params = new URLSearchParams(location.search || '');
       const qRole = (params.get('role') || '').toLowerCase();
+      const qPwa  = (params.get('pwa')  || '').toLowerCase();
 
       // ✅ PWA가 start_url 때문에 '/' 또는 '/login'으로 시작한 순간에는
       //    기존에 저장해 둔 참가자 경로(/player/events)를 덮어쓰지 않습니다.
       //    이 덮어쓰기가 발생하면 홈화면 앱 실행 시 운영자 로그인으로 고정되는 문제가 생깁니다.
       const isPwaStartPlaceholder = isStandalonePWA()
-        && (location.pathname === '/' || location.pathname === '/login');
+        && (location.pathname === '/' || location.pathname === '/login')
+        && !qRole
+        && !qPwa;
       if (isPwaStartPlaceholder) return;
 
       localStorage.setItem('agm.lastRoute', full);
@@ -78,7 +122,7 @@ function PwaRouteRememberer() {
       } else if (location.pathname.startsWith('/login')) {
         // ✅ 운영자 링크(/ 또는 /login?role=admin)에서 홈화면 추가 시에도
         //    설치 모드를 admin으로 고정해야 iOS PWA 실행 때 참가자 로그인으로 밀리지 않습니다.
-        if (qRole === 'player') {
+        if (qRole === 'player' || qPwa === 'player') {
           localStorage.setItem('agm.lastMode', 'player');
           localStorage.setItem('agm.installMode', 'player');
         } else {
@@ -105,6 +149,7 @@ function PwaStartRedirect() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    updatePwaManifestForRoute(location);
     if (!isStandalonePWA()) return;
     // PWA는 start_url 때문에 '/' 또는 '/login'으로 뜨는 경우가 많음 → lastRoute로 되돌림
     if (location.pathname !== '/' && location.pathname !== '/login') return;
@@ -118,9 +163,10 @@ function PwaStartRedirect() {
     // (레이아웃/CSS에는 영향 없음)
     const params = new URLSearchParams(location.search || '');
     const qRole = (params.get('role') || '').toLowerCase();
+    const qPwa  = (params.get('pwa')  || '').toLowerCase();
 
     // URL이 role을 명시하면 기존 installMode보다 URL 의도를 우선합니다.
-    if (qRole === 'admin') {
+    if (qRole === 'admin' || qPwa === 'admin') {
       try {
         localStorage.setItem('agm.lastMode', 'admin');
         localStorage.setItem('agm.installMode', 'admin');
@@ -128,12 +174,12 @@ function PwaStartRedirect() {
       navigate('/login?role=admin', { replace: true });
       return;
     }
-    if (qRole === 'player') {
+    if (qRole === 'player' || qPwa === 'player') {
       try {
         localStorage.setItem('agm.lastMode', 'player');
         localStorage.setItem('agm.installMode', 'player');
       } catch (e) {}
-      navigate('/player/login-or-code', { replace: true });
+      navigate('/player/login-or-code?pwa=player', { replace: true });
       return;
     }
 
