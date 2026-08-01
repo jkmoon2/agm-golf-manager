@@ -35,7 +35,7 @@ import HiddenEventMonitor from '../eventTemplates/hiddenEvent/HiddenEventMonitor
 import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../events/holeRankForce';
 import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../events/bingo';
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
-import { getPickLineupConfig } from '../events/pickLineup';
+import { getPickLineupConfig, getPickLineupRequiredCount } from '../events/pickLineup';
 import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, getRankScoreGroupSide, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../events/rankScoreGame';
 import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs, normalizeHiddenPersonalPoints } from '../events/hiddenEvent';
 
@@ -1454,6 +1454,63 @@ if (editForm?.template === 'group-battle') {
     await commitEventsList(next);
   };
 
+  const savePickLineupSelection = async (selector, memberIds = []) => {
+    if (!pickLineupMonitorEvent || !selector) return;
+    if (!ensureEventWriteReady('개인/조 선택 대결 수정 저장')) return;
+    const selectorId = String(selector?.id ?? '');
+    if (!selectorId) return;
+    const requiredCount = getPickLineupRequiredCount(pickLineupMonitorEvent);
+    const ids = (Array.isArray(memberIds) ? memberIds : [])
+      .map((id) => String(id || '').trim())
+      .slice(0, requiredCount);
+    while (ids.length < requiredCount) ids.push('');
+    const hasAny = ids.some(Boolean);
+    const now = Date.now();
+
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => {
+        const next = { ...(freshBase || {}) };
+        const slot = { ...(next[pickLineupMonitorEvent.id] || {}) };
+        const person = { ...(slot.person || {}) };
+        if (hasAny) {
+          person[selectorId] = {
+            ...((person && person[selectorId]) || {}),
+            memberIds: ids,
+            selectedAt: now,
+            assignedBy: 'admin',
+          };
+        } else {
+          delete person[selectorId];
+        }
+        slot.person = person;
+        next[pickLineupMonitorEvent.id] = slot;
+        return next;
+      });
+    } else {
+      const all = { ...(inputsAll || {}) };
+      const slot = { ...(all[pickLineupMonitorEvent.id] || {}) };
+      const person = { ...(slot.person || {}) };
+      if (hasAny) {
+        person[selectorId] = {
+          ...((person && person[selectorId]) || {}),
+          memberIds: ids,
+          selectedAt: now,
+          assignedBy: 'admin',
+        };
+      } else {
+        delete person[selectorId];
+      }
+      slot.person = person;
+      all[pickLineupMonitorEvent.id] = slot;
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false, '이벤트 입력 저장');
+    }
+    try { broadcastEventSync(eventId, { reason: 'pickLineupSelectionEdit' }); } catch {}
+  };
+
+  const cancelPickLineupSelection = async (selector) => {
+    await savePickLineupSelection(selector, []);
+  };
+
   const toggleBingoInputLock = async (locked) => {
     if (!bingoMonitorEvent) return;
     const next = (eventsOfSelected || []).map((e) => {
@@ -1746,40 +1803,68 @@ if (editForm?.template === 'group-battle') {
 
   const cancelHiddenSelection = async (me) => {
     if (!hiddenMonitorEvent || !me) return;
+    if (!ensureEventWriteReady('히든 이벤트 배정 취소')) return;
     const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
     const meId = String(me.id ?? '');
     if (!meId) return;
-
-    const currentSlot = (inputsAll && typeof inputsAll === 'object') ? (inputsAll[hiddenMonitorEvent.id] || {}) : {};
-    const slot = { ...(currentSlot || {}) };
     const now = Date.now();
 
-    if (params.mode === 'personal' || (params.mode === 'fourball' && (params.fourballMode === 'select' || params.fourballMode === 'self'))) {
+    const buildCanceledSlot = (sourceSlot = {}) => {
+      const slot = { ...(sourceSlot || {}) };
       const person = { ...(slot.person || {}) };
-      const partnerId = getMonitorOpponentId(person[meId]);
-      delete person[meId];
-      if (params.mode === 'fourball' && params.fourballMode === 'self' && partnerId) {
-        Object.entries(person).forEach(([pid, rec]) => {
-          if (pid === partnerId || getMonitorOpponentId(rec) === meId) delete person[pid];
-        });
-        const sharedPairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
-        [meId, partnerId].forEach((pid) => {
-          const prev = sharedPairs[pid];
-          if (prev != null) delete sharedPairs[String(prev)];
-          delete sharedPairs[pid];
-        });
-        slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: sharedPairs, assignedAt: now, assignedMode: 'admin-edit' };
-      }
-      slot.person = person;
-    } else if (params.mode === 'fourball') {
-      const pairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
-      const partnerId = String(pairs[meId] || '');
-      if (partnerId) delete pairs[partnerId];
-      delete pairs[meId];
-      slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'admin-edit' };
-    }
 
-    await saveHiddenMonitorInputs(hiddenMonitorEvent, slot, 'hiddenSelectionCancel');
+      if (params.mode === 'personal' || (params.mode === 'fourball' && params.fourballMode === 'select')) {
+        delete person[meId];
+        slot.person = person;
+        return slot;
+      }
+
+      if (params.mode === 'fourball' && params.fourballMode === 'self') {
+        const sharedPairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
+        const partnerId = getMonitorOpponentId(person[meId]) || String(sharedPairs[meId] || '');
+        delete person[meId];
+        if (partnerId) delete person[partnerId];
+        Object.entries(person).forEach(([pid, rec]) => {
+          const opponentId = getMonitorOpponentId(rec);
+          if (opponentId === meId || (partnerId && opponentId === partnerId)) delete person[pid];
+        });
+        Object.entries({ ...sharedPairs }).forEach(([pid, pairedId]) => {
+          if (pid === meId || pairedId === meId || (partnerId && (pid === partnerId || pairedId === partnerId))) {
+            delete sharedPairs[pid];
+          }
+        });
+        slot.person = person;
+        slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: sharedPairs, assignedAt: now, assignedMode: 'admin-edit' };
+        return slot;
+      }
+
+      if (params.mode === 'fourball') {
+        const pairs = normalizeHiddenFourballPairs(slot?.shared?.hiddenFourballPairs || slot?.shared?.pairs || {});
+        const partnerId = String(pairs[meId] || '');
+        Object.entries({ ...pairs }).forEach(([pid, pairedId]) => {
+          if (pid === meId || pairedId === meId || (partnerId && (pid === partnerId || pairedId === partnerId))) {
+            delete pairs[pid];
+          }
+        });
+        slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'admin-edit' };
+        return slot;
+      }
+
+      return slot;
+    };
+
+    if (typeof updateEventInputsTransaction === 'function') {
+      await updateEventInputsTransaction(eventId, (freshBase) => {
+        const next = { ...(freshBase || {}) };
+        next[hiddenMonitorEvent.id] = buildCanceledSlot(next[hiddenMonitorEvent.id] || {});
+        return next;
+      });
+    } else {
+      const all = { ...(inputsAll || {}) };
+      all[hiddenMonitorEvent.id] = buildCanceledSlot(all[hiddenMonitorEvent.id] || {});
+      await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false, '이벤트 입력 저장');
+    }
+    try { broadcastEventSync(eventId, { reason: 'hiddenSelectionCancel' }); } catch {}
   };
 
   const assignHiddenFourball = async () => {
@@ -2856,6 +2941,8 @@ if (editForm?.template === 'group-battle') {
             roomNames={roomNames}
             onClose={() => setMonitorId(null)}
             onToggleLock={togglePickLineupLock}
+            onSaveSelection={savePickLineupSelection}
+            onCancelSelection={cancelPickLineupSelection}
           />
         )}
 
