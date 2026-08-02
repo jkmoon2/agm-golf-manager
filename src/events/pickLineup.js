@@ -168,6 +168,7 @@ export function computePickLineup(eventDef, participants = [], inputsByEvent = {
         room: selector?.room ?? null,
         roomLabel: getRoomLabel(roomNames, selector?.room),
         value: total,
+        score: total,
         handicapSum,
         members,
       };
@@ -180,12 +181,69 @@ export function computePickLineup(eventDef, participants = [], inputsByEvent = {
       || String(a.name).localeCompare(String(b.name), 'ko');
   });
 
+  const roomNumbers = new Set();
+  const safeRoomCount = Math.max(0, Number(opt.roomCount || 0) || 0);
+  if (safeRoomCount > 0) {
+    for (let r = 1; r <= safeRoomCount; r += 1) roomNumbers.add(r);
+  }
+  (Array.isArray(participants) ? participants : []).forEach((p) => {
+    const roomNo = Number(p?.room);
+    if (Number.isFinite(roomNo) && roomNo >= 1) roomNumbers.add(roomNo);
+  });
+  rows.forEach((row) => {
+    const roomNo = Number(row?.room);
+    if (Number.isFinite(roomNo) && roomNo >= 1) roomNumbers.add(roomNo);
+  });
+
+  const roomMap = new Map();
+  Array.from(roomNumbers).sort((a, b) => a - b).forEach((roomNo) => {
+    roomMap.set(roomNo, {
+      key: `room-${roomNo}`,
+      room: roomNo,
+      name: getRoomLabel(roomNames, roomNo),
+      value: 0,
+      score: 0,
+      count: 0,
+      selectors: [],
+    });
+  });
+
+  rows.forEach((row) => {
+    const roomNo = Number(row?.room);
+    if (!Number.isFinite(roomNo) || roomNo < 1) return;
+    if (!roomMap.has(roomNo)) {
+      roomMap.set(roomNo, {
+        key: `room-${roomNo}`,
+        room: roomNo,
+        name: getRoomLabel(roomNames, roomNo),
+        value: 0,
+        score: 0,
+        count: 0,
+        selectors: [],
+      });
+    }
+    const bucket = roomMap.get(roomNo);
+    const value = Number(row?.value ?? row?.score ?? 0) || 0;
+    bucket.value += value;
+    bucket.score = bucket.value;
+    bucket.count += 1;
+    bucket.selectors.push(row);
+  });
+
+  const roomRows = Array.from(roomMap.values());
+  roomRows.sort((a, b) => {
+    return sign * ((Number(a.value) || 0) - (Number(b.value) || 0))
+      || Number(a.room || 0) - Number(b.room || 0);
+  });
+
   return {
     kind: 'person',
     metric: 'result',
     mode: cfg.mode,
     order,
     rows,
+    personRows: rows,
+    roomRows,
     config: cfg,
   };
 }
