@@ -71,6 +71,7 @@ export default function PickLineupSelectionMonitor({
   roomNames = [],
   onClose,
   onToggleLock,
+  onToggleReveal,
   onSaveSelection,
   onCancelSelection,
 }) {
@@ -122,7 +123,8 @@ export default function PickLineupSelectionMonitor({
   const rowById = useMemo(() => new Map(rows.map((row) => [String(row.id), row])), [rows]);
   const doneCount = rows.filter((row) => row.complete).length;
   const unregisteredRows = rows.filter((row) => !row.complete);
-  const locked = !!eventDef?.params?.selectionLocked;
+  const locked = !!(eventDef?.params?.selectionLocked || eventDef?.params?.locked);
+  const revealed = !!(eventDef?.params?.selectionRevealed || eventDef?.params?.revealed || eventDef?.params?.publicSelection || eventDef?.params?.showSelections);
 
   const updateDraftCell = (pid, idx, value) => {
     const key = String(pid || '');
@@ -271,6 +273,16 @@ export default function PickLineupSelectionMonitor({
         <div style={summaryBox}>
           <div style={summaryItem}><b>{doneCount}</b> / {rows.length} 완료</div>
           <div style={summaryItem}>상태: <b style={{ color: locked ? '#dc2626' : '#2563eb' }}>{locked ? '마감' : '진행중'}</b></div>
+          <div style={summaryItem}>공개: <b style={{ color: revealed ? '#2563eb' : '#dc2626' }}>{revealed ? '공개' : '비공개'}</b></div>
+          <button
+            type="button"
+            style={revealed ? dangerStyle : btnPrimary}
+            onClick={() => {
+              if (typeof onToggleReveal === 'function') onToggleReveal(!revealed);
+            }}
+          >
+            {revealed ? '비공개' : '공개'}
+          </button>
           <button
             type="button"
             style={locked ? btnSub : btnPrimary}
