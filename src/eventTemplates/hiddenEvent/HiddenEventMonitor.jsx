@@ -340,7 +340,7 @@ export default function HiddenEventMonitor({
           <button type="button" style={editMode ? primaryStyle : btnStyle} onClick={() => setEditMode((prev) => !prev)}>
             수정
           </button>
-          {cfg.mode === 'fourball' && cfg.fourballMode !== 'select' && editMode && (
+          {cfg.mode === 'fourball' && cfg.fourballMode !== 'select' && (
             <button type="button" style={primaryStyle} onClick={onAssignFourball}>포볼 무작위 배정</button>
           )}
           {showDirectionButtons && !editMode && (

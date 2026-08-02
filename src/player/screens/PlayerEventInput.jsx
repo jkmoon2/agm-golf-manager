@@ -114,10 +114,46 @@ function makeEmptyBingoBoard(cellCount = 16){
   return Array.from({ length: count }, () => '');
 }
 
+function getStrongRandomFloat() {
+  try {
+    const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+    if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+      const bucket = new Uint32Array(1);
+      cryptoObj.getRandomValues(bucket);
+      return bucket[0] / 4294967296;
+    }
+  } catch {}
+  return Math.random();
+}
+
+function getStrongRandomInt(max) {
+  const n = Math.floor(Number(max));
+  if (!Number.isFinite(n) || n <= 1) return 0;
+  return Math.floor(getStrongRandomFloat() * n);
+}
+
+function pickRandomItem(list = []) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) return null;
+  return arr[getStrongRandomInt(arr.length)] || arr[0] || null;
+}
+
+function compactRecentIds(ids = [], limit = 6) {
+  const out = [];
+  (Array.isArray(ids) ? ids : []).forEach((id) => {
+    const key = String(id || '');
+    if (!key) return;
+    const prevIdx = out.indexOf(key);
+    if (prevIdx >= 0) out.splice(prevIdx, 1);
+    out.push(key);
+  });
+  return out.slice(-Math.max(1, Number(limit) || 6));
+}
+
 function shuffleArray(arr = []) {
   const next = [...arr];
   for (let i = next.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = getStrongRandomInt(i + 1);
     const tmp = next[i];
     next[i] = next[j];
     next[j] = tmp;
@@ -1690,6 +1726,12 @@ export default function PlayerEventInput(){
   };
 
   const patchPickMember = (evId, pid, idx, value, requiredCount) => {
+    const mineId = String(selfParticipant?.id ?? selfParticipantId ?? '');
+    const selectorId = String(pid ?? '');
+    if (!mineId || !selectorId || selectorId !== mineId) {
+      alert('본인 선택만 수정할 수 있습니다.');
+      return;
+    }
     const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
@@ -1713,6 +1755,7 @@ export default function PlayerEventInput(){
 
     slot.person = person; all[evId] = slot;
     applyDraft(all);
+    setDirty(true);
   };
 
   const finalizeValue = (evId, pid, raw) => {
@@ -2362,10 +2405,19 @@ export default function PlayerEventInput(){
           throw new Error('no-candidate');
         }
 
-        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        const history = (freshShared.hiddenFourballPickHistory && typeof freshShared.hiddenFourballPickHistory === 'object')
+          ? { ...freshShared.hiddenFourballPickHistory }
+          : {};
+        const mineHistory = compactRecentIds(history[mineId], 6);
+        const recentAvoid = new Set(mineHistory.slice(-Math.min(3, Math.max(candidates.length - 1, 0))));
+        const preferredCandidates = candidates.length > 1
+          ? candidates.filter((p) => !recentAvoid.has(String(p?.id ?? '')))
+          : candidates;
+        const pick = pickRandomItem(preferredCandidates.length ? preferredCandidates : candidates);
         const pickId = String(pick?.id ?? '');
         if (!pickId) throw new Error('no-candidate');
         pickedName = pick?.nickname || '상대';
+        history[mineId] = compactRecentIds([...mineHistory, pickId], 6);
 
         // 라이브 동시 선택 보호: A/B 1대1 매칭은 서버 최신값 기준으로 확정한다.
         // 이미 다른 참가자가 같은 상대를 가져갔으면 후보에서 제외되므로 중복 배정되지 않는다.
@@ -2379,7 +2431,14 @@ export default function PlayerEventInput(){
         freshPairs[mineId] = pickId;
         freshPairs[pickId] = mineId;
         freshSlot.person = freshPerson;
-        freshSlot.shared = { ...freshShared, hiddenFourballPairs: freshPairs, assignedAt: now, assignedMode: 'self-player' };
+        freshSlot.shared = {
+          ...freshShared,
+          hiddenFourballPairs: freshPairs,
+          hiddenFourballLastPairs: freshPairs,
+          hiddenFourballPickHistory: history,
+          assignedAt: now,
+          assignedMode: 'self-player',
+        };
         next[ev.id] = freshSlot;
         return next;
       }, { updatedBy: auth?.currentUser?.uid || 'player' });
@@ -4159,10 +4218,16 @@ export default function PlayerEventInput(){
             const pickNickColPx = 108;
             const pickPreviewNickPx = pickCfg.mode === 'jo' ? 102 : 100;
             const pickPreviewTotalPx = 42;
-            const locked = !!ev?.params?.selectionLocked;
+            const locked = !!(ev?.params?.selectionLocked || ev?.params?.locked);
+            const pickLineupRevealed = !!(ev?.params?.selectionRevealed || ev?.params?.revealed || ev?.params?.publicSelection || ev?.params?.showSelections);
+            const myPickSelectorId = String(selfParticipant?.id ?? selfParticipantId ?? '');
             const previewRows = roomMembers.map((p) => {
               if (!p) return { selectorName: '', cells: slotLabels.map(() => ''), teamLine: '', handicapSum: '', hasAny: false };
-              const rowIds = padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount);
+              const ownerId = String(p?.id ?? '');
+              const canViewRowSelection = pickLineupRevealed || (ownerId && ownerId === myPickSelectorId);
+              const rowIds = canViewRowSelection
+                ? padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount)
+                : padPickIds([], requiredCount);
               const members = rowIds.map((id) => participantById.get(String(id))).filter(Boolean);
               const cells = [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
               const handicapSum = members.reduce((sum, m) => {
@@ -4209,9 +4274,13 @@ export default function PlayerEventInput(){
 
                     <tbody>
                       {roomMembers.map((p, rIdx) => {
-                        const rowIds = p
+                        const rowOwnerId = String(p?.id ?? '');
+                        const isOwnPickLineupRow = !!rowOwnerId && !!myPickSelectorId && rowOwnerId === myPickSelectorId;
+                        const rowRawIds = p
                           ? padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount)
                           : padPickIds([], requiredCount);
+                        const rowIds = (pickLineupRevealed || isOwnPickLineupRow) ? rowRawIds : padPickIds([], requiredCount);
+                        const canEditPickLineupRow = !!p && isOwnPickLineupRow && !locked;
 
                         return (
                           <tr key={rIdx}>
@@ -4228,15 +4297,15 @@ export default function PlayerEventInput(){
                                       className={`${tCss.pickNativeSelect} ${isFourJo ? tCss.pickNativeSelectCompact : ''}`}
                                       value={selectedId}
                                       onChange={(e) => {
-                                        if (!p || locked) return;
+                                        if (!canEditPickLineupRow) return;
                                         setPickMenuState(null);
                                         patchPickMember(ev.id, String(p.id ?? ''), idx, e.target.value, requiredCount);
                                       }}
-                                      disabled={!p || locked}
-                                      title={buttonText}
+                                      disabled={!canEditPickLineupRow}
+                                      title={!isOwnPickLineupRow && !pickLineupRevealed ? '비공개' : buttonText}
                                     >
                                       <option value="">
-                                        {selectedOpt ? '선택 해제' : (options.length ? '선택' : '선택할 참가자 없음')}
+                                        {!isOwnPickLineupRow && !pickLineupRevealed ? '비공개' : (selectedOpt ? '선택 해제' : (options.length ? '선택' : '선택할 참가자 없음'))}
                                       </option>
                                       {options.map((opt) => {
                                         const value = String(opt?.id ?? '');

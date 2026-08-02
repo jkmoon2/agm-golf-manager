@@ -28,11 +28,18 @@ export function getPickLineupConfig(eventDef) {
   const pickCount = Math.max(1, Math.min(4, Number(params.pickCount || 1)));
   const openGroups = normalizeOpenGroups(params.openGroups);
   const lastPlaceHalf = !!params.lastPlaceHalf;
+  const selectionLocked = !!(params.selectionLocked || params.locked);
+  const selectionRevealed = !!(params.selectionRevealed || params.revealed || params.publicSelection || params.showSelections);
   return {
     mode,
     pickCount,
     openGroups: openGroups.length ? openGroups : [1],
     lastPlaceHalf,
+    selectionLocked,
+    selectionRevealed,
+    revealed: selectionRevealed,
+    publicSelection: selectionRevealed,
+    showSelections: selectionRevealed,
   };
 }
 

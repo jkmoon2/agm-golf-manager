@@ -278,27 +278,28 @@ function roomLabel(roomNames = [], roomNo) {
   return (Array.isArray(roomNames) && roomNames[n - 1] && String(roomNames[n - 1]).trim()) ? String(roomNames[n - 1]).trim() : `${n}번방`;
 }
 
-function seededRandom(seedText) {
-  let h = 2166136261;
-  const text = String(seedText || `agm-hidden-event-${Date.now()}`);
-  for (let i = 0; i < text.length; i += 1) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return function next() {
-    h += 0x6D2B79F5;
-    let t = h;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+function strongRandomFloat() {
+  try {
+    const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+    if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+      const bucket = new Uint32Array(1);
+      cryptoObj.getRandomValues(bucket);
+      return bucket[0] / 4294967296;
+    }
+  } catch {}
+  return Math.random();
 }
 
-function shuffle(items, seedText) {
+function randomInt(max) {
+  const n = Math.floor(Number(max));
+  if (!Number.isFinite(n) || n <= 1) return 0;
+  return Math.floor(strongRandomFloat() * n);
+}
+
+function shuffle(items) {
   const out = [...(Array.isArray(items) ? items : [])];
-  const rnd = seededRandom(seedText);
   for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rnd() * (i + 1));
+    const j = randomInt(i + 1);
     const tmp = out[i];
     out[i] = out[j];
     out[j] = tmp;
@@ -306,11 +307,35 @@ function shuffle(items, seedText) {
   return out;
 }
 
-export function assignHiddenFourballPairs(participants = [], params = {}, existingPairs = {}) {
+function compactRecentPartnerHistory(history, limit = 6) {
+  const src = Array.isArray(history) ? history : [];
+  const out = [];
+  src.forEach((id) => {
+    const key = String(id || '');
+    if (!key) return;
+    const prevIdx = out.indexOf(key);
+    if (prevIdx >= 0) out.splice(prevIdx, 1);
+    out.push(key);
+  });
+  return out.slice(-Math.max(1, Number(limit) || 6));
+}
+
+function isAvoidedPair(avoidMap, aId, bId) {
+  const a = String(aId || '');
+  const b = String(bId || '');
+  if (!a || !b) return false;
+  const direct = avoidMap?.[a];
+  if (Array.isArray(direct)) return direct.map(String).includes(b);
+  return String(direct || '') === b || String(avoidMap?.[b] || '') === a;
+}
+
+export function assignHiddenFourballPairs(participants = [], params = {}, existingPairs = {}, options = {}) {
   const cfg = normalizeHiddenEventParams(params);
   const groups = cfg.pairGroups;
   const safeParticipants = Array.isArray(participants) ? participants : [];
   const byId = new Map(safeParticipants.map((p) => [String(p?.id ?? ''), p]));
+  const avoidPairs = normalizeHiddenFourballPairs(options?.avoidPairs || options?.historyPairs || {});
+  const recentHistory = (options?.recentHistory && typeof options.recentHistory === 'object') ? options.recentHistory : {};
   const sideOf = (p) => {
     const g = clampGroupNo(getParticipantGroupNo(p));
     if (groups.A.includes(g)) return 'A';
@@ -337,22 +362,43 @@ export function assignHiddenFourballPairs(participants = [], params = {}, existi
     paired.add(bKey);
   });
 
-  const seedBase = `agm-hidden-${Date.now()}-${Math.random()}`;
-  const aList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'A' && !paired.has(String(p?.id ?? ''))), `${seedBase}-A`);
-  const bList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'B' && !paired.has(String(p?.id ?? ''))), `${seedBase}-B`);
-  const count = Math.min(aList.length, bList.length);
-  for (let i = 0; i < count; i += 1) {
-    const aId = String(aList[i]?.id ?? '');
-    const bId = String(bList[i]?.id ?? '');
-    if (!aId || !bId) continue;
+  const aList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'A' && !paired.has(String(p?.id ?? ''))));
+  let bList = shuffle(safeParticipants.filter((p) => sideOf(p) === 'B' && !paired.has(String(p?.id ?? ''))));
+
+  aList.forEach((a) => {
+    const aId = String(a?.id ?? '');
+    if (!aId || !bList.length) return;
+    const recentSet = new Set(compactRecentPartnerHistory(recentHistory?.[aId], 4));
+    let candidateIndexes = bList
+      .map((b, idx) => ({ b, idx }))
+      .filter(({ b }) => {
+        const bId = String(b?.id ?? '');
+        return bId && !isAvoidedPair(avoidPairs, aId, bId) && !recentSet.has(bId);
+      });
+
+    if (!candidateIndexes.length && bList.length > 1) {
+      candidateIndexes = bList
+        .map((b, idx) => ({ b, idx }))
+        .filter(({ b }) => {
+          const bId = String(b?.id ?? '');
+          return bId && !isAvoidedPair(avoidPairs, aId, bId);
+        });
+    }
+    if (!candidateIndexes.length) candidateIndexes = bList.map((b, idx) => ({ b, idx }));
+
+    const chosen = candidateIndexes[randomInt(candidateIndexes.length)];
+    const b = chosen?.b;
+    const bIdx = Number(chosen?.idx);
+    const bId = String(b?.id ?? '');
+    if (!bId || !Number.isFinite(bIdx) || bIdx < 0) return;
     pairs[aId] = bId;
     pairs[bId] = aId;
     paired.add(aId);
     paired.add(bId);
-  }
+    bList = bList.filter((_, idx) => idx !== bIdx);
+  });
   return pairs;
 }
-
 export function normalizeHiddenFourballPairs(raw) {
   const src = (raw && typeof raw === 'object') ? raw : {};
   const pairs = {};

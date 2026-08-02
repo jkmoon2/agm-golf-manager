@@ -1322,10 +1322,30 @@ if (editForm?.template === 'group-battle') {
     }
   };
   const toggleImportCheck = (idx) => setImportList(list => { const n = [...list]; n[idx] = { ...n[idx], _checked: !n[idx]._checked }; return n; });
+  const cloneImportedEvent = (ev) => {
+    const item = { ...ev, id: uid(), enabled: true };
+    delete item._checked;
+
+    // 이벤트 불러오기는 "설정"만 가져오고, 이전 대회의 운영 상태/공개 상태는 새 대회에 넘기지 않습니다.
+    // 실제 선택/무작위 배정 내역은 eventInputs에 저장되며, 새 id로 복사되므로 원칙적으로 넘어오지 않습니다.
+    if (item.template === 'hidden-event') {
+      const params = normalizeHiddenEventParams(item.params || {});
+      item.params = { ...params, revealed: false, selectionLocked: false, locked: false };
+      item.target = normalizeHiddenPreviewTarget(item.params, item.target);
+      item.rankOrder = normalizeHiddenPreviewOrder(item.params, item.rankOrder);
+    } else if (item.template === 'pick-lineup') {
+      item.params = { ...(item.params || {}), selectionLocked: false, locked: false, selectionRevealed: false, revealed: false, publicSelection: false, showSelections: false };
+    } else if (item.template === 'rank-score-game') {
+      const params = normalizeRankScoreGameParams(item.params || {});
+      item.params = { ...params, selectionLocked: false, locked: false, selectionRevealed: false, revealed: false };
+    }
+
+    return item;
+  };
   const doImport = async () => {
     const picked = importList.filter(x => x._checked);
     if (!picked.length) { alert('가져올 이벤트를 선택하세요.'); return; }
-    const cloned = picked.map(ev => ({ ...ev, id: uid(), enabled: true }));
+    const cloned = picked.map(cloneImportedEvent);
     const list = [...eventsOfSelected, ...cloned];
     await commitEventsList(list);
     alert(`${picked.length}개의 이벤트를 불러왔습니다.`);
@@ -1449,6 +1469,16 @@ if (editForm?.template === 'group-battle') {
     const next = (eventsOfSelected || []).map((e) => {
       if (e.id !== pickLineupMonitorEvent.id) return e;
       const params = { ...(e.params || {}), selectionLocked: !!locked };
+      return { ...e, params };
+    });
+    await commitEventsList(next);
+  };
+
+  const togglePickLineupReveal = async (revealed) => {
+    if (!pickLineupMonitorEvent) return;
+    const next = (eventsOfSelected || []).map((e) => {
+      if (e.id !== pickLineupMonitorEvent.id) return e;
+      const params = { ...(e.params || {}), selectionRevealed: !!revealed, revealed: !!revealed, publicSelection: !!revealed, showSelections: !!revealed };
       return { ...e, params };
     });
     await commitEventsList(next);
@@ -1889,34 +1919,58 @@ if (editForm?.template === 'group-battle') {
           : '포볼 히든팀을 무작위로 배정할까요?');
     if (!askConfirm(confirmMessage)) return;
 
-    const pairs = params.fourballMode === 'self'
-      ? assignHiddenFourballPairs(participants, params, currentPairs)
-      : assignHiddenFourballPairs(participants, params);
-    const all = { ...(inputsAll || {}) };
-    const slot = { ...(all[hiddenMonitorEvent.id] || {}) };
     const now = Date.now();
+    const buildAssignedSlot = (sourceSlot = {}) => {
+      const slot = { ...(sourceSlot || {}) };
+      const shared = { ...((slot.shared && typeof slot.shared === 'object') ? slot.shared : {}) };
+      const sharedPairs = normalizeHiddenFourballPairs(shared.hiddenFourballPairs || shared.pairs || {});
+      const personPairs = getHiddenFourballPairsFromPerson(slot.person || {});
+      const basePairs = params.fourballMode === 'self'
+        ? normalizeHiddenFourballPairs({ ...sharedPairs, ...personPairs })
+        : {};
+      const avoidPairs = normalizeHiddenFourballPairs(shared.hiddenFourballLastPairs || sharedPairs || {});
+      const pairs = params.fourballMode === 'self'
+        ? assignHiddenFourballPairs(participants, params, basePairs, { avoidPairs, recentHistory: shared.hiddenFourballPickHistory || {} })
+        : assignHiddenFourballPairs(participants, params, {}, { avoidPairs, recentHistory: shared.hiddenFourballPickHistory || {} });
 
-    if (params.fourballMode === 'self') {
-      const nextPerson = {};
+      const pickHistory = { ...((shared.hiddenFourballPickHistory && typeof shared.hiddenFourballPickHistory === 'object') ? shared.hiddenFourballPickHistory : {}) };
       Object.entries(pairs).forEach(([pid, partnerId]) => {
-        if (!pid || !partnerId) return;
-        nextPerson[String(pid)] = {
-          ...((currentSlot?.person && currentSlot.person[String(pid)]) || {}),
-          opponentId: String(partnerId),
-          pickedAt: ((currentSlot?.person && currentSlot.person[String(pid)]?.pickedAt) || now),
-          autoAssigned: true,
-        };
+        const key = String(pid || '');
+        const val = String(partnerId || '');
+        if (!key || !val) return;
+        const prev = Array.isArray(pickHistory[key]) ? pickHistory[key] : [];
+        pickHistory[key] = [...prev.filter((id) => String(id || '') !== val), val].slice(-6);
       });
-      slot.person = nextPerson;
-      slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'self-fill' };
-    } else {
-      slot.shared = { ...(slot.shared || {}), hiddenFourballPairs: pairs, assignedAt: now, assignedMode: 'operator-random' };
-    }
 
-    all[hiddenMonitorEvent.id] = slot;
+      if (params.fourballMode === 'self') {
+        const prevPerson = (slot.person && typeof slot.person === 'object') ? slot.person : {};
+        const nextPerson = {};
+        Object.entries(pairs).forEach(([pid, partnerId]) => {
+          if (!pid || !partnerId) return;
+          nextPerson[String(pid)] = {
+            ...((prevPerson && prevPerson[String(pid)]) || {}),
+            opponentId: String(partnerId),
+            pickedAt: ((prevPerson && prevPerson[String(pid)]?.pickedAt) || now),
+            autoAssigned: true,
+          };
+        });
+        slot.person = nextPerson;
+        slot.shared = { ...shared, hiddenFourballPairs: pairs, hiddenFourballLastPairs: pairs, hiddenFourballPickHistory: pickHistory, assignedAt: now, assignedMode: 'self-fill' };
+      } else {
+        slot.shared = { ...shared, hiddenFourballPairs: pairs, hiddenFourballLastPairs: pairs, hiddenFourballPickHistory: pickHistory, assignedAt: now, assignedMode: 'operator-random' };
+      }
+      return slot;
+    };
+
     if (typeof updateEventInputsTransaction === 'function') {
-      await updateEventInputsTransaction(eventId, (freshBase) => ({ ...(freshBase || {}), [hiddenMonitorEvent.id]: slot }));
+      await updateEventInputsTransaction(eventId, (freshBase) => {
+        const next = { ...(freshBase || {}) };
+        next[hiddenMonitorEvent.id] = buildAssignedSlot(next[hiddenMonitorEvent.id] || {});
+        return next;
+      });
     } else {
+      const all = { ...(inputsAll || {}) };
+      all[hiddenMonitorEvent.id] = buildAssignedSlot(all[hiddenMonitorEvent.id] || {});
       await safeUpdateEventImmediate({ eventInputs: all, inputsUpdatedAt: now }, false, '이벤트 입력 저장');
     }
     alert(params.fourballMode === 'self'
@@ -2941,6 +2995,7 @@ if (editForm?.template === 'group-battle') {
             roomNames={roomNames}
             onClose={() => setMonitorId(null)}
             onToggleLock={togglePickLineupLock}
+            onToggleReveal={togglePickLineupReveal}
             onSaveSelection={savePickLineupSelection}
             onCancelSelection={cancelPickLineupSelection}
           />
