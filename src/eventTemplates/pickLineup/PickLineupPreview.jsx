@@ -2,22 +2,64 @@
 import React, { useMemo } from 'react';
 import { computePickLineup } from '../../events/pickLineup';
 
-export default function PickLineupPreview({ eventDef, participants = [], inputs = {}, roomNames = [] }) {
+export default function PickLineupPreview({ eventDef, participants = [], inputs = {}, roomNames = [], roomCount = 0, viewTab = 'person' }) {
   const data = useMemo(() => {
     if (!eventDef) return null;
-    return computePickLineup(eventDef, participants, inputs, { roomNames });
-  }, [eventDef, participants, inputs, roomNames]);
+    return computePickLineup(eventDef, participants, inputs, { roomNames, roomCount });
+  }, [eventDef, participants, inputs, roomNames, roomCount]);
 
   if (!eventDef || !data) return null;
 
-  if (!data.rows.length) {
+  const isRoomView = viewTab === 'room';
+  const rows = isRoomView ? (Array.isArray(data.roomRows) ? data.roomRows : []) : (Array.isArray(data.rows) ? data.rows : []);
+
+  if (!rows.length || !data.rows.length) {
     return <div style={{ color: '#999', fontSize: 13 }}>아직 선택 데이터가 없습니다.</div>;
+  }
+
+  if (isRoomView) {
+    return (
+      <div style={{ marginTop: 4 }}>
+        <ol style={listStyle}>
+          {rows.map((row, idx) => (
+            <li key={row.key || `room-${row.room}`} style={itemStyle}>
+              <div style={headRowStyle}>
+                <div style={{ minWidth: 0 }}>
+                  <span style={rankStyle}>{idx + 1}.</span>{' '}
+                  <span style={selectorNameStyle}>{row.name || `${row.room}번방`}</span>{' '}
+                  <span style={selectorMetaStyle}>({row.count || 0}명 선택완료)</span>
+                </div>
+                <div style={totalStyle}>{row.value}</div>
+              </div>
+
+              <div style={membersWrapStyle}>
+                {(row.selectors || []).length ? (
+                  (row.selectors || []).map((selector) => (
+                    <div key={`${row.key}-${selector.selectorId}`} style={memberRowStyle}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <span style={memberNameStyle}>{selector.name}</span>{' '}
+                          <span style={memberMetaStyle}>선택 {Array.isArray(selector.members) ? selector.members.map((m) => m.name).join(' / ') : '-'}</span>
+                        </div>
+                        <div style={memberValueStyle}>합계 {selector.value}</div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div style={emptyRoomStyle}>선택 완료 참가자가 없습니다.</div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
   }
 
   return (
     <div style={{ marginTop: 4 }}>
       <ol style={listStyle}>
-        {data.rows.map((row, idx) => (
+        {rows.map((row, idx) => (
           <li key={row.key} style={itemStyle}>
             <div style={headRowStyle}>
               <div style={{ minWidth: 0 }}>
@@ -63,3 +105,4 @@ const memberRowStyle = { padding: '8px 10px', border: '1px solid #f1f5f9', borde
 const memberNameStyle = { fontWeight: 400, color: '#183153' };
 const memberMetaStyle = { color: '#999', fontSize: 12, fontWeight: 400 };
 const memberValueStyle = { fontSize: 12, color: '#555', fontWeight: 400, textAlign: 'right', lineHeight: 1.45 };
+const emptyRoomStyle = { color: '#999', fontSize: 12, padding: '4px 2px' };

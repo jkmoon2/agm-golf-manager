@@ -2787,6 +2787,8 @@ if (editForm?.template === 'group-battle') {
                   participants={participants}
                   inputs={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
                 />
               ) : previewDef.template === 'group-room-hole-battle' ? (
                 <GroupRoomHoleBattlePreview
@@ -2834,6 +2836,15 @@ if (editForm?.template === 'group-battle') {
                   eventDef={previewDef}
                   participants={participants}
                   inputsByEvent={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : previewDef.template === 'pick-lineup' ? (
+                <PickLineupPreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputs={inputsAll?.[previewId] || {}}
                   roomNames={roomNames}
                   roomCount={roomCount}
                   viewTab={viewTab}
