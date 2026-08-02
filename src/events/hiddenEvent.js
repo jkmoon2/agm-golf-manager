@@ -280,7 +280,7 @@ function roomLabel(roomNames = [], roomNo) {
 
 function strongRandomFloat() {
   try {
-    const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+    const cryptoObj = typeof window !== 'undefined' ? window.crypto : null;
     if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
       const bucket = new Uint32Array(1);
       cryptoObj.getRandomValues(bucket);
