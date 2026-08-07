@@ -163,6 +163,7 @@ function VoteResult({ data }) {
                       <tr>
                         <td style={voteDetailTd} colSpan={5}>
                           구성: {row.members.map((member) => `${member.name}(${member.resultValue !== null && member.resultValue !== undefined && Number.isFinite(Number(member.resultValue)) ? member.resultValue : '-'})`).join(' / ')}
+                          {Number(row?.missingMemberCount || 0) > 0 ? ` · 미입력 ${row.missingMemberCount}명` : ''}
                         </td>
                       </tr>
                     )}
