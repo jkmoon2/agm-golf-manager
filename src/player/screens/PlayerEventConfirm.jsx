@@ -478,8 +478,8 @@ const events = useMemo(
     // ── pick-lineup(개인/조/투표 선택 대결) ─────────────────────
     if (template === 'pick-lineup') {
       const cfg = getPickLineupConfig(ev);
-      if (cfg.mode === 'vote') {
-        return { kind: 'vote', metricLabel: '득표', rows: [], isPickLineupVote: true };
+      if (cfg.mode === 'vote1' || cfg.mode === 'vote2') {
+        return { kind: 'vote', metricLabel: '결과', rows: [], isPickLineupVote: true };
       }
       const data = computePickLineup(ev, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames });
       const rows = (data?.rows || []).map((r, i) => ({
@@ -805,7 +805,7 @@ const events = useMemo(
 
           {results.map(({ ev, res }) => {
             const title = ev?.title || '이벤트';
-            const isPickLineupVote = ev?.template === 'pick-lineup' && getPickLineupConfig(ev).mode === 'vote';
+            const isPickLineupVote = ev?.template === 'pick-lineup' && ['vote1', 'vote2'].includes(getPickLineupConfig(ev).mode);
             if (isPickLineupVote) {
               return (
                 <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>

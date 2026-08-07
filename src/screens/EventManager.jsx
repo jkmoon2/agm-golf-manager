@@ -260,7 +260,7 @@ function normalizeEventParamsForAdmin(template, params) {
 
 function isValidPickLineupParams(params) {
   const cfg = getPickLineupConfig({ template: 'pick-lineup', params });
-  if (cfg.mode !== 'vote') return true;
+  if (cfg.mode !== 'vote1' && cfg.mode !== 'vote2') return true;
   return cfg.voteSlots.length === cfg.voteCount
     && cfg.voteSlots.every((slot) => Array.isArray(slot?.candidateIds) && slot.candidateIds.length > 0);
 }
@@ -536,7 +536,7 @@ if (form.template === 'group-battle') {
         return;
       }
       if (form.template === 'pick-lineup' && !isValidPickLineupParams(parsed)) {
-        alert('투표 모드는 각 투표별로 리스트에 표시할 참가자를 1명 이상 선택해야 합니다.');
+        alert('투표1/투표2 모드는 각 투표별로 참가자를 1명 이상 선택해야 합니다.');
         return;
       }
       const isBingo = form.template === 'bingo';
@@ -554,8 +554,8 @@ if (form.template === 'group-battle') {
         template: form.template,
         params: hiddenParams || rankScoreParams || pickLineupParams || parsed,
         ...(isHiddenEvent ? { sameGroupOnly: !!hiddenParams.sameGroupOnly, sameGroupTargetOnly: !!hiddenParams.sameGroupOnly, targetScope: hiddenParams.targetScope || 'all', opponentScope: hiddenParams.opponentScope || 'all' } : {}),
-        target: isHiddenEvent ? normalizeHiddenPreviewTarget(hiddenParams) : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isPickLineup && pickLineupParams?.mode === 'vote' ? 'vote' : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person')))),
-        rankOrder: isHiddenEvent ? normalizeHiddenPreviewOrder(hiddenParams) : (isRankScoreGame ? rankScoreParams.winnerOrder : (isPickLineup && pickLineupParams?.mode === 'vote' ? 'desc' : (isBingo ? 'desc' : 'asc'))),
+        target: isHiddenEvent ? normalizeHiddenPreviewTarget(hiddenParams) : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isPickLineup && (pickLineupParams?.mode === 'vote1' || pickLineupParams?.mode === 'vote2') ? 'vote' : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person')))),
+        rankOrder: isHiddenEvent ? normalizeHiddenPreviewOrder(hiddenParams) : (isRankScoreGame ? rankScoreParams.winnerOrder : (isPickLineup && (pickLineupParams?.mode === 'vote1' || pickLineupParams?.mode === 'vote2') ? 'asc' : (isBingo ? 'desc' : 'asc'))),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -1063,7 +1063,7 @@ if (editForm?.template === 'group-battle') {
         return;
       }
       if (editForm.template === 'pick-lineup' && !isValidPickLineupParams(parsed)) {
-        alert('투표 모드는 각 투표별로 리스트에 표시할 참가자를 1명 이상 선택해야 합니다.');
+        alert('투표1/투표2 모드는 각 투표별로 참가자를 1명 이상 선택해야 합니다.');
         return;
       }
       const isBingoEdit = editForm.template === 'bingo';
@@ -1081,8 +1081,8 @@ if (editForm?.template === 'group-battle') {
         template: editForm.template,
         params: hiddenParamsEdit || rankScoreParamsEdit || pickLineupParamsEdit || parsed,
         ...(isHiddenEventEdit ? { sameGroupOnly: !!hiddenParamsEdit.sameGroupOnly, sameGroupTargetOnly: !!hiddenParamsEdit.sameGroupOnly, targetScope: hiddenParamsEdit.targetScope || 'all', opponentScope: hiddenParamsEdit.opponentScope || 'all' } : {}),
-        target: isHiddenEventEdit ? normalizeHiddenPreviewTarget(hiddenParamsEdit, e.target) : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isPickLineupEdit ? (pickLineupParamsEdit?.mode === 'vote' ? 'vote' : (e.target === 'vote' ? 'person' : e.target)) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target)))),
-        rankOrder: isHiddenEventEdit ? normalizeHiddenPreviewOrder(hiddenParamsEdit, e.rankOrder) : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isPickLineupEdit && pickLineupParamsEdit?.mode === 'vote' ? 'desc' : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder)))),
+        target: isHiddenEventEdit ? normalizeHiddenPreviewTarget(hiddenParamsEdit, e.target) : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isPickLineupEdit ? ((pickLineupParamsEdit?.mode === 'vote1' || pickLineupParamsEdit?.mode === 'vote2') ? 'vote' : (e.target === 'vote' ? 'person' : e.target)) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target)))),
+        rankOrder: isHiddenEventEdit ? normalizeHiddenPreviewOrder(hiddenParamsEdit, e.rankOrder) : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isPickLineupEdit && (pickLineupParamsEdit?.mode === 'vote1' || pickLineupParamsEdit?.mode === 'vote2') ? ((e.rankOrder === 'desc' || e.rankOrder === 'asc') ? e.rankOrder : 'asc') : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder)))),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -1389,9 +1389,11 @@ if (editForm?.template === 'group-battle') {
     }
     if (ev?.template === 'pick-lineup') {
       const cfg = getPickLineupConfig(ev);
-      if (cfg.mode === 'vote') {
+      if (cfg.mode === 'vote1' || cfg.mode === 'vote2') {
         const candidateText = cfg.voteSlots.map((slot, idx) => `${String(slot?.title ?? '').trim() || `투표${idx + 1}`}:${slot.candidateIds.length}명`).join(', ');
-        return `pick-lineup · 투표 · ${cfg.voteCount}건${candidateText ? ` · ${candidateText}` : ''}`;
+        const modeText = cfg.mode === 'vote1' ? '투표1' : '투표2';
+        const calcText = cfg.mode === 'vote1' ? ` · ${cfg.vote1CalcMethod === 'min' ? '최저결과1명' : '결과합계'}` : '';
+        return `pick-lineup · ${modeText} · ${cfg.voteCount}건${calcText}${candidateText ? ` · ${candidateText}` : ''}`;
       }
       if (cfg.mode === 'single') {
         return `pick-lineup · 개인 · ${cfg.pickCount}명 선택`;

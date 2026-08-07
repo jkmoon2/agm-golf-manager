@@ -11,15 +11,15 @@ export default function PickLineupPreview({ eventDef, participants = [], inputs 
   if (!eventDef || !data) return null;
 
   const cfg = getPickLineupConfig(eventDef);
-  if (cfg.mode === 'vote') {
+  if (cfg.mode === 'vote1' || cfg.mode === 'vote2') {
     if (viewTab !== 'vote') {
-      return <div style={{ color: '#999', fontSize: 13 }}>투표 모드는 미리보기 조건에서 “투표”를 선택하세요.</div>;
+      return <div style={{ color: '#999', fontSize: 13 }}>투표1/투표2 모드는 미리보기 조건에서 “투표”를 선택하세요.</div>;
     }
     return <VoteResult data={data} />;
   }
 
   if (viewTab === 'vote') {
-    return <div style={{ color: '#999', fontSize: 13 }}>투표 모드 이벤트에서만 투표 결과를 표시합니다.</div>;
+    return <div style={{ color: '#999', fontSize: 13 }}>투표1/투표2 모드 이벤트에서만 투표 결과를 표시합니다.</div>;
   }
 
   const isRoomView = viewTab === 'room';
@@ -110,9 +110,10 @@ function VoteResult({ data }) {
   const totalVoterCount = Number(data?.totalVoterCount || 0);
   const completedVoterCount = Number(data?.completedVoterCount || 0);
   const hasCandidate = sections.some((section) => Array.isArray(section?.rows) && section.rows.length > 0);
+  const isVote1 = data?.mode === 'vote1';
 
   if (!sections.length || !hasCandidate) {
-    return <div style={{ color: '#999', fontSize: 13 }}>투표 후보 참가자가 설정되지 않았습니다.</div>;
+    return <div style={{ color: '#999', fontSize: 13 }}>{isVote1 ? '투표안 참가자가 설정되지 않았습니다.' : '투표 후보 참가자가 설정되지 않았습니다.'}</div>;
   }
 
   return (
@@ -129,31 +130,43 @@ function VoteResult({ data }) {
           </div>
 
           <div style={voteTableWrap}>
-            <table style={voteTable}>
+            <table style={{ ...voteTable, minWidth: isVote1 ? 520 : 430 }}>
               <colgroup>
                 <col style={{ width: 46 }} />
-                <col style={{ width: 90 }} />
+                <col style={{ width: isVote1 ? 100 : 84 }} />
                 <col style={{ width: 54 }} />
+                <col style={{ width: 58 }} />
                 <col />
               </colgroup>
               <thead>
                 <tr>
                   <th style={voteTh}>순위</th>
-                  <th style={voteTh}>참가자</th>
+                  <th style={voteTh}>{isVote1 ? '투표안' : '참가자'}</th>
                   <th style={voteTh}>득표</th>
+                  <th style={voteTh}>결과</th>
                   <th style={voteTh}>투표자</th>
                 </tr>
               </thead>
               <tbody>
                 {(section.rows || []).map((row) => (
-                  <tr key={row.key}>
-                    <td style={{ ...voteTd, color: '#1d4ed8', fontWeight: 900 }}>{row.displayRank || row.rank || '-'}</td>
-                    <td style={{ ...voteTd, fontWeight: 900, color: '#183153' }}>{row.name}</td>
-                    <td style={{ ...voteTd, color: '#be123c', fontWeight: 900 }}>{row.voteCount || 0}표</td>
-                    <td style={{ ...voteTd, textAlign: 'left', lineHeight: 1.45 }}>
-                      {Array.isArray(row.voterNames) && row.voterNames.length ? row.voterNames.join(', ') : '없음'}
-                    </td>
-                  </tr>
+                  <React.Fragment key={row.key}>
+                    <tr>
+                      <td style={{ ...voteTd, color: '#1d4ed8', fontWeight: 900 }}>{row.displayRank || row.rank || '-'}</td>
+                      <td style={{ ...voteTd, fontWeight: 900, color: '#183153' }}>{row.name || row.title}</td>
+                      <td style={{ ...voteTd, color: '#be123c', fontWeight: 900 }}>{row.voteCount || 0}표</td>
+                      <td style={{ ...voteTd, color: '#0f766e', fontWeight: 900 }}>{row.resultValue !== null && row.resultValue !== undefined && Number.isFinite(Number(row.resultValue)) ? row.resultValue : '-'}</td>
+                      <td style={{ ...voteTd, textAlign: 'left', lineHeight: 1.45 }}>
+                        {Array.isArray(row.voterNames) && row.voterNames.length ? row.voterNames.join(', ') : '없음'}
+                      </td>
+                    </tr>
+                    {isVote1 && Array.isArray(row.members) && row.members.length > 0 && (
+                      <tr>
+                        <td style={voteDetailTd} colSpan={5}>
+                          구성: {row.members.map((member) => `${member.name}(${member.resultValue !== null && member.resultValue !== undefined && Number.isFinite(Number(member.resultValue)) ? member.resultValue : '-'})`).join(' / ')}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -205,6 +218,8 @@ const voteSectionHead = {
 const voteSectionTitle = { fontSize: 14, fontWeight: 950, color: '#16376c' };
 const voteSectionMeta = { fontSize: 12, fontWeight: 800, color: '#667085' };
 const voteTableWrap = { width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' };
-const voteTable = { width: '100%', minWidth: 360, borderCollapse: 'collapse', tableLayout: 'fixed' };
+const voteTable = { width: '100%', minWidth: 430, borderCollapse: 'collapse', tableLayout: 'fixed' };
 const voteTh = { border: '1px solid #dfe5ee', background: '#f8fafc', padding: '7px 5px', textAlign: 'center', fontSize: 12, color: '#344054' };
 const voteTd = { border: '1px solid #e5eaf2', padding: '8px 6px', textAlign: 'center', fontSize: 12, color: '#344054', wordBreak: 'keep-all' };
+
+const voteDetailTd = { border: '1px solid #e5eaf2', padding: '6px 8px', background: '#fbfdff', color: '#667085', fontSize: 11, lineHeight: 1.45, textAlign: 'left' };

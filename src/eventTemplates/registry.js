@@ -130,6 +130,7 @@ export const TEMPLATE_REGISTRY = [
       openGroups: [1],
       lastPlaceHalf: false,
       voteCount: 1,
+      vote1CalcMethod: 'sum',
       voteSlots: [
         { title: '투표1', candidateIds: [] },
       ],

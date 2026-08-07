@@ -6,6 +6,8 @@ import {
   getPickLineupConfig,
   getPickLineupRequiredCount,
   getPickLineupSlotLabels,
+  getVote1OptionIndexFromIds,
+  makeVote1OptionToken,
   normalizeMemberIds,
 } from '../../events/pickLineup';
 import PickLineupPreview from './PickLineupPreview';
@@ -44,7 +46,12 @@ function buildSelectionSummary(eventDef, cfg, ids, byId) {
       return found ? `${groupNo}조:${found.nickname}` : `${groupNo}조:-`;
     }).join(' / ');
   }
-  if (cfg.mode === 'vote') {
+  if (cfg.mode === 'vote1') {
+    const labels = getPickLineupSlotLabels(eventDef);
+    const selectedIdx = getVote1OptionIndexFromIds(ids);
+    return selectedIdx >= 0 ? (labels[selectedIdx] || `투표${selectedIdx + 1}`) : '-';
+  }
+  if (cfg.mode === 'vote2') {
     const labels = getPickLineupSlotLabels(eventDef);
     return labels.map((label, idx) => {
       const selected = byId.get(String(ids[idx] ?? ''));
@@ -59,7 +66,11 @@ function isComplete(eventDef, cfg, ids, byId) {
   if (cfg.mode === 'single') {
     return members.length === cfg.pickCount;
   }
-  if (cfg.mode === 'vote') {
+  if (cfg.mode === 'vote1') {
+    const selectedIdx = getVote1OptionIndexFromIds(ids);
+    return selectedIdx >= 0 && selectedIdx < cfg.voteCount;
+  }
+  if (cfg.mode === 'vote2') {
     if (ids.length !== cfg.voteCount) return false;
     return ids.every((id, idx) => {
       const selectedId = String(id ?? '').trim();
@@ -84,7 +95,7 @@ function getCandidateOptions(eventDef, cfg, participants = [], slotIdx = 0) {
     const groupNo = cfg.openGroups[slotIdx];
     return list.filter((p) => Number(getParticipantGroupNo(p)) === Number(groupNo));
   }
-  if (cfg.mode === 'vote') {
+  if (cfg.mode === 'vote2') {
     const candidateIds = getPickLineupCandidateIds(eventDef, slotIdx);
     const byId = new Map(list.map((p) => [String(p?.id ?? ''), p]));
     return candidateIds.map((id) => byId.get(String(id))).filter(Boolean);
@@ -132,9 +143,10 @@ export default function PickLineupSelectionMonitor({
   const rows = useMemo(() => {
     return sortedParticipants.map((p) => {
       const rawIds = normalizeMemberIds(inputsByEvent?.person?.[p?.id] || {});
-      const ids = cfg.mode === 'vote' ? rawIds : uniqueIds(rawIds);
+      const ids = (cfg.mode === 'vote1' || cfg.mode === 'vote2') ? rawIds : uniqueIds(rawIds);
       const paddedIds = padIds(ids.slice(0, requiredCount), requiredCount);
       const members = paddedIds.map((id) => byId.get(String(id))).filter(Boolean);
+      const complete = isComplete(eventDef, cfg, paddedIds, byId);
       const handicapSum = members.reduce((sum, m) => sum + (Number(eventDef?.params?.handicapOverrides?.[String(m?.id)]) || Number(m?.handicap ?? 0) || 0), 0);
       return {
         id: String(p?.id ?? ''),
@@ -142,8 +154,8 @@ export default function PickLineupSelectionMonitor({
         roomLabel: roomLabel(roomNames, p?.room),
         groupLabel: Number.isFinite(Number(getParticipantGroupNo(p))) ? `${getParticipantGroupNo(p)}조` : '',
         ids: paddedIds,
-        complete: isComplete(eventDef, cfg, paddedIds, byId),
-        count: members.length,
+        complete,
+        count: cfg.mode === 'vote1' ? (complete ? 1 : 0) : members.length,
         summary: buildSelectionSummary(eventDef, cfg, paddedIds, byId),
         handicapSum,
       };
@@ -163,7 +175,7 @@ export default function PickLineupSelectionMonitor({
     const base = padIds(draftById?.[key] || currentIds, requiredCount);
     const next = [...base];
     const selected = String(value ?? '');
-    if (selected && cfg.mode !== 'vote') {
+    if (selected && cfg.mode !== 'vote1' && cfg.mode !== 'vote2') {
       for (let i = 0; i < next.length; i += 1) {
         if (i !== idx && next[i] === selected) next[i] = '';
       }
@@ -244,7 +256,21 @@ export default function PickLineupSelectionMonitor({
             </div>
 
             <div style={{ display: 'grid', gap: 7, marginTop: 8 }}>
-              {slotLabels.map((label, idx) => {
+              {cfg.mode === 'vote1' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr', gap: 8, alignItems: 'center' }}>
+                  <div style={{ fontSize: 12, fontWeight: 900, color: '#475467' }}>투표안</div>
+                  <select
+                    value={String(activeIds[0] || '')}
+                    onChange={(e) => updateDraftCell(pid, 0, e.target.value)}
+                    style={selectStyle}
+                  >
+                    <option value="">선택</option>
+                    {slotLabels.map((label, idx) => (
+                      <option key={`pick-lineup-vote1-option-${pid}-${idx}`} value={makeVote1OptionToken(idx)}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : slotLabels.map((label, idx) => {
                 const options = getCandidateOptions(eventDef, cfg, sortedParticipants, idx);
                 const selectedId = String(activeIds[idx] || '');
                 return (
@@ -258,7 +284,7 @@ export default function PickLineupSelectionMonitor({
                       <option value="">선택</option>
                       {options.map((opt) => {
                         const value = String(opt?.id ?? '');
-                        const selectedElsewhere = cfg.mode !== 'vote' && activeIds.includes(value) && activeIds[idx] !== value;
+                        const selectedElsewhere = cfg.mode !== 'vote2' && activeIds.includes(value) && activeIds[idx] !== value;
                         return (
                           <option key={`pick-lineup-option-${pid}-${idx}-${value}`} value={value} disabled={selectedElsewhere}>
                             {getParticipantLabel(opt, cfg.mode !== 'jo')}
@@ -287,9 +313,11 @@ export default function PickLineupSelectionMonitor({
 
   const modeSummary = cfg.mode === 'jo'
     ? `조 모드 (${cfg.openGroups.map((g) => `${g}조`).join(', ')})`
-    : cfg.mode === 'vote'
-      ? `투표 모드 (${cfg.voteCount}건)`
-      : `개인 모드 (${cfg.pickCount}명 선택)`;
+    : cfg.mode === 'vote1'
+      ? `투표1 모드 (${cfg.voteCount}안 중 1개 선택)`
+      : cfg.mode === 'vote2'
+        ? `투표2 모드 (${cfg.voteCount}건)`
+        : `개인 모드 (${cfg.pickCount}명 선택)`;
 
   return (
     <div style={backdrop} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>
@@ -337,7 +365,7 @@ export default function PickLineupSelectionMonitor({
         {showUnregistered && renderUnregistered()}
 
         {editMode ? renderEditList() : (
-          cfg.mode === 'vote' ? (
+          (cfg.mode === 'vote1' || cfg.mode === 'vote2') ? (
             <div style={{ marginTop: 12 }}>
               <PickLineupPreview
                 eventDef={eventDef}

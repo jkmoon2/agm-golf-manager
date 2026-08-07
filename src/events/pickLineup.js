@@ -1,9 +1,11 @@
 // /src/events/pickLineup.js
-// 개인/조/투표 선택 대결 계산 유틸
+// 개인/조/투표1/투표2 선택 대결 계산 유틸
 // - 개인모드(single): 전체 참가자 중 1~4명 선택
 // - 조모드(jo): 오픈된 각 조에서 1명씩 선택
-// - 투표모드(vote): 운영자가 투표별 후보 참가자를 지정하고, 각 참가자가 투표별 1명 선택
-// - 개인/조 계산식: 점수 - G핸디 = 결과
+// - 투표1모드(vote1): 운영자가 투표안별 구성 참가자를 지정하고, 각 참가자는 투표안 중 1개만 선택
+// - 투표2모드(vote2): 운영자가 투표별 후보 참가자를 지정하고, 각 참가자가 투표별 1명 선택
+// - 기존 vote 값은 하위 호환을 위해 vote2로 해석
+// - 개인/조/투표 결과값: 점수 - G핸디 = 결과
 // - 옵션: 조모드 + 4조 모두 오픈 시 꼴등반띵(가장 높은 점수 1명만 floor(score/2) 적용)
 
 export function getParticipantGroupNo(p) {
@@ -37,7 +39,7 @@ function normalizeIdList(input) {
 }
 
 export function normalizeVoteSlots(input, voteCount = 1) {
-  const count = Math.max(1, Math.min(4, Number(voteCount || 1)));
+  const count = Math.max(1, Math.min(8, Number(voteCount || 1)));
   const src = Array.isArray(input) ? input : [];
   return Array.from({ length: count }, (_, idx) => {
     const raw = src[idx] && typeof src[idx] === 'object' ? src[idx] : {};
@@ -58,13 +60,37 @@ export function normalizeVoteSlots(input, voteCount = 1) {
   });
 }
 
+export function isPickLineupVoteMode(mode) {
+  return mode === 'vote1' || mode === 'vote2' || mode === 'vote';
+}
+
+export function makeVote1OptionToken(slotIdx) {
+  return `vote1:${Math.max(0, Number(slotIdx) || 0)}`;
+}
+
+export function getVote1OptionIndexFromIds(ids) {
+  const first = String((Array.isArray(ids) ? ids[0] : '') ?? '').trim();
+  const m = first.match(/^vote1:(\d+)$/);
+  if (!m) return -1;
+  const idx = Number(m[1]);
+  return Number.isFinite(idx) ? idx : -1;
+}
+
 export function getPickLineupConfig(eventDef) {
   const params = eventDef?.params || {};
-  const mode = params.mode === 'jo' ? 'jo' : (params.mode === 'vote' ? 'vote' : 'single');
+  const rawMode = String(params.mode || 'single');
+  const mode = rawMode === 'jo'
+    ? 'jo'
+    : rawMode === 'vote1'
+      ? 'vote1'
+      : (rawMode === 'vote2' || rawMode === 'vote')
+        ? 'vote2'
+        : 'single';
   const pickCount = Math.max(1, Math.min(4, Number(params.pickCount || 1)));
-  const voteCount = Math.max(1, Math.min(4, Number(params.voteCount || 1)));
+  const voteCount = Math.max(1, Math.min(8, Number(params.voteCount || 1)));
   const openGroups = normalizeOpenGroups(params.openGroups);
   const voteSlots = normalizeVoteSlots(params.voteSlots, voteCount);
+  const vote1CalcMethod = params.vote1CalcMethod === 'min' ? 'min' : 'sum';
   const lastPlaceHalf = !!params.lastPlaceHalf;
   const selectionLocked = !!(params.selectionLocked || params.locked);
   const selectionRevealed = !!(params.selectionRevealed || params.revealed || params.publicSelection || params.showSelections);
@@ -73,6 +99,7 @@ export function getPickLineupConfig(eventDef) {
     pickCount,
     voteCount,
     voteSlots,
+    vote1CalcMethod,
     openGroups: openGroups.length ? openGroups : [1],
     lastPlaceHalf,
     selectionLocked,
@@ -86,20 +113,21 @@ export function getPickLineupConfig(eventDef) {
 export function getPickLineupRequiredCount(eventDef) {
   const cfg = getPickLineupConfig(eventDef);
   if (cfg.mode === 'jo') return cfg.openGroups.length;
-  if (cfg.mode === 'vote') return cfg.voteCount;
+  if (cfg.mode === 'vote1') return 1;
+  if (cfg.mode === 'vote2') return cfg.voteCount;
   return cfg.pickCount;
 }
 
 export function getPickLineupSlotLabels(eventDef) {
   const cfg = getPickLineupConfig(eventDef);
   if (cfg.mode === 'jo') return cfg.openGroups.map((groupNo) => `${groupNo}조`);
-  if (cfg.mode === 'vote') return cfg.voteSlots.map((slot, idx) => String(slot?.title ?? '').trim() || `투표${idx + 1}`);
+  if (cfg.mode === 'vote1' || cfg.mode === 'vote2') return cfg.voteSlots.map((slot, idx) => String(slot?.title ?? '').trim() || `투표${idx + 1}`);
   return Array.from({ length: cfg.pickCount }, (_, idx) => `선택${idx + 1}`);
 }
 
 export function getPickLineupCandidateIds(eventDef, slotIdx = 0) {
   const cfg = getPickLineupConfig(eventDef);
-  if (cfg.mode !== 'vote') return [];
+  if (cfg.mode !== 'vote1' && cfg.mode !== 'vote2') return [];
   return normalizeIdList(cfg.voteSlots?.[slotIdx]?.candidateIds || []);
 }
 
@@ -115,6 +143,20 @@ function getRoomLabel(roomNames, roomNo) {
     return String(roomNames[idx]).trim();
   }
   return Number.isFinite(Number(roomNo)) && Number(roomNo) >= 1 ? `${roomNo}번방` : '-';
+}
+
+function hasScoreValue(p) {
+  const raw = p?.score;
+  return raw !== null && raw !== undefined && String(raw).trim() !== '' && Number.isFinite(Number(raw));
+}
+
+function getPlainParticipantResult(p, handicapOverrides = {}) {
+  if (!p || !hasScoreValue(p)) return null;
+  const baseHandicap = Number(p?.handicap ?? 0) || 0;
+  const override = Number(handicapOverrides[String(p?.id ?? '')]);
+  const handicap = Number.isFinite(override) ? override : baseHandicap;
+  const score = Number(p?.score ?? 0) || 0;
+  return score - handicap;
 }
 
 function getResultValue(p, handicapValue, { lastPlaceHalf = false, halved = false } = {}) {
@@ -163,7 +205,7 @@ function validateSelection(cfg, rows) {
   if (cfg.mode === 'single') {
     return rows.length === cfg.pickCount;
   }
-  if (cfg.mode === 'vote') {
+  if (cfg.mode === 'vote2') {
     return rows.length === cfg.voteCount;
   }
   if (rows.length !== cfg.openGroups.length) return false;
@@ -178,10 +220,45 @@ function sortParticipantsForVote(a, b) {
   return String(a?.name ?? a?.nickname ?? '').localeCompare(String(b?.name ?? b?.nickname ?? ''), 'ko');
 }
 
-function buildVoteResult(eventDef, participants = [], inputsByEvent = {}, opt = {}) {
+function sortVoteRowsByResult(rows, order = 'asc') {
+  const sign = order === 'desc' ? -1 : 1;
+  rows.sort((a, b) => {
+    const aValid = a?.resultValue !== null && a?.resultValue !== undefined && Number.isFinite(Number(a.resultValue));
+    const bValid = b?.resultValue !== null && b?.resultValue !== undefined && Number.isFinite(Number(b.resultValue));
+    if (aValid !== bValid) return aValid ? -1 : 1;
+    if (aValid && bValid) {
+      const diff = sign * (Number(a.resultValue) - Number(b.resultValue));
+      if (diff) return diff;
+    }
+    return Number(a?.groupNo || 999) - Number(b?.groupNo || 999)
+      || String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+  });
+
+  let previousResult = Symbol('none');
+  let currentRank = 0;
+  rows.forEach((row, idx) => {
+    const result = row?.resultValue !== null && row?.resultValue !== undefined && Number.isFinite(Number(row.resultValue)) ? Number(row.resultValue) : null;
+    if (result === null) {
+      row.rank = '-';
+      row.displayRank = '-';
+      return;
+    }
+    if (idx === 0 || previousResult !== result) currentRank = idx + 1;
+    row.rank = currentRank;
+    row.displayRank = currentRank;
+    previousResult = result;
+  });
+  return rows;
+}
+
+function buildVote2Result(eventDef, participants = [], inputsByEvent = {}, opt = {}) {
   const cfg = getPickLineupConfig(eventDef);
   const safeParticipants = Array.isArray(participants) ? participants : [];
   const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
+  const order = eventDef?.rankOrder === 'desc' ? 'desc' : 'asc';
+  const handicapOverrides = (eventDef?.params?.handicapOverrides && typeof eventDef.params.handicapOverrides === 'object')
+    ? eventDef.params.handicapOverrides
+    : {};
   const byId = new Map(safeParticipants.map((p) => [String(p?.id ?? ''), p]));
   const personBucket = inputsByEvent?.person && typeof inputsByEvent.person === 'object'
     ? inputsByEvent.person
@@ -222,6 +299,7 @@ function buildVoteResult(eventDef, participants = [], inputsByEvent = {}, opt = 
             groupNo: selector.groupNo,
           }))
           .sort(sortParticipantsForVote);
+        const resultValue = getPlainParticipantResult(candidate, handicapOverrides);
         return {
           key: `${slotIdx}-${candidateId}`,
           candidateId: String(candidateId),
@@ -229,34 +307,22 @@ function buildVoteResult(eventDef, participants = [], inputsByEvent = {}, opt = 
           room: candidate?.room ?? null,
           roomLabel: getRoomLabel(roomNames, candidate?.room),
           groupNo: getParticipantGroupNo(candidate),
-          value: voters.length,
-          score: voters.length,
+          resultValue,
+          value: resultValue,
+          score: resultValue,
           voteCount: voters.length,
           voters,
           voterNames: voters.map((voter) => voter.name),
         };
       })
-      .filter(Boolean)
-      .sort((a, b) => {
-        return (Number(b.voteCount) || 0) - (Number(a.voteCount) || 0)
-          || Number(a.groupNo || 999) - Number(b.groupNo || 999)
-          || String(a.name || '').localeCompare(String(b.name || ''), 'ko');
-      });
+      .filter(Boolean);
 
-    let previousCount = null;
-    let currentRank = 0;
-    rows.forEach((row, idx) => {
-      const count = Number(row.voteCount || 0);
-      if (idx === 0 || count !== previousCount) currentRank = idx + 1;
-      row.rank = currentRank;
-      row.displayRank = currentRank;
-      previousCount = count;
-    });
+    sortVoteRowsByResult(rows, order);
 
     return {
       key: `vote-${slotIdx + 1}`,
       index: slotIdx,
-      title: String(slot?.title ?? '').trim() || `투표${slotIdx + 1}` ,
+      title: String(slot?.title ?? '').trim() || `투표${slotIdx + 1}`,
       candidateIds,
       rows,
       totalVotes: rows.reduce((sum, row) => sum + (Number(row.voteCount) || 0), 0),
@@ -264,10 +330,10 @@ function buildVoteResult(eventDef, participants = [], inputsByEvent = {}, opt = 
   });
 
   return {
-    kind: 'vote',
-    metric: 'votes',
-    mode: 'vote',
-    order: 'desc',
+    kind: 'vote2',
+    metric: 'result',
+    mode: 'vote2',
+    order,
     rows: [],
     personRows: [],
     roomRows: [],
@@ -279,10 +345,113 @@ function buildVoteResult(eventDef, participants = [], inputsByEvent = {}, opt = 
   };
 }
 
+function buildVote1Result(eventDef, participants = [], inputsByEvent = {}, opt = {}) {
+  const cfg = getPickLineupConfig(eventDef);
+  const safeParticipants = Array.isArray(participants) ? participants : [];
+  const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
+  const order = eventDef?.rankOrder === 'desc' ? 'desc' : 'asc';
+  const handicapOverrides = (eventDef?.params?.handicapOverrides && typeof eventDef.params.handicapOverrides === 'object')
+    ? eventDef.params.handicapOverrides
+    : {};
+  const byId = new Map(safeParticipants.map((p) => [String(p?.id ?? ''), p]));
+  const personBucket = inputsByEvent?.person && typeof inputsByEvent.person === 'object'
+    ? inputsByEvent.person
+    : {};
+
+  const selectorRows = safeParticipants.map((selector) => {
+    const selectorId = String(selector?.id ?? '');
+    const ids = normalizeMemberIds(personBucket?.[selectorId]);
+    const selectedOptionIdx = getVote1OptionIndexFromIds(ids);
+    const complete = selectedOptionIdx >= 0 && selectedOptionIdx < cfg.voteCount;
+    return {
+      id: selectorId,
+      name: String(selector?.nickname || ''),
+      room: selector?.room ?? null,
+      roomLabel: getRoomLabel(roomNames, selector?.room),
+      groupNo: getParticipantGroupNo(selector),
+      ids: complete ? [makeVote1OptionToken(selectedOptionIdx)] : [''],
+      selectedOptionIdx,
+      complete,
+    };
+  });
+
+  const optionRows = cfg.voteSlots.map((slot, slotIdx) => {
+    const memberIds = normalizeIdList(slot?.candidateIds || []);
+    const members = memberIds.map((id) => byId.get(String(id))).filter(Boolean);
+    const memberRows = members.map((member) => ({
+      id: String(member?.id ?? ''),
+      name: String(member?.nickname || ''),
+      resultValue: getPlainParticipantResult(member, handicapOverrides),
+      room: member?.room ?? null,
+      roomLabel: getRoomLabel(roomNames, member?.room),
+      groupNo: getParticipantGroupNo(member),
+    }));
+    const allReady = memberRows.length > 0 && memberRows.every((member) => member.resultValue !== null && member.resultValue !== undefined && Number.isFinite(Number(member.resultValue)));
+    let resultValue = null;
+    if (allReady) {
+      if (cfg.vote1CalcMethod === 'min') {
+        resultValue = Math.min(...memberRows.map((member) => Number(member.resultValue)));
+      } else {
+        resultValue = memberRows.reduce((sum, member) => sum + Number(member.resultValue || 0), 0);
+      }
+    }
+    const voters = selectorRows
+      .filter((selector) => selector.selectedOptionIdx === slotIdx)
+      .map((selector) => ({
+        id: selector.id,
+        name: selector.name,
+        room: selector.room,
+        roomLabel: selector.roomLabel,
+        groupNo: selector.groupNo,
+      }))
+      .sort(sortParticipantsForVote);
+
+    return {
+      key: `vote1-option-${slotIdx + 1}`,
+      index: slotIdx,
+      title: String(slot?.title ?? '').trim() || `투표${slotIdx + 1}`,
+      name: String(slot?.title ?? '').trim() || `투표${slotIdx + 1}`,
+      memberIds,
+      members: memberRows,
+      resultValue,
+      value: resultValue,
+      score: resultValue,
+      voteCount: voters.length,
+      voters,
+      voterNames: voters.map((voter) => voter.name),
+    };
+  });
+
+  sortVoteRowsByResult(optionRows, order);
+
+  return {
+    kind: 'vote1',
+    metric: 'result',
+    mode: 'vote1',
+    order,
+    rows: optionRows,
+    optionRows,
+    voteSections: [{
+      key: 'vote1-options',
+      index: 0,
+      title: cfg.vote1CalcMethod === 'min' ? '투표안 결과 (구성원 중 최저 결과)' : '투표안 결과 (구성원 결과 합계)',
+      rows: optionRows,
+      totalVotes: optionRows.reduce((sum, row) => sum + (Number(row.voteCount) || 0), 0),
+    }],
+    selectorRows,
+    completedVoterCount: selectorRows.filter((row) => row.complete).length,
+    totalVoterCount: selectorRows.length,
+    config: cfg,
+  };
+}
+
 export function computePickLineup(eventDef, participants = [], inputsByEvent = {}, opt = {}) {
   const cfg = getPickLineupConfig(eventDef);
-  if (cfg.mode === 'vote') {
-    return buildVoteResult(eventDef, participants, inputsByEvent, opt);
+  if (cfg.mode === 'vote1') {
+    return buildVote1Result(eventDef, participants, inputsByEvent, opt);
+  }
+  if (cfg.mode === 'vote2') {
+    return buildVote2Result(eventDef, participants, inputsByEvent, opt);
   }
 
   const roomNames = Array.isArray(opt.roomNames) ? opt.roomNames : [];
