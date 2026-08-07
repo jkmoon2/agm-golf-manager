@@ -258,6 +258,14 @@ function normalizeEventParamsForAdmin(template, params) {
   return raw;
 }
 
+function isValidPickLineupParams(params) {
+  const cfg = getPickLineupConfig({ template: 'pick-lineup', params });
+  if (cfg.mode !== 'vote') return true;
+  return cfg.voteSlots.length === cfg.voteCount
+    && cfg.voteSlots.every((slot) => Array.isArray(slot?.candidateIds) && slot.candidateIds.length > 0);
+}
+
+
 function normalizeEventDefForAdmin(ev) {
   if (!ev || typeof ev !== 'object') return ev;
   return {
@@ -527,6 +535,10 @@ if (form.template === 'group-battle') {
         alert('그룹/방/개인 홀별 지목전은 사용 홀, 참가자 조건을 모두 설정하고, 그룹 모드는 그룹 멤버, 개인 모드는 참가자를 1명 이상 선택해야 합니다.');
         return;
       }
+      if (form.template === 'pick-lineup' && !isValidPickLineupParams(parsed)) {
+        alert('투표 모드는 각 투표별로 리스트에 표시할 참가자를 1명 이상 선택해야 합니다.');
+        return;
+      }
       const isBingo = form.template === 'bingo';
       const isGroupRoomHoleBattle = form.template === 'group-room-hole-battle';
       const isPickLineup = form.template === 'pick-lineup';
@@ -542,8 +554,8 @@ if (form.template === 'group-battle') {
         template: form.template,
         params: hiddenParams || rankScoreParams || pickLineupParams || parsed,
         ...(isHiddenEvent ? { sameGroupOnly: !!hiddenParams.sameGroupOnly, sameGroupTargetOnly: !!hiddenParams.sameGroupOnly, targetScope: hiddenParams.targetScope || 'all', opponentScope: hiddenParams.opponentScope || 'all' } : {}),
-        target: isHiddenEvent ? normalizeHiddenPreviewTarget(hiddenParams) : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person'))),
-        rankOrder: isHiddenEvent ? normalizeHiddenPreviewOrder(hiddenParams) : (isRankScoreGame ? rankScoreParams.winnerOrder : (isBingo ? 'desc' : 'asc')),
+        target: isHiddenEvent ? normalizeHiddenPreviewTarget(hiddenParams) : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isPickLineup && pickLineupParams?.mode === 'vote' ? 'vote' : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person')))),
+        rankOrder: isHiddenEvent ? normalizeHiddenPreviewOrder(hiddenParams) : (isRankScoreGame ? rankScoreParams.winnerOrder : (isPickLineup && pickLineupParams?.mode === 'vote' ? 'desc' : (isBingo ? 'desc' : 'asc'))),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
         attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
         enabled: true,
@@ -1050,21 +1062,27 @@ if (editForm?.template === 'group-battle') {
         alert('그룹/방/개인 홀별 지목전은 사용 홀, 참가자 조건을 모두 설정하고, 그룹 모드는 그룹 멤버, 개인 모드는 참가자를 1명 이상 선택해야 합니다.');
         return;
       }
+      if (editForm.template === 'pick-lineup' && !isValidPickLineupParams(parsed)) {
+        alert('투표 모드는 각 투표별로 리스트에 표시할 참가자를 1명 이상 선택해야 합니다.');
+        return;
+      }
       const isBingoEdit = editForm.template === 'bingo';
       const isGroupRoomHoleBattleEdit = editForm.template === 'group-room-hole-battle';
+      const isPickLineupEdit = editForm.template === 'pick-lineup';
       const isRankScoreGameEdit = editForm.template === 'rank-score-game';
       const isHiddenEventEdit = editForm.template === 'hidden-event';
       const battleModeEdit = isGroupRoomHoleBattleEdit ? normalizeGroupRoomHoleBattleParams(parsed).mode : 'group';
+      const pickLineupParamsEdit = isPickLineupEdit ? normalizeEventParamsForAdmin('pick-lineup', parsed) : null;
       const rankScoreParamsEdit = isRankScoreGameEdit ? normalizeRankScoreGameParams(parsed) : null;
       const hiddenParamsEdit = isHiddenEventEdit ? normalizeHiddenEventParams(parsed) : null;
       const next = eventsOfSelected.map(e => e.id === editId ? {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
-        params: hiddenParamsEdit || rankScoreParamsEdit || parsed,
+        params: hiddenParamsEdit || rankScoreParamsEdit || pickLineupParamsEdit || parsed,
         ...(isHiddenEventEdit ? { sameGroupOnly: !!hiddenParamsEdit.sameGroupOnly, sameGroupTargetOnly: !!hiddenParamsEdit.sameGroupOnly, targetScope: hiddenParamsEdit.targetScope || 'all', opponentScope: hiddenParamsEdit.opponentScope || 'all' } : {}),
-        target: isHiddenEventEdit ? normalizeHiddenPreviewTarget(hiddenParamsEdit, e.target) : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target))),
-        rankOrder: isHiddenEventEdit ? normalizeHiddenPreviewOrder(hiddenParamsEdit, e.rankOrder) : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder))),
+        target: isHiddenEventEdit ? normalizeHiddenPreviewTarget(hiddenParamsEdit, e.target) : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isPickLineupEdit ? (pickLineupParamsEdit?.mode === 'vote' ? 'vote' : (e.target === 'vote' ? 'person' : e.target)) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target)))),
+        rankOrder: isHiddenEventEdit ? normalizeHiddenPreviewOrder(hiddenParamsEdit, e.rankOrder) : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isPickLineupEdit && pickLineupParamsEdit?.mode === 'vote' ? 'desc' : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder)))),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
         attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
       } : e);
@@ -1078,7 +1096,7 @@ if (editForm?.template === 'group-battle') {
   };
 
   /* ── 미리보기(계산) ───────────────────────────────────── */
-  const [viewTab, setViewTab] = useState('person'); // person | room | team | group | jo
+  const [viewTab, setViewTab] = useState('person'); // person | room | team | group | jo | vote
   const [viewOrder, setViewOrder] = useState('asc');
   const sign = viewOrder === 'desc' ? -1 : 1;
 
@@ -1370,15 +1388,18 @@ if (editForm?.template === 'group-battle') {
       return `hole-rank-force · ${holes}홀 · 참가자${slots}명`;
     }
     if (ev?.template === 'pick-lineup') {
-      const mode = ev?.params?.mode === 'jo' ? '조' : '개인';
-      if (mode === '개인') {
-        const count = Math.max(1, Math.min(4, Number(ev?.params?.pickCount || 1)));
-        return `pick-lineup · 개인 · ${count}명 선택`;
+      const cfg = getPickLineupConfig(ev);
+      if (cfg.mode === 'vote') {
+        const candidateText = cfg.voteSlots.map((slot, idx) => `${String(slot?.title ?? '').trim() || `투표${idx + 1}`}:${slot.candidateIds.length}명`).join(', ');
+        return `pick-lineup · 투표 · ${cfg.voteCount}건${candidateText ? ` · ${candidateText}` : ''}`;
       }
-      const openGroups = Array.isArray(ev?.params?.openGroups) && ev.params.openGroups.length
-        ? ev.params.openGroups.map((g) => `${g}조`).join(', ')
+      if (cfg.mode === 'single') {
+        return `pick-lineup · 개인 · ${cfg.pickCount}명 선택`;
+      }
+      const openGroups = cfg.openGroups.length
+        ? cfg.openGroups.map((g) => `${g}조`).join(', ')
         : '1조';
-      const lastHalf = ev?.params?.lastPlaceHalf ? ' · 꼴등반띵' : '';
+      const lastHalf = cfg.lastPlaceHalf ? ' · 꼴등반띵' : '';
       return `pick-lineup · 조 · ${openGroups}${lastHalf}`;
     }
     if (ev?.template === 'bingo') {
@@ -1491,7 +1512,7 @@ if (editForm?.template === 'group-battle') {
     if (!selectorId) return;
     const requiredCount = getPickLineupRequiredCount(pickLineupMonitorEvent);
     const ids = (Array.isArray(memberIds) ? memberIds : [])
-      .map((id) => String(id || '').trim())
+      .map((id) => String(id ?? '').trim())
       .slice(0, requiredCount);
     while (ids.length < requiredCount) ids.push('');
     const hasAny = ids.some(Boolean);
@@ -2740,6 +2761,7 @@ if (editForm?.template === 'group-battle') {
                 <option value="team">팀</option>
                 <option value="group">그룹</option>
                 <option value="jo">조</option>
+                <option value="vote">투표</option>
               </select>
 
               <select
@@ -2924,6 +2946,21 @@ if (editForm?.template === 'group-battle') {
                   );
                 })}
               </ol>
+            )}
+
+            {previewDef && viewTab === 'vote' && (
+              previewDef.template === 'pick-lineup' ? (
+                <PickLineupPreview
+                  eventDef={previewDef}
+                  participants={participants}
+                  inputs={inputsAll?.[previewId] || {}}
+                  roomNames={roomNames}
+                  roomCount={roomCount}
+                  viewTab={viewTab}
+                />
+              ) : (
+                <div className={css.empty}>투표 미리보기를 지원하는 이벤트가 아닙니다.</div>
+              )
             )}
 
             {previewDef && viewTab === 'team' && (

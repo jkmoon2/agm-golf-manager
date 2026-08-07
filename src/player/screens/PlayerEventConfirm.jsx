@@ -18,6 +18,7 @@ import tCss    from './PlayerEventConfirm.module.css';
 import { buildTeamsByRoom } from '../../events/utils';
 import { computeGroupBattle } from '../../events/groupBattle';
 import { computePickLineup, getPickLineupConfig } from '../../events/pickLineup';
+import PickLineupPreview from '../../eventTemplates/pickLineup/PickLineupPreview';
 import { computeHoleRankForce, defaultHoleRankForceParams, normalizeSelectedHoles as normalizeHoleRankSelectedHoles, normalizeSelectedSlots, normalizeForcedRanks } from '../../events/holeRankForce';
 import { computeGroupRoomHoleBattle, defaultGroupRoomHoleBattleParams, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
@@ -474,8 +475,12 @@ const events = useMemo(
       return { kind: 'person', metricLabel: '합계', rows };
     }
 
-    // ── pick-lineup(개인/조 선택 대결) ──────────────────────────
+    // ── pick-lineup(개인/조/투표 선택 대결) ─────────────────────
     if (template === 'pick-lineup') {
+      const cfg = getPickLineupConfig(ev);
+      if (cfg.mode === 'vote') {
+        return { kind: 'vote', metricLabel: '득표', rows: [], isPickLineupVote: true };
+      }
       const data = computePickLineup(ev, participants, inputsByEvent?.[evId] || {}, { roomNames: effectiveRoomNames });
       const rows = (data?.rows || []).map((r, i) => ({
         key: r.key || String(i),
@@ -800,6 +805,28 @@ const events = useMemo(
 
           {results.map(({ ev, res }) => {
             const title = ev?.title || '이벤트';
+            const isPickLineupVote = ev?.template === 'pick-lineup' && getPickLineupConfig(ev).mode === 'vote';
+            if (isPickLineupVote) {
+              return (
+                <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                  <div className={baseCss.cardHeader}>
+                    <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>
+                      {title} <span style={{ color:'#9aa3ad', fontWeight:400, marginLeft:6 }}>· 투표 결과</span>
+                    </div>
+                  </div>
+                  <div style={{ padding: '10px 12px 14px' }}>
+                    <PickLineupPreview
+                      eventDef={ev}
+                      participants={participants}
+                      inputs={inputsByEvent?.[ev.id] || {}}
+                      roomNames={effectiveRoomNames}
+                      roomCount={effectiveRoomCount}
+                      viewTab="vote"
+                    />
+                  </div>
+                </div>
+              );
+            }
             const unit  = res.kind === 'person' ? '개인' : (res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '조' : '방')));
             const hasExtraMetric = !!res.extraMetricLabel;
             return (

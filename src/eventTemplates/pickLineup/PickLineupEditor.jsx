@@ -1,32 +1,61 @@
 // /src/eventTemplates/pickLineup/PickLineupEditor.jsx
 import React, { useMemo, useState } from 'react';
-import { getParticipantGroupNo, normalizeOpenGroups } from '../../events/pickLineup';
+import {
+  getParticipantGroupNo,
+  getPickLineupConfig,
+  normalizeOpenGroups,
+  normalizeVoteSlots,
+} from '../../events/pickLineup';
 
 export default function PickLineupEditor({ participants = [], value, onChange }) {
   const safe = value && typeof value === 'object' ? value : {};
-  const mode = safe.mode === 'jo' ? 'jo' : 'single';
-  const pickCount = Math.max(1, Math.min(4, Number(safe.pickCount || 1)));
-  const openGroups = normalizeOpenGroups(safe.openGroups);
-  const lastPlaceHalf = !!safe.lastPlaceHalf;
+  const cfg = getPickLineupConfig({ template: 'pick-lineup', params: safe });
+  const mode = cfg.mode;
+  const pickCount = cfg.pickCount;
+  const openGroups = normalizeOpenGroups(cfg.openGroups);
+  const lastPlaceHalf = !!cfg.lastPlaceHalf;
+  const voteCount = cfg.voteCount;
+  const voteSlots = normalizeVoteSlots(cfg.voteSlots, voteCount);
 
   const [openKey, setOpenKey] = useState('');
 
+  const safeParticipants = useMemo(() => {
+    const list = Array.isArray(participants) ? [...participants] : [];
+    list.sort((a, b) => {
+      const groupDiff = Number(getParticipantGroupNo(a) || 999) - Number(getParticipantGroupNo(b) || 999);
+      if (groupDiff) return groupDiff;
+      const roomDiff = Number(a?.room ?? 999) - Number(b?.room ?? 999);
+      if (roomDiff) return roomDiff;
+      return String(a?.nickname || '').localeCompare(String(b?.nickname || ''), 'ko');
+    });
+    return list;
+  }, [participants]);
+
+  const allParticipantIds = useMemo(() => (
+    safeParticipants
+      .map((p) => String(p?.id ?? '').trim())
+      .filter(Boolean)
+  ), [safeParticipants]);
+
   const groupCounts = useMemo(() => {
     const out = { 1: 0, 2: 0, 3: 0, 4: 0 };
-    (Array.isArray(participants) ? participants : []).forEach((p) => {
+    safeParticipants.forEach((p) => {
       const g = getParticipantGroupNo(p);
       if (g >= 1 && g <= 4) out[g] += 1;
     });
     return out;
-  }, [participants]);
+  }, [safeParticipants]);
 
   const emit = (patch) => {
     if (typeof onChange === 'function') {
       onChange({
+        ...safe,
         mode,
         pickCount,
         openGroups,
         lastPlaceHalf,
+        voteCount,
+        voteSlots,
         ...patch,
       });
     }
@@ -38,6 +67,36 @@ export default function PickLineupEditor({ participants = [], value, onChange })
     next = normalizeOpenGroups(next);
     if (!next.length) next = [1];
     emit({ openGroups: next, lastPlaceHalf: (next.length === 4 ? lastPlaceHalf : false) });
+  };
+
+  const updateVoteCount = (nextValue) => {
+    const nextCount = Math.max(1, Math.min(4, Number(nextValue || 1)));
+    emit({
+      voteCount: nextCount,
+      voteSlots: normalizeVoteSlots(voteSlots, nextCount),
+    });
+  };
+
+  const updateVoteSlot = (slotIdx, patch) => {
+    const next = normalizeVoteSlots(voteSlots, voteCount).map((slot, idx) => (
+      idx === slotIdx ? { ...slot, ...patch } : slot
+    ));
+    emit({ voteSlots: next });
+  };
+
+  const toggleVoteCandidate = (slotIdx, participantId) => {
+    const id = String(participantId ?? '').trim();
+    if (!id) return;
+    const slot = voteSlots[slotIdx] || { title: `투표${slotIdx + 1}`, candidateIds: [] };
+    const current = Array.isArray(slot.candidateIds) ? slot.candidateIds.map(String) : [];
+    const nextIds = current.includes(id)
+      ? current.filter((item) => item !== id)
+      : [...current, id];
+    updateVoteSlot(slotIdx, { candidateIds: nextIds });
+  };
+
+  const setAllVoteCandidates = (slotIdx, checked) => {
+    updateVoteSlot(slotIdx, { candidateIds: checked ? allParticipantIds : [] });
   };
 
   const summaryCount = `${pickCount}명`;
@@ -55,18 +114,23 @@ export default function PickLineupEditor({ participants = [], value, onChange })
           <select
             value={mode}
             onChange={(e) => {
-              const nextMode = e.target.value === 'jo' ? 'jo' : 'single';
+              const raw = e.target.value;
+              const nextMode = raw === 'jo' ? 'jo' : (raw === 'vote' ? 'vote' : 'single');
               emit({
                 mode: nextMode,
                 pickCount,
                 openGroups: nextMode === 'jo' ? (openGroups.length ? openGroups : [1]) : openGroups,
                 lastPlaceHalf: nextMode === 'jo' && openGroups.length === 4 ? lastPlaceHalf : false,
+                voteCount,
+                voteSlots: normalizeVoteSlots(voteSlots, voteCount),
               });
+              setOpenKey('');
             }}
             style={select}
           >
             <option value="single">개인 모드</option>
             <option value="jo">조 모드</option>
+            <option value="vote">투표 모드</option>
           </select>
         </label>
 
@@ -130,6 +194,89 @@ export default function PickLineupEditor({ participants = [], value, onChange })
             )}
           </>
         )}
+
+        {mode === 'vote' && (
+          <>
+            <AccordionBox
+              title="투표 건수"
+              summary={`${voteCount}건`}
+              open={openKey === 'vote-count'}
+              onToggle={() => setOpenKey((prev) => (prev === 'vote-count' ? '' : 'vote-count'))}
+            >
+              <label style={labelBox}>
+                <span style={fieldLabel}>투표 건수</span>
+                <select value={voteCount} onChange={(e) => updateVoteCount(e.target.value)} style={select}>
+                  <option value={1}>1건</option>
+                  <option value={2}>2건</option>
+                  <option value={3}>3건</option>
+                  <option value={4}>4건</option>
+                </select>
+              </label>
+            </AccordionBox>
+
+            {voteSlots.map((slot, slotIdx) => {
+              const slotKey = `vote-slot-${slotIdx}`;
+              const selectedIds = Array.isArray(slot?.candidateIds) ? slot.candidateIds.map(String) : [];
+              const selectedCount = selectedIds.length;
+              return (
+                <AccordionBox
+                  key={slotKey}
+                  title={`투표${slotIdx + 1} 설정`}
+                  summary={`${String(slot?.title ?? '').trim() || `투표${slotIdx + 1}`} · 후보 ${selectedCount}명`}
+                  open={openKey === slotKey}
+                  onToggle={() => setOpenKey((prev) => (prev === slotKey ? '' : slotKey))}
+                >
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <label style={labelBox}>
+                      <span style={fieldLabel}>타이틀</span>
+                      <input
+                        type="text"
+                        value={slot?.title || ''}
+                        placeholder={`투표${slotIdx + 1}`}
+                        onChange={(e) => updateVoteSlot(slotIdx, { title: e.target.value })}
+                        style={textInput}
+                      />
+                    </label>
+
+                    <div style={candidateHeader}>
+                      <span style={fieldLabel}>리스트에 표시할 참가자</span>
+                      <div style={candidateActions}>
+                        <button type="button" style={miniButton} onClick={() => setAllVoteCandidates(slotIdx, true)}>전체 선택</button>
+                        <button type="button" style={miniButton} onClick={() => setAllVoteCandidates(slotIdx, false)}>전체 해제</button>
+                      </div>
+                    </div>
+
+                    {!safeParticipants.length && (
+                      <div style={emptyText}>등록된 참가자가 없습니다.</div>
+                    )}
+
+                    {!!safeParticipants.length && (
+                      <div style={candidateGridStyle}>
+                        {safeParticipants.map((p) => {
+                          const id = String(p?.id ?? '').trim();
+                          const active = selectedIds.includes(id);
+                          const groupNo = getParticipantGroupNo(p);
+                          return (
+                            <button
+                              key={`${slotKey}-${id}`}
+                              type="button"
+                              onClick={() => toggleVoteCandidate(slotIdx, id)}
+                              style={{ ...candidatePillStyle, ...(active ? pillOnStyle : {}) }}
+                              title={String(p?.nickname || '')}
+                            >
+                              <span style={candidateName}>{p?.nickname || '-'}</span>
+                              <span style={candidateMeta}>{Number.isFinite(Number(groupNo)) ? `${groupNo}조` : ''}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </AccordionBox>
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );
@@ -187,6 +334,10 @@ const select = {
   padding: '0 12px',
   fontSize: 14,
   boxSizing: 'border-box',
+};
+const textInput = {
+  ...select,
+  appearance: 'none',
 };
 const sectionBox = {
   border: '1px solid #e5e7eb',
@@ -259,4 +410,59 @@ const checkRowStyle = {
   marginTop: 2,
   fontSize: 13,
   color: '#111827',
+};
+const candidateHeader = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  flexWrap: 'wrap',
+};
+const candidateActions = {
+  display: 'flex',
+  gap: 6,
+};
+const miniButton = {
+  border: '1px solid #cbd5e1',
+  background: '#fff',
+  color: '#344054',
+  borderRadius: 8,
+  padding: '6px 8px',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+const candidateGridStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: 7,
+  maxHeight: 280,
+  overflowY: 'auto',
+  WebkitOverflowScrolling: 'touch',
+};
+const candidatePillStyle = {
+  ...pillStyle,
+  borderRadius: 10,
+  minHeight: 40,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 6,
+  textAlign: 'left',
+};
+const candidateName = {
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+const candidateMeta = {
+  flexShrink: 0,
+  fontSize: 11,
+  color: '#667085',
+};
+const emptyText = {
+  color: '#98a2b3',
+  fontSize: 13,
+  padding: '8px 0',
 };

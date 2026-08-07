@@ -129,6 +129,10 @@ export const TEMPLATE_REGISTRY = [
       pickCount: 1,
       openGroups: [1],
       lastPlaceHalf: false,
+      voteCount: 1,
+      voteSlots: [
+        { title: '투표1', candidateIds: [] },
+      ],
     },
     help: '',
     ui: {
