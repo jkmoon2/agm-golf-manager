@@ -11,7 +11,7 @@ import { doc, onSnapshot, setDoc, updateDoc, getDoc, runTransaction, serverTimes
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoGridSize, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
-import { getParticipantGroupNo, getPickLineupCandidateIds, getPickLineupConfig, getPickLineupRequiredCount, getPickLineupSlotLabels, getVote1OptionIndexFromIds, makeVote1OptionToken, normalizeMemberIds } from '../../events/pickLineup';
+import { getParticipantGroupNo, getPickLineupCandidateIds, getPickLineupConfig, getPickLineupRequiredCount, getPickLineupSlotLabels, getVote1OptionIndexesFromIds, makeVote1OptionToken, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
@@ -574,6 +574,7 @@ export default function PlayerEventInput(){
   const [fallbackGate, setFallbackGate] = useState(null);
   const [fallbackAt, setFallbackAt] = useState(0);
   const [pickMenuState, setPickMenuState] = useState(null);
+  const [pickOverallEventId, setPickOverallEventId] = useState('');
   const [battleMenuState, setBattleMenuState] = useState(null);
   const [battlePreviewExpandedMap, setBattlePreviewExpandedMap] = useState({});
   const [hiddenSelectFocusId, setHiddenSelectFocusId] = useState('');
@@ -1756,6 +1757,48 @@ export default function PlayerEventInput(){
     }
 
     slot.person = person; all[evId] = slot;
+    applyDraft(all);
+    setDirty(true);
+  };
+
+  const toggleVote1PlayerOption = (evId, pid, optionIdx) => {
+    const mineId = String(selfParticipant?.id ?? selfParticipantId ?? '');
+    const selectorId = String(pid ?? '');
+    if (!mineId || !selectorId || selectorId !== mineId) {
+      alert('본인 선택만 수정할 수 있습니다.');
+      return;
+    }
+
+    const pickEventDef = events.find((item) => String(item?.id ?? '') === String(evId ?? '')) || null;
+    const cfg = getPickLineupConfig(pickEventDef);
+    if (cfg.mode !== 'vote1') return;
+
+    const requiredCount = getPickLineupRequiredCount(pickEventDef);
+    const all = { ...(draft || {}) };
+    const slot = { ...(all[evId] || {}) };
+    const person = { ...(slot.person || {}) };
+    const prevObj = person[pid] && typeof person[pid] === 'object' ? { ...person[pid] } : {};
+    const currentIds = padPickIds(normalizeMemberIds(prevObj), requiredCount);
+    const parsed = getVote1OptionIndexesFromIds(currentIds, cfg.voteCount);
+    const selected = new Set(cfg.vote1MultiSelect ? parsed : parsed.slice(0, 1));
+
+    if (selected.has(optionIdx)) {
+      selected.delete(optionIdx);
+    } else {
+      if (!cfg.vote1MultiSelect) selected.clear();
+      selected.add(optionIdx);
+    }
+
+    const tokens = Array.from(selected)
+      .sort((a, b) => a - b)
+      .map((idx) => makeVote1OptionToken(idx));
+    const memberIds = padPickIds(tokens, requiredCount);
+
+    if (!tokens.length) person[pid] = { ...prevObj, memberIds: [] };
+    else person[pid] = { ...prevObj, memberIds };
+
+    slot.person = person;
+    all[evId] = slot;
     applyDraft(all);
     setDirty(true);
   };
@@ -4238,11 +4281,15 @@ export default function PlayerEventInput(){
               const rowIds = canViewRowSelection
                 ? padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount)
                 : padPickIds([], requiredCount);
-              const vote1SelectedIdx = isVote1 ? getVote1OptionIndexFromIds(rowIds) : -1;
+              const vote1ParsedIndexes = isVote1 ? getVote1OptionIndexesFromIds(rowIds, pickCfg.voteCount) : [];
+              const vote1SelectedIndexes = isVote1
+                ? (pickCfg.vote1MultiSelect ? vote1ParsedIndexes : vote1ParsedIndexes.slice(0, 1))
+                : [];
+              const vote1SelectedLabels = vote1SelectedIndexes.map((idx) => slotLabels[idx] || `투표${idx + 1}`);
               const membersBySlot = isVote1 ? [] : rowIds.map((id) => participantById.get(String(id)) || null);
               const members = membersBySlot.filter(Boolean);
               const cells = isVote1
-                ? [vote1SelectedIdx >= 0 ? (slotLabels[vote1SelectedIdx] || `투표${vote1SelectedIdx + 1}`) : '']
+                ? [vote1SelectedLabels.join(' / ')]
                 : isVote2
                   ? membersBySlot.map((member) => String(member?.nickname || ''))
                   : [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
@@ -4260,8 +4307,8 @@ export default function PlayerEventInput(){
                 cells,
                 teamLine,
                 handicapSum: members.length ? handicapSum : '',
-                selectedCount: isVote1 ? (vote1SelectedIdx >= 0 ? 1 : 0) : members.length,
-                hasAny: isVote1 ? vote1SelectedIdx >= 0 : members.length > 0,
+                selectedCount: isVote1 ? vote1SelectedIndexes.length : members.length,
+                hasAny: isVote1 ? vote1SelectedIndexes.length > 0 : members.length > 0,
               };
             });
             const hasPreviewRows = previewRows.some((row) => row.hasAny);
@@ -4272,14 +4319,37 @@ export default function PlayerEventInput(){
                   <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>{ev.title}</div>
                 </div>
 
-                <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
-                  {pickCfg.mode === 'jo'
-                    ? `오픈 조: ${pickCfg.openGroups.map((g) => `${g}조`).join(', ')}${pickCfg.lastPlaceHalf && pickCfg.openGroups.length === 4 ? ' · 꼴등반띵 적용' : ''}`
-                    : (isVote1
-                      ? `${pickCfg.voteCount}개 투표안 중 1개만 선택`
-                      : (isVote2
-                        ? `${pickCfg.voteCount}건 투표 · 각 항목별 후보 참가자 중 1명 선택`
-                        : `전체 참가자 중 ${pickCfg.pickCount}명 선택`))}
+                <div style={{ padding: '0 12px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ minWidth: 0, fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
+                    {pickCfg.mode === 'jo'
+                      ? `오픈 조: ${pickCfg.openGroups.map((g) => `${g}조`).join(', ')}${pickCfg.lastPlaceHalf && pickCfg.openGroups.length === 4 ? ' · 꼴등반띵 적용' : ''}`
+                      : (isVote1
+                        ? `${pickCfg.voteCount}개 투표안 중 ${pickCfg.vote1MultiSelect ? '복수 선택 가능' : '1개만 선택'}`
+                        : (isVote2
+                          ? `${pickCfg.voteCount}건 투표 · 각 항목별 후보 참가자 중 1명 선택`
+                          : `전체 참가자 중 ${pickCfg.pickCount}명 선택`))}
+                  </div>
+                  {pickLineupRevealed && (
+                    <button
+                      type="button"
+                      onClick={() => setPickOverallEventId(String(ev.id ?? ''))}
+                      style={{
+                        flexShrink: 0,
+                        minWidth: 48,
+                        height: 30,
+                        padding: '0 10px',
+                        border: '1px solid #9ec5ff',
+                        borderRadius: 8,
+                        background: '#eef5ff',
+                        color: '#1d4ed8',
+                        fontSize: 12,
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      전체
+                    </button>
+                  )}
                 </div>
 
                 {locked && <div className={tCss.lockNotice}>선택이 마감되어 더 이상 수정할 수 없습니다.</div>}
@@ -4317,8 +4387,9 @@ export default function PlayerEventInput(){
                           <tr key={rIdx}>
                             <td className={tCss.pickInputNick}>{p ? p.nickname : ''}</td>
                             {isVote1 ? slotLabels.map((label, idx) => {
-                              const selectedOptionIdx = getVote1OptionIndexFromIds(rowIds);
-                              const active = selectedOptionIdx === idx;
+                              const parsedIndexes = getVote1OptionIndexesFromIds(rowIds, pickCfg.voteCount);
+                              const selectedOptionIndexes = pickCfg.vote1MultiSelect ? parsedIndexes : parsedIndexes.slice(0, 1);
+                              const active = selectedOptionIndexes.includes(idx);
                               const canShow = isOwnPickLineupRow || pickLineupRevealed;
                               return (
                                 <td key={idx} className={tCss.cellEditable} style={{ textAlign: 'center' }}>
@@ -4326,7 +4397,11 @@ export default function PlayerEventInput(){
                                     type="button"
                                     onClick={() => {
                                       if (!canEditPickLineupRow) return;
-                                      patchPickMember(ev.id, String(p.id ?? ''), 0, active ? '' : makeVote1OptionToken(idx), 1);
+                                      if (pickCfg.vote1MultiSelect) {
+                                        toggleVote1PlayerOption(ev.id, String(p.id ?? ''), idx);
+                                      } else {
+                                        patchPickMember(ev.id, String(p.id ?? ''), 0, active ? '' : makeVote1OptionToken(idx), 1);
+                                      }
                                     }}
                                     disabled={!canEditPickLineupRow}
                                     title={!canShow ? '비공개' : label}
@@ -4421,7 +4496,11 @@ export default function PlayerEventInput(){
                               >
                                 {row.teamLine}
                               </td>
-                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{(isVote1 || isVote2) ? `${row.selectedCount || 0}/${requiredCount}` : (row.handicapSum !== '' ? row.handicapSum : '')}</td>
+                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>
+                                {isVote1
+                                  ? (pickCfg.vote1MultiSelect ? `${row.selectedCount || 0}개` : `${row.selectedCount || 0}/1`)
+                                  : (isVote2 ? `${row.selectedCount || 0}/${requiredCount}` : (row.handicapSum !== '' ? row.handicapSum : ''))}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -4873,6 +4952,135 @@ export default function PlayerEventInput(){
             </div>
           );
         })}
+
+        {pickOverallEventId && (() => {
+          const overallEvent = events.find((item) => String(item?.id ?? '') === String(pickOverallEventId)) || null;
+          if (!overallEvent || overallEvent.template !== 'pick-lineup') return null;
+          const overallCfg = getPickLineupConfig(overallEvent);
+          if (!overallCfg.selectionRevealed) return null;
+
+          const overallRequiredCount = getPickLineupRequiredCount(overallEvent);
+          const overallLabels = getPickLineupSlotLabels(overallEvent);
+          const overallLocked = !!overallCfg.selectionLocked;
+          const overallRows = sortedParticipants.map((p) => {
+            const pid = String(p?.id ?? '');
+            const isMe = pid === String(selfParticipant?.id ?? selfParticipantId ?? '');
+            const livePersonInput = isMe
+              ? (inputsByEvent?.[overallEvent.id]?.person?.[pid] ?? inputsByEventServer?.[overallEvent.id]?.person?.[pid])
+              : inputsByEventServer?.[overallEvent.id]?.person?.[pid];
+            const ids = padPickIds(normalizeMemberIds(livePersonInput), overallRequiredCount);
+            const roomNo = Number(p?.room);
+            const roomLabel = Number.isFinite(roomNo) && roomNo >= 1
+              ? (String(roomNames?.[roomNo - 1] || '').trim() || `${roomNo}번방`)
+              : '-';
+
+            let summary = '-';
+            let complete = false;
+
+            if (overallCfg.mode === 'vote1') {
+              const parsed = getVote1OptionIndexesFromIds(ids, overallCfg.voteCount);
+              const selectedIndexes = overallCfg.vote1MultiSelect ? parsed : parsed.slice(0, 1);
+              summary = selectedIndexes.length
+                ? selectedIndexes.map((idx) => overallLabels[idx] || `투표${idx + 1}`).join(' / ')
+                : '-';
+              complete = selectedIndexes.length > 0;
+            } else if (overallCfg.mode === 'vote2') {
+              const parts = overallLabels.map((label, idx) => {
+                const selectedId = String(ids[idx] ?? '').trim();
+                const member = participantById.get(selectedId);
+                return `${label}:${member?.nickname || '-'}`;
+              });
+              summary = parts.join(' / ');
+              complete = overallLabels.every((_, idx) => {
+                const selectedId = String(ids[idx] ?? '').trim();
+                const candidateIds = getPickLineupCandidateIds(overallEvent, idx);
+                return !!selectedId && participantById.has(selectedId) && candidateIds.includes(selectedId);
+              });
+            } else {
+              const members = ids.map((id) => participantById.get(String(id))).filter(Boolean);
+              if (overallCfg.mode === 'jo') {
+                summary = overallCfg.openGroups.map((groupNo) => {
+                  const found = members.find((member) => Number(getParticipantGroupNo(member)) === Number(groupNo));
+                  return `${groupNo}조:${found?.nickname || '-'}`;
+                }).join(' / ');
+                complete = overallCfg.openGroups.every((groupNo) => members.some((member) => Number(getParticipantGroupNo(member)) === Number(groupNo)));
+              } else {
+                summary = members.map((member) => String(member?.nickname || '')).filter(Boolean).join(' / ') || '-';
+                complete = members.length === overallCfg.pickCount;
+              }
+            }
+
+            return { pid, roomLabel, nickname: String(p?.nickname || ''), summary, complete };
+          });
+
+          const overallDone = overallRows.filter((row) => row.complete).length;
+          const portalNode = typeof document !== 'undefined' ? document.body : null;
+          if (!portalNode) return null;
+
+          return createPortal(
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 10020, background: 'rgba(15,23,42,.28)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}
+              onClick={() => setPickOverallEventId('')}
+            >
+              <div
+                style={{ width: '100%', maxWidth: 640, maxHeight: '84dvh', overflow: 'hidden', background: '#fff', borderRadius: 16, boxShadow: '0 18px 48px rgba(15,23,42,.24)', display: 'flex', flexDirection: 'column' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ padding: '13px 14px 10px', borderBottom: '1px solid #e5eaf2', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 16, fontWeight: 950, color: '#16376c' }}>전체 선택 현황</div>
+                    <div style={{ marginTop: 3, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
+                      {overallEvent.title} · {overallLocked ? '마감' : '진행중'} · 실시간 공개
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPickOverallEventId('')}
+                    style={{ flexShrink: 0, border: '1px solid #cbd5e1', background: '#fff', borderRadius: 9, height: 32, padding: '0 11px', color: '#475467', fontSize: 12, fontWeight: 800 }}
+                  >
+                    닫기
+                  </button>
+                </div>
+
+                <div style={{ margin: '10px 12px 0', padding: '9px 10px', border: '1px solid #dbeafe', background: '#eff6ff', borderRadius: 10, color: '#334155', fontSize: 13 }}>
+                  선택 완료 <b style={{ color: '#1d4ed8' }}>{overallDone}</b> / {overallRows.length}명
+                </div>
+
+                <div style={{ padding: 12, overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #dfe5ee', borderRadius: 11 }}>
+                    <table style={{ width: '100%', minWidth: 540, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: 78 }} />
+                        <col style={{ width: 92 }} />
+                        <col />
+                        <col style={{ width: 58 }} />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>방</th>
+                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>닉네임</th>
+                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>선택 현황</th>
+                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>완료</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {overallRows.map((row) => (
+                          <tr key={`pick-overall-${overallEvent.id}-${row.pid}`}>
+                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: '#667085' }}>{row.roomLabel}</td>
+                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: '#183153', fontWeight: 900 }}>{row.nickname}</td>
+                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 7px', textAlign: 'left', fontSize: 12, color: '#344054', lineHeight: 1.45, wordBreak: 'keep-all' }}>{row.summary}</td>
+                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: row.complete ? '#059669' : '#dc2626', fontWeight: 900 }}>{row.complete ? '완료' : '대기'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            portalNode
+          );
+        })()}
 
         <div className={baseCss.footerNav}>
           <button

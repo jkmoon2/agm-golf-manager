@@ -131,6 +131,7 @@ export const TEMPLATE_REGISTRY = [
       lastPlaceHalf: false,
       voteCount: 1,
       vote1CalcMethod: 'sum',
+      vote1MultiSelect: false,
       voteSlots: [
         { title: '투표1', candidateIds: [] },
       ],

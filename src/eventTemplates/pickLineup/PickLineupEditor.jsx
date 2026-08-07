@@ -17,6 +17,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
   const voteCount = cfg.voteCount;
   const voteSlots = normalizeVoteSlots(cfg.voteSlots, voteCount);
   const vote1CalcMethod = cfg.vote1CalcMethod;
+  const vote1MultiSelect = !!cfg.vote1MultiSelect;
 
   const [openKey, setOpenKey] = useState('');
 
@@ -58,6 +59,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
         voteCount,
         voteSlots,
         vote1CalcMethod,
+        vote1MultiSelect,
         ...patch,
       });
     }
@@ -125,6 +127,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
                 lastPlaceHalf: nextMode === 'jo' && openGroups.length === 4 ? lastPlaceHalf : false,
                 voteCount,
                 voteSlots: normalizeVoteSlots(voteSlots, voteCount),
+                vote1MultiSelect,
               });
               setOpenKey('');
             }}
@@ -222,17 +225,28 @@ export default function PickLineupEditor({ participants = [], value, onChange })
             </AccordionBox>
 
             {mode === 'vote1' && (
-              <label style={labelBox}>
-                <span style={fieldLabel}>투표안 결과 계산</span>
-                <select
-                  value={vote1CalcMethod}
-                  onChange={(e) => emit({ vote1CalcMethod: e.target.value === 'min' ? 'min' : 'sum' })}
-                  style={select}
-                >
-                  <option value="sum">구성 참가자 결과 합계</option>
-                  <option value="min">구성 참가자 중 가장 낮은 결과 1명</option>
-                </select>
-              </label>
+              <>
+                <label style={labelBox}>
+                  <span style={fieldLabel}>투표안 결과 계산</span>
+                  <select
+                    value={vote1CalcMethod}
+                    onChange={(e) => emit({ vote1CalcMethod: e.target.value === 'min' ? 'min' : 'sum' })}
+                    style={select}
+                  >
+                    <option value="sum">구성 참가자 결과 합계</option>
+                    <option value="min">구성 참가자 중 가장 낮은 결과 1명</option>
+                  </select>
+                </label>
+
+                <label style={checkRowStyle}>
+                  <input
+                    type="checkbox"
+                    checked={vote1MultiSelect}
+                    onChange={(e) => emit({ vote1MultiSelect: !!e.target.checked })}
+                  />
+                  <span>복수선택 허용</span>
+                </label>
+              </>
             )}
 
             {voteSlots.map((slot, slotIdx) => {

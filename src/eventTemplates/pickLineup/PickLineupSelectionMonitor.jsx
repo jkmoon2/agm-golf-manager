@@ -6,7 +6,7 @@ import {
   getPickLineupConfig,
   getPickLineupRequiredCount,
   getPickLineupSlotLabels,
-  getVote1OptionIndexFromIds,
+  getVote1OptionIndexesFromIds,
   makeVote1OptionToken,
   normalizeMemberIds,
 } from '../../events/pickLineup';
@@ -48,8 +48,11 @@ function buildSelectionSummary(eventDef, cfg, ids, byId) {
   }
   if (cfg.mode === 'vote1') {
     const labels = getPickLineupSlotLabels(eventDef);
-    const selectedIdx = getVote1OptionIndexFromIds(ids);
-    return selectedIdx >= 0 ? (labels[selectedIdx] || `투표${selectedIdx + 1}`) : '-';
+    const parsed = getVote1OptionIndexesFromIds(ids, cfg.voteCount);
+    const selectedIndexes = cfg.vote1MultiSelect ? parsed : parsed.slice(0, 1);
+    return selectedIndexes.length
+      ? selectedIndexes.map((idx) => labels[idx] || `투표${idx + 1}`).join(' / ')
+      : '-';
   }
   if (cfg.mode === 'vote2') {
     const labels = getPickLineupSlotLabels(eventDef);
@@ -67,8 +70,9 @@ function isComplete(eventDef, cfg, ids, byId) {
     return members.length === cfg.pickCount;
   }
   if (cfg.mode === 'vote1') {
-    const selectedIdx = getVote1OptionIndexFromIds(ids);
-    return selectedIdx >= 0 && selectedIdx < cfg.voteCount;
+    const parsed = getVote1OptionIndexesFromIds(ids, cfg.voteCount);
+    const selectedIndexes = cfg.vote1MultiSelect ? parsed : parsed.slice(0, 1);
+    return selectedIndexes.length > 0;
   }
   if (cfg.mode === 'vote2') {
     if (ids.length !== cfg.voteCount) return false;
@@ -155,7 +159,11 @@ export default function PickLineupSelectionMonitor({
         groupLabel: Number.isFinite(Number(getParticipantGroupNo(p))) ? `${getParticipantGroupNo(p)}조` : '',
         ids: paddedIds,
         complete,
-        count: cfg.mode === 'vote1' ? (complete ? 1 : 0) : members.length,
+        count: cfg.mode === 'vote1'
+          ? (cfg.vote1MultiSelect
+            ? getVote1OptionIndexesFromIds(paddedIds, cfg.voteCount).length
+            : (complete ? 1 : 0))
+          : members.length,
         summary: buildSelectionSummary(eventDef, cfg, paddedIds, byId),
         handicapSum,
       };
@@ -182,6 +190,24 @@ export default function PickLineupSelectionMonitor({
     }
     next[idx] = selected;
     setDraftById((prev) => ({ ...(prev || {}), [key]: next }));
+  };
+
+  const toggleVote1DraftOption = (pid, optionIdx) => {
+    const key = String(pid ?? '');
+    if (!key) return;
+    const currentIds = padIds(rowById.get(key)?.ids || [], requiredCount);
+    const base = padIds(draftById?.[key] || currentIds, requiredCount);
+    const parsed = getVote1OptionIndexesFromIds(base, cfg.voteCount);
+    const set = new Set(cfg.vote1MultiSelect ? parsed : parsed.slice(0, 1));
+    if (set.has(optionIdx)) set.delete(optionIdx);
+    else {
+      if (!cfg.vote1MultiSelect) set.clear();
+      set.add(optionIdx);
+    }
+    const tokens = Array.from(set)
+      .sort((a, b) => a - b)
+      .map((idx) => makeVote1OptionToken(idx));
+    setDraftById((prev) => ({ ...(prev || {}), [key]: padIds(tokens, requiredCount) }));
   };
 
   const clearDraft = (pid) => {
@@ -257,19 +283,44 @@ export default function PickLineupSelectionMonitor({
 
             <div style={{ display: 'grid', gap: 7, marginTop: 8 }}>
               {cfg.mode === 'vote1' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr', gap: 8, alignItems: 'center' }}>
-                  <div style={{ fontSize: 12, fontWeight: 900, color: '#475467' }}>투표안</div>
-                  <select
-                    value={String(activeIds[0] || '')}
-                    onChange={(e) => updateDraftCell(pid, 0, e.target.value)}
-                    style={selectStyle}
-                  >
-                    <option value="">선택</option>
-                    {slotLabels.map((label, idx) => (
-                      <option key={`pick-lineup-vote1-option-${pid}-${idx}`} value={makeVote1OptionToken(idx)}>{label}</option>
-                    ))}
-                  </select>
-                </div>
+                cfg.vote1MultiSelect ? (
+                  <div style={{ display: 'grid', gap: 7 }}>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#475467' }}>투표안 · 복수선택</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 7 }}>
+                      {slotLabels.map((label, idx) => {
+                        const activeIndexes = getVote1OptionIndexesFromIds(activeIds, cfg.voteCount);
+                        const active = activeIndexes.includes(idx);
+                        return (
+                          <button
+                            key={`pick-lineup-vote1-multi-${pid}-${idx}`}
+                            type="button"
+                            onClick={() => toggleVote1DraftOption(pid, idx)}
+                            style={{
+                              ...vote1MultiButton,
+                              ...(active ? vote1MultiButtonOn : {}),
+                            }}
+                          >
+                            {active ? '✓ ' : ''}{label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr', gap: 8, alignItems: 'center' }}>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#475467' }}>투표안</div>
+                    <select
+                      value={String(activeIds[0] || '')}
+                      onChange={(e) => updateDraftCell(pid, 0, e.target.value)}
+                      style={selectStyle}
+                    >
+                      <option value="">선택</option>
+                      {slotLabels.map((label, idx) => (
+                        <option key={`pick-lineup-vote1-option-${pid}-${idx}`} value={makeVote1OptionToken(idx)}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )
               ) : slotLabels.map((label, idx) => {
                 const options = getCandidateOptions(eventDef, cfg, sortedParticipants, idx);
                 const selectedId = String(activeIds[idx] || '');
@@ -298,7 +349,11 @@ export default function PickLineupSelectionMonitor({
             </div>
 
             <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={metaLine} title={row.summary || ''}>{row.summary || '선택 없음'} · 선택 {activeIds.filter(Boolean).length}/{requiredCount}</div>
+              <div style={metaLine} title={row.summary || ''}>
+                {row.summary || '선택 없음'} · {cfg.mode === 'vote1' && cfg.vote1MultiSelect
+                  ? `선택 ${getVote1OptionIndexesFromIds(activeIds, cfg.voteCount).length}개`
+                  : `선택 ${activeIds.filter(Boolean).length}/${requiredCount}`}
+              </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {changed && <button type="button" style={btnSub} onClick={() => clearDraft(pid)}>원복</button>}
                 <button type="button" style={btnPrimary} onClick={() => saveOne(p)} disabled={!complete}>저장</button>
@@ -314,7 +369,7 @@ export default function PickLineupSelectionMonitor({
   const modeSummary = cfg.mode === 'jo'
     ? `조 모드 (${cfg.openGroups.map((g) => `${g}조`).join(', ')})`
     : cfg.mode === 'vote1'
-      ? `투표1 모드 (${cfg.voteCount}안 중 1개 선택)`
+      ? `투표1 모드 (${cfg.voteCount}안 중 ${cfg.vote1MultiSelect ? '복수선택' : '1개 선택'})`
       : cfg.mode === 'vote2'
         ? `투표2 모드 (${cfg.voteCount}건)`
         : `개인 모드 (${cfg.pickCount}명 선택)`;
@@ -441,3 +496,5 @@ const btnPrimary = { ...btn, borderColor: '#2563eb', background: '#2563eb', colo
 const btnSub = { ...btn, borderColor: '#d1d5db', background: '#f8fafc', color: '#344054', fontWeight: 700 };
 const dangerStyle = { ...btn, borderColor: '#fecdd3', background: '#fff1f2', color: '#be123c', fontWeight: 700 };
 const selectStyle = { width: '100%', minWidth: 0, height: 34, border: '1px solid #d7dfec', borderRadius: 9, padding: '0 8px', fontSize: 13, background: '#fff', boxSizing: 'border-box' };
+const vote1MultiButton = { minHeight: 36, border: '1px solid #d7dfec', borderRadius: 9, background: '#fff', color: '#475467', padding: '6px 8px', fontSize: 12, fontWeight: 800, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+const vote1MultiButtonOn = { borderColor: '#6ea8ff', background: '#eef5ff', color: '#1d4ed8' };
