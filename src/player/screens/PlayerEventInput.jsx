@@ -575,6 +575,7 @@ export default function PlayerEventInput(){
   const [fallbackAt, setFallbackAt] = useState(0);
   const [pickMenuState, setPickMenuState] = useState(null);
   const [pickOverallEventId, setPickOverallEventId] = useState('');
+  const [pickOverallViewMode, setPickOverallViewMode] = useState('room'); // room | vote
   const [battleMenuState, setBattleMenuState] = useState(null);
   const [battlePreviewExpandedMap, setBattlePreviewExpandedMap] = useState({});
   const [hiddenSelectFocusId, setHiddenSelectFocusId] = useState('');
@@ -4332,7 +4333,10 @@ export default function PlayerEventInput(){
                   {pickLineupRevealed && (
                     <button
                       type="button"
-                      onClick={() => setPickOverallEventId(String(ev.id ?? ''))}
+                      onClick={() => {
+                        setPickOverallViewMode('room');
+                        setPickOverallEventId(String(ev.id ?? ''));
+                      }}
                       style={{
                         flexShrink: 0,
                         minWidth: 48,
@@ -4423,8 +4427,12 @@ export default function PlayerEventInput(){
                               );
                             }) : slotLabels.map((_, idx) => {
                               const options = getPickOptions(ev, idx);
-                              const selectedId = p ? (rowIds[idx] || '') : '';
-                              const selectedOpt = options.find((opt) => String(opt?.id ?? '') === String(selectedId));
+                              // vote1 → vote2 등 모드 변경 후 첫 칸에 과거 토큰(vote1:0 등)이
+                              // 남아 있으면, 기존 코드는 selectedId가 truthy라 모든 후보 옵션을
+                              // disabled 처리했습니다. 실제 후보에 존재하는 값만 현재 선택값으로 인정합니다.
+                              const rawSelectedId = p ? String(rowIds[idx] || '') : '';
+                              const selectedOpt = options.find((opt) => String(opt?.id ?? '') === rawSelectedId);
+                              const selectedId = selectedOpt ? rawSelectedId : '';
                               const buttonText = selectedOpt ? displayPickOption(selectedOpt) : '선택';
                               return (
                                 <td key={idx} className={tCss.cellEditable}>
@@ -4725,7 +4733,11 @@ export default function PlayerEventInput(){
             : padPickIds([], requiredCount);
           const options = activeEvent ? getPickOptions(activeEvent, pickMenuState.idx) : (Array.isArray(pickMenuState.optionsSnapshot) ? pickMenuState.optionsSnapshot : []);
           const activePickCfg = getPickLineupConfig(activeEvent);
-          const selectedId = selector ? (rowIds[pickMenuState.idx] || '') : '';
+          // 현재 모드의 후보 목록에 없는 과거 선택값은 '미선택'으로 간주합니다.
+          // 특히 vote1 모드에서 저장된 vote1:N 토큰이 vote2 첫 칸에 남아 있을 때
+          // 모든 후보 버튼이 잠기는 문제를 방지합니다.
+          const rawSelectedId = selector ? String(rowIds[pickMenuState.idx] || '') : '';
+          const selectedId = options.some((opt) => String(opt?.id ?? '') === rawSelectedId) ? rawSelectedId : '';
           const portalNode = typeof document !== 'undefined' ? document.body : null;
           if (!portalNode || !activeEvent || !selector) return null;
 
@@ -4962,6 +4974,8 @@ export default function PlayerEventInput(){
           const overallRequiredCount = getPickLineupRequiredCount(overallEvent);
           const overallLabels = getPickLineupSlotLabels(overallEvent);
           const overallLocked = !!overallCfg.selectionLocked;
+          const isOverallVoteMode = overallCfg.mode === 'vote1' || overallCfg.mode === 'vote2';
+
           const overallRows = sortedParticipants.map((p) => {
             const pid = String(p?.id ?? '');
             const isMe = pid === String(selfParticipant?.id ?? selfParticipantId ?? '');
@@ -4976,26 +4990,29 @@ export default function PlayerEventInput(){
 
             let summary = '-';
             let complete = false;
+            let selectedIndexes = [];
+            let validIds = [...ids];
 
             if (overallCfg.mode === 'vote1') {
               const parsed = getVote1OptionIndexesFromIds(ids, overallCfg.voteCount);
-              const selectedIndexes = overallCfg.vote1MultiSelect ? parsed : parsed.slice(0, 1);
+              selectedIndexes = overallCfg.vote1MultiSelect ? parsed : parsed.slice(0, 1);
               summary = selectedIndexes.length
                 ? selectedIndexes.map((idx) => overallLabels[idx] || `투표${idx + 1}`).join(' / ')
                 : '-';
               complete = selectedIndexes.length > 0;
             } else if (overallCfg.mode === 'vote2') {
+              // 현재 투표2 후보 목록에 없는 과거 값(vote1:N 토큰 등)은 무효값으로 정리해 표시/집계합니다.
+              validIds = overallLabels.map((_, idx) => {
+                const rawId = String(ids[idx] ?? '').trim();
+                const candidateIds = getPickLineupCandidateIds(overallEvent, idx);
+                return rawId && participantById.has(rawId) && candidateIds.includes(rawId) ? rawId : '';
+              });
               const parts = overallLabels.map((label, idx) => {
-                const selectedId = String(ids[idx] ?? '').trim();
-                const member = participantById.get(selectedId);
+                const member = participantById.get(String(validIds[idx] || ''));
                 return `${label}:${member?.nickname || '-'}`;
               });
               summary = parts.join(' / ');
-              complete = overallLabels.every((_, idx) => {
-                const selectedId = String(ids[idx] ?? '').trim();
-                const candidateIds = getPickLineupCandidateIds(overallEvent, idx);
-                return !!selectedId && participantById.has(selectedId) && candidateIds.includes(selectedId);
-              });
+              complete = overallLabels.every((_, idx) => !!validIds[idx]);
             } else {
               const members = ids.map((id) => participantById.get(String(id))).filter(Boolean);
               if (overallCfg.mode === 'jo') {
@@ -5010,8 +5027,60 @@ export default function PlayerEventInput(){
               }
             }
 
-            return { pid, roomLabel, nickname: String(p?.nickname || ''), summary, complete };
+            return {
+              pid,
+              roomNo: Number.isFinite(roomNo) ? roomNo : null,
+              roomLabel,
+              nickname: String(p?.nickname || ''),
+              summary,
+              complete,
+              ids,
+              validIds,
+              selectedIndexes,
+            };
           });
+
+          // 방 번호를 참가자마다 반복하지 않고 같은 방 참가자 수만큼 rowSpan으로 병합합니다.
+          const overallRowsWithRoomSpan = overallRows.map((row) => ({ ...row, roomRowSpan: 0 }));
+          for (let i = 0; i < overallRowsWithRoomSpan.length; ) {
+            const roomKey = `${overallRowsWithRoomSpan[i]?.roomNo ?? ''}|${overallRowsWithRoomSpan[i]?.roomLabel || '-'}`;
+            let j = i + 1;
+            while (
+              j < overallRowsWithRoomSpan.length
+              && `${overallRowsWithRoomSpan[j]?.roomNo ?? ''}|${overallRowsWithRoomSpan[j]?.roomLabel || '-'}` === roomKey
+            ) {
+              j += 1;
+            }
+            overallRowsWithRoomSpan[i].roomRowSpan = Math.max(1, j - i);
+            i = j;
+          }
+
+          // '투표 현황' 보기: 투표1/투표2 각각 투표 항목별 인원 + 투표자(투표2는 선택 대상까지) 표시
+          const overallVoteRows = isOverallVoteMode
+            ? overallLabels.map((label, idx) => {
+                if (overallCfg.mode === 'vote1') {
+                  const voters = overallRows.filter((row) => Array.isArray(row.selectedIndexes) && row.selectedIndexes.includes(idx));
+                  return {
+                    key: `vote1-${idx}`,
+                    label,
+                    count: voters.length,
+                    detail: voters.map((row) => row.nickname).filter(Boolean).join(', ') || '없음',
+                  };
+                }
+
+                const voters = overallRows.filter((row) => !!String(row?.validIds?.[idx] || ''));
+                return {
+                  key: `vote2-${idx}`,
+                  label,
+                  count: voters.length,
+                  detail: voters.map((row) => {
+                    const selectedId = String(row?.validIds?.[idx] || '');
+                    const target = participantById.get(selectedId);
+                    return target?.nickname ? `${row.nickname}→${target.nickname}` : row.nickname;
+                  }).filter(Boolean).join(', ') || '없음',
+                };
+              })
+            : [];
 
           const overallDone = overallRows.filter((row) => row.complete).length;
           const portalNode = typeof document !== 'undefined' ? document.body : null;
@@ -5028,7 +5097,9 @@ export default function PlayerEventInput(){
               >
                 <div style={{ padding: '13px 14px 10px', borderBottom: '1px solid #e5eaf2', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 950, color: '#16376c' }}>전체 선택 현황</div>
+                    <div style={{ fontSize: 16, fontWeight: 950, color: '#16376c' }}>
+                      {pickOverallViewMode === 'vote' && isOverallVoteMode ? '투표 현황' : '전체 선택 현황'}
+                    </div>
                     <div style={{ marginTop: 3, fontSize: 12, color: '#667085', lineHeight: 1.45 }}>
                       {overallEvent.title} · {overallLocked ? '마감' : '진행중'} · 실시간 공개
                     </div>
@@ -5042,39 +5113,118 @@ export default function PlayerEventInput(){
                   </button>
                 </div>
 
-                <div style={{ margin: '10px 12px 0', padding: '9px 10px', border: '1px solid #dbeafe', background: '#eff6ff', borderRadius: 10, color: '#334155', fontSize: 13 }}>
-                  선택 완료 <b style={{ color: '#1d4ed8' }}>{overallDone}</b> / {overallRows.length}명
+                <div
+                  style={{
+                    margin: '10px 12px 0',
+                    padding: '8px 9px',
+                    border: '1px solid #dbeafe',
+                    background: '#eff6ff',
+                    borderRadius: 10,
+                    color: '#334155',
+                    fontSize: 13,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                  }}
+                >
+                  <span>
+                    선택 완료 <b style={{ color: '#1d4ed8' }}>{overallDone}</b> / {overallRows.length}명
+                  </span>
+                  {isOverallVoteMode && (
+                    <button
+                      type="button"
+                      onClick={() => setPickOverallViewMode((prev) => (prev === 'vote' ? 'room' : 'vote'))}
+                      style={{
+                        flexShrink: 0,
+                        height: 30,
+                        padding: '0 10px',
+                        border: '1px solid #6ea8ff',
+                        borderRadius: 8,
+                        background: pickOverallViewMode === 'vote' ? '#1d4ed8' : '#fff',
+                        color: pickOverallViewMode === 'vote' ? '#fff' : '#1d4ed8',
+                        fontSize: 12,
+                        fontWeight: 900,
+                      }}
+                    >
+                      {pickOverallViewMode === 'vote' ? '방 현황' : '투표 현황'}
+                    </button>
+                  )}
                 </div>
 
                 <div style={{ padding: 12, overflow: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #dfe5ee', borderRadius: 11 }}>
-                    <table style={{ width: '100%', minWidth: 540, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-                      <colgroup>
-                        <col style={{ width: 78 }} />
-                        <col style={{ width: 92 }} />
-                        <col />
-                        <col style={{ width: 58 }} />
-                      </colgroup>
-                      <thead>
-                        <tr>
-                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>방</th>
-                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>닉네임</th>
-                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>선택 현황</th>
-                          <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>완료</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {overallRows.map((row) => (
-                          <tr key={`pick-overall-${overallEvent.id}-${row.pid}`}>
-                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: '#667085' }}>{row.roomLabel}</td>
-                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: '#183153', fontWeight: 900 }}>{row.nickname}</td>
-                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 7px', textAlign: 'left', fontSize: 12, color: '#344054', lineHeight: 1.45, wordBreak: 'keep-all' }}>{row.summary}</td>
-                            <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: row.complete ? '#059669' : '#dc2626', fontWeight: 900 }}>{row.complete ? '완료' : '대기'}</td>
+                  {pickOverallViewMode === 'vote' && isOverallVoteMode ? (
+                    <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #dfe5ee', borderRadius: 11 }}>
+                      <table style={{ width: '100%', minWidth: 430, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                        <colgroup>
+                          <col style={{ width: 105 }} />
+                          <col style={{ width: 62 }} />
+                          <col />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>투표</th>
+                            <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>인원</th>
+                            <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>투표자</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {overallVoteRows.map((row) => (
+                            <tr key={`pick-overall-vote-${overallEvent.id}-${row.key}`}>
+                              <td style={{ border: '1px solid #e5eaf2', padding: '9px 6px', textAlign: 'center', fontSize: 12, color: '#183153', fontWeight: 900 }}>{row.label}</td>
+                              <td style={{ border: '1px solid #e5eaf2', padding: '9px 6px', textAlign: 'center', fontSize: 12, color: '#be123c', fontWeight: 900 }}>{row.count}명</td>
+                              <td style={{ border: '1px solid #e5eaf2', padding: '9px 8px', textAlign: 'left', fontSize: 12, color: '#344054', lineHeight: 1.5, wordBreak: 'keep-all' }}>{row.detail}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #dfe5ee', borderRadius: 11 }}>
+                      <table style={{ width: '100%', minWidth: 540, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                        <colgroup>
+                          <col style={{ width: 78 }} />
+                          <col style={{ width: 92 }} />
+                          <col />
+                          <col style={{ width: 58 }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>방</th>
+                            <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>닉네임</th>
+                            <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>선택 현황</th>
+                            <th style={{ border: '1px solid #dfe5ee', background: '#f8fafc', padding: '8px 5px', fontSize: 12, color: '#344054' }}>완료</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {overallRowsWithRoomSpan.map((row) => (
+                            <tr key={`pick-overall-${overallEvent.id}-${row.pid}`}>
+                              {row.roomRowSpan > 0 && (
+                                <td
+                                  rowSpan={row.roomRowSpan}
+                                  style={{
+                                    border: '1px solid #e5eaf2',
+                                    padding: '8px 5px',
+                                    textAlign: 'center',
+                                    verticalAlign: 'middle',
+                                    fontSize: 12,
+                                    color: '#475467',
+                                    fontWeight: 900,
+                                    background: '#fbfdff',
+                                  }}
+                                >
+                                  {row.roomLabel}
+                                </td>
+                              )}
+                              <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: '#183153', fontWeight: 900 }}>{row.nickname}</td>
+                              <td style={{ border: '1px solid #e5eaf2', padding: '8px 7px', textAlign: 'left', fontSize: 12, color: '#344054', lineHeight: 1.45, wordBreak: 'keep-all' }}>{row.summary}</td>
+                              <td style={{ border: '1px solid #e5eaf2', padding: '8px 5px', textAlign: 'center', fontSize: 12, color: row.complete ? '#059669' : '#dc2626', fontWeight: 900 }}>{row.complete ? '완료' : '대기'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>,

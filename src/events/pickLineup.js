@@ -406,13 +406,27 @@ function buildVote1Result(eventDef, participants = [], inputsByEvent = {}, opt =
       roomLabel: getRoomLabel(roomNames, member?.room),
       groupNo: getParticipantGroupNo(member),
     }));
-    const allReady = memberRows.length > 0 && memberRows.every((member) => member.resultValue !== null && member.resultValue !== undefined && Number.isFinite(Number(member.resultValue)));
+    // 투표1 결과는 "현재 입력된 구성원 결과값"을 기준으로 즉시 집계합니다.
+    // 기존에는 구성원 중 단 1명이라도 점수 미입력(resultValue=null)이면 전체 결과를 '-'
+    // 처리했기 때문에, 일부 참가자의 점수가 아직 비어 있는 테스트/진행중 상황에서는
+    // 모든 투표안의 결과/순위가 사라져 보였습니다.
+    // → 유효한 결과값만 합계/최저값에 반영하고, 미입력 인원은 별도 카운트로 보관합니다.
+    //    이후 점수가 입력되면 scores 실시간 overlay에 의해 자동 재계산됩니다.
+    const readyMemberRows = memberRows.filter(
+      (member) => member.resultValue !== null
+        && member.resultValue !== undefined
+        && Number.isFinite(Number(member.resultValue))
+    );
+    const readyMemberCount = readyMemberRows.length;
+    const missingMemberCount = Math.max(0, memberRows.length - readyMemberCount);
+    const allReady = memberRows.length > 0 && missingMemberCount === 0;
+
     let resultValue = null;
-    if (allReady) {
+    if (readyMemberRows.length > 0) {
       if (cfg.vote1CalcMethod === 'min') {
-        resultValue = Math.min(...memberRows.map((member) => Number(member.resultValue)));
+        resultValue = Math.min(...readyMemberRows.map((member) => Number(member.resultValue)));
       } else {
-        resultValue = memberRows.reduce((sum, member) => sum + Number(member.resultValue || 0), 0);
+        resultValue = readyMemberRows.reduce((sum, member) => sum + Number(member.resultValue), 0);
       }
     }
     const voters = selectorRows
@@ -433,6 +447,9 @@ function buildVote1Result(eventDef, participants = [], inputsByEvent = {}, opt =
       name: String(slot?.title ?? '').trim() || `투표${slotIdx + 1}`,
       memberIds,
       members: memberRows,
+      readyMemberCount,
+      missingMemberCount,
+      allReady,
       resultValue,
       value: resultValue,
       score: resultValue,
