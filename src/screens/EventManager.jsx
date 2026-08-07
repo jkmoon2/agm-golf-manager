@@ -1393,7 +1393,8 @@ if (editForm?.template === 'group-battle') {
         const candidateText = cfg.voteSlots.map((slot, idx) => `${String(slot?.title ?? '').trim() || `투표${idx + 1}`}:${slot.candidateIds.length}명`).join(', ');
         const modeText = cfg.mode === 'vote1' ? '투표1' : '투표2';
         const calcText = cfg.mode === 'vote1' ? ` · ${cfg.vote1CalcMethod === 'min' ? '최저결과1명' : '결과합계'}` : '';
-        return `pick-lineup · ${modeText} · ${cfg.voteCount}건${calcText}${candidateText ? ` · ${candidateText}` : ''}`;
+        const multiText = cfg.mode === 'vote1' && cfg.vote1MultiSelect ? ' · 복수선택' : '';
+        return `pick-lineup · ${modeText} · ${cfg.voteCount}건${calcText}${multiText}${candidateText ? ` · ${candidateText}` : ''}`;
       }
       if (cfg.mode === 'single') {
         return `pick-lineup · 개인 · ${cfg.pickCount}명 선택`;

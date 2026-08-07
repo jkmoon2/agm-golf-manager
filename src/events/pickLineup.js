@@ -2,7 +2,7 @@
 // 개인/조/투표1/투표2 선택 대결 계산 유틸
 // - 개인모드(single): 전체 참가자 중 1~4명 선택
 // - 조모드(jo): 오픈된 각 조에서 1명씩 선택
-// - 투표1모드(vote1): 운영자가 투표안별 구성 참가자를 지정하고, 각 참가자는 투표안 중 1개만 선택
+// - 투표1모드(vote1): 운영자가 투표안별 구성 참가자를 지정하고, 각 참가자는 기본 1개 / 옵션 시 복수 투표안 선택
 // - 투표2모드(vote2): 운영자가 투표별 후보 참가자를 지정하고, 각 참가자가 투표별 1명 선택
 // - 기존 vote 값은 하위 호환을 위해 vote2로 해석
 // - 개인/조/투표 결과값: 점수 - G핸디 = 결과
@@ -68,12 +68,25 @@ export function makeVote1OptionToken(slotIdx) {
   return `vote1:${Math.max(0, Number(slotIdx) || 0)}`;
 }
 
+export function getVote1OptionIndexesFromIds(ids, voteCount = 8) {
+  const limit = Math.max(1, Math.min(8, Number(voteCount || 8)));
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(ids) ? ids : []).forEach((value) => {
+    const token = String(value ?? '').trim();
+    const m = token.match(/^vote1:(\d+)$/);
+    if (!m) return;
+    const idx = Number(m[1]);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= limit || seen.has(idx)) return;
+    seen.add(idx);
+    out.push(idx);
+  });
+  return out;
+}
+
 export function getVote1OptionIndexFromIds(ids) {
-  const first = String((Array.isArray(ids) ? ids[0] : '') ?? '').trim();
-  const m = first.match(/^vote1:(\d+)$/);
-  if (!m) return -1;
-  const idx = Number(m[1]);
-  return Number.isFinite(idx) ? idx : -1;
+  const indexes = getVote1OptionIndexesFromIds(ids, 8);
+  return indexes.length ? indexes[0] : -1;
 }
 
 export function getPickLineupConfig(eventDef) {
@@ -91,6 +104,7 @@ export function getPickLineupConfig(eventDef) {
   const openGroups = normalizeOpenGroups(params.openGroups);
   const voteSlots = normalizeVoteSlots(params.voteSlots, voteCount);
   const vote1CalcMethod = params.vote1CalcMethod === 'min' ? 'min' : 'sum';
+  const vote1MultiSelect = !!params.vote1MultiSelect;
   const lastPlaceHalf = !!params.lastPlaceHalf;
   const selectionLocked = !!(params.selectionLocked || params.locked);
   const selectionRevealed = !!(params.selectionRevealed || params.revealed || params.publicSelection || params.showSelections);
@@ -100,6 +114,7 @@ export function getPickLineupConfig(eventDef) {
     voteCount,
     voteSlots,
     vote1CalcMethod,
+    vote1MultiSelect,
     openGroups: openGroups.length ? openGroups : [1],
     lastPlaceHalf,
     selectionLocked,
@@ -113,7 +128,9 @@ export function getPickLineupConfig(eventDef) {
 export function getPickLineupRequiredCount(eventDef) {
   const cfg = getPickLineupConfig(eventDef);
   if (cfg.mode === 'jo') return cfg.openGroups.length;
-  if (cfg.mode === 'vote1') return 1;
+  // vote1 복수선택은 memberIds에 여러 vote1:N 토큰을 보관해야 하므로
+  // 저장 배열 길이를 voteCount만큼 확보합니다. 완료 조건은 별도로 '1개 이상'입니다.
+  if (cfg.mode === 'vote1') return cfg.vote1MultiSelect ? cfg.voteCount : 1;
   if (cfg.mode === 'vote2') return cfg.voteCount;
   return cfg.pickCount;
 }
@@ -361,16 +378,19 @@ function buildVote1Result(eventDef, participants = [], inputsByEvent = {}, opt =
   const selectorRows = safeParticipants.map((selector) => {
     const selectorId = String(selector?.id ?? '');
     const ids = normalizeMemberIds(personBucket?.[selectorId]);
-    const selectedOptionIdx = getVote1OptionIndexFromIds(ids);
-    const complete = selectedOptionIdx >= 0 && selectedOptionIdx < cfg.voteCount;
+    const parsedIndexes = getVote1OptionIndexesFromIds(ids, cfg.voteCount);
+    const selectedOptionIndexes = cfg.vote1MultiSelect ? parsedIndexes : parsedIndexes.slice(0, 1);
+    const selectedOptionIdx = selectedOptionIndexes.length ? selectedOptionIndexes[0] : -1;
+    const complete = selectedOptionIndexes.length > 0;
     return {
       id: selectorId,
       name: String(selector?.nickname || ''),
       room: selector?.room ?? null,
       roomLabel: getRoomLabel(roomNames, selector?.room),
       groupNo: getParticipantGroupNo(selector),
-      ids: complete ? [makeVote1OptionToken(selectedOptionIdx)] : [''],
+      ids: selectedOptionIndexes.map((idx) => makeVote1OptionToken(idx)),
       selectedOptionIdx,
+      selectedOptionIndexes,
       complete,
     };
   });
@@ -396,7 +416,7 @@ function buildVote1Result(eventDef, participants = [], inputsByEvent = {}, opt =
       }
     }
     const voters = selectorRows
-      .filter((selector) => selector.selectedOptionIdx === slotIdx)
+      .filter((selector) => Array.isArray(selector.selectedOptionIndexes) && selector.selectedOptionIndexes.includes(slotIdx))
       .map((selector) => ({
         id: selector.id,
         name: selector.name,
