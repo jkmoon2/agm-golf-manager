@@ -16,6 +16,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
   const lastPlaceHalf = !!cfg.lastPlaceHalf;
   const voteCount = cfg.voteCount;
   const voteSlots = normalizeVoteSlots(cfg.voteSlots, voteCount);
+  const vote1CalcMethod = cfg.vote1CalcMethod;
 
   const [openKey, setOpenKey] = useState('');
 
@@ -56,6 +57,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
         lastPlaceHalf,
         voteCount,
         voteSlots,
+        vote1CalcMethod,
         ...patch,
       });
     }
@@ -70,7 +72,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
   };
 
   const updateVoteCount = (nextValue) => {
-    const nextCount = Math.max(1, Math.min(4, Number(nextValue || 1)));
+    const nextCount = Math.max(1, Math.min(8, Number(nextValue || 1)));
     emit({
       voteCount: nextCount,
       voteSlots: normalizeVoteSlots(voteSlots, nextCount),
@@ -115,7 +117,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
             value={mode}
             onChange={(e) => {
               const raw = e.target.value;
-              const nextMode = raw === 'jo' ? 'jo' : (raw === 'vote' ? 'vote' : 'single');
+              const nextMode = raw === 'jo' ? 'jo' : (raw === 'vote1' ? 'vote1' : (raw === 'vote2' ? 'vote2' : 'single'));
               emit({
                 mode: nextMode,
                 pickCount,
@@ -130,7 +132,8 @@ export default function PickLineupEditor({ participants = [], value, onChange })
           >
             <option value="single">개인 모드</option>
             <option value="jo">조 모드</option>
-            <option value="vote">투표 모드</option>
+            <option value="vote1">투표1 모드</option>
+            <option value="vote2">투표2 모드</option>
           </select>
         </label>
 
@@ -195,7 +198,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
           </>
         )}
 
-        {mode === 'vote' && (
+        {(mode === 'vote1' || mode === 'vote2') && (
           <>
             <AccordionBox
               title="투표 건수"
@@ -210,9 +213,27 @@ export default function PickLineupEditor({ participants = [], value, onChange })
                   <option value={2}>2건</option>
                   <option value={3}>3건</option>
                   <option value={4}>4건</option>
+                  <option value={5}>5건</option>
+                  <option value={6}>6건</option>
+                  <option value={7}>7건</option>
+                  <option value={8}>8건</option>
                 </select>
               </label>
             </AccordionBox>
+
+            {mode === 'vote1' && (
+              <label style={labelBox}>
+                <span style={fieldLabel}>투표안 결과 계산</span>
+                <select
+                  value={vote1CalcMethod}
+                  onChange={(e) => emit({ vote1CalcMethod: e.target.value === 'min' ? 'min' : 'sum' })}
+                  style={select}
+                >
+                  <option value="sum">구성 참가자 결과 합계</option>
+                  <option value="min">구성 참가자 중 가장 낮은 결과 1명</option>
+                </select>
+              </label>
+            )}
 
             {voteSlots.map((slot, slotIdx) => {
               const slotKey = `vote-slot-${slotIdx}`;
@@ -222,7 +243,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
                 <AccordionBox
                   key={slotKey}
                   title={`투표${slotIdx + 1} 설정`}
-                  summary={`${String(slot?.title ?? '').trim() || `투표${slotIdx + 1}`} · 후보 ${selectedCount}명`}
+                  summary={`${String(slot?.title ?? '').trim() || `투표${slotIdx + 1}`} · ${mode === 'vote1' ? '구성' : '후보'} ${selectedCount}명`}
                   open={openKey === slotKey}
                   onToggle={() => setOpenKey((prev) => (prev === slotKey ? '' : slotKey))}
                 >
@@ -239,7 +260,7 @@ export default function PickLineupEditor({ participants = [], value, onChange })
                     </label>
 
                     <div style={candidateHeader}>
-                      <span style={fieldLabel}>리스트에 표시할 참가자</span>
+                      <span style={fieldLabel}>{mode === 'vote1' ? '투표안에 포함할 참가자' : '리스트에 표시할 참가자'}</span>
                       <div style={candidateActions}>
                         <button type="button" style={miniButton} onClick={() => setAllVoteCandidates(slotIdx, true)}>전체 선택</button>
                         <button type="button" style={miniButton} onClick={() => setAllVoteCandidates(slotIdx, false)}>전체 해제</button>

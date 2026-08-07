@@ -11,7 +11,7 @@ import { doc, onSnapshot, setDoc, updateDoc, getDoc, runTransaction, serverTimes
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoGridSize, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
-import { getParticipantGroupNo, getPickLineupCandidateIds, getPickLineupConfig, getPickLineupRequiredCount, getPickLineupSlotLabels, normalizeMemberIds } from '../../events/pickLineup';
+import { getParticipantGroupNo, getPickLineupCandidateIds, getPickLineupConfig, getPickLineupRequiredCount, getPickLineupSlotLabels, getVote1OptionIndexFromIds, makeVote1OptionToken, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
@@ -1741,7 +1741,7 @@ export default function PlayerEventInput(){
     if (arr[idx] === next) return;
 
     const pickEventDef = events.find((item) => String(item?.id ?? '') === String(evId ?? '')) || null;
-    const allowDuplicateAcrossSlots = getPickLineupConfig(pickEventDef).mode === 'vote';
+    const allowDuplicateAcrossSlots = getPickLineupConfig(pickEventDef).mode === 'vote2';
     if (next && !allowDuplicateAcrossSlots) {
       for (let i = 0; i < arr.length; i += 1) {
         if (i !== idx && arr[i] === next) arr[i] = '';
@@ -1899,7 +1899,7 @@ export default function PlayerEventInput(){
       const groupNo = cfg.openGroups[slotIdx];
       return sortedParticipants.filter((p) => Number(getParticipantGroupNo(p)) === Number(groupNo));
     }
-    if (cfg.mode === 'vote') {
+    if (cfg.mode === 'vote2') {
       const candidateIds = getPickLineupCandidateIds(ev, slotIdx);
       const candidateSet = new Set(candidateIds.map((id) => String(id)));
       return candidateIds
@@ -4221,6 +4221,9 @@ export default function PlayerEventInput(){
           if (pickCfg) {
             const requiredCount = getPickLineupRequiredCount(ev);
             const slotLabels = getPickLineupSlotLabels(ev);
+            const isVote1 = pickCfg.mode === 'vote1';
+            const isVote2 = pickCfg.mode === 'vote2';
+            const displayColumnCount = isVote1 ? pickCfg.voteCount : requiredCount;
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
             const pickNickColPx = 108;
             const pickPreviewNickPx = pickCfg.mode === 'jo' ? 102 : 100;
@@ -4235,25 +4238,30 @@ export default function PlayerEventInput(){
               const rowIds = canViewRowSelection
                 ? padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount)
                 : padPickIds([], requiredCount);
-              const membersBySlot = rowIds.map((id) => participantById.get(String(id)) || null);
+              const vote1SelectedIdx = isVote1 ? getVote1OptionIndexFromIds(rowIds) : -1;
+              const membersBySlot = isVote1 ? [] : rowIds.map((id) => participantById.get(String(id)) || null);
               const members = membersBySlot.filter(Boolean);
-              const cells = pickCfg.mode === 'vote'
-                ? membersBySlot.map((member) => String(member?.nickname || ''))
-                : [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
+              const cells = isVote1
+                ? [vote1SelectedIdx >= 0 ? (slotLabels[vote1SelectedIdx] || `투표${vote1SelectedIdx + 1}`) : '']
+                : isVote2
+                  ? membersBySlot.map((member) => String(member?.nickname || ''))
+                  : [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
               const handicapSum = members.reduce((sum, m) => {
                 const override = Number(ev?.params?.handicapOverrides?.[String(m?.id)]);
                 return sum + (Number.isFinite(override) ? override : (Number(m?.handicap ?? 0) || 0));
               }, 0);
-              const teamLine = pickCfg.mode === 'vote'
-                ? cells.map((name, idx) => name ? `${slotLabels[idx]}: ${name}` : '').filter(Boolean).join(' / ')
-                : getPickPreviewLineText(cells);
+              const teamLine = isVote1
+                ? (cells[0] || '')
+                : isVote2
+                  ? cells.map((name, idx) => name ? `${slotLabels[idx]}: ${name}` : '').filter(Boolean).join(' / ')
+                  : getPickPreviewLineText(cells);
               return {
                 selectorName: String(p?.nickname || ''),
                 cells,
                 teamLine,
                 handicapSum: members.length ? handicapSum : '',
-                selectedCount: members.length,
-                hasAny: members.length > 0,
+                selectedCount: isVote1 ? (vote1SelectedIdx >= 0 ? 1 : 0) : members.length,
+                hasAny: isVote1 ? vote1SelectedIdx >= 0 : members.length > 0,
               };
             });
             const hasPreviewRows = previewRows.some((row) => row.hasAny);
@@ -4267,18 +4275,26 @@ export default function PlayerEventInput(){
                 <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
                   {pickCfg.mode === 'jo'
                     ? `오픈 조: ${pickCfg.openGroups.map((g) => `${g}조`).join(', ')}${pickCfg.lastPlaceHalf && pickCfg.openGroups.length === 4 ? ' · 꼴등반띵 적용' : ''}`
-                    : (pickCfg.mode === 'vote'
-                      ? `${pickCfg.voteCount}건 투표 · 각 항목별 후보 참가자 중 1명 선택`
-                      : `전체 참가자 중 ${pickCfg.pickCount}명 선택`)}
+                    : (isVote1
+                      ? `${pickCfg.voteCount}개 투표안 중 1개만 선택`
+                      : (isVote2
+                        ? `${pickCfg.voteCount}건 투표 · 각 항목별 후보 참가자 중 1명 선택`
+                        : `전체 참가자 중 ${pickCfg.pickCount}명 선택`))}
                 </div>
 
                 {locked && <div className={tCss.lockNotice}>선택이 마감되어 더 이상 수정할 수 없습니다.</div>}
 
-                <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
-                  <table className={tCss.table} style={{ width: '100%' }}>
+                <div
+                  className={`${baseCss.tableWrap} ${displayColumnCount >= 5 ? '' : tCss.noOverflow}`}
+                  style={displayColumnCount >= 5 ? { overflowX: 'auto', WebkitOverflowScrolling: 'touch' } : undefined}
+                >
+                  <table
+                    className={tCss.table}
+                    style={displayColumnCount >= 5 ? { width: `${pickNickColPx + (displayColumnCount * 92)}px`, minWidth: '100%' } : { width: '100%' }}
+                  >
                     <colgroup>
                       <col style={{ width: `${pickNickColPx}px` }} />
-                      {slotLabels.map((_, idx) => <col key={idx} style={{ width: `calc((100% - ${pickNickColPx}px) / ${Math.max(requiredCount, 1)})` }} />)}
+                      {slotLabels.map((_, idx) => <col key={idx} style={{ width: displayColumnCount >= 5 ? '92px' : `calc((100% - ${pickNickColPx}px) / ${Math.max(displayColumnCount, 1)})` }} />)}
                     </colgroup>
                     <thead>
                       <tr>
@@ -4300,7 +4316,37 @@ export default function PlayerEventInput(){
                         return (
                           <tr key={rIdx}>
                             <td className={tCss.pickInputNick}>{p ? p.nickname : ''}</td>
-                            {slotLabels.map((_, idx) => {
+                            {isVote1 ? slotLabels.map((label, idx) => {
+                              const selectedOptionIdx = getVote1OptionIndexFromIds(rowIds);
+                              const active = selectedOptionIdx === idx;
+                              const canShow = isOwnPickLineupRow || pickLineupRevealed;
+                              return (
+                                <td key={idx} className={tCss.cellEditable} style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!canEditPickLineupRow) return;
+                                      patchPickMember(ev.id, String(p.id ?? ''), 0, active ? '' : makeVote1OptionToken(idx), 1);
+                                    }}
+                                    disabled={!canEditPickLineupRow}
+                                    title={!canShow ? '비공개' : label}
+                                    style={{
+                                      width: '100%',
+                                      minWidth: 60,
+                                      minHeight: 34,
+                                      border: active && canShow ? '1px solid #6ea8ff' : '1px solid #d7dfec',
+                                      borderRadius: 8,
+                                      background: active && canShow ? '#eef5ff' : '#fff',
+                                      color: active && canShow ? '#1d4ed8' : '#667085',
+                                      fontSize: 12,
+                                      fontWeight: active && canShow ? 900 : 700,
+                                    }}
+                                  >
+                                    {!canShow ? '비공개' : (active ? '선택됨' : '선택')}
+                                  </button>
+                                </td>
+                              );
+                            }) : slotLabels.map((_, idx) => {
                               const options = getPickOptions(ev, idx);
                               const selectedId = p ? (rowIds[idx] || '') : '';
                               const selectedOpt = options.find((opt) => String(opt?.id ?? '') === String(selectedId));
@@ -4324,7 +4370,7 @@ export default function PlayerEventInput(){
                                       </option>
                                       {options.map((opt) => {
                                         const value = String(opt?.id ?? '');
-                                        const selectedElsewhere = pickCfg.mode !== 'vote' && rowIds.includes(value) && rowIds[idx] !== value;
+                                        const selectedElsewhere = !isVote2 && rowIds.includes(value) && rowIds[idx] !== value;
                                         const lockedByCurrentSelection = !!selectedId && String(selectedId) !== value;
                                         return (
                                           <option
@@ -4361,8 +4407,8 @@ export default function PlayerEventInput(){
                         <thead>
                           <tr>
                             <th>닉네임</th>
-                            <th>{pickCfg.mode === 'vote' ? '투표 선택' : '선택팀'}</th>
-                            <th>{pickCfg.mode === 'vote' ? '완료' : '합계'}</th>
+                            <th>{isVote1 ? '선택 투표안' : (isVote2 ? '투표 선택' : '선택팀')}</th>
+                            <th>{(isVote1 || isVote2) ? '완료' : '합계'}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4375,7 +4421,7 @@ export default function PlayerEventInput(){
                               >
                                 {row.teamLine}
                               </td>
-                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{pickCfg.mode === 'vote' ? `${row.selectedCount || 0}/${requiredCount}` : (row.handicapSum !== '' ? row.handicapSum : '')}</td>
+                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{(isVote1 || isVote2) ? `${row.selectedCount || 0}/${requiredCount}` : (row.handicapSum !== '' ? row.handicapSum : '')}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -4655,7 +4701,7 @@ export default function PlayerEventInput(){
                 )}
                 {options.map((opt) => {
                   const value = String(opt?.id ?? '');
-                  const selectedElsewhere = activePickCfg.mode !== 'vote' && rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
+                  const selectedElsewhere = activePickCfg.mode !== 'vote2' && rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
                   const active = String(selectedId) === value;
                   const disabled = !!selectedId || selectedElsewhere;
                   return (
