@@ -176,6 +176,24 @@ function getPlainParticipantResult(p, handicapOverrides = {}) {
   return score - handicap;
 }
 
+// 투표2는 경기 진행 중 점수 미입력 상태도 현재값으로 바로 순위에 반영해야 합니다.
+// 점수 공란과 실제 0점은 계산상 동일하게 0으로 보고, 결과 = 0 - G핸디로 계산합니다.
+// (투표1은 여러 구성원의 합계/최저값 계산이므로 기존 getPlainParticipantResult의
+//  null 판정을 유지하여 미입력 인원 표시 기능을 그대로 사용합니다.)
+function getVote2ParticipantResult(p, handicapOverrides = {}) {
+  if (!p) return null;
+  const baseHandicap = Number(p?.handicap ?? 0) || 0;
+  const override = Number(handicapOverrides[String(p?.id ?? '')]);
+  const handicap = Number.isFinite(override) ? override : baseHandicap;
+
+  const rawScore = p?.score;
+  const score = (rawScore === null || rawScore === undefined || String(rawScore).trim() === '')
+    ? 0
+    : Number(rawScore);
+  if (!Number.isFinite(score)) return null;
+  return score - handicap;
+}
+
 function getResultValue(p, handicapValue, { lastPlaceHalf = false, halved = false } = {}) {
   const score = Number(p?.score ?? 0) || 0;
   const handicap = Number(handicapValue ?? p?.handicap ?? 0) || 0;
@@ -316,7 +334,7 @@ function buildVote2Result(eventDef, participants = [], inputsByEvent = {}, opt =
             groupNo: selector.groupNo,
           }))
           .sort(sortParticipantsForVote);
-        const resultValue = getPlainParticipantResult(candidate, handicapOverrides);
+        const resultValue = getVote2ParticipantResult(candidate, handicapOverrides);
         return {
           key: `${slotIdx}-${candidateId}`,
           candidateId: String(candidateId),
