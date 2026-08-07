@@ -1,6 +1,14 @@
 // /src/eventTemplates/pickLineup/PickLineupSelectionMonitor.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
+import {
+  getParticipantGroupNo,
+  getPickLineupCandidateIds,
+  getPickLineupConfig,
+  getPickLineupRequiredCount,
+  getPickLineupSlotLabels,
+  normalizeMemberIds,
+} from '../../events/pickLineup';
+import PickLineupPreview from './PickLineupPreview';
 
 function roomLabel(roomNames, roomNo) {
   const idx = Number(roomNo) - 1;
@@ -14,7 +22,7 @@ function uniqueIds(arr = []) {
   const seen = new Set();
   const out = [];
   arr.forEach((id) => {
-    const s = String(id || '').trim();
+    const s = String(id ?? '').trim();
     if (!s || seen.has(s)) return;
     seen.add(s);
     out.push(s);
@@ -23,12 +31,12 @@ function uniqueIds(arr = []) {
 }
 
 function padIds(ids = [], count = 1) {
-  const arr = Array.isArray(ids) ? ids.map((id) => String(id || '')) : [];
+  const arr = Array.isArray(ids) ? ids.map((id) => String(id ?? '')) : [];
   while (arr.length < count) arr.push('');
   return arr.slice(0, count);
 }
 
-function buildSelectionSummary(cfg, ids, byId) {
+function buildSelectionSummary(eventDef, cfg, ids, byId) {
   const members = ids.map((id) => byId.get(String(id))).filter(Boolean);
   if (cfg.mode === 'jo') {
     return cfg.openGroups.map((groupNo) => {
@@ -36,13 +44,28 @@ function buildSelectionSummary(cfg, ids, byId) {
       return found ? `${groupNo}조:${found.nickname}` : `${groupNo}조:-`;
     }).join(' / ');
   }
+  if (cfg.mode === 'vote') {
+    const labels = getPickLineupSlotLabels(eventDef);
+    return labels.map((label, idx) => {
+      const selected = byId.get(String(ids[idx] ?? ''));
+      return `${label}:${selected?.nickname || '-'}`;
+    }).join(' / ');
+  }
   return members.map((m) => `${m.nickname}`).join(' / ');
 }
 
-function isComplete(cfg, ids, byId) {
+function isComplete(eventDef, cfg, ids, byId) {
   const members = ids.map((id) => byId.get(String(id))).filter(Boolean);
   if (cfg.mode === 'single') {
     return members.length === cfg.pickCount;
+  }
+  if (cfg.mode === 'vote') {
+    if (ids.length !== cfg.voteCount) return false;
+    return ids.every((id, idx) => {
+      const selectedId = String(id ?? '').trim();
+      const candidateIds = getPickLineupCandidateIds(eventDef, idx);
+      return !!selectedId && byId.has(selectedId) && candidateIds.includes(selectedId);
+    });
   }
   if (members.length !== cfg.openGroups.length) return false;
   return cfg.openGroups.every((groupNo) => members.some((m) => Number(getParticipantGroupNo(m)) === Number(groupNo)));
@@ -55,11 +78,16 @@ function getParticipantLabel(p, showGroup = true) {
   return `${name} (${groupNo}조)`;
 }
 
-function getCandidateOptions(cfg, participants = [], slotIdx = 0) {
+function getCandidateOptions(eventDef, cfg, participants = [], slotIdx = 0) {
   const list = Array.isArray(participants) ? participants : [];
   if (cfg.mode === 'jo') {
     const groupNo = cfg.openGroups[slotIdx];
     return list.filter((p) => Number(getParticipantGroupNo(p)) === Number(groupNo));
+  }
+  if (cfg.mode === 'vote') {
+    const candidateIds = getPickLineupCandidateIds(eventDef, slotIdx);
+    const byId = new Map(list.map((p) => [String(p?.id ?? ''), p]));
+    return candidateIds.map((id) => byId.get(String(id))).filter(Boolean);
   }
   return list;
 }
@@ -78,7 +106,7 @@ export default function PickLineupSelectionMonitor({
   const cfg = getPickLineupConfig(eventDef);
   const requiredCount = getPickLineupRequiredCount(eventDef);
   const safeParticipants = Array.isArray(participants) ? participants : [];
-  const byId = useMemo(() => new Map(safeParticipants.map((p) => [String(p?.id), p])), [safeParticipants]);
+  const byId = useMemo(() => new Map(safeParticipants.map((p) => [String(p?.id ?? ''), p])), [safeParticipants]);
   const [editMode, setEditMode] = useState(false);
   const [showUnregistered, setShowUnregistered] = useState(false);
   const [draftById, setDraftById] = useState({});
@@ -103,22 +131,24 @@ export default function PickLineupSelectionMonitor({
 
   const rows = useMemo(() => {
     return sortedParticipants.map((p) => {
-      const ids = uniqueIds(normalizeMemberIds(inputsByEvent?.person?.[p?.id] || {})).slice(0, requiredCount);
-      const members = ids.map((id) => byId.get(String(id))).filter(Boolean);
+      const rawIds = normalizeMemberIds(inputsByEvent?.person?.[p?.id] || {});
+      const ids = cfg.mode === 'vote' ? rawIds : uniqueIds(rawIds);
+      const paddedIds = padIds(ids.slice(0, requiredCount), requiredCount);
+      const members = paddedIds.map((id) => byId.get(String(id))).filter(Boolean);
       const handicapSum = members.reduce((sum, m) => sum + (Number(eventDef?.params?.handicapOverrides?.[String(m?.id)]) || Number(m?.handicap ?? 0) || 0), 0);
       return {
         id: String(p?.id ?? ''),
         name: String(p?.nickname || ''),
         roomLabel: roomLabel(roomNames, p?.room),
         groupLabel: Number.isFinite(Number(getParticipantGroupNo(p))) ? `${getParticipantGroupNo(p)}조` : '',
-        ids: padIds(ids, requiredCount),
-        complete: isComplete(cfg, ids, byId),
+        ids: paddedIds,
+        complete: isComplete(eventDef, cfg, paddedIds, byId),
         count: members.length,
-        summary: buildSelectionSummary(cfg, ids, byId),
+        summary: buildSelectionSummary(eventDef, cfg, paddedIds, byId),
         handicapSum,
       };
     });
-  }, [sortedParticipants, inputsByEvent, cfg, requiredCount, byId, eventDef?.params?.handicapOverrides, roomNames]);
+  }, [sortedParticipants, inputsByEvent, cfg, requiredCount, byId, eventDef, eventDef?.params?.handicapOverrides, roomNames]);
 
   const rowById = useMemo(() => new Map(rows.map((row) => [String(row.id), row])), [rows]);
   const doneCount = rows.filter((row) => row.complete).length;
@@ -127,13 +157,13 @@ export default function PickLineupSelectionMonitor({
   const revealed = !!(eventDef?.params?.selectionRevealed || eventDef?.params?.revealed || eventDef?.params?.publicSelection || eventDef?.params?.showSelections);
 
   const updateDraftCell = (pid, idx, value) => {
-    const key = String(pid || '');
+    const key = String(pid ?? '');
     if (!key) return;
     const currentIds = padIds(rowById.get(key)?.ids || [], requiredCount);
     const base = padIds(draftById?.[key] || currentIds, requiredCount);
     const next = [...base];
-    const selected = String(value || '');
-    if (selected) {
+    const selected = String(value ?? '');
+    if (selected && cfg.mode !== 'vote') {
       for (let i = 0; i < next.length; i += 1) {
         if (i !== idx && next[i] === selected) next[i] = '';
       }
@@ -143,7 +173,7 @@ export default function PickLineupSelectionMonitor({
   };
 
   const clearDraft = (pid) => {
-    const key = String(pid || '');
+    const key = String(pid ?? '');
     if (!key) return;
     setDraftById((prev) => {
       const next = { ...(prev || {}) };
@@ -157,7 +187,7 @@ export default function PickLineupSelectionMonitor({
     if (!pid) return;
     const row = rowById.get(pid);
     const ids = padIds(draftById?.[pid] || row?.ids || [], requiredCount);
-    if (!isComplete(cfg, ids, byId)) {
+    if (!isComplete(eventDef, cfg, ids, byId)) {
       alert('필요한 선택을 모두 완료한 뒤 저장하세요.');
       return;
     }
@@ -201,10 +231,8 @@ export default function PickLineupSelectionMonitor({
         const activeIds = padIds(draftById?.[pid] || currentIds, requiredCount);
         const changed = activeIds.join('|') !== currentIds.join('|');
         const hasAnySelection = currentIds.some(Boolean);
-        const complete = isComplete(cfg, activeIds, byId);
-        const slotLabels = cfg.mode === 'jo'
-          ? cfg.openGroups.map((groupNo) => `${groupNo}조`)
-          : Array.from({ length: requiredCount }, (_, idx) => `선택${idx + 1}`);
+        const complete = isComplete(eventDef, cfg, activeIds, byId);
+        const slotLabels = getPickLineupSlotLabels(eventDef);
         return (
           <div key={`pick-lineup-edit-${pid}`} style={rowBox}>
             <div style={rowHead}>
@@ -217,11 +245,11 @@ export default function PickLineupSelectionMonitor({
 
             <div style={{ display: 'grid', gap: 7, marginTop: 8 }}>
               {slotLabels.map((label, idx) => {
-                const options = getCandidateOptions(cfg, sortedParticipants, idx);
+                const options = getCandidateOptions(eventDef, cfg, sortedParticipants, idx);
                 const selectedId = String(activeIds[idx] || '');
                 return (
-                  <div key={`pick-lineup-edit-${pid}-${idx}`} style={{ display: 'grid', gridTemplateColumns: '64px 1fr', gap: 8, alignItems: 'center' }}>
-                    <div style={{ fontSize: 12, fontWeight: 900, color: '#475467' }}>{label}</div>
+                  <div key={`pick-lineup-edit-${pid}-${idx}`} style={{ display: 'grid', gridTemplateColumns: '76px 1fr', gap: 8, alignItems: 'center' }}>
+                    <div style={{ fontSize: 12, fontWeight: 900, color: '#475467', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={label}>{label}</div>
                     <select
                       value={selectedId}
                       onChange={(e) => updateDraftCell(pid, idx, e.target.value)}
@@ -230,7 +258,7 @@ export default function PickLineupSelectionMonitor({
                       <option value="">선택</option>
                       {options.map((opt) => {
                         const value = String(opt?.id ?? '');
-                        const selectedElsewhere = activeIds.includes(value) && activeIds[idx] !== value;
+                        const selectedElsewhere = cfg.mode !== 'vote' && activeIds.includes(value) && activeIds[idx] !== value;
                         return (
                           <option key={`pick-lineup-option-${pid}-${idx}-${value}`} value={value} disabled={selectedElsewhere}>
                             {getParticipantLabel(opt, cfg.mode !== 'jo')}
@@ -244,7 +272,7 @@ export default function PickLineupSelectionMonitor({
             </div>
 
             <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={metaLine}>{row.summary || '선택 없음'} · 선택 {activeIds.filter(Boolean).length}/{requiredCount}</div>
+              <div style={metaLine} title={row.summary || ''}>{row.summary || '선택 없음'} · 선택 {activeIds.filter(Boolean).length}/{requiredCount}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {changed && <button type="button" style={btnSub} onClick={() => clearDraft(pid)}>원복</button>}
                 <button type="button" style={btnPrimary} onClick={() => saveOne(p)} disabled={!complete}>저장</button>
@@ -257,6 +285,12 @@ export default function PickLineupSelectionMonitor({
     </div>
   );
 
+  const modeSummary = cfg.mode === 'jo'
+    ? `조 모드 (${cfg.openGroups.map((g) => `${g}조`).join(', ')})`
+    : cfg.mode === 'vote'
+      ? `투표 모드 (${cfg.voteCount}건)`
+      : `개인 모드 (${cfg.pickCount}명 선택)`;
+
   return (
     <div style={backdrop} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>
       <div style={card} onClick={(e) => e.stopPropagation()}>
@@ -264,7 +298,7 @@ export default function PickLineupSelectionMonitor({
           <div style={{ minWidth: 0 }}>
             <div style={title}>선택 현황 / 마감</div>
             <div style={subTitle}>
-              {eventDef?.title || '개인/조 선택 대결'} · {cfg.mode === 'jo' ? `조 모드 (${cfg.openGroups.map((g) => `${g}조`).join(', ')})` : `개인 모드 (${cfg.pickCount}명 선택)`}
+              {eventDef?.title || '개인/조/투표 선택 대결'} · {modeSummary}
             </div>
           </div>
           <button type="button" style={btn} onClick={() => (typeof onClose === 'function' ? onClose() : null)}>닫기</button>
@@ -303,23 +337,35 @@ export default function PickLineupSelectionMonitor({
         {showUnregistered && renderUnregistered()}
 
         {editMode ? renderEditList() : (
-          <div style={listWrap}>
-            {rows.map((row) => (
-              <div key={row.id} style={rowBox}>
-                <div style={rowHead}>
-                  <div style={{ minWidth: 0 }}>
-                    <span style={rowName}>{row.name}</span>
-                    <span style={rowMeta}> ({row.roomLabel})</span>
+          cfg.mode === 'vote' ? (
+            <div style={{ marginTop: 12 }}>
+              <PickLineupPreview
+                eventDef={eventDef}
+                participants={participants}
+                inputs={inputsByEvent}
+                roomNames={roomNames}
+                viewTab="vote"
+              />
+            </div>
+          ) : (
+            <div style={listWrap}>
+              {rows.map((row) => (
+                <div key={row.id} style={rowBox}>
+                  <div style={rowHead}>
+                    <div style={{ minWidth: 0 }}>
+                      <span style={rowName}>{row.name}</span>
+                      <span style={rowMeta}> ({row.roomLabel})</span>
+                    </div>
+                    <span style={row.complete ? badgeDone : badgeWait}>{row.complete ? '완료' : '대기'}</span>
                   </div>
-                  <span style={row.complete ? badgeDone : badgeWait}>{row.complete ? '완료' : '대기'}</span>
+                  <div style={rowBody}>
+                    <div style={summaryText}>{row.summary || '선택 없음'}</div>
+                    <div style={metaLine}>선택 {row.count}/{requiredCount} · G합 {row.handicapSum}</div>
+                  </div>
                 </div>
-                <div style={rowBody}>
-                  <div style={summaryText}>{row.summary || '선택 없음'}</div>
-                  <div style={metaLine}>선택 {row.count}/{requiredCount} · G합 {row.handicapSum}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )
         )}
       </div>
     </div>
@@ -358,7 +404,7 @@ const rowName = { fontWeight: 700, color: '#183153' };
 const rowMeta = { fontSize: 12, color: '#98a2b3' };
 const rowBody = { marginTop: 6, display: 'grid', gap: 4 };
 const summaryText = { fontSize: 13, color: '#344054', lineHeight: 1.45, wordBreak: 'keep-all' };
-const metaLine = { fontSize: 12, color: '#667085' };
+const metaLine = { fontSize: 12, color: '#667085', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const badgeBase = { display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 8px', borderRadius: 999, fontSize: 12, border: '1px solid' };
 const badgeDone = { ...badgeBase, color: '#10b981', borderColor: '#a7f3d0', background: '#ecfdf5' };
 const badgeWait = { ...badgeBase, color: '#6b7280', borderColor: '#d1d5db', background: '#f9fafb' };

@@ -33,7 +33,7 @@ function normalizeTemplateLabel(template = '') {
     case 'group-battle': return '그룹/개인 대결';
     case 'group-room-hole-battle': return '그룹/방/개인 홀별 지목전';
     case 'hole-rank-force': return '홀별 강제 순위 점수';
-    case 'pick-lineup': return '개인/조 선택 대결';
+    case 'pick-lineup': return '개인/조/투표 선택 대결';
     case 'hidden-event': return '히든 이벤트';
     default: return template || '일반 이벤트';
   }

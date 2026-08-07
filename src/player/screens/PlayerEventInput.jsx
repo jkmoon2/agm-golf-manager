@@ -11,7 +11,7 @@ import { doc, onSnapshot, setDoc, updateDoc, getDoc, runTransaction, serverTimes
 import { db, auth } from '../../firebase';
 import { computeHoleRankForce, normalizeForcedRanks, normalizeSelectedHoles } from '../../events/holeRankForce';
 import { buildLargeBingoPreview, computeBingoCount, extractBingoPersonInput, getBingoGridSize, getBingoHoleValues, getBingoMarkType, getNextBingoHole, normalizeBingoBoard, normalizeBingoBoardCellCount, normalizeBingoLargeOrder, normalizeBingoScoreHoleCount, normalizeBingoSelectedHoles, normalizeBingoSpecialZones } from '../../events/bingo';
-import { getParticipantGroupNo, getPickLineupConfig, getPickLineupRequiredCount, normalizeMemberIds } from '../../events/pickLineup';
+import { getParticipantGroupNo, getPickLineupCandidateIds, getPickLineupConfig, getPickLineupRequiredCount, getPickLineupSlotLabels, normalizeMemberIds } from '../../events/pickLineup';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
@@ -1677,7 +1677,7 @@ export default function PlayerEventInput(){
     const need = Math.max(1, Number(count || 1));
     const base = Array.isArray(arr) ? [...arr] : [];
     while (base.length < need) base.push('');
-    return base.slice(0, need).map((x) => String(x || ''));
+    return base.slice(0, need).map((x) => String(x ?? ''));
   };
 
   const getServerPickIds = (evId, pid, requiredCount) => {
@@ -1737,10 +1737,12 @@ export default function PlayerEventInput(){
     const person = { ...(slot.person || {}) };
     const prevObj = person[pid] && typeof person[pid] === 'object' ? { ...person[pid] } : {};
     const arr = padPickIds(normalizeMemberIds(prevObj), requiredCount);
-    const next = String(value || '');
+    const next = String(value ?? '');
     if (arr[idx] === next) return;
 
-    if (next) {
+    const pickEventDef = events.find((item) => String(item?.id ?? '') === String(evId ?? '')) || null;
+    const allowDuplicateAcrossSlots = getPickLineupConfig(pickEventDef).mode === 'vote';
+    if (next && !allowDuplicateAcrossSlots) {
       for (let i = 0; i < arr.length; i += 1) {
         if (i !== idx && arr[i] === next) arr[i] = '';
       }
@@ -1896,6 +1898,13 @@ export default function PlayerEventInput(){
     if (cfg.mode === 'jo') {
       const groupNo = cfg.openGroups[slotIdx];
       return sortedParticipants.filter((p) => Number(getParticipantGroupNo(p)) === Number(groupNo));
+    }
+    if (cfg.mode === 'vote') {
+      const candidateIds = getPickLineupCandidateIds(ev, slotIdx);
+      const candidateSet = new Set(candidateIds.map((id) => String(id)));
+      return candidateIds
+        .map((id) => participantById.get(String(id)))
+        .filter((p) => p && candidateSet.has(String(p?.id ?? '')));
     }
     return sortedParticipants;
   };
@@ -4211,9 +4220,7 @@ export default function PlayerEventInput(){
 
           if (pickCfg) {
             const requiredCount = getPickLineupRequiredCount(ev);
-            const slotLabels = pickCfg.mode === 'jo'
-              ? pickCfg.openGroups.map((groupNo) => `${groupNo}조`)
-              : Array.from({ length: requiredCount }, (_, i) => `선택${i + 1}`);
+            const slotLabels = getPickLineupSlotLabels(ev);
             const isFourJo = pickCfg.mode === 'jo' && requiredCount === 4;
             const pickNickColPx = 108;
             const pickPreviewNickPx = pickCfg.mode === 'jo' ? 102 : 100;
@@ -4228,18 +4235,24 @@ export default function PlayerEventInput(){
               const rowIds = canViewRowSelection
                 ? padPickIds(normalizeMemberIds(inputsByEvent?.[ev.id]?.person?.[p.id]), requiredCount)
                 : padPickIds([], requiredCount);
-              const members = rowIds.map((id) => participantById.get(String(id))).filter(Boolean);
-              const cells = [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
+              const membersBySlot = rowIds.map((id) => participantById.get(String(id)) || null);
+              const members = membersBySlot.filter(Boolean);
+              const cells = pickCfg.mode === 'vote'
+                ? membersBySlot.map((member) => String(member?.nickname || ''))
+                : [members.map((m) => String(m.nickname || '')).filter(Boolean).join(' / ')];
               const handicapSum = members.reduce((sum, m) => {
                 const override = Number(ev?.params?.handicapOverrides?.[String(m?.id)]);
                 return sum + (Number.isFinite(override) ? override : (Number(m?.handicap ?? 0) || 0));
               }, 0);
-              const teamLine = getPickPreviewLineText(cells);
+              const teamLine = pickCfg.mode === 'vote'
+                ? cells.map((name, idx) => name ? `${slotLabels[idx]}: ${name}` : '').filter(Boolean).join(' / ')
+                : getPickPreviewLineText(cells);
               return {
                 selectorName: String(p?.nickname || ''),
                 cells,
                 teamLine,
                 handicapSum: members.length ? handicapSum : '',
+                selectedCount: members.length,
                 hasAny: members.length > 0,
               };
             });
@@ -4254,7 +4267,9 @@ export default function PlayerEventInput(){
                 <div style={{ padding: '0 12px 8px', fontSize: 12, color: '#667085', lineHeight: 1.5 }}>
                   {pickCfg.mode === 'jo'
                     ? `오픈 조: ${pickCfg.openGroups.map((g) => `${g}조`).join(', ')}${pickCfg.lastPlaceHalf && pickCfg.openGroups.length === 4 ? ' · 꼴등반띵 적용' : ''}`
-                    : `전체 참가자 중 ${pickCfg.pickCount}명 선택`}
+                    : (pickCfg.mode === 'vote'
+                      ? `${pickCfg.voteCount}건 투표 · 각 항목별 후보 참가자 중 1명 선택`
+                      : `전체 참가자 중 ${pickCfg.pickCount}명 선택`)}
                 </div>
 
                 {locked && <div className={tCss.lockNotice}>선택이 마감되어 더 이상 수정할 수 없습니다.</div>}
@@ -4309,7 +4324,7 @@ export default function PlayerEventInput(){
                                       </option>
                                       {options.map((opt) => {
                                         const value = String(opt?.id ?? '');
-                                        const selectedElsewhere = rowIds.includes(value) && rowIds[idx] !== value;
+                                        const selectedElsewhere = pickCfg.mode !== 'vote' && rowIds.includes(value) && rowIds[idx] !== value;
                                         const lockedByCurrentSelection = !!selectedId && String(selectedId) !== value;
                                         return (
                                           <option
@@ -4346,8 +4361,8 @@ export default function PlayerEventInput(){
                         <thead>
                           <tr>
                             <th>닉네임</th>
-                            <th>선택팀</th>
-                            <th>합계</th>
+                            <th>{pickCfg.mode === 'vote' ? '투표 선택' : '선택팀'}</th>
+                            <th>{pickCfg.mode === 'vote' ? '완료' : '합계'}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4360,7 +4375,7 @@ export default function PlayerEventInput(){
                               >
                                 {row.teamLine}
                               </td>
-                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{row.handicapSum !== '' ? row.handicapSum : ''}</td>
+                              <td className={`${tCss.pickPreviewCell} ${tCss.pickPreviewHandicap}`}>{pickCfg.mode === 'vote' ? `${row.selectedCount || 0}/${requiredCount}` : (row.handicapSum !== '' ? row.handicapSum : '')}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -4584,6 +4599,7 @@ export default function PlayerEventInput(){
             ? padPickIds(normalizeMemberIds(inputsByEvent?.[String(pickMenuState.evId ?? '')]?.person?.[selectorKey]), requiredCount)
             : padPickIds([], requiredCount);
           const options = activeEvent ? getPickOptions(activeEvent, pickMenuState.idx) : (Array.isArray(pickMenuState.optionsSnapshot) ? pickMenuState.optionsSnapshot : []);
+          const activePickCfg = getPickLineupConfig(activeEvent);
           const selectedId = selector ? (rowIds[pickMenuState.idx] || '') : '';
           const portalNode = typeof document !== 'undefined' ? document.body : null;
           if (!portalNode || !activeEvent || !selector) return null;
@@ -4639,7 +4655,7 @@ export default function PlayerEventInput(){
                 )}
                 {options.map((opt) => {
                   const value = String(opt?.id ?? '');
-                  const selectedElsewhere = rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
+                  const selectedElsewhere = activePickCfg.mode !== 'vote' && rowIds.includes(value) && rowIds[pickMenuState.idx] !== value;
                   const active = String(selectedId) === value;
                   const disabled = !!selectedId || selectedElsewhere;
                   return (

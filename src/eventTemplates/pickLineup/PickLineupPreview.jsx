@@ -1,6 +1,6 @@
 // /src/eventTemplates/pickLineup/PickLineupPreview.jsx
 import React, { useMemo } from 'react';
-import { computePickLineup } from '../../events/pickLineup';
+import { computePickLineup, getPickLineupConfig } from '../../events/pickLineup';
 
 export default function PickLineupPreview({ eventDef, participants = [], inputs = {}, roomNames = [], roomCount = 0, viewTab = 'person' }) {
   const data = useMemo(() => {
@@ -9,6 +9,18 @@ export default function PickLineupPreview({ eventDef, participants = [], inputs 
   }, [eventDef, participants, inputs, roomNames, roomCount]);
 
   if (!eventDef || !data) return null;
+
+  const cfg = getPickLineupConfig(eventDef);
+  if (cfg.mode === 'vote') {
+    if (viewTab !== 'vote') {
+      return <div style={{ color: '#999', fontSize: 13 }}>투표 모드는 미리보기 조건에서 “투표”를 선택하세요.</div>;
+    }
+    return <VoteResult data={data} />;
+  }
+
+  if (viewTab === 'vote') {
+    return <div style={{ color: '#999', fontSize: 13 }}>투표 모드 이벤트에서만 투표 결과를 표시합니다.</div>;
+  }
 
   const isRoomView = viewTab === 'room';
   const rows = isRoomView ? (Array.isArray(data.roomRows) ? data.roomRows : []) : (Array.isArray(data.rows) ? data.rows : []);
@@ -93,6 +105,65 @@ export default function PickLineupPreview({ eventDef, participants = [], inputs 
   );
 }
 
+function VoteResult({ data }) {
+  const sections = Array.isArray(data?.voteSections) ? data.voteSections : [];
+  const totalVoterCount = Number(data?.totalVoterCount || 0);
+  const completedVoterCount = Number(data?.completedVoterCount || 0);
+  const hasCandidate = sections.some((section) => Array.isArray(section?.rows) && section.rows.length > 0);
+
+  if (!sections.length || !hasCandidate) {
+    return <div style={{ color: '#999', fontSize: 13 }}>투표 후보 참가자가 설정되지 않았습니다.</div>;
+  }
+
+  return (
+    <div style={voteWrap}>
+      <div style={voteSummary}>
+        투표 완료 <b style={{ color: '#1d4ed8' }}>{completedVoterCount}</b> / {totalVoterCount}명
+      </div>
+
+      {sections.map((section) => (
+        <div key={section.key} style={voteSection}>
+          <div style={voteSectionHead}>
+            <span style={voteSectionTitle}>{section.title}</span>
+            <span style={voteSectionMeta}>총 {section.totalVotes || 0}표</span>
+          </div>
+
+          <div style={voteTableWrap}>
+            <table style={voteTable}>
+              <colgroup>
+                <col style={{ width: 46 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 54 }} />
+                <col />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style={voteTh}>순위</th>
+                  <th style={voteTh}>참가자</th>
+                  <th style={voteTh}>득표</th>
+                  <th style={voteTh}>투표자</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(section.rows || []).map((row) => (
+                  <tr key={row.key}>
+                    <td style={{ ...voteTd, color: '#1d4ed8', fontWeight: 900 }}>{row.displayRank || row.rank || '-'}</td>
+                    <td style={{ ...voteTd, fontWeight: 900, color: '#183153' }}>{row.name}</td>
+                    <td style={{ ...voteTd, color: '#be123c', fontWeight: 900 }}>{row.voteCount || 0}표</td>
+                    <td style={{ ...voteTd, textAlign: 'left', lineHeight: 1.45 }}>
+                      {Array.isArray(row.voterNames) && row.voterNames.length ? row.voterNames.join(', ') : '없음'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const listStyle = { listStyle: 'none', padding: 0, margin: 0 };
 const itemStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, marginBottom: 10, background: '#fff' };
 const headRowStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' };
@@ -106,3 +177,34 @@ const memberNameStyle = { fontWeight: 400, color: '#183153' };
 const memberMetaStyle = { color: '#999', fontSize: 12, fontWeight: 400 };
 const memberValueStyle = { fontSize: 12, color: '#555', fontWeight: 400, textAlign: 'right', lineHeight: 1.45 };
 const emptyRoomStyle = { color: '#999', fontSize: 12, padding: '4px 2px' };
+
+const voteWrap = { display: 'grid', gap: 10, marginTop: 4 };
+const voteSummary = {
+  border: '1px solid #dbeafe',
+  background: '#eff6ff',
+  borderRadius: 10,
+  padding: '9px 10px',
+  color: '#334155',
+  fontSize: 13,
+};
+const voteSection = {
+  border: '1px solid #e5eaf2',
+  borderRadius: 12,
+  background: '#fff',
+  overflow: 'hidden',
+};
+const voteSectionHead = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  padding: '10px 12px',
+  background: '#f8fafc',
+  borderBottom: '1px solid #e5eaf2',
+};
+const voteSectionTitle = { fontSize: 14, fontWeight: 950, color: '#16376c' };
+const voteSectionMeta = { fontSize: 12, fontWeight: 800, color: '#667085' };
+const voteTableWrap = { width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' };
+const voteTable = { width: '100%', minWidth: 360, borderCollapse: 'collapse', tableLayout: 'fixed' };
+const voteTh = { border: '1px solid #dfe5ee', background: '#f8fafc', padding: '7px 5px', textAlign: 'center', fontSize: 12, color: '#344054' };
+const voteTd = { border: '1px solid #e5eaf2', padding: '8px 6px', textAlign: 'center', fontSize: 12, color: '#344054', wordBreak: 'keep-all' };
