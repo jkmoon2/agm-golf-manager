@@ -805,7 +805,28 @@ const events = useMemo(
 
           {results.map(({ ev, res }) => {
             const title = ev?.title || '이벤트';
-            const isPickLineupVote = ev?.template === 'pick-lineup' && ['vote1', 'vote2'].includes(getPickLineupConfig(ev).mode);
+            const isPickLineup = ev?.template === 'pick-lineup';
+            const pickLineupCfg = isPickLineup ? getPickLineupConfig(ev) : null;
+            const isPickLineupRevealed = !isPickLineup || !!pickLineupCfg?.selectionRevealed;
+            const isPickLineupVote = isPickLineup && ['vote1', 'vote2'].includes(pickLineupCfg?.mode);
+
+            // 개인/조 선택 대결(투표1/투표2 포함)은 운영자의 공개/비공개 상태를
+            // Player STEP3뿐 아니라 STEP6 결과 화면에도 동일하게 적용합니다.
+            if (isPickLineup && !isPickLineupRevealed) {
+              return (
+                <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                  <div className={baseCss.cardHeader}>
+                    <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>
+                      {title} <span style={{ color:'#9aa3ad', fontWeight:400, marginLeft:6 }}>· 비공개</span>
+                    </div>
+                  </div>
+                  <div style={{ padding: '18px 12px', textAlign: 'center', color: '#98a2b3', fontWeight: 700 }}>
+                    운영자가 공개하면 결과가 표시됩니다.
+                  </div>
+                </div>
+              );
+            }
+
             if (isPickLineupVote) {
               return (
                 <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>

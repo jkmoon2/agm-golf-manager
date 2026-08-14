@@ -338,6 +338,57 @@ export default function PlayerRoomTable() {
 
   const tableRef = useRef(null);
 
+  // JPG 저장은 data URL 대신 Blob URL을 사용합니다.
+  // iOS Safari/PWA에서 긴 data URL + DOM에 붙지 않은 a.click() 조합이
+  // 무시되는 경우가 있어, 실제 <a>를 문서에 붙인 뒤 클릭하고 URL을 해제합니다.
+  const downloadCanvasAsJpeg = (canvas, filename, quality = 0.92) => new Promise((resolve, reject) => {
+    if (!canvas) { resolve(false); return; }
+
+    const clickDataUrlFallback = () => {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/jpeg', quality);
+      link.download = filename;
+      link.rel = 'noopener';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      window.setTimeout(() => {
+        try { document.body.removeChild(link); } catch {}
+        resolve(true);
+      }, 0);
+    };
+
+    if (typeof canvas.toBlob !== 'function') {
+      try { clickDataUrlFallback(); } catch (e) { reject(e); }
+      return;
+    }
+
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          try { clickDataUrlFallback(); } catch (e) { reject(e); }
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.rel = 'noopener';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        window.setTimeout(() => {
+          try { document.body.removeChild(link); } catch {}
+          try { URL.revokeObjectURL(url); } catch {}
+          resolve(true);
+        }, 1500);
+      }, 'image/jpeg', quality);
+    } catch (e) {
+      reject(e);
+    }
+  });
+
+
   async function saveAs(kind) {
     const t = tableRef.current;
     if (!t) return;
@@ -363,13 +414,15 @@ export default function PlayerRoomTable() {
     t.style.overflow = oFlow;
     t.style.width = oW;
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     if (kind === 'jpg') {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `방배정표_${paramId}.jpg`;
-      a.click();
+      try {
+        await downloadCanvasAsJpeg(canvas, `방배정표_${paramId}.jpg`);
+      } catch (e) {
+        console.warn('[PlayerRoomTable] JPG save failed:', e);
+        alert('JPG 저장에 실패했습니다. 다시 시도해 주세요.');
+      }
     } else {
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
       const imgW = canvas.width;
       const imgH = canvas.height;
       const pdf = new jsPDF({ orientation: imgW > imgH ? 'l' : 'p', unit: 'pt', format: 'a4' });

@@ -351,6 +351,57 @@ export default function PlayerResults() {
   const resultRef = useRef(null);
   const teamRef   = useRef(null);
 
+  // JPG 저장은 data URL 대신 Blob URL을 사용합니다.
+  // iOS Safari/PWA에서 긴 data URL + DOM에 붙지 않은 a.click() 조합이
+  // 무시되는 경우가 있어, 실제 <a>를 문서에 붙인 뒤 클릭하고 URL을 해제합니다.
+  const downloadCanvasAsJpeg = (canvas, filename, quality = 0.92) => new Promise((resolve, reject) => {
+    if (!canvas) { resolve(false); return; }
+
+    const clickDataUrlFallback = () => {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/jpeg', quality);
+      link.download = filename;
+      link.rel = 'noopener';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      window.setTimeout(() => {
+        try { document.body.removeChild(link); } catch {}
+        resolve(true);
+      }, 0);
+    };
+
+    if (typeof canvas.toBlob !== 'function') {
+      try { clickDataUrlFallback(); } catch (e) { reject(e); }
+      return;
+    }
+
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          try { clickDataUrlFallback(); } catch (e) { reject(e); }
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.rel = 'noopener';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        window.setTimeout(() => {
+          try { document.body.removeChild(link); } catch {}
+          try { URL.revokeObjectURL(url); } catch {}
+          resolve(true);
+        }, 1500);
+      }, 'image/jpeg', quality);
+    } catch (e) {
+      reject(e);
+    }
+  });
+
+
   const captureAndSave = async (ref, file, type='jpg') => {
     const el = ref.current; if (!el) return;
     const ovr = el.style.overflow, ow = el.style.width;
@@ -369,10 +420,12 @@ export default function PlayerResults() {
     el.style.overflow = ovr; el.style.width = ow;
 
     if (type === 'jpg') {
-      const a = document.createElement('a');
-      a.download = `${file}.jpg`;
-      a.href = canvas.toDataURL('image/jpeg', 0.92);
-      a.click();
+      try {
+        await downloadCanvasAsJpeg(canvas, `${file}.jpg`);
+      } catch (e) {
+        console.warn('[PlayerResults] JPG save failed:', e);
+        alert('JPG 저장에 실패했습니다. 다시 시도해 주세요.');
+      }
       return;
     }
 
