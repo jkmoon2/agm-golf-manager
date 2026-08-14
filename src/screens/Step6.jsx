@@ -292,6 +292,57 @@ export default function Step6() {
   const allocRef  = useRef();
   const resultRef = useRef();
 
+  // JPG 저장은 data URL 대신 Blob URL을 사용합니다.
+  // iOS Safari/PWA에서 긴 data URL + DOM에 붙지 않은 a.click() 조합이
+  // 무시되는 경우가 있어, 실제 <a>를 문서에 붙인 뒤 클릭하고 URL을 해제합니다.
+  const downloadCanvasAsJpeg = (canvas, filename, quality = 0.92) => new Promise((resolve, reject) => {
+    if (!canvas) { resolve(false); return; }
+
+    const clickDataUrlFallback = () => {
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/jpeg', quality);
+      link.download = filename;
+      link.rel = 'noopener';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      window.setTimeout(() => {
+        try { document.body.removeChild(link); } catch {}
+        resolve(true);
+      }, 0);
+    };
+
+    if (typeof canvas.toBlob !== 'function') {
+      try { clickDataUrlFallback(); } catch (e) { reject(e); }
+      return;
+    }
+
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          try { clickDataUrlFallback(); } catch (e) { reject(e); }
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.rel = 'noopener';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        window.setTimeout(() => {
+          try { document.body.removeChild(link); } catch {}
+          try { URL.revokeObjectURL(url); } catch {}
+          resolve(true);
+        }, 1500);
+      }, 'image/jpeg', quality);
+    } catch (e) {
+      reject(e);
+    }
+  });
+
+
   // 다운로드 헬퍼 (JPG / PDF)
   const downloadTable = async (ref, name, type) => {
     const elem = ref.current;
@@ -315,10 +366,12 @@ export default function Step6() {
     elem.style.width    = origWidth;
 
     if (type === 'jpg') {
-      const link = document.createElement('a');
-      link.download = `${name}.jpg`;
-      link.href     = canvas.toDataURL('image/jpeg');
-      link.click();
+      try {
+        await downloadCanvasAsJpeg(canvas, `${name}.jpg`);
+      } catch (e) {
+        console.warn('[Step6] JPG save failed:', e);
+        alert('JPG 저장에 실패했습니다. 다시 시도해 주세요.');
+      }
     } else {
       const img = canvas.toDataURL('image/png');
       const pdf = new jsPDF({ orientation: 'landscape' });
