@@ -155,7 +155,7 @@ function VoteResult({ data }) {
                       <td style={{ ...voteTd, fontWeight: 900, color: '#183153' }}>{row.name || row.title}</td>
                       <td style={{ ...voteTd, color: '#be123c', fontWeight: 900 }}>{row.voteCount || 0}표</td>
                       <td style={{ ...voteTd, color: '#0f766e', fontWeight: 900 }}>{row.resultValue !== null && row.resultValue !== undefined && Number.isFinite(Number(row.resultValue)) ? row.resultValue : '-'}</td>
-                      <td style={{ ...voteTd, textAlign: 'left', lineHeight: 1.45 }}>
+                      <td style={{ ...voteTd, textAlign: 'left', lineHeight: 1.45, color: (Array.isArray(row.voterNames) && row.voterNames.length) ? '#2563eb' : '#344054' }}>
                         {Array.isArray(row.voterNames) && row.voterNames.length ? row.voterNames.join(', ') : '없음'}
                       </td>
                     </tr>
