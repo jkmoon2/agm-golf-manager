@@ -1,6 +1,7 @@
 // src/screens/Step6.jsx
 
-import React, { useState, useRef, useMemo, useContext, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useRef, useMemo, useContext, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step6.module.css';
@@ -33,6 +34,10 @@ export default function Step6() {
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const [menuOpen, setMenuOpen]             = useState(false);
+  // [PATCH] 선택 메뉴는 tableContainer의 overflow에 잘리지 않도록 body Portal로 표시
+  const selectMenuRef = useRef(null);
+  const selectMenuBtnRef = useRef(null);
+  const [selectMenuPosition, setSelectMenuPosition] = useState({ top: 0, right: 8, maxHeight: 320 });
   // [NEW] 방대방 최종결과 계산에서 제외할 참가자(복수 선택)
   const [resultExcludedIds, setResultExcludedIds] = useState(new Set());
   const [excludeMenuOpen, setExcludeMenuOpen] = useState(false);
@@ -250,11 +255,51 @@ export default function Step6() {
   }, [eventData?.resultExcludedParticipantIds]);
 
   // 메뉴 토글 + 바깥 클릭 닫기
-  const toggleMenu = (e) => { e.stopPropagation(); setMenuOpen(o => !o); };
+  // tableContainer는 가로 스크롤(overflow-x:auto)을 사용하므로 내부 absolute 메뉴는
+  // z-index와 무관하게 컨테이너 경계에서 잘립니다. 메뉴만 body Portal로 띄워 클리핑을 피합니다.
+  const updateSelectMenuPosition = useCallback(() => {
+    try {
+      const btn = selectMenuBtnRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const viewportH = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 640;
+      const top = Math.max(4, Math.round(rect.bottom + 4));
+      const right = Math.max(8, Math.round((window.innerWidth || document.documentElement.clientWidth || 360) - rect.right));
+      const maxHeight = Math.max(160, Math.floor(viewportH - top - 8));
+      setSelectMenuPosition({ top, right, maxHeight });
+    } catch {}
+  }, []);
+
+  const toggleMenu = (e) => {
+    e.stopPropagation();
+    if (!menuOpen) updateSelectMenuPosition();
+    setMenuOpen(o => !o);
+  };
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    updateSelectMenuPosition();
+    const update = () => updateSelectMenuPosition();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [menuOpen, updateSelectMenuPosition]);
+
   useEffect(() => {
-    const close = () => { setMenuOpen(false); setExcludeMenuOpen(false); };
-    if (menuOpen) document.addEventListener('click', close, true);
-    return () => document.removeEventListener('click', close, true);
+    if (!menuOpen) return;
+    const onDoc = (e) => {
+      if (selectMenuRef.current && selectMenuRef.current.contains(e.target)) return;
+      if (selectMenuBtnRef.current && selectMenuBtnRef.current.contains(e.target)) return;
+      setMenuOpen(false);
+      setExcludeMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc, true);
+    return () => document.removeEventListener('mousedown', onDoc, true);
   }, [menuOpen]);
 
   useEffect(() => {
@@ -536,9 +581,20 @@ export default function Step6() {
           <div className={styles.tableToolbar}>
             <h4 className={styles.tableTitle}>🏠 방배정표</h4>
             <div className={styles.selectWrapper}>
-              <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
-              {menuOpen && (
-                <div className={styles.selectMenu} onClick={e => e.stopPropagation()}>
+              <button ref={selectMenuBtnRef} className={styles.selectButton} onClick={toggleMenu}>선택</button>
+              {menuOpen && typeof document !== 'undefined' && createPortal(
+                <div
+                  ref={selectMenuRef}
+                  className={styles.selectMenu}
+                  style={{
+                    position: 'fixed',
+                    top: `${selectMenuPosition.top}px`,
+                    right: `${selectMenuPosition.right}px`,
+                    maxHeight: `${selectMenuPosition.maxHeight}px`,
+                    zIndex: 2147483000
+                  }}
+                  onClick={e => e.stopPropagation()}
+                >
                   {headers.map((h, i) => (
                     <label key={i} className={styles.selectMenuItem}>
                       <input type="checkbox" checked={!isHiddenIdx(i)} onChange={() => { toggleRoom(i); setMenuOpen(false); }} />
@@ -568,7 +624,8 @@ export default function Step6() {
                       ))}
                     </div>
                   )}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
           </div>

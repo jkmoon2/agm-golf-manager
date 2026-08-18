@@ -1,6 +1,7 @@
 // /src/screens/Step8.jsx
 
-import React, { useState, useRef, useMemo, useContext, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useContext, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import styles from './Step8.module.css';
@@ -141,6 +142,36 @@ export default function Step8() {
   // 외부 클릭으로 드롭다운 닫기
   const menuRef = useRef(null);
   const menuBtnRef = useRef(null);
+  // [PATCH] tableContainer overflow 클리핑 방지용 Portal 메뉴 위치
+  const [selectMenuPosition, setSelectMenuPosition] = useState({ top: 0, right: 8, maxHeight: 320 });
+
+  const updateSelectMenuPosition = useCallback(() => {
+    try {
+      const btn = menuBtnRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const viewportH = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 640;
+      const top = Math.max(4, Math.round(rect.bottom + 4));
+      const right = Math.max(8, Math.round((window.innerWidth || document.documentElement.clientWidth || 360) - rect.right));
+      const maxHeight = Math.max(160, Math.floor(viewportH - top - 8));
+      setSelectMenuPosition({ top, right, maxHeight });
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!selectMenuOpen) return;
+    updateSelectMenuPosition();
+    const update = () => updateSelectMenuPosition();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [selectMenuOpen, updateSelectMenuPosition]);
+
   useEffect(() => {
     if (!selectMenuOpen) return;
     const onDoc = (e) => {
@@ -763,9 +794,28 @@ export default function Step8() {
           <div className={styles.tableToolbar}>
             <h4 className={styles.tableTitle}>🏠 방배정표</h4>
             <div className={styles.selectWrapper}>
-              <button ref={menuBtnRef} className={styles.selectButton} onClick={() => setSelectMenuOpen(o => !o)}>선택</button>
-              {selectMenuOpen && (
-                <div ref={menuRef} className={styles.selectMenu}>
+              <button
+                ref={menuBtnRef}
+                className={styles.selectButton}
+                onClick={() => {
+                  if (!selectMenuOpen) updateSelectMenuPosition();
+                  setSelectMenuOpen(o => !o);
+                }}
+              >
+                선택
+              </button>
+              {selectMenuOpen && typeof document !== 'undefined' && createPortal(
+                <div
+                  ref={menuRef}
+                  className={styles.selectMenu}
+                  style={{
+                    position: 'fixed',
+                    top: `${selectMenuPosition.top}px`,
+                    right: `${selectMenuPosition.right}px`,
+                    maxHeight: `${selectMenuPosition.maxHeight}px`,
+                    zIndex: 2147483000
+                  }}
+                >
                   {headers.map((h, i) => (
                     <label key={`toggle-room-${i}`} className={styles.selectMenuItem}>
                       <input type="checkbox" checked={!isHiddenIdx(i)} onChange={() => toggleRoom(i)} />
@@ -793,7 +843,8 @@ export default function Step8() {
                       ))}
                     </div>
                   )}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
           </div>
