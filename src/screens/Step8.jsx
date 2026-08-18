@@ -685,6 +685,12 @@ export default function Step8() {
   // ── 10) 팀결과표용: 방별 2인씩 팀A/팀B ─────────────────────
   const teamsByRoom = useMemo(() => {
     const list = [];
+    const isRankEligibleMember = (p) => !!(
+      p?.id != null &&
+      String(p?.nickname || '').trim() &&
+      !resultExcludedIds.has(String(p.id))
+    );
+
     orderedByRoom.forEach((roomArr, roomIdx) => {
       const [p0, p1, p2, p3] = roomArr;
       // 팀 A
@@ -700,7 +706,9 @@ export default function Step8() {
         sumHandicap: sumHdA,
         roomName:    headers[roomIdx],
         originalIndex: list.length,
-        isComplete: !!(p0?.id != null && String(p0?.nickname || '').trim() && p1?.id != null && String(p1?.nickname || '').trim())
+        // 방제외된 참가자는 팀 순위 계산에서는 없는 인원으로 간주합니다.
+        // 두 명이 모두 실제 참가자이면서 방제외 대상이 아닐 때만 완성 팀입니다.
+        isComplete: isRankEligibleMember(p0) && isRankEligibleMember(p1)
       });
       // 팀 B
       const rB0 = (p2?.score || 0) - (p2?.handicap || 0);
@@ -715,11 +723,11 @@ export default function Step8() {
         sumHandicap: sumHdB,
         roomName:    headers[roomIdx],
         originalIndex: list.length,
-        isComplete: !!(p2?.id != null && String(p2?.nickname || '').trim() && p3?.id != null && String(p3?.nickname || '').trim())
+        isComplete: isRankEligibleMember(p2) && isRankEligibleMember(p3)
       });
     });
     return list;
-  }, [orderedByRoom, headers]);
+  }, [orderedByRoom, headers, resultExcludedIds]);
 
   // ── 11) 모든 팀 중 “낮은 합산점수=1등” 순위 계산 ─────────────────
   const teamRankMap = useMemo(() => {
