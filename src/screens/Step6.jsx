@@ -33,6 +33,9 @@ export default function Step6() {
   const [hiddenRooms, setHiddenRooms]       = useState(new Set());
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const [menuOpen, setMenuOpen]             = useState(false);
+  // [NEW] 방대방 최종결과 계산에서 제외할 참가자(복수 선택)
+  const [resultExcludedIds, setResultExcludedIds] = useState(new Set());
+  const [excludeMenuOpen, setExcludeMenuOpen] = useState(false);
   // 최종결과표 정렬: 방(기본) / 오름(1위→N위) / 내림(N위→1위)
   const [resultSortMode, setResultSortMode] = useState('room');
   // ✅ 공유 체크 시에만 Player STEP5에 최종결과표 정렬을 반영(기본: Admin 전용)
@@ -238,10 +241,18 @@ export default function Step6() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventData?.publicView, roomCount]);
 
+  // 방제외 선택은 최종결과표 계산 전용이며 방배정표에는 영향을 주지 않습니다.
+  useEffect(() => {
+    const arr = Array.isArray(eventData?.resultExcludedParticipantIds)
+      ? eventData.resultExcludedParticipantIds
+      : [];
+    setResultExcludedIds(new Set(arr.map(v => String(v))));
+  }, [eventData?.resultExcludedParticipantIds]);
+
   // 메뉴 토글 + 바깥 클릭 닫기
   const toggleMenu = (e) => { e.stopPropagation(); setMenuOpen(o => !o); };
   useEffect(() => {
-    const close = () => setMenuOpen(false);
+    const close = () => { setMenuOpen(false); setExcludeMenuOpen(false); };
     if (menuOpen) document.addEventListener('click', close, true);
     return () => document.removeEventListener('click', close, true);
   }, [menuOpen]);
@@ -272,6 +283,25 @@ export default function Step6() {
     const next = { ...visibleMetrics, [key]: !visibleMetrics[key] };
     setVisibleMetrics(next);
     persistPublicViewNow(hiddenRooms, next, resultSortMode, resultSortShared);
+  };
+
+  const persistResultExcludedNow = async (nextSet) => {
+    if (!updateEventImmediate) return;
+    try {
+      await updateEventImmediate({
+        resultExcludedParticipantIds: Array.from(nextSet).map(String).sort()
+      });
+    } catch (e) {
+      console.warn('[Step6] persistResultExcludedNow failed:', e);
+    }
+  };
+
+  const toggleResultExcluded = (id) => {
+    const key = String(id);
+    const next = new Set(resultExcludedIds);
+    next.has(key) ? next.delete(key) : next.add(key);
+    setResultExcludedIds(next);
+    persistResultExcludedNow(next);
   };
 
   const onResultSortSelect = (nextMode) => {
@@ -422,6 +452,13 @@ export default function Step6() {
     return arr;
   }, [participantsWithScore, roomCount]);
 
+  const resultExcludeCandidates = useMemo(() => {
+    return (participantsWithScore || [])
+      .filter(p => p && p.id != null && String(p.nickname || '').trim())
+      .map(p => ({ ...p, __roomNo: Number(getAssignmentRoom(p)) || 0 }))
+      .sort((a, b) => (a.__roomNo - b.__roomNo) || String(a.nickname || '').localeCompare(String(b.nickname || ''), 'ko'));
+  }, [participantsWithScore]);
+
   // 방배정표 rows
   const MAX = 4;
   const allocRows = Array.from({ length: MAX }, (_, ri) =>
@@ -429,49 +466,52 @@ export default function Step6() {
   );
 
   // 최종결과 계산(반땅만 결과에 영향)
+  // [NEW] 방제외 참가자는 표에는 남기되 합계/순위/반땅 대상 계산에서 제외합니다.
   const resultByRoom = useMemo(() => {
     return byRoom.map(roomArr => {
       const filled = Array.from({ length: MAX }, (_, i) =>
         roomArr[i] || { nickname: '', handicap: 0, score: 0 }
       );
 
-      // 반땅 대상(최고 점수)
-      let maxIdx = 0, maxVal = -Infinity;
+      let maxIdx = -1, maxVal = -Infinity;
       filled.forEach((p, i) => {
-        const sc = p.score || 0;
+        const isReal = p && p.id != null && String(p.nickname || '').trim();
+        const excluded = isReal && resultExcludedIds.has(String(p.id));
+        if (!isReal || excluded) return;
+        const sc = Number(p.score || 0);
         if (sc > maxVal) { maxVal = sc; maxIdx = i; }
       });
 
-      let sumHd = 0, sumSc = 0, sumBd = 0, sumRs = 0;
+      let sumHd = 0, sumSc = 0, sumBd = 0, sumRs = 0, includedCount = 0;
       const detail = filled.map((p, i) => {
-        const hd = p.handicap || 0;
-        const sc = p.score    || 0;
-        const bd = i === maxIdx ? Math.floor(sc / 2) : sc; // 반땅
-        const used = showHalved ? bd : sc;                  // 결과 계산은 반땅만 영향
+        const isReal = p && p.id != null && String(p.nickname || '').trim();
+        const excluded = !!(isReal && resultExcludedIds.has(String(p.id)));
+        const hd = Number(p.handicap || 0);
+        const sc = Number(p.score || 0);
+        const bd = i === maxIdx ? Math.floor(sc / 2) : sc;
+        const used = showHalved ? bd : sc;
+        const rs = used - hd;
 
-        sumHd += hd;
-        sumSc += sc;
-        sumBd += bd;
-        sumRs += (used - hd);
+        if (isReal && !excluded) {
+          includedCount += 1;
+          sumHd += hd;
+          sumSc += sc;
+          sumBd += bd;
+          sumRs += rs;
+        }
 
-        return { ...p, score: sc, banddang: bd, result: (used - hd) };
+        return { ...p, score: sc, banddang: bd, result: rs, excluded };
       });
 
-      return {
-        detail,
-        sumHandicap: sumHd,
-        sumScore:    sumSc,
-        sumBanddang: sumBd,
-        sumResult:   sumRs
-      };
+      return { detail, sumHandicap: sumHd, sumScore: sumSc, sumBanddang: sumBd, sumResult: sumRs, includedCount };
     });
-  }, [byRoom, showHalved]);
+  }, [byRoom, showHalved, resultExcludedIds]);
 
   // 등수(낮을수록 1등), 동점 시 합계핸디 낮은 쪽 우선
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
-      .filter(x => !isHiddenIdx(x.idx))
+      .filter(x => !isHiddenIdx(x.idx) && resultByRoom[x.idx]?.includedCount > 0)
       .sort((a, b) => a.tot - b.tot || a.hd - b.hd);
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
@@ -491,45 +531,47 @@ export default function Step6() {
     <div className={styles.step} style={__pageStyle}>
       {/* ──────────────── 스크롤 본문 래퍼 시작 ──────────────── */}
       <div ref={scrollRef} style={__scrollAreaBaseStyle}>
-        {/* 선택 메뉴 */}
-        <div className={styles.selectWrapper}>
-          <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
-          {menuOpen && (
-            <div className="dropdownMenu" onClick={e => e.stopPropagation()}>
-              {headers.map((h, i) => (
-                <label key={i} className="dropdownItem">
-                  <input
-                    type="checkbox"
-                    checked={!isHiddenIdx(i)}
-                    onChange={() => { toggleRoom(i); setMenuOpen(false); }}
-                  />
-                  {h}
-                </label>
-              ))}
-              <hr className="dropdownDivider" />
-              <label className="dropdownItem">
-                <input
-                  type="checkbox"
-                  checked={visibleMetrics.score}
-                  onChange={() => { toggleMetric('score'); setMenuOpen(false); }}
-                />
-                점수
-              </label>
-              <label className="dropdownItem">
-                <input
-                  type="checkbox"
-                  checked={visibleMetrics.banddang}
-                  onChange={() => { toggleMetric('banddang'); setMenuOpen(false); }}
-                />
-                반땅
-              </label>
-            </div>
-          )}
-        </div>
-
         {/* 방배정표 */}
-        <div ref={allocRef} className={styles.tableContainer}>
-          <h4 className={styles.tableTitle}>🏠 방배정표</h4>
+        <div ref={allocRef} className={`${styles.tableContainer} ${styles.allocContainer}`}>
+          <div className={styles.tableToolbar}>
+            <h4 className={styles.tableTitle}>🏠 방배정표</h4>
+            <div className={styles.selectWrapper}>
+              <button className={styles.selectButton} onClick={toggleMenu}>선택</button>
+              {menuOpen && (
+                <div className={styles.selectMenu} onClick={e => e.stopPropagation()}>
+                  {headers.map((h, i) => (
+                    <label key={i} className={styles.selectMenuItem}>
+                      <input type="checkbox" checked={!isHiddenIdx(i)} onChange={() => { toggleRoom(i); setMenuOpen(false); }} />
+                      {h}
+                    </label>
+                  ))}
+                  <hr className={styles.selectMenuDivider} />
+                  <label className={styles.selectMenuItem}>
+                    <input type="checkbox" checked={visibleMetrics.score} onChange={() => { toggleMetric('score'); setMenuOpen(false); }} />
+                    점수
+                  </label>
+                  <label className={styles.selectMenuItem}>
+                    <input type="checkbox" checked={visibleMetrics.banddang} onChange={() => { toggleMetric('banddang'); setMenuOpen(false); }} />
+                    반땅
+                  </label>
+                  <hr className={styles.selectMenuDivider} />
+                  <button type="button" className={styles.excludeMenuButton} onClick={() => setExcludeMenuOpen(v => !v)}>
+                    <span>방제외</span><span>{excludeMenuOpen ? '▲' : '▼'}</span>
+                  </button>
+                  {excludeMenuOpen && (
+                    <div className={styles.excludeParticipantList}>
+                      {resultExcludeCandidates.map((p) => (
+                        <label key={`exclude-${p.id}`} className={styles.selectMenuItem}>
+                          <input type="checkbox" checked={resultExcludedIds.has(String(p.id))} onChange={() => toggleResultExcluded(p.id)} />
+                          <span>{p.__roomNo ? (headers[p.__roomNo - 1] || `${p.__roomNo}번방`) : '미배정'} · {p.nickname}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
           <table className={`${styles.table} ${styles.fixedRows}`}>
             <thead>
               <tr>
@@ -725,7 +767,7 @@ export default function Step6() {
                     const roomObj = resultByRoom[ci];
                     return (
                       <React.Fragment key={ci}>
-                        <td className={styles.cell} style={__COL.resultNick}>{roomObj.detail[ri].nickname}</td>
+                        <td className={styles.cell} style={__COL.resultNick}>{roomObj.detail[ri].excluded ? `${roomObj.detail[ri].nickname} (제외)` : roomObj.detail[ri].nickname}</td>
                         <td className={styles.cell} style={__COL.resultGhandi}>{roomObj.detail[ri].handicap}</td>
                         {showScore  && <td className={styles.cell} style={__COL.resultScore}>{roomObj.detail[ri].score}</td>}
                         {showHalved && (
@@ -734,7 +776,7 @@ export default function Step6() {
                           </td>
                         )}
                         <td className={styles.cell} style={{ ...__COL.resultResult, color: 'red' }}>
-                          {roomObj.detail[ri].result}
+                          {roomObj.detail[ri].excluded ? '제외' : roomObj.detail[ri].result}
                         </td>
                       </React.Fragment>
                     );
@@ -765,7 +807,7 @@ export default function Step6() {
                       className={styles.footerBlank}
                     />
                     <td className={styles.footerRank} style={{ ...__COL.resultResult, background: '#fff8d1', color: 'blue' }}>
-                      {rankMap[i]}등
+                      {rankMap[i] ? `${rankMap[i]}등` : '-'}
                     </td>
                   </React.Fragment>
                 ))}
