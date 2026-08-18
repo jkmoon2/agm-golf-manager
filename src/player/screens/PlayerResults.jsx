@@ -315,9 +315,14 @@ export default function PlayerResults() {
     resultByRoom.forEach((room, roomIdx) => {
       const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀
       const val = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
-      const isReal = (p) => !!(p && p.id != null && String(p.nickname || '').trim());
-      const teamA = { roomIdx, roomName: headers[roomIdx], teamIdx: 0, members: [p0, p1], sumResult: val(p0)+val(p1), sumHandicap: Number(p0?.handicap||0)+Number(p1?.handicap||0), isComplete: isReal(p0) && isReal(p1) };
-      const teamB = { roomIdx, roomName: headers[roomIdx], teamIdx: 1, members: [p2, p3], sumResult: val(p2)+val(p3), sumHandicap: Number(p2?.handicap||0)+Number(p3?.handicap||0), isComplete: isReal(p2) && isReal(p3) };
+      const isRankEligible = (p) => !!(
+        p &&
+        p.id != null &&
+        String(p.nickname || '').trim() &&
+        !p.excluded
+      );
+      const teamA = { roomIdx, roomName: headers[roomIdx], teamIdx: 0, members: [p0, p1], sumResult: val(p0)+val(p1), sumHandicap: Number(p0?.handicap||0)+Number(p1?.handicap||0), isComplete: isRankEligible(p0) && isRankEligible(p1) };
+      const teamB = { roomIdx, roomName: headers[roomIdx], teamIdx: 1, members: [p2, p3], sumResult: val(p2)+val(p3), sumHandicap: Number(p2?.handicap||0)+Number(p3?.handicap||0), isComplete: isRankEligible(p2) && isRankEligible(p3) };
       list.push(teamA, teamB);
     });
     return list;
