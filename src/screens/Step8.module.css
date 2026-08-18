@@ -496,3 +496,95 @@
   margin-right: 0 !important;
   white-space: nowrap !important;
 }
+
+/* ────────────────────────────────────────────────────────────────
+   STEP8 방배정표/선택 메뉴를 STEP6와 동일한 라인/간격으로 통일
+   ──────────────────────────────────────────────────────────────── */
+.allocContainer { margin-top: 4px !important; }
+.tableToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 8;
+  background: #fff;
+  padding: 6px 8px;
+  border-bottom: 1px solid #bbb;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 100%;
+}
+.tableToolbar .tableTitle {
+  position: static !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-bottom: none !important;
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0 !important;
+}
+.tableToolbar .selectWrapper {
+  position: relative !important;
+  margin: 0 !important;
+  flex: 0 0 auto;
+  z-index: 20;
+}
+.tableToolbar .selectButton { min-width: 56px; margin: 0 !important; }
+.selectMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 112px;
+  width: max-content;
+  max-width: min(280px, 78vw);
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #ccc;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10000;
+  box-shadow: 0 2px 6px rgba(0,0,0,.1);
+  box-sizing: border-box;
+  text-align: left;
+}
+.selectMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  text-align: left;
+  box-sizing: border-box;
+}
+.selectMenuDivider { width: 100%; border: 0; border-top: 1px solid #eee; margin: 4px 0; }
+.excludeMenuButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  background: #fff;
+  color: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.excludeParticipantList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+  border-top: 1px dashed #e4e8ef;
+}

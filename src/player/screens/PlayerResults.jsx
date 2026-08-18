@@ -210,6 +210,12 @@ export default function PlayerResults() {
   const [visibleMetrics, setVisibleMetrics] = useState({ score: true, banddang: true });
   const teamSortMode = readFourballTeamSort(sourceEventData?.publicView || {});
   const resultSortMode = readResultSort(sourceEventData?.publicView || {});
+  // Admin STEP6/8의 '방제외' 선택을 Player 최종결과표에도 동일 적용
+  const resultExcludedIds = useMemo(() => new Set(
+    (Array.isArray(sourceEventData?.resultExcludedParticipantIds)
+      ? sourceEventData.resultExcludedParticipantIds
+      : []).map(v => String(v))
+  ), [sourceEventData?.resultExcludedParticipantIds]);
 
   useEffect(() => {
     const pv = sourceEventData?.publicView || {};
@@ -255,37 +261,39 @@ export default function PlayerResults() {
         ? orderRoomFourball(roomArr)
         : Array.from({ length: MAX_PER_ROOM }, (_, i) => roomArr[i] || { nickname: '', handicap: 0, score: 0 });
 
-      let maxIdx = 0, maxVal = -Infinity;
+      let maxIdx = -1, maxVal = -Infinity;
       ordered.forEach((p, i) => {
+        const isReal = p && p.id != null && String(p.nickname || '').trim();
+        const excluded = isReal && resultExcludedIds.has(String(p.id));
+        if (!isReal || excluded) return;
         const sc = Number(p.score || 0);
         if (sc > maxVal) { maxVal = sc; maxIdx = i; }
       });
 
-      let sumHd = 0, sumSc = 0, sumBd = 0, sumRs = 0;
+      let sumHd = 0, sumSc = 0, sumBd = 0, sumRs = 0, includedCount = 0;
       const detail = ordered.map((p, i) => {
+        const isReal = p && p.id != null && String(p.nickname || '').trim();
+        const excluded = !!(isReal && resultExcludedIds.has(String(p.id)));
         const hd = Number(p.handicap || 0);
-        const sc = Number(p.score    || 0);
+        const sc = Number(p.score || 0);
         const bd = (i === maxIdx) ? Math.floor(sc / 2) : sc;
         const used = visibleMetrics.banddang ? bd : sc;
         const rs = used - hd;
-        sumHd += hd; sumSc += sc; sumBd += bd; sumRs += rs;
-        return { ...p, score: sc, banddang: bd, result: rs };
+        if (isReal && !excluded) {
+          includedCount += 1;
+          sumHd += hd; sumSc += sc; sumBd += bd; sumRs += rs;
+        }
+        return { ...p, score: sc, banddang: bd, result: rs, excluded };
       });
 
-      return {
-        detail,
-        sumHandicap: sumHd,
-        sumScore:    sumSc,
-        sumBanddang: sumBd,
-        sumResult:   sumRs
-      };
+      return { detail, sumHandicap: sumHd, sumScore: sumSc, sumBanddang: sumBd, sumResult: sumRs, includedCount };
     });
-  }, [byRoom, visibleMetrics.banddang, mode]);
+  }, [byRoom, visibleMetrics.banddang, mode, resultExcludedIds]);
 
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
-      .filter(x => !hiddenRooms.has(x.idx))
+      .filter(x => !hiddenRooms.has(x.idx) && resultByRoom[x.idx]?.includedCount > 0)
       .sort((a, b) => a.tot - b.tot || a.hd - b.hd);
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
   }, [resultByRoom, hiddenRooms]);
@@ -307,15 +315,16 @@ export default function PlayerResults() {
     resultByRoom.forEach((room, roomIdx) => {
       const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀
       const val = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
-      const teamA = { roomIdx, roomName: headers[roomIdx], teamIdx: 0, members: [p0, p1], sumResult: val(p0)+val(p1), sumHandicap: Number(p0?.handicap||0)+Number(p1?.handicap||0) };
-      const teamB = { roomIdx, roomName: headers[roomIdx], teamIdx: 1, members: [p2, p3], sumResult: val(p2)+val(p3), sumHandicap: Number(p2?.handicap||0)+Number(p3?.handicap||0) };
+      const isReal = (p) => !!(p && p.id != null && String(p.nickname || '').trim());
+      const teamA = { roomIdx, roomName: headers[roomIdx], teamIdx: 0, members: [p0, p1], sumResult: val(p0)+val(p1), sumHandicap: Number(p0?.handicap||0)+Number(p1?.handicap||0), isComplete: isReal(p0) && isReal(p1) };
+      const teamB = { roomIdx, roomName: headers[roomIdx], teamIdx: 1, members: [p2, p3], sumResult: val(p2)+val(p3), sumHandicap: Number(p2?.handicap||0)+Number(p3?.handicap||0), isComplete: isReal(p2) && isReal(p3) };
       list.push(teamA, teamB);
     });
     return list;
   }, [resultByRoom, headers, mode]);
 
   const teamRankMap = useMemo(() => {
-    const vis = teamsByRoom.filter(t => !hiddenRooms.has(t.roomIdx));
+    const vis = teamsByRoom.filter(t => !hiddenRooms.has(t.roomIdx) && t.isComplete);
     vis.sort((a,b) =>
       (a.sumResult - b.sumResult) ||
       (a.sumHandicap - b.sumHandicap) ||
@@ -339,11 +348,12 @@ export default function PlayerResults() {
     const list = teamsByRoom
       .map((t, idx) => ({ ...t, idxInOriginal: idx }))
       .filter(t => !hiddenRooms.has(t.roomIdx));
+    const completeFirst = (a, b) => Number(b.isComplete) - Number(a.isComplete);
     if (teamSortMode === 'asc') {
-      return list.sort((a, b) => (a.sumResult - b.sumResult) || (a.sumHandicap - b.sumHandicap) || (a.roomIdx - b.roomIdx) || (a.teamIdx - b.teamIdx));
+      return list.sort((a, b) => completeFirst(a, b) || (a.sumResult - b.sumResult) || (a.sumHandicap - b.sumHandicap) || (a.roomIdx - b.roomIdx) || (a.teamIdx - b.teamIdx));
     }
     if (teamSortMode === 'desc') {
-      return list.sort((a, b) => (b.sumResult - a.sumResult) || (b.sumHandicap - a.sumHandicap) || (a.roomIdx - b.roomIdx) || (a.teamIdx - b.teamIdx));
+      return list.sort((a, b) => completeFirst(a, b) || (b.sumResult - a.sumResult) || (b.sumHandicap - a.sumHandicap) || (a.roomIdx - b.roomIdx) || (a.teamIdx - b.teamIdx));
     }
     return list;
   }, [teamsByRoom, hiddenRooms, teamSortMode]);
@@ -513,11 +523,11 @@ export default function PlayerResults() {
                   <tr key={`res-row-${ri}`}>
                     {resultRoomOrder.map((ci) => (
                       <React.Fragment key={`res-${ci}-${ri}`}>
-                        <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{(resultByRoom[ci]||{}).detail?.[ri]?.nickname || ''}</span></td>
+                        <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{(resultByRoom[ci]||{}).detail?.[ri]?.excluded ? `${(resultByRoom[ci]||{}).detail?.[ri]?.nickname || ''} (제외)` : ((resultByRoom[ci]||{}).detail?.[ri]?.nickname || '')}</span></td>
                         <td className={`${styles.td} ${styles.metricCol}`}>{(resultByRoom[ci]||{}).detail?.[ri]?.handicap || 0}</td>
                         {visibleMetrics.score    && <td className={`${styles.td} ${styles.metricCol}`}>{(resultByRoom[ci]||{}).detail?.[ri]?.score || 0}</td>}
                         {visibleMetrics.banddang && <td className={`${styles.td} ${styles.metricCol}`} style={{ color: '#0b61da' }}>{(resultByRoom[ci]||{}).detail?.[ri]?.banddang || 0}</td>}
-                        <td className={`${styles.td} ${styles.metricCol}`} style={{ color:'red', fontWeight:600 }}>{(resultByRoom[ci]||{}).detail?.[ri]?.result || 0}</td>
+                        <td className={`${styles.td} ${styles.metricCol}`} style={{ color:'red', fontWeight:600 }}>{(resultByRoom[ci]||{}).detail?.[ri]?.excluded ? '제외' : ((resultByRoom[ci]||{}).detail?.[ri]?.result ?? 0)}</td>
                       </React.Fragment>
                     ))}
                   </tr>
@@ -542,7 +552,7 @@ export default function PlayerResults() {
                   {resultRoomOrder.map((i) => (
                     <React.Fragment key={`res-rank-${i}`}>
                       <td colSpan={metricsPerRoom} className={styles.td} />
-                      <td className={`${styles.td} ${styles.metricCol} ${styles.rankCell}`}>{rankMap[i]}등</td>
+                      <td className={`${styles.td} ${styles.metricCol} ${styles.rankCell}`}>{rankMap[i] ? `${rankMap[i]}등` : '-'}</td>
                     </React.Fragment>
                   ))}
                 </tr>
