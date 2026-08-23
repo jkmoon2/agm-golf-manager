@@ -1421,11 +1421,11 @@ if (editForm?.template === 'group-battle') {
 
 
 
-  /* ── group-battle: 이벤트 전용 G핸디(오버라이드) 수정 ───────────── */
+  /* ── 이벤트 결과 전용 G핸디(오버라이드) 수정 ─────────────────── */
   const [handicapEditId, setHandicapEditId] = useState(null);
 
   const openHandicapEditor = (ev) => {
-    if (!ev || (ev.template !== 'group-battle' && ev.template !== 'pick-lineup' && ev.template !== 'hidden-event')) return;
+    if (!ev || (ev.template !== 'group-battle' && ev.template !== 'pick-lineup' && ev.template !== 'hidden-event' && ev.template !== 'rank-score-game')) return;
     setHandicapEditId(ev.id);
     setOpenMenuId(null);
     setMenuUpId(null);
@@ -2447,15 +2447,18 @@ if (editForm?.template === 'group-battle') {
                                 </button>
                               )}
                               {ev?.template === 'rank-score-game' && (
-                                <button
-                                  onClick={() => {
-                                    setRankScoreMonitorId(ev.id);
-                                    setOpenMenuId(null);
-                                    setMenuUpId(null);
-                                  }}
-                                >
-                                  히든/배정/취소
-                                </button>
+                                <>
+                                  <button onClick={() => openHandicapEditor(ev)}>G핸디 수정</button>
+                                  <button
+                                    onClick={() => {
+                                      setRankScoreMonitorId(ev.id);
+                                      setOpenMenuId(null);
+                                      setMenuUpId(null);
+                                    }}
+                                  >
+                                    히든/배정/취소
+                                  </button>
+                                </>
                               )}
                               {ev?.template === 'hidden-event' && (
                                 <>
@@ -3026,7 +3029,7 @@ if (editForm?.template === 'group-battle') {
         <div style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 120px)' }} />
 
         {/* 이벤트 결과 전용 G핸디 수정(다른 페이지와 연동 금지) */}
-        {(handicapEditEvent?.template === 'group-battle' || handicapEditEvent?.template === 'pick-lineup' || handicapEditEvent?.template === 'hidden-event') && (
+        {(handicapEditEvent?.template === 'group-battle' || handicapEditEvent?.template === 'pick-lineup' || handicapEditEvent?.template === 'hidden-event' || handicapEditEvent?.template === 'rank-score-game') && (
           <GroupBattleHandicapEditor
             eventDef={handicapEditEvent}
             participants={participants}
