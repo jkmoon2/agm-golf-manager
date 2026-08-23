@@ -35,12 +35,23 @@ export default function GroupBattleHandicapEditor({
 
   const title = eventDef?.title || '이벤트';
   const template = String(eventDef?.template || '');
+  const rankSource = String(eventDef?.params?.rankingSource || 'result');
   const metric = template === 'pick-lineup'
     ? '결과'
-    : (template === 'hidden-event' ? '히든 계산' : (eventDef?.params?.metric === 'score' ? '점수' : '결과'));
+    : (template === 'hidden-event'
+        ? '히든 계산'
+        : (template === 'rank-score-game'
+            ? (rankSource === 'scoreAdjusted'
+                ? '보정치 적용(점수+보정치)'
+                : (rankSource === 'adjusted'
+                    ? '보정치 반영(점수-G핸디+보정치)'
+                    : (rankSource === 'manual' ? '참가자 직접 순위' : '결과(점수-G핸디)')))
+            : (eventDef?.params?.metric === 'score' ? '점수' : '결과')));
   const eventTypeLabel = template === 'hidden-event'
     ? '히든 이벤트'
-    : (template === 'pick-lineup' ? '개인/조 선택 대결 이벤트' : '그룹대결 이벤트');
+    : (template === 'pick-lineup'
+        ? '개인/조 선택 대결 이벤트'
+        : (template === 'rank-score-game' ? '대회 순위 점수 게임' : '그룹대결 이벤트'));
 
   const roomLabel = (p) => {
     const r = Number(p?.room);
@@ -125,6 +136,9 @@ export default function GroupBattleHandicapEditor({
 
         <div style={{ marginTop: 10, fontSize: 12, color:'#666', lineHeight: 1.4 }}>
           * 여기서 수정한 G핸디는 <b>이 {eventTypeLabel} 결과</b>에만 반영됩니다.
+          {template === 'rank-score-game' && (rankSource === 'scoreAdjusted' || rankSource === 'manual') && (
+            <><br />* 현재 개인 순위 산출값은 G핸디를 사용하지 않는 기준입니다.</>
+          )}
         </div>
 
         <div style={listWrap}>

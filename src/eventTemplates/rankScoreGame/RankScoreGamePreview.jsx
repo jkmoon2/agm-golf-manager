@@ -39,6 +39,7 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
               <div style={detailStyle}>
                 점수 {fmt(row.score)} · G{fmt(row.handicap)} · 결과 {fmt(row.resultValue)}
                 {params.rankingSource === 'adjusted' ? ` · 보정 ${fmt(row.adjustment)} · 보정결과 ${fmt(row.adjustedValue)}` : ''}
+                {params.rankingSource === 'scoreAdjusted' ? ` · 보정 ${fmt(row.adjustment)} · 보정적용 ${fmt(row.scoreAdjustedValue)}` : ''}
                 {params.rankingSource === 'manual' ? ` · 입력순위 ${fmt(row.manualValue)}` : ''}
                 {' '}· 산정순위 {row.rank || '-'} · 환산 {fmt(row.convertedScore)} · 순위점수 {fmt(row.rankScore)}
               </div>
@@ -78,7 +79,8 @@ function calcText(value) {
 
 function sourceText(value) {
   if (value === 'manual') return '참가자 직접 순위';
-  if (value === 'adjusted') return '보정치 순위';
+  if (value === 'adjusted') return '보정치 반영 순위';
+  if (value === 'scoreAdjusted') return '보정치 적용 순위';
   return '결과값 순위';
 }
 

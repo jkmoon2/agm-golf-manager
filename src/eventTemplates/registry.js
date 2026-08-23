@@ -188,6 +188,7 @@ export const TEMPLATE_REGISTRY = [
       gameType: 'room',
       winnerOrder: 'desc',
       adjustments: {},
+      handicapOverrides: {},
       pairGroups: { A: [1, 2], B: [3, 4] },
       selfPickSide: 'A',
       directExcludeSameGroupTargets: true,

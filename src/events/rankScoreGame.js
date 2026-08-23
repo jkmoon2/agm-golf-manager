@@ -1,17 +1,18 @@
 // /src/events/rankScoreGame.js
 // 순위 점수 게임 계산 유틸
-// - 기준: 결과값(점수-G핸디), 보정 결과값(점수-G핸디+보정치), 참가자 직접 순위 입력
+// - 기준: 결과값(점수-G핸디), 보정 결과값(점수-G핸디+보정치), 보정치 적용값(점수+보정치), 참가자 직접 순위 입력
 // - 동점: 동일 순위, 다음 순위는 건너뛰는 competition rank 방식(1/2/2/4/5)
 // - 점수: 환산점수(N-rank+1) 또는 순위점수(rank)
 // - 게임: 참가자 선택형 포볼 2인팀 / 방대방
 
 export function defaultRankScoreGameParams() {
   return {
-    rankingSource: 'result',       // result | adjusted | manual
+    rankingSource: 'result',       // result | adjusted | scoreAdjusted | manual
     pointType: 'converted',        // converted | rank
     gameType: 'room',              // randomPair | directPair | room
     winnerOrder: 'desc',           // desc(높은 점수 승) | asc(낮은 점수 승)
     adjustments: {},               // { [participantId]: number }
+    handicapOverrides: {},          // 이벤트 결과 전용 G핸디 { [participantId]: number }
     pairGroups: { A: [1, 2], B: [3, 4] }, // 포볼게임 A/B 그룹 조합
     selfPickSide: 'A',             // randomPair: 포볼선택 버튼 사용 그룹(A|B)
     directExcludeSameGroupTargets: false, // directPair: 본인 조 제외 여부
@@ -64,7 +65,7 @@ export function getRankScorePairGroupLabel(pairGroups, side) {
 export function normalizeRankScoreGameParams(raw) {
   const base = defaultRankScoreGameParams();
   const src = (raw && typeof raw === 'object') ? raw : {};
-  const rankingSource = ['result', 'adjusted', 'manual'].includes(src.rankingSource) ? src.rankingSource : base.rankingSource;
+  const rankingSource = ['result', 'adjusted', 'scoreAdjusted', 'manual'].includes(src.rankingSource) ? src.rankingSource : base.rankingSource;
   const pointType = ['converted', 'rank'].includes(src.pointType) ? src.pointType : base.pointType;
   const gameType = ['randomPair', 'directPair', 'room'].includes(src.gameType) ? src.gameType : base.gameType;
   const winnerOrder = ['asc', 'desc'].includes(src.winnerOrder) ? src.winnerOrder : base.winnerOrder;
@@ -82,6 +83,13 @@ export function normalizeRankScoreGameParams(raw) {
       if (Number.isFinite(n) && n !== 0) adjustments[String(key)] = n;
     });
   }
+  const handicapOverrides = {};
+  if (src.handicapOverrides && typeof src.handicapOverrides === 'object') {
+    Object.entries(src.handicapOverrides).forEach(([key, value]) => {
+      const n = Number(value);
+      if (Number.isFinite(n)) handicapOverrides[String(key)] = n;
+    });
+  }
   return {
     ...base,
     ...src,
@@ -90,6 +98,7 @@ export function normalizeRankScoreGameParams(raw) {
     gameType,
     winnerOrder,
     adjustments,
+    handicapOverrides,
     pairGroups,
     calculationMethod,
     roomRankSlots,
@@ -187,16 +196,21 @@ function buildPersonRows(eventDef, participants = [], inputsSlot = {}, roomNames
   const baseRows = safeParticipants.map((p, idx) => {
     const pid = String(p?.id ?? idx);
     const score = asNum(p?.score);
-    const handicap = asNum(p?.handicap);
+    const baseHandicap = asNum(p?.handicap);
+    const overrideHandicap = asNum(params.handicapOverrides?.[pid]);
     const safeScore = Number.isFinite(score) ? score : 0;
-    const safeHandicap = Number.isFinite(handicap) ? handicap : 0;
+    const safeBaseHandicap = Number.isFinite(baseHandicap) ? baseHandicap : 0;
+    const safeHandicap = Number.isFinite(overrideHandicap) ? overrideHandicap : safeBaseHandicap;
     const resultValue = safeScore - safeHandicap;
     const adjustment = Number(params.adjustments?.[pid] ?? 0) || 0;
     const adjustedValue = resultValue + adjustment;
+    const scoreAdjustedValue = safeScore + adjustment;
     const manualValue = getManualRankValue(inputsSlot, pid);
     const rankValue = params.rankingSource === 'manual'
       ? manualValue
-      : (params.rankingSource === 'adjusted' ? adjustedValue : resultValue);
+      : (params.rankingSource === 'adjusted'
+          ? adjustedValue
+          : (params.rankingSource === 'scoreAdjusted' ? scoreAdjustedValue : resultValue));
     const roomNo = Number(p?.room ?? p?.roomNumber ?? 0) || 0;
 
     return {
@@ -207,9 +221,12 @@ function buildPersonRows(eventDef, participants = [], inputsSlot = {}, roomNames
       roomLabel: fmtRoomLabel(roomNo, roomNames),
       score: safeScore,
       handicap: safeHandicap,
+      baseHandicap: safeBaseHandicap,
+      handicapOverridden: Number.isFinite(overrideHandicap),
       resultValue,
       adjustment,
       adjustedValue,
+      scoreAdjustedValue,
       manualValue,
       rankValue,
       rank: null,
@@ -447,7 +464,11 @@ export function getRankScoreGroupSide(participant, params = null) {
 
 export function getRankScoreGameMetaText(params) {
   const safe = normalizeRankScoreGameParams(params);
-  const sourceText = safe.rankingSource === 'manual' ? '참가자 직접 순위' : safe.rankingSource === 'adjusted' ? '보정 결과값' : '결과값';
+  const sourceText = safe.rankingSource === 'manual'
+    ? '참가자 직접 순위'
+    : (safe.rankingSource === 'adjusted'
+        ? '보정 결과값'
+        : (safe.rankingSource === 'scoreAdjusted' ? '보정치 적용값' : '결과값'));
   const pointText = safe.pointType === 'rank' ? '순위점수' : '환산점수';
   const gameText = safe.gameType === 'randomPair'
     ? `포볼 게임(${getRankScorePairGroupLabel(safe.pairGroups, 'A')} ↔ ${getRankScorePairGroupLabel(safe.pairGroups, 'B')})`

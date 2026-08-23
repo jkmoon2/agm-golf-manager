@@ -149,6 +149,7 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
           <select value={safe.rankingSource} onChange={(e) => emit({ rankingSource: e.target.value })} style={selectStyle}>
             <option value="result">결과값 순위(점수-G핸디)</option>
             <option value="adjusted">보정치 반영 순위(점수-G핸디+보정치)</option>
+            <option value="scoreAdjusted">보정치 적용 순위(점수+보정치)</option>
             <option value="manual">참가자 직접 순위 입력</option>
           </select>
         </label>
@@ -268,10 +269,13 @@ export default function RankScoreGameEditor({ participants = [], value, onChange
         </div>
       )}
 
-      {safe.rankingSource === 'adjusted' && (
+      {(safe.rankingSource === 'adjusted' || safe.rankingSource === 'scoreAdjusted') && (
         <div style={adjustBoxStyle}>
           <div style={titleSubStyle}>참가자별 보정치</div>
-          <div style={smallTextStyle}>+/- 값을 입력합니다. 비워두면 0으로 계산합니다.</div>
+          <div style={smallTextStyle}>
+            +/- 값을 입력합니다. 비워두면 0으로 계산합니다.
+            {safe.rankingSource === 'scoreAdjusted' ? ' 계산식: 점수+보정치(G핸디 미적용).' : ''}
+          </div>
           <div style={adjustListStyle}>
             {adjustmentRows.map((row) => (
               <div key={row.id} style={adjustRowStyle}>
