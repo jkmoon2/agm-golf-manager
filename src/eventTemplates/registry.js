@@ -195,6 +195,7 @@ export const TEMPLATE_REGISTRY = [
       calculationMethod: 'add',
       roomRankSlots: [1, 4],
       randomSeed: '',
+      revealed: false,
     },
     help: '',
     ui: {

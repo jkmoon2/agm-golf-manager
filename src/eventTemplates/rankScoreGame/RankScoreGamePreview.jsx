@@ -20,10 +20,6 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
 
   return (
     <div style={wrapStyle}>
-      <div style={summaryStyle}>
-        기준: {sourceText(params.rankingSource)} · 점수: {params.pointType === 'rank' ? '순위점수' : '환산점수'} · 계산: {calcText(params.calculationMethod)}{params.gameType === 'room' && params.calculationMethod === 'add' ? `(${params.roomAddTarget === 'slots' ? '기준순위 2명' : '방인원 전체'})` : ''} · 정렬: {params.winnerOrder === 'asc' ? '오름' : '내림'}
-      </div>
-
       {tab === 'person' && (
         <ol style={listStyle}>
           {rows.map((row) => (
@@ -70,20 +66,6 @@ export default function RankScoreGamePreview({ eventDef, participants = [], inpu
   );
 }
 
-function calcText(value) {
-  if (value === 'subtract') return '빼기';
-  if (value === 'multiply') return '곱하기';
-  if (value === 'divide') return '나누기';
-  return '더하기';
-}
-
-function sourceText(value) {
-  if (value === 'manual') return '참가자 직접 순위';
-  if (value === 'adjusted') return '보정치 반영 순위';
-  if (value === 'scoreAdjusted') return '보정치 적용 순위';
-  return '결과값 순위';
-}
-
 function fmt(value) {
   if (value === '' || value == null) return '-';
   const n = Number(value);
@@ -93,7 +75,6 @@ function fmt(value) {
 }
 
 const wrapStyle = { marginTop: 4 };
-const summaryStyle = { fontSize: 12, color: '#667085', marginBottom: 8, lineHeight: 1.45 };
 const emptyStyle = { color: '#999', fontSize: 13 };
 const listStyle = { listStyle: 'none', padding: 0, margin: 0 };
 const itemStyle = { border: '1px solid #eef2f7', borderRadius: 12, padding: 10, marginBottom: 8, background: '#fff' };

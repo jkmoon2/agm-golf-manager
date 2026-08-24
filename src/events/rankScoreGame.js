@@ -21,7 +21,7 @@ export function defaultRankScoreGameParams() {
     roomAddTarget: 'all',          // add일 때 all(방 전체) | slots(기준순위 2명)
     randomSeed: '',
     // 관리자 '히든/배정/취소' 메뉴에서 포볼팀 공개 여부 제어
-    revealed: true,
+    revealed: false,
     selectionLocked: false,
   };
 }
@@ -106,7 +106,7 @@ export function normalizeRankScoreGameParams(raw) {
     randomSeed: String(src.randomSeed || ''),
     selfPickSide: src.selfPickSide === 'B' ? 'B' : (src.selfPickSide === 'both' ? 'both' : base.selfPickSide),
     directExcludeSameGroupTargets: src.directExcludeSameGroupTargets === true || src.excludeSameGroupTargets === true ? true : false,
-    revealed: src.revealed === false || src.hidden === true ? false : true,
+    revealed: src.hidden === true ? false : (src.revealed === true ? true : base.revealed),
     selectionLocked: src.selectionLocked === true || src.locked === true ? true : false,
   };
 }

@@ -854,33 +854,45 @@ const events = useMemo(
             // 방/팀별 순위와 각 참가자의 순위점수·산정순위를 함께 표시합니다.
             if (ev?.template === 'rank-score-game') {
               const rankCfg = normalizeRankScoreGameParams(ev?.params);
-              const rankTarget = ev?.target || getRankScoreGameTarget(rankCfg);
-              const rankViewTab = rankTarget === 'team' ? 'team' : (rankTarget === 'room' ? 'room' : 'person');
 
-              // 기존 동작 유지: 포볼 배정 결과가 비공개인 경우에는 기존 표 렌더링으로 내려가
-              // 팀명/점수를 마스킹합니다. 방대방/개인 결과는 기존처럼 표시합니다.
-              if (!(rankViewTab === 'team' && rankCfg.revealed === false)) {
-                const rankUnit = rankViewTab === 'team' ? '팀' : (rankViewTab === 'room' ? '방' : '개인');
+              // 관리자 '히든/배정/취소'의 공개/비공개 상태를 Player STEP6에도 동일하게 적용합니다.
+              if (rankCfg.revealed === false) {
                 return (
                   <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
                     <div className={baseCss.cardHeader}>
                       <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>
-                        {title} <span style={{ color:'#9aa3ad', fontWeight:400, marginLeft:6 }}>· {rankUnit} 순위</span>
+                        {title} <span style={{ color:'#9aa3ad', fontWeight:400, marginLeft:6 }}>· 비공개</span>
                       </div>
                     </div>
-                    <div style={{ padding: '10px 12px 14px' }}>
-                      <RankScoreGamePreview
-                        eventDef={ev}
-                        participants={participants}
-                        inputs={inputsByEvent?.[ev.id] || {}}
-                        roomNames={effectiveRoomNames}
-                        roomCount={effectiveRoomCount}
-                        viewTab={rankViewTab}
-                      />
+                    <div style={{ padding: '18px 12px', textAlign: 'center', color: '#98a2b3', fontWeight: 700 }}>
+                      운영자가 공개하면 결과가 표시됩니다.
                     </div>
                   </div>
                 );
               }
+
+              const rankTarget = ev?.target || getRankScoreGameTarget(rankCfg);
+              const rankViewTab = rankTarget === 'team' ? 'team' : (rankTarget === 'room' ? 'room' : 'person');
+              const rankUnit = rankViewTab === 'team' ? '팀' : (rankViewTab === 'room' ? '방' : '개인');
+              return (
+                <div key={ev.id} className={`${baseCss.card} ${tCss.eventCard}`}>
+                  <div className={baseCss.cardHeader}>
+                    <div className={`${baseCss.cardTitle} ${tCss.eventTitle}`}>
+                      {title} <span style={{ color:'#9aa3ad', fontWeight:400, marginLeft:6 }}>· {rankUnit} 순위</span>
+                    </div>
+                  </div>
+                  <div style={{ padding: '10px 12px 14px' }}>
+                    <RankScoreGamePreview
+                      eventDef={ev}
+                      participants={participants}
+                      inputs={inputsByEvent?.[ev.id] || {}}
+                      roomNames={effectiveRoomNames}
+                      roomCount={effectiveRoomCount}
+                      viewTab={rankViewTab}
+                    />
+                  </div>
+                </div>
+              );
             }
 
             const unit  = res.kind === 'person' ? '개인' : (res.kind === 'team' ? '팀' : (res.kind === 'group' ? '그룹' : (res.kind === 'jo' ? '조' : '방')));
