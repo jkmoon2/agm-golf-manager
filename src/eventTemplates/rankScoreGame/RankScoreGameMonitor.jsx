@@ -15,6 +15,8 @@ const btnStyle = { border: '1px solid #d7dfec', borderRadius: 10, background: '#
 const primaryStyle = { ...btnStyle, borderColor: '#2563eb', background: '#eaf2ff', color: '#1d4ed8' };
 const dangerStyle = { ...btnStyle, borderColor: '#fecdd3', background: '#fff1f2', color: '#be123c' };
 const selectStyle = { width: '100%', minWidth: 0, height: 34, border: '1px solid #d7dfec', borderRadius: 9, padding: '0 8px', fontSize: 13, background: '#fff', boxSizing: 'border-box' };
+const detailThStyle = { borderBottom: '1px solid #e5eaf2', borderRight: '1px solid #eef2f7', padding: '7px 6px', textAlign: 'center', color: '#344054', fontWeight: 900, whiteSpace: 'nowrap' };
+const detailTdStyle = { borderBottom: '1px solid #eef2f7', borderRight: '1px solid #eef2f7', padding: '7px 6px', textAlign: 'center', color: '#344054', whiteSpace: 'nowrap' };
 
 function getName(p) {
   return String(p?.nickname || p?.name || '-');
@@ -84,6 +86,27 @@ export default function RankScoreGameMonitor({
 
   const resultData = useMemo(() => computeRankScoreGame(eventDef, safeParticipants, inputsByEvent, { roomNames, roomCount }), [eventDef, safeParticipants, inputsByEvent, roomNames, roomCount]);
   const summaryRows = Array.isArray(resultData?.teamRows) ? resultData.teamRows : [];
+  const personDetailRows = useMemo(() => {
+    const rows = Array.isArray(resultData?.personBaseRows) ? [...resultData.personBaseRows] : [];
+    return rows.sort((a, b) => {
+      const ar = Number(a?.rank);
+      const br = Number(b?.rank);
+      const aValid = Number.isFinite(ar);
+      const bValid = Number.isFinite(br);
+      if (aValid && bValid && ar !== br) return ar - br;
+      if (aValid !== bValid) return aValid ? -1 : 1;
+      const av = Number(a?.rankValue);
+      const bv = Number(b?.rankValue);
+      if (Number.isFinite(av) && Number.isFinite(bv) && av !== bv) return av - bv;
+      return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+    });
+  }, [resultData]);
+
+  const detailFormulaText = cfg.rankingSource === 'adjusted'
+    ? '결과 = 점수 - G핸디 + 보정치'
+    : (cfg.rankingSource === 'scoreAdjusted'
+        ? '결과 = 점수 + 보정치'
+        : (cfg.rankingSource === 'manual' ? '결과 = 참가자 입력 순위' : '결과 = 점수 - G핸디'));
 
   const candidatesById = useMemo(() => {
     const map = {};
@@ -181,6 +204,55 @@ export default function RankScoreGameMonitor({
           ))}
         </div>
       )}
+    </div>
+  );
+
+  const renderPersonDetails = () => (
+    <div style={{ border: '1px solid #e5eaf2', background: '#fbfdff', borderRadius: 14, padding: 12, marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', marginBottom: 4 }}>
+        <div style={{ fontSize: 14, fontWeight: 950, color: '#16376c' }}>참가자 순위 상세</div>
+        <div style={{ fontSize: 11, color: '#667085', textAlign: 'right' }}>{detailFormulaText}</div>
+      </div>
+      <div style={{ fontSize: 11, color: '#98a2b3', marginBottom: 8 }}>순위 기준으로 정렬 · 이벤트 결과에만 적용되는 현재 값을 표시합니다.</div>
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #e5eaf2', borderRadius: 10, background: '#fff' }}>
+        <table style={{ width: '100%', minWidth: 430, borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 12 }}>
+          <colgroup>
+            <col style={{ width: 50 }} />
+            <col style={{ width: 135 }} />
+            <col style={{ width: 72 }} />
+            <col style={{ width: 76 }} />
+            <col style={{ width: 82 }} />
+          </colgroup>
+          <thead>
+            <tr style={{ background: '#f8fafc' }}>
+              <th style={detailThStyle}>순위</th>
+              <th style={detailThStyle}>참가자</th>
+              <th style={detailThStyle}>점수</th>
+              <th style={detailThStyle}>보정치</th>
+              <th style={detailThStyle}>결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!personDetailRows.length && (
+              <tr>
+                <td colSpan={5} style={{ ...detailTdStyle, color: '#999' }}>표시할 참가자가 없습니다.</td>
+              </tr>
+            )}
+            {personDetailRows.map((row) => (
+              <tr key={`rank-score-detail-${row?.id}`}>
+                <td style={{ ...detailTdStyle, color: '#1d4ed8', fontWeight: 950 }}>{row?.rank || '-'}</td>
+                <td style={{ ...detailTdStyle, textAlign: 'left', paddingLeft: 10 }}>
+                  <div style={{ fontWeight: 900, color: '#16243f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row?.name || '-'}</div>
+                  <div style={{ marginTop: 1, color: '#98a2b3', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row?.roomLabel || '-'}</div>
+                </td>
+                <td style={detailTdStyle}>{fmt(row?.score)}</td>
+                <td style={{ ...detailTdStyle, color: Number(row?.adjustment || 0) === 0 ? '#667085' : '#1d4ed8', fontWeight: 850 }}>{fmt(row?.adjustment)}</td>
+                <td style={{ ...detailTdStyle, color: '#be123c', fontWeight: 950 }}>{fmt(row?.rankValue)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 
@@ -286,6 +358,8 @@ export default function RankScoreGameMonitor({
         </div>
 
         {showUnregistered && renderUnregistered()}
+
+        {renderPersonDetails()}
 
         {!isRandomPairGame && !isDirectPairGame ? (
           <div style={{ color: '#667085', fontSize: 13, border: '1px dashed #d7dfec', borderRadius: 12, padding: 12 }}>
