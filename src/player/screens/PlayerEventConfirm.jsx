@@ -563,13 +563,15 @@ const events = useMemo(
           }));
           return { kind: 'room', metricLabel, rows, isHiddenFourball: true };
         }
-        const rows = [...(data.teamRows || [])].sort((a, b) => {
-          const diff = rankOrder === 'desc' ? (Number(b?.value || 0) - Number(a?.value || 0)) : (Number(a?.value || 0) - Number(b?.value || 0));
-          if (diff) return diff;
-          return String(a?.label || '').localeCompare(String(b?.label || ''), 'ko');
-        }).map((row, i) => ({
+        // ★ hidden-fourball rank sync
+        // 운영자 '히든/배정/방식'에서 사용하는 computeHiddenEvent()의 teamRows를
+        // 그대로 사용한다. teamRows는 이미
+        // ① 최종결과값(value) → ② G핸디 합계 낮은 팀 → ③ 팀명 순으로 정렬되고,
+        // 같은 최종결과값 + 같은 G합은 공동순위(row.rank)까지 계산되어 있다.
+        // Player STEP6에서 다시 정렬/순위계산하지 않아 운영자 기준과 100% 동일하게 유지한다.
+        const rows = (data.teamRows || []).map((row, i) => ({
           key: row.key || String(i),
-          rank: i + 1,
+          rank: row.rank || i + 1,
           label: row.label,
           value: row.eventScore ?? row.value,
           bigValue: row.value,
