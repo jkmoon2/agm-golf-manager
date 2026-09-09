@@ -20,7 +20,6 @@ export default function SkillRoomEditor({
   roomCount = 0,
   roomNames = [],
   roomCapacities = [],
-  mode = 'stroke',
 }) {
   const normalizedInitial = useMemo(
     () => normalizeSkillRoomConfig(value, { roomCount, participants }),
@@ -191,16 +190,11 @@ export default function SkillRoomEditor({
     }
   };
 
-  const isFourball = mode === 'fourball' || mode === 'agm';
-
   return createPortal(
     <div style={overlayStyle} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
       <div style={modalStyle} onMouseDown={(e) => e.stopPropagation()}>
         <div style={headerStyle}>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 900, color: '#0b2d59' }}>특별방 설정</div>
-            <div style={{ marginTop: 3, fontSize: 11, color: '#667085' }}>선택 참가자는 자동/수동/Player 배정 시 지정 방으로 반강제됩니다.</div>
-          </div>
+          <div style={{ fontSize: 17, fontWeight: 900, color: '#0b2d59' }}>특별방 설정</div>
           <button type="button" onClick={onClose} style={closeBtnStyle}>닫기</button>
         </div>
 
@@ -213,12 +207,6 @@ export default function SkillRoomEditor({
             />
             <b>특별방 사용</b>
           </label>
-
-          <div style={noticeStyle}>
-            일반 참가자는 특별방으로 자동 배정되지 않습니다. Admin의 기존 <b>강제</b> 배정은 예외로 그대로 사용할 수 있습니다.
-            {isFourball ? <><br />포볼에서도 특별방 참가자는 <b>파트너를 구성하지 않고 스트로크 방식</b>으로 해당 방에 배정됩니다.</> : null}
-            <br /><b>0조는 특별방 표시용 선택값</b>입니다. 조 기준 이벤트에 참여해야 한다면 0조 사용 여부를 확인해주세요.
-          </div>
 
           {(draft.groups || []).map((g, gi) => {
             const cap = roomCapacity(g.roomNo);
@@ -317,11 +305,10 @@ const modalStyle = {
   border: '1px solid #dbe3ef', boxShadow: '0 18px 48px rgba(15,23,42,0.2)', overflow: 'hidden',
   display: 'flex', flexDirection: 'column',
 };
-const headerStyle = { padding: '14px 14px 10px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, borderBottom: '1px solid #e7edf5' };
-const closeBtnStyle = { border: '1px solid #cfd8e6', borderRadius: 10, background: '#fff', padding: '8px 10px', fontWeight: 800, color: '#344054' };
+const headerStyle = { padding: '14px 14px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottom: '1px solid #e7edf5' };
+const closeBtnStyle = { flex: '0 0 auto', minWidth: 58, height: 34, border: '1px solid #cfd8e6', borderRadius: 10, background: '#fff', padding: '0 12px', fontWeight: 800, color: '#344054', whiteSpace: 'nowrap', lineHeight: 1 };
 const bodyStyle = { padding: 12, overflowY: 'auto', WebkitOverflowScrolling: 'touch' };
 const toggleLineStyle = { display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, fontSize: 14, color: '#172b4d' };
-const noticeStyle = { padding: '9px 10px', borderRadius: 10, border: '1px dashed #cbd5e1', background: '#f8fafc', fontSize: 11, lineHeight: 1.45, color: '#667085', marginBottom: 10 };
 const groupCardStyle = { border: '1px solid #dce5f1', borderRadius: 12, padding: 10, marginBottom: 10, background: '#fff' };
 const groupHeaderStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, color: '#0b2d59', marginBottom: 8 };
 const removeBtnStyle = { border: '1px solid #fecaca', background: '#fff5f5', color: '#dc2626', borderRadius: 8, padding: '5px 8px', fontSize: 11, fontWeight: 800 };

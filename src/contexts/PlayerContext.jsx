@@ -24,7 +24,7 @@ import {
   transactionalAssignFourball,
 } from '../player/logic/assignFourball';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
-import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
+import { clearPlayerRoom, readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
 import { diagMerge, diagPush, diagSummaryParticipant } from '../utils/agmDiag';
 import { startPlayerPresence } from '../utils/playerPresence';
 import {
@@ -215,6 +215,15 @@ function resolveParticipantForDirectEntry(partArr = [], eventId = '', seed = nul
 function resolveCurrentRoomForDirectEntry(participant, eventId = '') {
   const direct = Number(participant?.room ?? participant?.roomNumber ?? NaN);
   if (Number.isFinite(direct) && direct >= 1) return direct;
+
+  // 서버에서 확인된 참가자 객체에 room/roomNumber 필드가 있고 값이 비어 있으면
+  // Admin 초기화/배정취소가 최신 상태이므로 과거 로컬 방 캐시로 되돌아가지 않습니다.
+  const hasAuthoritativeRoomField = !!participant && (
+    Object.prototype.hasOwnProperty.call(participant, 'room') ||
+    Object.prototype.hasOwnProperty.call(participant, 'roomNumber')
+  );
+  if (hasAuthoritativeRoomField) return null;
+
   const cachedParticipant = readPlayerParticipant(eventId, true);
   const cachedRoomFromParticipant = Number(cachedParticipant?.room ?? cachedParticipant?.roomNumber ?? NaN);
   if (Number.isFinite(cachedRoomFromParticipant) && cachedRoomFromParticipant >= 1) return cachedRoomFromParticipant;
@@ -673,6 +682,15 @@ if (!idCached) {
     try { writePlayerParticipant(eventId, participant); } catch {}
     if (Number.isFinite(Number(currentRoom)) && Number(currentRoom) >= 1) {
       try { writePlayerRoom(eventId, currentRoom); } catch {}
+    } else {
+      // Admin 초기화/강제취소로 최신 participant.room이 null이 되면 이전 방 캐시도 즉시 제거
+      const hasAuthoritativeRoomField = (
+        Object.prototype.hasOwnProperty.call(participant, 'room') ||
+        Object.prototype.hasOwnProperty.call(participant, 'roomNumber')
+      );
+      if (hasAuthoritativeRoomField) {
+        try { clearPlayerRoom(eventId); } catch {}
+      }
     }
   }, [eventId, participant, participantReady, currentRoom]);
 

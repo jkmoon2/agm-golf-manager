@@ -132,6 +132,21 @@ export function writePlayerRoom(eventId, room) {
   safeSet(sessionStorage, playerStorageKey(eventId, 'room'), String(v));
 }
 
+// Admin 초기화/배정취소가 실시간 반영되었을 때 이전 방 캐시가 다시 살아나지 않도록 정리
+export function clearPlayerRoom(eventId) {
+  safeSet(localStorage, playerStorageKey(eventId, 'room'), '');
+  safeSet(sessionStorage, playerStorageKey(eventId, 'room'), '');
+  safeSet(localStorage, playerStorageKey(eventId, 'currentRoom'), '');
+  safeSet(sessionStorage, playerStorageKey(eventId, 'currentRoom'), '');
+
+  // 구버전/호환 캐시도 함께 제거
+  safeSet(localStorage, `player.currentRoom:${eventId}`, '');
+  safeSet(sessionStorage, `player.currentRoom:${eventId}`, '');
+  safeSet(localStorage, 'player.currentRoom', '');
+  safeSet(localStorage, 'player.home.room', '');
+  safeSet(localStorage, 'player.auth.room', '');
+}
+
 export function readPlayerTicket(eventId, allowLegacyFallback = false) {
   const parse = (raw) => { try { return raw ? JSON.parse(raw) : null; } catch { return null; } };
   const scoped = parse(safeGet(localStorage, playerStorageKey(eventId || 'global', 'ticket')));

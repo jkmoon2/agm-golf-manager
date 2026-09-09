@@ -82,6 +82,7 @@ export default function Step5() {
   const syncInFlightRef = useRef(false);
   const queuedSyncRef = useRef(null);
   const lastSyncedSigRef = useRef('');
+  const forceNextSyncRef = useRef(false);
 
   // ✅ [ADD] onNext에서 항상 최신 participants로 저장하기 위한 스냅샷 ref
   const latestParticipantsRef = useRef(participants);
@@ -188,7 +189,8 @@ export default function Step5() {
         // 간단 시그니처(중복 동기화 스킵용)
         let sig = '';
         try { sig = JSON.stringify(sanitized); } catch { sig = ''; }
-        if (sig && sig === lastSyncedSigRef.current) return;
+        const forceSync = !!forceNextSyncRef.current;
+        if (!forceSync && sig && sig === lastSyncedSigRef.current) return;
 
         syncInFlightRef.current = true;
 
@@ -226,6 +228,7 @@ export default function Step5() {
         }
 
         if (sig) lastSyncedSigRef.current = sig;
+        if (forceSync) forceNextSyncRef.current = false;
       } catch (e) {
         console.warn('[Step5] syncParticipantsToEvent error:', e);
       } finally {
@@ -726,7 +729,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     if (nextSnapshot) syncParticipantsToEvent(nextSnapshot);
   };
 
-  const onReset = () => {
+  const onReset = async () => {
     if (!window.confirm('초기화를 실행하시겠습니까?\n확인을 누르면 방배정과 점수가 초기화됩니다.')) return;
 
     let nextSnapshot = null;
@@ -736,11 +739,15 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     activeScoreIdRef.current = null;
     setScoreDraftMap({});
 
-    // ✅ [ADD] 진행중/대기중 동기화도 같이 끊어줘야 점수 되살아남(깜빡임) 방지
+    // ✅ 대기 중인 구 요청은 버리되, 이미 진행 중인 Firestore 저장은 강제로 false 처리하지 않습니다.
+    // 진행 중 저장 뒤에 이번 reset을 마지막 요청으로 큐잉해야 오래된 배정이 reset 뒤에 다시 살아나지 않습니다.
     queuedSyncRef.current = null;
-    syncInFlightRef.current = false;
 
     // ✅ reset 1번에 “점수+방배정+버튼상태” 모두 초기화
+    // Player가 외부 탭/기기에서 방배정을 바꿨을 수 있으므로 이번 reset 저장만 중복 스킵하지 않고,
+    // rooms 미러도 반드시 다시 동기화합니다. 평상시 중복저장 방지 로직은 그대로 유지합니다.
+    forceNextSyncRef.current = true;
+    lastRoomSyncSigRef.current = '';
     setLoadingId(null);
 
     setParticipants((ps) => {
@@ -755,15 +762,21 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     closeForceMenu();
     // ✅ SSOT: 점수 초기화는 scores 서브컬렉션에서 수행(1회 reset로 통일)
     if (typeof resetScores === 'function') {
-      resetScores().catch((e) => console.warn('[Step5] resetScores failed:', e));
+      try {
+        await resetScores();
+      } catch (e) {
+        console.warn('[Step5] resetScores failed:', e);
+      }
     } else if (typeof upsertScores === 'function' && Array.isArray(nextSnapshot)) {
       // fallback (컨텍스트에 resetScores가 없을 때)
-      upsertScores(nextSnapshot.map((p) => ({ id: p.id, score: null }))).catch((e) =>
-        console.warn('[Step5] upsertScores(reset fallback) failed:', e)
-      );
+      try {
+        await upsertScores(nextSnapshot.map((p) => ({ id: p.id, score: null })));
+      } catch (e) {
+        console.warn('[Step5] upsertScores(reset fallback) failed:', e);
+      }
     }
 
-    if (nextSnapshot) syncParticipantsToEvent(nextSnapshot);
+    if (nextSnapshot) await syncParticipantsToEvent(nextSnapshot);
   };
 
   const onNext = async () => {

@@ -21,7 +21,7 @@ import * as XLSX from "xlsx";
 import { getAuth } from "firebase/auth";
 import { isRulesAdminUser } from "../utils/adminAuth";
 import SkillRoomEditor from "../components/SkillRoomEditor";
-import { getSkillRoomParticipantIdSet, getSkillRoomSummary, normalizeSkillRoomConfig } from "../utils/skillRoom";
+import { getSkillRoomParticipantIdSet, normalizeSkillRoomConfig } from "../utils/skillRoom";
 
 
 // 엑셀/STEP4 조 값 정규화
@@ -113,11 +113,6 @@ export default function Step4() {
     () => normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants }),
     [eventData?.skillRoomConfig, roomCount, participants]
   );
-  const skillRoomSummary = useMemo(
-    () => getSkillRoomSummary(skillRoomConfig, { roomCount, participants }),
-    [skillRoomConfig, roomCount, participants]
-  );
-
   const saveSkillRoomConfig = async (nextConfig) => {
     if (!eventId || typeof updateEventImmediate !== 'function') return;
     const normalized = normalizeSkillRoomConfig(nextConfig, { roomCount, participants });
@@ -775,40 +770,21 @@ export default function Step4() {
             <div className={styles.rightCol}>
               <div className={styles.rightBox}>
                 <span className={styles.totalInline}>총 슬롯: {roomCount * 4}명</span>
-                <ToggleBtn checked={savePII} onChange={setSavePII} />
+                <div className={styles.headerActionRow}>
+                  <ToggleBtn checked={savePII} onChange={setSavePII} />
+                  <button
+                    type="button"
+                    onClick={() => setSkillRoomEditorOpen(true)}
+                    className={styles.pmToggleBtn}
+                    title="특별방 설정"
+                  >
+                    <span>특별방</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
-      </div>
-
-      {/* 특별방 설정: 기존 참가자 표 레이아웃은 유지하고 상단에 작은 설정 바만 추가 */}
-      <div
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          margin: '0 0 8px', padding: '6px 8px', border: '1px solid #ccc',
-          background: '#fff', boxSizing: 'border-box'
-        }}
-      >
-        <div style={{ minWidth: 0, flex: '1 1 auto' }}>
-          <div style={{ fontSize: 14, fontWeight: 900, color: '#0b2d59', lineHeight: 1.2 }}>특별방</div>
-          <div style={{ marginTop: 2, fontSize: 10, color: '#667085', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {skillRoomSummary.enabled
-              ? `${skillRoomSummary.roomCount}개 방 · ${skillRoomSummary.participantCount}명 반강제`
-              : '미사용 · 기존 배정 방식 유지'}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setSkillRoomEditorOpen(true)}
-          style={{
-            flex: '0 0 auto', minWidth: 56, height: 32, padding: '0 12px',
-            border: '1px solid #ccc', background: '#fff', color: '#172b4d',
-            fontSize: 13, fontWeight: 700, cursor: 'pointer'
-          }}
-        >
-          설정
-        </button>
       </div>
 
       {/* 표 헤더 */}
@@ -841,10 +817,9 @@ export default function Step4() {
                 value={p.group}
                 onChange={(e) => changeGroup(i, Number(e.target.value))}
               >
-                <option value={0}>0조</option>
-                {Array.from({ length: roomCount }, (_, idx) => idx + 1).map((n) => (
+                {Array.from({ length: 5 }, (_, n) => n).map((n) => (
                   <option key={n} value={n}>
-                    {n}조
+                    {n}
                   </option>
                 ))}
               </select>

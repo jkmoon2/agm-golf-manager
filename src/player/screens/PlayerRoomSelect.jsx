@@ -8,7 +8,7 @@ import styles from './PlayerRoomSelect.module.css';
 
 import { doc, onSnapshot, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db, auth, waitForAuthRestored, ensureAnonAfterCode } from '../../firebase';
-import { writePlayerRoom } from '../utils/playerState';
+import { clearPlayerRoom, writePlayerRoom } from '../utils/playerState';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 import { getSkillRoomGroupForParticipant, normalizeSkillRoomConfig } from '../../utils/skillRoom';
@@ -234,7 +234,8 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     viewParticipant?.id,
     { roomCount: effectiveRoomNames.length, participants: effectiveParticipants }
   ), [specialRoomConfig, viewParticipant?.id, effectiveRoomNames.length, effectiveParticipants]);
-  const specialFourballStroke = variant === 'fourball' && (!!specialRoomGroup || Number(viewParticipant?.group) === 0);
+  const isSpecialRoomParticipant = !!specialRoomGroup;
+  const specialFourballStroke = variant === 'fourball' && (isSpecialRoomParticipant || Number(viewParticipant?.group) === 0);
   const actsLikeStroke = variant === 'stroke' || specialFourballStroke;
 
   // ✅ URL의 eventId가 PlayerContext의 eventId보다 우선 (이전 대회 localStorage 잔상/오배정 방지)
@@ -283,9 +284,24 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const [optimisticRoom, setOptimisticRoom] = useState(null);
 
   useEffect(() => {
-    const r = Number(getAssignmentRoom(viewParticipant));
-    if (Number.isFinite(r) && r >= 1) setOptimisticRoom(r);
-  }, [viewParticipant?.room, viewParticipant?.roomNumber]);
+    const rawRoom = getAssignmentRoom(viewParticipant);
+    const r = Number(rawRoom);
+    if (Number.isFinite(r) && r >= 1) {
+      setOptimisticRoom(r);
+      return;
+    }
+
+    // Admin 초기화/강제취소가 실시간으로 내려오면 STEP1의 낙관적 방 상태와 로컬 캐시도 해제
+    const hasAuthoritativeRoomField = !!viewParticipant && (
+      Object.prototype.hasOwnProperty.call(viewParticipant, 'room') ||
+      Object.prototype.hasOwnProperty.call(viewParticipant, 'roomNumber')
+    );
+    if (hasAuthoritativeRoomField) {
+      setOptimisticRoom(null);
+      const eid = playerEventId || ctxEventId || urlEventId;
+      try { if (eid) clearPlayerRoom(eid); } catch {}
+    }
+  }, [viewParticipant?.room, viewParticipant?.roomNumber, viewParticipant?.id, playerEventId, ctxEventId, urlEventId]);
   const isValidRoom = (v) => {
     const n = Number(v);
     return Number.isFinite(n) && n >= 1;
@@ -395,15 +411,22 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     if (!actsLikeStroke) return true;
     if (!roomNo) return false;
     const myGroup = Number(viewParticipant?.group) || 0;
-    const sameGroupExists = !specialFourballStroke && effectiveParticipants.some(
+
+    // 특별방 참가자는 같은 0조끼리 한 방에 모이는 것이 정상이라 같은 조 중복 제한을 적용하지 않습니다.
+    const sameGroupExists = !isSpecialRoomParticipant && effectiveParticipants.some(
       (p) =>
         Number(getAssignmentRoom(p)) === Number(roomNo) &&
         Number(p.group) === myGroup &&
         String(p.id) !== String(viewParticipant?.id)
     );
-    const currentCount = effectiveParticipants.filter((p) => Number(getAssignmentRoom(p)) === Number(roomNo)).length;
-    const isFull = currentCount >= roomCapacityAt(effectiveRoomCapacities, roomNo);
-    return !sameGroupExists && !isFull;
+
+    // 배정 트랜잭션 성공 직후 스냅샷에 본인이 이미 포함될 수 있으므로 '본인을 제외한 인원'으로 정원을 검증합니다.
+    // 기존 currentCount >= cap 방식은 마지막 자리(또는 특별방 2번째 이후)를 정상 배정하고도 만실로 오판할 수 있습니다.
+    const otherCount = effectiveParticipants.filter(
+      (p) => Number(getAssignmentRoom(p)) === Number(roomNo) && String(p.id) !== String(viewParticipant?.id)
+    ).length;
+    const isFullForMe = otherCount >= roomCapacityAt(effectiveRoomCapacities, roomNo);
+    return !sameGroupExists && !isFullForMe;
   };
 
   const isValidFourballRoom = (roomNo) => {
