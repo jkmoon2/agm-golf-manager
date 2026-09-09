@@ -6,6 +6,7 @@ import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCo
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
+import { getSkillRoomGroupForParticipant, normalizeSkillRoomConfig } from '../utils/skillRoom';
 
 const LONG_PRESS_MS = 600;
 
@@ -36,6 +37,7 @@ export default function Step7() {
 
   const {
     eventId,
+    eventData,
     updateEventImmediate,
     upsertScores,
     persistRoomsFromParticipants,
@@ -178,10 +180,27 @@ export default function Step7() {
       ? Number(p.group) % 2 === 1
       : p.id % 2 === 1;
 
-  // 완료 여부: 방 + 파트너 둘 다 할당되어 있으면 완료로 간주
+  // 특별방은 포볼에서도 스트로크 방식으로 처리(파트너 불필요)
+  const specialRoomConfig = normalizeSkillRoomConfig(eventData?.skillRoomConfig, {
+    roomCount: Array.isArray(roomNames) ? roomNames.length : 0,
+    participants,
+  });
+  const getSpecialRoomGroup = (p) => p
+    ? getSkillRoomGroupForParticipant(specialRoomConfig, p.id, {
+        roomCount: Array.isArray(roomNames) ? roomNames.length : 0,
+        participants,
+      })
+    : null;
+  const isSpecialRoomParticipant = (p) => !!getSpecialRoomGroup(p);
+
+  // 완료 여부
+  // - 일반 포볼: 방 + 파트너
+  // - 특별방: 방만 있으면 완료
   const isCompleted = (id) => {
     const me = participants.find((p) => p.id === id);
-    return !!(me && getRoomValue(me) != null && getPartnerValue(me) != null);
+    if (!me || getRoomValue(me) == null) return false;
+    if (isSpecialRoomParticipant(me)) return true;
+    return getPartnerValue(me) != null;
   };
 
   const findParticipant = (id) =>
@@ -633,19 +652,24 @@ export default function Step7() {
         })();
 
       const roomLabel = roomNo ? getRoomLabel(roomNo) : '';
+      const specialRoomOnly = res?.specialRoomOnly === true || isSpecialRoomParticipant(me);
 
       if (roomNo) {
-        // 1차 알림: 방 배정
-        alert(
-          `${nickname}님은 ${roomLabel}에 배정되었습니다.\n` +
-            `팀원을 선택하려면 확인을 눌러주세요.`
-        );
+        if (specialRoomOnly) {
+          alert(`${nickname}님은 ${roomLabel}에 특별방 배정되었습니다.`);
+        } else {
+          // 1차 알림: 방 배정
+          alert(
+            `${nickname}님은 ${roomLabel}에 배정되었습니다.\n` +
+              `팀원을 선택하려면 확인을 눌러주세요.`
+          );
 
-        // 2차 알림: 팀원 정보
-        if (partnerNickname) {
-          setTimeout(() => {
-            alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
-          }, 700);
+          // 2차 알림: 팀원 정보
+          if (partnerNickname) {
+            setTimeout(() => {
+              alert(`${nickname}님은 ${partnerNickname}님을 선택했습니다.`);
+            }, 700);
+          }
         }
       } else {
         alert(`${nickname}님 수동 배정이 완료되었습니다.`);
@@ -671,13 +695,34 @@ export default function Step7() {
     const me = findParticipant(id);
     onCancel(id);
     if (me) {
-      alert(`${me.nickname}님과 팀원이 해제되었습니다.`);
+      alert(isSpecialRoomParticipant(me)
+        ? `${me.nickname}님의 특별방 배정이 해제되었습니다.`
+        : `${me.nickname}님과 팀원이 해제되었습니다.`);
     }
   };
 
-  // ✅ 강제 메뉴: 포볼 팀(1조+파트너)을 방 단위로 이동/맞교체하거나 배정취소
+  // ✅ 강제 메뉴: 일반 포볼은 팀 단위, 특별방은 개인 단위 이동/배정취소
   const handleForceAssign = async (id, roomNo) => {
     setForceSelectingId(null);
+    const me = findParticipant(id);
+
+    // 특별방 참가자는 포볼 팀이 없으므로 STEP5와 같은 개인 강제 이동/취소
+    if (me && isSpecialRoomParticipant(me)) {
+      if (roomNo == null) {
+        await applyBulkChanges([{ id: me.id, fields: { ...makeRoomFields(null), ...makePartnerFields(null) } }]);
+        alert(`${me.nickname}님의 특별방 배정이 취소되었습니다.`);
+        return;
+      }
+      const current = getRoomMembers(roomNo).filter((p) => String(p.id) !== String(me.id)).length;
+      if (current >= getRoomCapacity(roomNo)) {
+        alert('선택한 방 정원이 가득 찼습니다.');
+        return;
+      }
+      await applyBulkChanges([{ id: me.id, fields: { ...makeRoomFields(roomNo), ...makePartnerFields(null) } }]);
+      alert(`${me.nickname}님은 ${getRoomLabel(roomNo)}에 강제 배정되었습니다.`);
+      return;
+    }
+
     if (roomNo == null) {
       handleCancelClick(id);
       return;
@@ -799,7 +844,9 @@ export default function Step7() {
       <div className={styles.participantTable}>
         {participants.map((p) => {
           const group1 = isGroup1(p);
-          const done = group1 && isCompleted(p.id);
+          const specialRoom = isSpecialRoomParticipant(p);
+          const actionable = group1 || specialRoom;
+          const done = actionable && isCompleted(p.id);
 
           const scoreValue = getDisplayScore(p.id, p.score);
 
@@ -809,7 +856,7 @@ export default function Step7() {
               <div className={`${styles.cell} ${styles.group}`}>
                 <input
                   type="text"
-                  value={group1 ? '1조' : '2조'}
+                  value={Number(p?.group) === 0 ? '0조' : (group1 ? '1조' : '2조')}
                   disabled
                 />
               </div>
@@ -846,11 +893,11 @@ export default function Step7() {
 
               {/* 수동 배정 (1조만 표시) */}
               <div className={`${styles.cell} ${styles.manual}`}>
-                {group1 ? (
+                {actionable ? (
                   <button
                     className={styles.smallBtn}
                     onClick={() => handleManualButtonClick(p.id)}
-                    onPointerDown={() => startManualLongPress(p.id)}
+                    onPointerDown={() => { if (group1) startManualLongPress(p.id); }}
                     onPointerUp={() => cancelManualLongPress(p.id)}
                     onPointerLeave={() => cancelManualLongPress(p.id)}
                     onTouchEnd={() => cancelManualLongPress(p.id)}
@@ -879,7 +926,7 @@ export default function Step7() {
 
               {/* 강제 (1조 팀 단위 이동/맞교체/배정취소) */}
               <div className={`${styles.cell} ${styles.force}`} style={{ position: 'relative' }}>
-                {group1 ? (
+                {actionable ? (
                   <>
                     <button
                       className={styles.smallBtn}

@@ -9,6 +9,7 @@ import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection'
 import { EventContext } from '../contexts/EventContext';
 import { StepContext } from '../flows/StepFlow';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
+import { getSkillReservedRoomSet, getSkillRoomParticipantIdSet, getSkillRoomRankExcludedRoomSet } from '../utils/skillRoom';
 // [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
 //         Step8에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
 
@@ -659,17 +660,41 @@ export default function Step8() {
     });
   }, [orderedByRoom, visibleMetrics.banddang, resultExcludedIds]);
 
+  const skillRoomRankExcludedRooms = useMemo(
+    () => getSkillRoomRankExcludedRoomSet(
+      eventData?.skillRoomConfig,
+      { roomCount, participants: sourceParticipants }
+    ),
+    [eventData?.skillRoomConfig, roomCount, sourceParticipants]
+  );
+
+  // 특별방은 포볼에서도 스트로크 방식이므로 팀결과표에서는 포볼 팀을 구성하지 않습니다.
+  const specialRoomNumbers = useMemo(
+    () => getSkillReservedRoomSet(
+      eventData?.skillRoomConfig,
+      { roomCount, participants: sourceParticipants }
+    ),
+    [eventData?.skillRoomConfig, roomCount, sourceParticipants]
+  );
+  const specialParticipantIds = useMemo(
+    () => getSkillRoomParticipantIdSet(
+      eventData?.skillRoomConfig,
+      { roomCount, participants: sourceParticipants }
+    ),
+    [eventData?.skillRoomConfig, roomCount, sourceParticipants]
+  );
+
   // ── 9) 방별 최종결과 순위 계산 ─────────────────────────────
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
-      .filter(x => !isHiddenIdx(x.idx) && resultByRoom[x.idx]?.includedCount > 0) // ← 1-based 세트로 판정
+      .filter(x => !isHiddenIdx(x.idx) && !skillRoomRankExcludedRooms.has(x.idx + 1) && resultByRoom[x.idx]?.includedCount > 0) // ← 1-based 세트로 판정
       .sort((a, b) => {
         if (a.tot !== b.tot) return a.tot - b.tot;
         return a.hd - b.hd;
       });
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
-  }, [resultByRoom, hiddenRooms]);
+  }, [resultByRoom, hiddenRooms, skillRoomRankExcludedRooms]);
 
   const resultRoomOrder = useMemo(() => {
     const list = Array.from({ length: roomCount }, (_, i) => i).filter(i => !isHiddenIdx(i));
@@ -688,10 +713,13 @@ export default function Step8() {
     const isRankEligibleMember = (p) => !!(
       p?.id != null &&
       String(p?.nickname || '').trim() &&
-      !resultExcludedIds.has(String(p.id))
+      !resultExcludedIds.has(String(p.id)) &&
+      !specialParticipantIds.has(String(p.id))
     );
 
     orderedByRoom.forEach((roomArr, roomIdx) => {
+      // 특별방은 포볼 팀 미구성 → 팀결과표 대상에서 제외
+      if (specialRoomNumbers.has(roomIdx + 1)) return;
       const [p0, p1, p2, p3] = roomArr;
       // 팀 A
       const rA0 = (p0?.score || 0) - (p0?.handicap || 0);
@@ -727,7 +755,7 @@ export default function Step8() {
       });
     });
     return list;
-  }, [orderedByRoom, headers, resultExcludedIds]);
+  }, [orderedByRoom, headers, resultExcludedIds, specialRoomNumbers, specialParticipantIds]);
 
   // ── 11) 모든 팀 중 “낮은 합산점수=1등” 순위 계산 ─────────────────
   const teamRankMap = useMemo(() => {
@@ -1291,7 +1319,7 @@ export default function Step8() {
               <tbody>
                 {teamSortMode === 'room'
                   ? Array.from({ length: roomCount }).map((_, roomIdx) => {
-                      if (isHiddenIdx(roomIdx)) return null;
+                      if (isHiddenIdx(roomIdx) || specialRoomNumbers.has(roomIdx + 1)) return null;
 
                       const idxA = teamsByRoom.findIndex(
                         t => t.roomIdx === roomIdx && t.teamIdx === 0
@@ -1463,7 +1491,7 @@ export default function Step8() {
             <tbody>
               {teamSortMode === 'room'
                 ? Array.from({ length: roomCount }).map((_, roomIdx) => {
-                    if (isHiddenIdx(roomIdx)) return null;
+                    if (isHiddenIdx(roomIdx) || specialRoomNumbers.has(roomIdx + 1)) return null;
 
                     const idxA = teamsByRoom.findIndex(
                       t => t.roomIdx === roomIdx && t.teamIdx === 0

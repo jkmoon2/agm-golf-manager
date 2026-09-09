@@ -7,6 +7,14 @@ import { serverTimestamp } from 'firebase/firestore';
 
 import { EventContext } from '../contexts/EventContext';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
+import {
+  filterSkillFourballPartnerPool,
+  getSkillAllowedRoomNumbers,
+  getSkillReservedRoomSet,
+  getSkillRoomGroupForParticipant,
+  getSkillRoomParticipantIdSet,
+  normalizeSkillRoomConfig,
+} from '../utils/skillRoom';
 import StepPage from '../components/StepPage';
 import Step1    from '../screens/Step1';
 import Step2    from '../screens/Step2';
@@ -21,6 +29,13 @@ export const StepContext = createContext();
 
 // ✅ Step5 등에서 import 해서 쓰는 훅 (기존 구조 유지)
 export const useStep = () => useContext(StepContext);
+
+// 엑셀 조 값: 빈칸은 기존 1조, 명시적인 0은 특별방 표시용 0조로 유지
+const parseRosterGroup = (raw) => {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return 1;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 1;
+};
 
 /**
  * ✅ [ADD] deep stable stringify (중첩 객체/배열 포함)
@@ -659,7 +674,7 @@ export default function StepFlow() {
     const rows  = XLSX.utils.sheet_to_json(sheet, { header: 1 }).slice(1);
     const data  = rows.map((row, idx) => ({
       id:       idx,
-      group:    Number(row[0]) || 1,
+      group:    parseRosterGroup(row[0]),
       nickname: String(row[1] || '').trim(),
       handicap: Number(row[2]) || 0,
       authCode: String(row[3] || '').trim(),
@@ -820,6 +835,31 @@ export default function StepFlow() {
       return { roomNo: null, nickname: "", partnerNickname: null };
     }
 
+    const cfgNow = normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants: ps });
+    const specialGroup = getSkillRoomGroupForParticipant(cfgNow, target.id, { roomCount, participants: ps });
+
+    // ✅ 특별방은 AGM 포볼에서도 스트로크 방식: 방만 배정하고 파트너를 만들지 않음
+    if (specialGroup) {
+      roomNo = getAssignmentRoom(target);
+      if (roomNo == null) {
+        const targetRoom = Number(specialGroup.roomNo);
+        const currentCount = ps.filter((p) => Number(getAssignmentRoom(p)) === targetRoom).length;
+        if (currentCount < getRoomCapacity(targetRoom)) roomNo = targetRoom;
+      }
+
+      if (roomNo == null) {
+        return { roomNo: null, nickname: target?.nickname || '', partnerNickname: null, specialRoomOnly: true };
+      }
+
+      ps = ps.map((p) => p.id === id
+        ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null }
+        : p
+      );
+      setParticipants(ps);
+      await save({ participants: ps });
+      return { roomNo, nickname: target?.nickname || '', partnerNickname: null, specialRoomOnly: true };
+    }
+
     if (!isGroup1(target)) {
       return {
         roomNo: getAssignmentRoom(target),
@@ -830,6 +870,9 @@ export default function StepFlow() {
       };
     }
 
+    const allRooms = Array.from({ length: roomCount }, (_, i) => i + 1);
+    const allowedRooms = getSkillAllowedRoomNumbers(cfgNow, target.id, allRooms, { roomCount, participants: ps });
+
     roomNo = getAssignmentRoom(target);
     if (roomNo == null) {
       // 같은 그룹1이 한 방에 최대 floor(capacity / 2)명
@@ -837,7 +880,7 @@ export default function StepFlow() {
         .filter(p => isGroup1(p) && getAssignmentRoom(p) != null)
         .reduce((acc, p) => { const rn = getAssignmentRoom(p);
           acc[rn] = (acc[rn]||0) + 1; return acc; }, {});
-      const candidates = Array.from({ length: roomCount }, (_, i) => i+1)
+      const candidates = allowedRooms
         .filter(r => {
           const pairSlots = Math.floor(getRoomCapacity(r) / 2);
           return pairSlots > 0 && (countByRoom[r] || 0) < pairSlots;
@@ -848,8 +891,9 @@ export default function StepFlow() {
     // 우선 대상의 방만 확정(파트너는 아직)
     ps = ps.map(p => p.id === id ? { ...p, room: roomNo, roomNumber: roomNo } : p);
 
-    // 파트너는 그룹2 중 미배정자에서 선택
-    const pool2 = ps.filter(p => isGroup2(p) && getAssignmentRoom(p) == null);
+    // 파트너는 그룹2 중 미배정자에서 선택 (특별방 참가자는 pool에서 제외)
+    const pool2Base = ps.filter(p => isGroup2(p) && getAssignmentRoom(p) == null);
+    const pool2 = filterSkillFourballPartnerPool(cfgNow, target.id, pool2Base, { roomCount, participants: ps });
     partner = pool2.length ? pool2[Math.floor(Math.random() * pool2.length)] : null;
 
     if (partner && roomNo != null) {
@@ -893,35 +937,101 @@ export default function StepFlow() {
   const handleAgmAutoAssign = async () => {
     let ps = [...participants];
     const roomsArr = Array.from({ length: roomCount }, (_, i) => i+1);
+    const cfgNow = normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants: ps });
 
-    // 1) 그룹1(리더) 채우기: 방당 최대 floor(capacity / 2)명
-    roomsArr.forEach(roomNo => {
-      const g1InRoom = ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === Number(roomNo)).length;
-      const pairSlots = Math.floor(getRoomCapacity(roomNo) / 2);
-      const need = Math.max(0, pairSlots - g1InRoom);
-      if (need <= 0) return;
+    if (!cfgNow.enabled || !cfgNow.groups.length) {
+      // ── 기존 로직 100% 유지 ──
+      // 1) 그룹1(리더) 채우기: 방당 최대 floor(capacity / 2)명
+      roomsArr.forEach(roomNo => {
+        const g1InRoom = ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === Number(roomNo)).length;
+        const pairSlots = Math.floor(getRoomCapacity(roomNo) / 2);
+        const need = Math.max(0, pairSlots - g1InRoom);
+        if (need <= 0) return;
 
-      const freeG1 = ps.filter(p => isGroup1(p) && getAssignmentRoom(p) == null);
-      for (let i = 0; i < need && freeG1.length; i += 1) {
-        const pick = freeG1.splice(Math.floor(Math.random() * freeG1.length), 1)[0];
-        ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null } : p);
-      }
-    });
+        const freeG1 = ps.filter(p => isGroup1(p) && getAssignmentRoom(p) == null);
+        for (let i = 0; i < need && freeG1.length; i += 1) {
+          const pick = freeG1.splice(Math.floor(Math.random() * freeG1.length), 1)[0];
+          ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null } : p);
+        }
+      });
 
-    // 2) 그룹1마다 그룹2 파트너 채우기(미배정 그룹2에서)
-    roomsArr.forEach(roomNo => {
-      const freeG1 = ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === Number(roomNo) && getAssignmentPartnerId(p) == null);
-      freeG1.forEach(p1 => {
-        const freeG2 = ps.filter(p => isGroup2(p) && getAssignmentRoom(p) == null);
-        if (!freeG2.length) return;
-        const pick = freeG2[Math.floor(Math.random() * freeG2.length)];
-        ps = ps.map(p => {
-          if (p.id === p1.id)   return { ...p, partner: pick.id, teammateId: pick.id, teammate: pick.id };
-          if (p.id === pick.id) return { ...p, room: roomNo, roomNumber: roomNo, partner: p1.id, teammateId: p1.id, teammate: p1.id };
-          return p;
+      // 2) 그룹1마다 그룹2 파트너 채우기(미배정 그룹2에서)
+      roomsArr.forEach(roomNo => {
+        const freeG1 = ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === Number(roomNo) && getAssignmentPartnerId(p) == null);
+        freeG1.forEach(p1 => {
+          const freeG2 = ps.filter(p => isGroup2(p) && Number(p?.group) !== 0 && getAssignmentRoom(p) == null);
+          if (!freeG2.length) return;
+          const pick = freeG2[Math.floor(Math.random() * freeG2.length)];
+          ps = ps.map(p => {
+            if (p.id === p1.id)   return { ...p, partner: pick.id, teammateId: pick.id, teammate: pick.id };
+            if (p.id === pick.id) return { ...p, room: roomNo, roomNumber: roomNo, partner: p1.id, teammateId: p1.id, teammate: p1.id };
+            return p;
+          });
         });
       });
-    });
+    } else {
+      // ── 특별방 사용 시: 특별방은 포볼 팀을 만들지 않고 스트로크 방식으로 개별 배정 ──
+      const specialIds = getSkillRoomParticipantIdSet(cfgNow, { roomCount, participants: ps });
+      const reservedRooms = getSkillReservedRoomSet(cfgNow, { roomCount, participants: ps });
+
+      // 1) 특별방 대상자는 조/파트너와 무관하게 지정 방으로 개별 배정
+      cfgNow.groups.forEach((specialGroup) => {
+        const roomNo = Number(specialGroup.roomNo);
+        const ids = new Set((specialGroup.participantIds || []).map(String));
+        const freeMembers = ps.filter((p) => ids.has(String(p.id)) && getAssignmentRoom(p) == null);
+        freeMembers.forEach((member) => {
+          const currentCount = ps.filter((p) => Number(getAssignmentRoom(p)) === roomNo).length;
+          if (currentCount >= getRoomCapacity(roomNo)) return;
+          ps = ps.map((p) => p.id === member.id
+            ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null }
+            : p
+          );
+        });
+      });
+
+      // 3) 일반 참가자는 예약 방을 제외하고 기존 방식으로 배정
+      roomsArr.filter((roomNo) => !reservedRooms.has(Number(roomNo))).forEach(roomNo => {
+        const g1InRoom = ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === Number(roomNo)).length;
+        const pairSlots = Math.floor(getRoomCapacity(roomNo) / 2);
+        const need = Math.max(0, pairSlots - g1InRoom);
+        if (need <= 0) return;
+
+        const freeG1 = ps.filter(p =>
+          isGroup1(p) &&
+          getAssignmentRoom(p) == null &&
+          !specialIds.has(String(p.id))
+        );
+        for (let i = 0; i < need && freeG1.length; i += 1) {
+          const pick = freeG1.splice(Math.floor(Math.random() * freeG1.length), 1)[0];
+          ps = ps.map(p => p.id === pick.id ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null } : p);
+        }
+      });
+
+      // 4) 일반 1조 ↔ 일반 2조 파트너 연결
+      roomsArr.filter((roomNo) => !reservedRooms.has(Number(roomNo))).forEach(roomNo => {
+        const freeG1 = ps.filter(p =>
+          isGroup1(p) &&
+          Number(getAssignmentRoom(p)) === Number(roomNo) &&
+          getAssignmentPartnerId(p) == null &&
+          !specialIds.has(String(p.id))
+        );
+        freeG1.forEach(p1 => {
+          const freeG2 = ps.filter(p =>
+            isGroup2(p) &&
+            Number(p?.group) !== 0 &&
+            getAssignmentRoom(p) == null &&
+            !specialIds.has(String(p.id))
+          );
+          if (!freeG2.length) return;
+          const pick = freeG2[Math.floor(Math.random() * freeG2.length)];
+          ps = ps.map(p => {
+            if (p.id === p1.id)   return { ...p, partner: pick.id, teammateId: pick.id, teammate: pick.id };
+            if (p.id === pick.id) return { ...p, room: roomNo, roomNumber: roomNo, partner: p1.id, teammateId: p1.id, teammate: p1.id };
+            return p;
+          });
+        });
+      });
+    }
 
     setParticipants(ps);
     const cleanList = ps.map(p => ({

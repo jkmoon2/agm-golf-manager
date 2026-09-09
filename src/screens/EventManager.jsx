@@ -11,6 +11,7 @@ import { db } from '../firebase';
 import { doc, getDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { broadcastEventSync } from '../utils/crossTabEventSync';
 import { diagMerge, diagPush } from '../utils/agmDiag';
+import { filterSkillRoomEventParticipants } from '../utils/skillRoom';
 import css from './EventManager.module.css';
 import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } from '../eventTemplates/registry';
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
@@ -1136,8 +1137,15 @@ if (editForm?.template === 'group-battle') {
   const aggregate = (arr = []) => arr.map(Number).filter(Number.isFinite).reduce((a, b) => a + b, 0);
 
   const participantsBase = Array.isArray(eventData?.participants) ? eventData.participants : [];
-  const participants = (typeof overlayScoresToParticipants === 'function') ? overlayScoresToParticipants(participantsBase) : participantsBase;
+  const participantsScored = (typeof overlayScoresToParticipants === 'function') ? overlayScoresToParticipants(participantsBase) : participantsBase;
   const roomCount    = Number(eventData?.roomCount || 0);
+  // ★ 실력방 이벤트 미참여 설정은 이벤트 계산/미리보기/모니터에만 적용
+  //   원본 participants 및 일반 결과표에는 영향을 주지 않습니다.
+  const participants = filterSkillRoomEventParticipants(
+    eventData?.skillRoomConfig,
+    participantsScored,
+    { roomCount, participants: participantsScored }
+  );
   const roomNames    = (Array.isArray(eventData?.roomNames) && eventData.roomNames.length)
     ? eventData.roomNames : Array.from({ length: roomCount }, (_, i) => `${i + 1}번방`);
   const inputsAll    = useMemo(() => ((eventData?.eventInputs && typeof eventData.eventInputs === 'object') ? eventData.eventInputs : {}), [eventData?.eventInputs]);

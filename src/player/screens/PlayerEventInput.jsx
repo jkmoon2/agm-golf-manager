@@ -18,6 +18,7 @@ import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreDi
 import { computeHiddenEvent, getHiddenFourballPairsFromPerson, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
+import { filterSkillRoomEventParticipants, isSkillRoomEventParticipant } from '../../utils/skillRoom';
 
 
 function getPlayerTabId(){
@@ -670,15 +671,13 @@ export default function PlayerEventInput(){
 
   useEffect(()=>{ if(eventId && eventId!==ctxId && typeof loadEvent==='function'){ loadEvent(eventId); } },[eventId,ctxId,loadEvent]);
 
-  const participants = useMemo(() => {
+  // ★ 참가자 본인/방 식별은 전체 참가자 기준으로 유지합니다.
+  //   실력방의 '이벤트 미참여' 필터는 본인 식별이 끝난 뒤 이벤트 UI/계산에만 적용합니다.
+  const participantsAll = useMemo(() => {
     const fromEvent = getEffectiveParticipants(effectiveEventData);
     if (Array.isArray(fromEvent) && fromEvent.length) return fromEvent;
     return Array.isArray(ctxParticipants) ? ctxParticipants : [];
   }, [effectiveEventData?.mode, effectiveEventData?.participants, effectiveEventData?.participantsStroke, effectiveEventData?.participantsFourball, ctxParticipants]);
-  const events = useMemo(
-    () => Array.isArray(effectiveEventData?.events) ? effectiveEventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle') : [],
-    [effectiveEventData?.events]
-  );
 
   const roomNames = useMemo(() => {
     if (Array.isArray(effectiveEventData?.roomNames) && effectiveEventData.roomNames.length) {
@@ -692,9 +691,9 @@ export default function PlayerEventInput(){
 
   const allRoomNos = useMemo(() => {
     const s = new Set();
-    participants.forEach(p => { const r = Number(getAssignmentRoom(p)); if (Number.isFinite(r) && r >= 1) s.add(r); });
+    participantsAll.forEach(p => { const r = Number(getAssignmentRoom(p)); if (Number.isFinite(r) && r >= 1) s.add(r); });
     return Array.from(s).sort((a,b)=>a-b);
-  }, [participants]);
+  }, [participantsAll]);
 
   const roomFromCtx = useMemo(() => {
     const cands = [ effectiveEventData?.myRoom, effectiveEventData?.player?.room, effectiveEventData?.auth?.room, effectiveEventData?.currentRoom ];
@@ -702,17 +701,17 @@ export default function PlayerEventInput(){
   }, [effectiveEventData?.myRoom, effectiveEventData?.player?.room, effectiveEventData?.auth?.room, effectiveEventData?.currentRoom]);
 
   const roomFromSelf = useMemo(
-    () => inferRoomFromSelf(participants, effectiveEventData, { participant: ctxParticipant }),
-    [participants, effectiveEventData, ctxParticipant]
+    () => inferRoomFromSelf(participantsAll, effectiveEventData, { participant: ctxParticipant }),
+    [participantsAll, effectiveEventData, ctxParticipant]
   );
 
   const roomFromParticipantCtx = useMemo(() => {
     const pid = String(ctxParticipant?.id ?? ctxParticipant?.uid ?? '').trim();
     const pnick = String(ctxParticipant?.nickname ?? '').trim().toLowerCase();
-    const match = participants.find((p) => (pid && (String(p?.id ?? '') === pid || String(p?.uid ?? '') === pid)) || (pnick && String(p?.nickname || '').trim().toLowerCase() === pnick));
+    const match = participantsAll.find((p) => (pid && (String(p?.id ?? '') === pid || String(p?.uid ?? '') === pid)) || (pnick && String(p?.nickname || '').trim().toLowerCase() === pnick));
     const n = Number(match?.room ?? match?.roomNumber);
     return Number.isFinite(n) && n >= 1 ? n : NaN;
-  }, [ctxParticipant, participants]);
+  }, [ctxParticipant, participantsAll]);
 
   const roomIdx = useMemo(() => {
     const ls = readRoomFromLocal(eventId);
@@ -727,11 +726,31 @@ export default function PlayerEventInput(){
   }, [roomFromParticipantCtx, roomFromCtx, roomFromSelf, eventId, allRoomNos, ctxParticipant]);
 
   const selfParticipant = useMemo(
-    () => inferSelfParticipant(participants, effectiveEventData, roomIdx, eventId || ctxId, { participant: ctxParticipant }),
-    [participants, effectiveEventData, roomIdx, eventId, ctxId, ctxParticipant]
+    () => inferSelfParticipant(participantsAll, effectiveEventData, roomIdx, eventId || ctxId, { participant: ctxParticipant }),
+    [participantsAll, effectiveEventData, roomIdx, eventId, ctxId, ctxParticipant]
   );
   const selfParticipantId = useMemo(() => String(selfParticipant?.id || ''), [selfParticipant]);
   const selfParticipantNickname = useMemo(() => String(selfParticipant?.nickname || '').trim().toLowerCase(), [selfParticipant]);
+
+  // ★ 실력방의 이벤트 참여 옵션: 이벤트 화면/계산 대상에서만 제외
+  const participants = useMemo(() => filterSkillRoomEventParticipants(
+    effectiveEventData?.skillRoomConfig,
+    participantsAll,
+    { roomCount: Number(effectiveEventData?.roomCount || roomNames.length || 0), participants: participantsAll }
+  ), [effectiveEventData?.skillRoomConfig, effectiveEventData?.roomCount, participantsAll, roomNames.length]);
+
+  const selfEventEligible = useMemo(() => isSkillRoomEventParticipant(
+    effectiveEventData?.skillRoomConfig,
+    selfParticipant?.id,
+    { roomCount: Number(effectiveEventData?.roomCount || roomNames.length || 0), participants: participantsAll }
+  ), [effectiveEventData?.skillRoomConfig, effectiveEventData?.roomCount, selfParticipant?.id, participantsAll, roomNames.length]);
+
+  const events = useMemo(
+    () => selfEventEligible && Array.isArray(effectiveEventData?.events)
+      ? effectiveEventData.events.filter(e => e?.enabled !== false && e?.template !== 'group-battle')
+      : [],
+    [effectiveEventData?.events, selfEventEligible]
+  );
 
   useEffect(() => {
     if (Number.isFinite(roomIdx) && roomIdx >= 1 && selfParticipant && Number(getAssignmentRoom(selfParticipant)) === Number(roomIdx)) {
