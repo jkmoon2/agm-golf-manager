@@ -716,72 +716,51 @@ export default function Step4() {
         style={{ marginBottom: 12 }}
       >
         {uploadMethod === "auto" && (
-          <div
-            className={styles.headerGrid}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto",
-              alignItems: "start",
-              columnGap: 12,
-            }}
-          >
-            <div
-              className={styles.leftCol}
-              style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}
-            >
-              {/* 파일 입력: input 라벨은 업로드 후 value 초기화로 "선택된 파일 없음"이 되므로 숨기고, 저장된 파일명을 배지로 표시 */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={handleFileExtended}
-                style={{ display: "none" }}
-              />
-              <button
-                type="button"
-                className={styles.filePickBtn}
-                onClick={() => {
-                  try {
-                    fileInputRef.current && fileInputRef.current.click();
-                  } catch (e) {}
-                }}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.18)",
-                  background: "#fff",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  lineHeight: "14px",
-                  whiteSpace: "nowrap",
-                }}
-                title="엑셀 파일 선택"
-              >
-                파일 선택
-              </button>
-              <span
-                className={styles.filenameBadge}
-                title={selectedFileName || "선택한 파일 없음"}
-              >
-                {selectedFileName || "선택한 파일 없음"}
-              </span>
+          <div className={styles.headerGrid}>
+            {/* 상단 1행: 파일명 영역은 preMembers/특별방 버튼 폭과 완전히 분리 */}
+            <div className={styles.headerTopRow}>
+              <div className={styles.leftCol}>
+                {/* 파일 입력: input 라벨은 업로드 후 value 초기화로 "선택된 파일 없음"이 되므로 숨기고, 저장된 파일명을 배지로 표시 */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleFileExtended}
+                  style={{ display: "none" }}
+                />
+                <button
+                  type="button"
+                  className={styles.filePickBtn}
+                  onClick={() => {
+                    try {
+                      fileInputRef.current && fileInputRef.current.click();
+                    } catch (e) {}
+                  }}
+                  title="엑셀 파일 선택"
+                >
+                  파일 선택
+                </button>
+                <span
+                  className={styles.filenameBadge}
+                  title={selectedFileName || "선택한 파일 없음"}
+                >
+                  {selectedFileName || "선택한 파일 없음"}
+                </span>
+              </div>
+              <span className={styles.totalInline}>총 슬롯: {roomCount * 4}명</span>
             </div>
 
-            <div className={styles.rightCol}>
-              <div className={styles.rightBox}>
-                <span className={styles.totalInline}>총 슬롯: {roomCount * 4}명</span>
-                <div className={styles.headerActionRow}>
-                  <ToggleBtn checked={savePII} onChange={setSavePII} />
-                  <button
-                    type="button"
-                    onClick={() => setSkillRoomEditorOpen(true)}
-                    className={styles.pmToggleBtn}
-                    title="특별방 설정"
-                  >
-                    <span>특별방</span>
-                  </button>
-                </div>
-              </div>
+            {/* 하단 1행: 파일명 폭에 영향을 주지 않고 우측에만 배치 */}
+            <div className={styles.headerActionRow}>
+              <ToggleBtn checked={savePII} onChange={setSavePII} />
+              <button
+                type="button"
+                onClick={() => setSkillRoomEditorOpen(true)}
+                className={`${styles.pmToggleBtn} ${styles.specialRoomBtn}`}
+                title="특별방 설정"
+              >
+                <span>특별방</span>
+              </button>
             </div>
           </div>
         )}

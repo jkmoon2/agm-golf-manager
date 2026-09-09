@@ -7,10 +7,12 @@
 .excelHeader{position:relative;margin:0 0 2px 0;padding:0 8px 4px;background:#f7f7f7;border-bottom:1px solid #ccc;}
 .manual{visibility:hidden;}
 
-.headerGrid{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;width:100%;}
-.leftCol{min-width:0;}
+.headerGrid{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0;}
+.headerTopRow{display:flex;align-items:center;gap:8px;width:100%;min-width:0;}
+.leftCol{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;}
 
-.filenameBadge{display:inline-block;padding:0 12px;height:32px;line-height:32px;border:1px solid #d1d5db;border-radius:10px;background:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;font-size:12px;}
+.filePickBtn{flex:0 0 auto;padding:8px 10px;border-radius:10px;border:1px solid rgba(0,0,0,.18);background:#fff;font-size:13px;font-weight:700;line-height:14px;white-space:nowrap;cursor:pointer;}
+.filenameBadge{display:block;flex:1 1 auto;min-width:0;padding:0 10px;height:32px;line-height:32px;border:1px solid #d1d5db;border-radius:10px;background:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;}
 
 /* 유령요소/배경/체크박스 전부 차단 */
 .excelHeader *::before,
@@ -27,23 +29,47 @@
 .rightCol::before{content:'';position:absolute;inset:0;background:#f7f7f7;z-index:0;border-radius:8px;}
 /* 실제 컨텐츠 박스(콘텐츠는 가장 위) */
 .rightBox{position:relative;z-index:2;display:flex;flex-direction:column;gap:6px;align-items:flex-end;background:#f7f7f7;border-radius:8px;padding:2px 4px;}
-.headerActionRow{display:flex;align-items:center;justify-content:flex-end;gap:6px;}
-.headerActionRow .pmToggleBtn{width:88px;height:28px;justify-content:center;padding:0 8px;box-sizing:border-box;white-space:nowrap;}
+.headerActionRow{display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;}
+.headerActionRow .pmToggleBtn{height:28px;justify-content:center;padding:0 8px;box-sizing:border-box;white-space:nowrap;}
+.headerActionRow .pmToggleBtn:not(.specialRoomBtn){width:88px;}
+.specialRoomBtn{width:68px;}
 
-.totalInline{font-size:12px;color:#333;white-space:nowrap;}
+.totalInline{flex:0 0 auto;font-size:12px;color:#333;white-space:nowrap;}
 .pmToggleBtn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid #d1d5db;border-radius:8px;padding:4px 8px;line-height:1;cursor:pointer;}
 
 .participantRowHeader{display:flex;gap:8px;margin:0 0 8px 0;padding-bottom:6px;border-bottom:1px solid #ccc;background:#f7f7f7;font-weight:600;}
-.participantRowHeader .group{flex:0 0 48px;}
+.participantRowHeader .group{flex:0 0 48px;padding-left:4px;padding-right:4px;}
 .participantRowHeader .nickname{flex:2.5;}
 .participantRowHeader .handicap{flex:0 0 50px;}
 .participantRowHeader .delete{flex:0 0 40px;font-size:12px;}
 
-.groupSelect{width:100%;height:32px;border:1px solid #ccc;border-radius:4px;background:#fff;font-size:14px;text-align:center;text-align-last:center;cursor:pointer;padding:0 16px 0 4px;box-sizing:border-box;}
+/* 조 선택: 기존 박스 톤은 유지하고 브라우저 기본 화살표만 제거합니다.
+   현재 조 숫자(0~4)가 박스 중앙에 보이고, 박스 전체를 누르면 기본 선택 메뉴가 열립니다. */
+.groupSelect{
+  width:100%;
+  height:32px;
+  border:1px solid #ccc;
+  border-radius:4px;
+  background:#fff;
+  color:#111;
+  font-size:14px;
+  font-weight:500;
+  text-align:center;
+  text-align-last:center;
+  cursor:pointer;
+  padding:0 2px;
+  box-sizing:border-box;
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  background-image:none!important;
+}
+.groupSelect::-ms-expand{display:none;}
+.groupSelect option{color:#111;background:#fff;text-align:center;}
 
 .participantTable{flex:1;overflow-y:auto;background:#fff;}
 .participantRow{display:flex;align-items:center;gap:8px;border-bottom:1px solid #eee;height:40px;}
-.participantRow .group{flex:0 0 48px;}
+.participantRow .group{flex:0 0 48px;padding-left:4px;padding-right:4px;}
 .participantRow .nickname{flex:2.5;}
 .participantRow .handicap{flex:0 0 50px;}
 .participantRow .delete{flex:0 0 40px;}
