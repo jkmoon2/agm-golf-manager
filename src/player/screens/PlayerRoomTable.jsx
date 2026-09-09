@@ -10,7 +10,7 @@ import styles from './PlayerRoomTable.module.css';
 import { EventContext } from '../../contexts/EventContext';
 import { PlayerContext } from '../../contexts/PlayerContext';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
-import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../utils/playerState';
+import { clearPlayerRoom, readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../utils/playerState';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 // ★ patch: Firestore 실시간 구독 import는 반드시 최상단
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -53,9 +53,18 @@ function resolveViewParticipant(participants = [], eventId = '', seed = null, au
 }
 
 function resolveRoomNo(eventData, participant, eventId) {
+  // 최신 참가자 스냅샷이 room/roomNumber를 명시적으로 null로 내려주면 Admin 초기화/취소가 권위값입니다.
+  // 이때는 과거 로컬 currentRoom 캐시로 되돌아가지 않습니다.
+  const hasAuthoritativeRoomField = !!participant && (
+    Object.prototype.hasOwnProperty.call(participant, 'room') ||
+    Object.prototype.hasOwnProperty.call(participant, 'roomNumber')
+  );
+  if (hasAuthoritativeRoomField) {
+    const direct = Number(participant?.room ?? participant?.roomNumber ?? NaN);
+    return Number.isFinite(direct) && direct >= 1 ? direct : null;
+  }
+
   const cands = [
-    participant?.room,
-    participant?.roomNumber,
     eventData?.myRoom,
     eventData?.player?.room,
     eventData?.auth?.room,
@@ -310,6 +319,14 @@ export default function PlayerRoomTable() {
     if (Number.isFinite(Number(resolvedCurrentRoom)) && Number(resolvedCurrentRoom) >= 1) {
       try { writePlayerRoom(eid, resolvedCurrentRoom); } catch {}
       try { localStorage.setItem(playerStorageKey(eid, 'currentRoom'), String(resolvedCurrentRoom)); } catch {}
+    } else {
+      const hasAuthoritativeRoomField = !!viewParticipant && (
+        Object.prototype.hasOwnProperty.call(viewParticipant, 'room') ||
+        Object.prototype.hasOwnProperty.call(viewParticipant, 'roomNumber')
+      );
+      if (hasAuthoritativeRoomField) {
+        try { clearPlayerRoom(eid); } catch {}
+      }
     }
   }, [paramId, ctxId, viewParticipant, participantReady, resolvedCurrentRoom]);
 

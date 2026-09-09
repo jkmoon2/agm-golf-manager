@@ -3,9 +3,10 @@
 import React, { useState, createContext, useEffect, useContext, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
-import { serverTimestamp } from 'firebase/firestore';
+import { collection, deleteDoc, getDocs, serverTimestamp } from 'firebase/firestore';
 
 import { EventContext } from '../contexts/EventContext';
+import { db } from '../firebase';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
 import {
   filterSkillFourballPartnerPool,
@@ -1051,6 +1052,21 @@ export default function StepFlow() {
     await save({ participants: cleanList });
   };
 
+  // ✅ [PATCH] 포볼 초기화 시 과거 Player 배정이 남아있는 fourballRooms 미러도 정리
+  // - participants가 방배정 SSOT이지만, 대시보드/일부 보조 화면은 배정이 0명일 때 fourballRooms를 fallback으로 볼 수 있음
+  // - 초기화에서만 정리하며, 일반 배정/특별방 배정 로직에는 영향 없음
+  const clearFourballRoomsMirror = async () => {
+    if (!eventId) return;
+    try {
+      const snap = await getDocs(collection(db, 'events', eventId, 'fourballRooms'));
+      if (!snap.empty) {
+        await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+      }
+    } catch (e) {
+      console.warn('[StepFlow] clearFourballRoomsMirror failed (continue):', e);
+    }
+  };
+
   // ✅ [PATCH] Step8/Step7/Step5 공통: "초기화" 시 디바운스 저장이 늦게 실행되며 옛 점수를 되살리는 문제 방지
   const handleAgmReset = async () => {
     if (resetInFlightRef.current) return;
@@ -1064,10 +1080,24 @@ export default function StepFlow() {
 
     // 2) 최신 participants 기준으로 초기화
     const base = participantsRef.current || participants || [];
-    const ps = base.map(p => ({ ...p, room: null, roomNumber: null, partner: null, score: null }));
+    const ps = base.map(p => ({
+      ...p,
+      room: null,
+      roomNumber: null,
+      partner: null,
+      teammateId: null,
+      teammate: null,
+      score: null,
+    }));
     setParticipants(ps);
 
     try {
+      // 이전 저장 체인이 끝난 뒤 reset을 강제로 1회 기록합니다.
+      // Player가 다른 탭/기기에서 배정한 뒤 reset payload가 과거 저장값과 우연히 같더라도
+      // last-signature 최적화 때문에 reset 자체가 생략되지 않도록 reset 시점에만 시그니처를 비웁니다.
+      try { await (saveChainRef.current || Promise.resolve()); } catch { /* ignore */ }
+      lastSaveSignatureRef.current = '';
+      lastRoomsSignatureRef.current = '';
       await save({ participants: ps });
 
       // 3) (추가 권장) scores 서브컬렉션도 한 번에 null로 반영 → Player/다른 화면 즉시 정합
@@ -1083,6 +1113,12 @@ export default function StepFlow() {
         } catch (e) {
           console.warn('[StepFlow] upsertScores(reset bulk) failed (continue):', e);
         }
+      }
+
+      // 포볼은 Player 배정 시 fourballRooms 하위 컬렉션에도 보조 미러를 남기므로
+      // 초기화 뒤 오래된 팀/방 정보가 fallback으로 되살아나지 않게 함께 정리합니다.
+      if (effectiveMode !== 'stroke') {
+        await clearFourballRoomsMirror();
       }
 
       // reset 이후 id별 score sig도 초기화(선택)
