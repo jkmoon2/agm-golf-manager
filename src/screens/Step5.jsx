@@ -7,6 +7,13 @@ import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (
 import { serverTimestamp } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
 import styles from './Step5.module.css';
 import { getAssignmentRoom } from '../utils/assignmentCompat';
+import {
+  getSkillAllowedRoomNumbers,
+  getSkillRoomGroupForParticipant,
+  getSkillRoomParticipantIdSet,
+  getSkillReservedRoomSet,
+  normalizeSkillRoomConfig,
+} from '../utils/skillRoom';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // (util) Firestore에 저장 가능한 형태로 정리
@@ -55,11 +62,18 @@ export default function Step5() {
   // ✅ SSOT 통일: 점수는 /events/{eventId}/scores/{pid} 에만 저장(양방향 실시간)
   //    - Step5/7/Admin, Player 모두 동일한 scores를 읽고/쓰도록 정리
   //    - participants 배열에는 score를 영구 저장하지 않음(방배정/명단만 유지)
-  const { eventId, updateEventImmediate, persistRoomsFromParticipants, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
+  const { eventId, eventData, updateEventImmediate, persistRoomsFromParticipants, upsertScores, resetScores, scoresMap, scoresReady } = useContext(EventContext) || {};
 
   const rooms = useMemo(
     () => Array.from({ length: Number(roomCount || 0) }, (_, i) => i + 1),
     [roomCount]
+  );
+
+  // [NEW] 특별방: 기존 배정 로직을 유지하되 자동/수동 배정 후보 방만 제한합니다.
+  // Admin의 '강제' 메뉴는 기존대로 예외 처리(반강제)합니다.
+  const skillRoomConfig = useMemo(
+    () => normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants }),
+    [eventData?.skillRoomConfig, roomCount, participants]
   );
 
   const [loadingId, setLoadingId] = useState(null);
@@ -473,7 +487,14 @@ export default function Step5() {
           .filter((p) => p.group === target.group && getRoomValue(p) != null)
           .map((p) => getRoomValue(p));
 
-        const available = rooms.filter((r) => !usedRooms.includes(r) && getRoomCountNow(ps, r) < getRoomCapacity(r));
+        const cfgNow = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants: ps });
+        const skillGroup = getSkillRoomGroupForParticipant(cfgNow, target.id, { roomCount, participants: ps });
+        const allowedRooms = getSkillAllowedRoomNumbers(cfgNow, target.id, rooms, { roomCount, participants: ps });
+        const available = allowedRooms.filter((r) =>
+          // 특별방 대상자는 같은 조 중복 금지 규칙을 풀고 지정 방으로 모일 수 있게 합니다.
+          (skillGroup ? true : !usedRooms.includes(r)) &&
+          getRoomCountNow(ps, r) < getRoomCapacity(r)
+        );
         chosen = available.length ? available[Math.floor(Math.random() * available.length)] : null;
 
         nextList = ps.map((p) => (p.id === id ? withRoomValue(p, chosen) : p));
@@ -648,6 +669,25 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
 
     setParticipants((ps) => {
       let updated = [...ps];
+      const cfgNow = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants: updated });
+
+      // 1) 특별방 대상자부터 지정 방의 남은 정원만큼 반강제 배정
+      if (cfgNow.enabled && cfgNow.groups.length) {
+        cfgNow.groups.forEach((skillGroup) => {
+          const roomNo = Number(skillGroup.roomNo);
+          const idSet = new Set((skillGroup.participantIds || []).map(String));
+          const freeMembers = updated.filter((p) => idSet.has(String(p.id)) && getRoomValue(p) == null);
+          freeMembers.forEach((p) => {
+            if (getRoomCountNow(updated, roomNo) >= getRoomCapacity(roomNo)) return;
+            updated = updated.map((x) => (x.id === p.id ? withRoomValue(x, roomNo) : x));
+          });
+        });
+      }
+
+      // 2) 일반 참가자는 기존 '같은 조 한 방 중복 금지 + 랜덤' 로직 유지
+      //    단, 특별방 대상자/예약 방은 후보에서 제외합니다.
+      const specialIds = getSkillRoomParticipantIdSet(cfgNow, { roomCount, participants: updated });
+      const reservedRooms = getSkillReservedRoomSet(cfgNow, { roomCount, participants: updated });
       const groups = Array.from(new Set(updated.map((p) => p.group)));
 
       groups.forEach((group) => {
@@ -655,10 +695,22 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
           .filter((p) => p.group === group && getRoomValue(p) != null)
           .map((p) => getRoomValue(p));
 
-        const unassigned = updated.filter((p) => p.group === group && getRoomValue(p) == null);
+        const unassigned = updated.filter((p) =>
+          p.group === group &&
+          getRoomValue(p) == null &&
+          !specialIds.has(String(p.id)) &&
+          Number(p.group) !== 0
+        );
 
-        const slots = rooms.filter((r) => !assigned.includes(r) && getRoomCountNow(updated, r) < getRoomCapacity(r));
-        const fallbackSlots = rooms.filter((r) => getRoomCountNow(updated, r) < getRoomCapacity(r));
+        const slots = rooms.filter((r) =>
+          !reservedRooms.has(Number(r)) &&
+          !assigned.includes(r) &&
+          getRoomCountNow(updated, r) < getRoomCapacity(r)
+        );
+        const fallbackSlots = rooms.filter((r) =>
+          !reservedRooms.has(Number(r)) &&
+          getRoomCountNow(updated, r) < getRoomCapacity(r)
+        );
         const shuffled = [...(slots.length ? slots : fallbackSlots)].sort(() => Math.random() - 0.5);
 
         unassigned.forEach((p, idx) => {

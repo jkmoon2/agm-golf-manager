@@ -14,6 +14,7 @@ import { db } from '../../firebase';
 import useEffectiveScoresMap from '../hooks/useEffectiveScoresMap';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
+import { getSkillReservedRoomSet, getSkillRoomParticipantIdSet, getSkillRoomRankExcludedRoomSet } from '../../utils/skillRoom';
 
 /* ★ 게이트 정규화 */
 function tsToMillis(ts){
@@ -290,13 +291,37 @@ export default function PlayerResults() {
     });
   }, [byRoom, visibleMetrics.banddang, mode, resultExcludedIds]);
 
+  const skillRoomRankExcludedRooms = useMemo(
+    () => getSkillRoomRankExcludedRoomSet(
+      sourceEventData?.skillRoomConfig,
+      { roomCount, participants }
+    ),
+    [sourceEventData?.skillRoomConfig, roomCount, participants]
+  );
+
+  // 특별방은 포볼에서도 팀을 구성하지 않으므로 팀결과표에서는 제외
+  const specialRoomNumbers = useMemo(
+    () => getSkillReservedRoomSet(
+      sourceEventData?.skillRoomConfig,
+      { roomCount, participants }
+    ),
+    [sourceEventData?.skillRoomConfig, roomCount, participants]
+  );
+  const specialParticipantIds = useMemo(
+    () => getSkillRoomParticipantIdSet(
+      sourceEventData?.skillRoomConfig,
+      { roomCount, participants }
+    ),
+    [sourceEventData?.skillRoomConfig, roomCount, participants]
+  );
+
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
-      .filter(x => !hiddenRooms.has(x.idx) && resultByRoom[x.idx]?.includedCount > 0)
+      .filter(x => !hiddenRooms.has(x.idx) && !skillRoomRankExcludedRooms.has(x.idx + 1) && resultByRoom[x.idx]?.includedCount > 0)
       .sort((a, b) => a.tot - b.tot || a.hd - b.hd);
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
-  }, [resultByRoom, hiddenRooms]);
+  }, [resultByRoom, hiddenRooms, skillRoomRankExcludedRooms]);
 
   const resultRoomOrder = useMemo(() => {
     const list = Array.from({ length: roomCount }, (_, i) => i).filter(i => !hiddenRooms.has(i));
@@ -313,20 +338,22 @@ export default function PlayerResults() {
     if (mode !== 'fourball') return [];
     const list = [];
     resultByRoom.forEach((room, roomIdx) => {
+      if (specialRoomNumbers.has(roomIdx + 1)) return;
       const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀
       const val = (p) => (Number(p?.score||0) - Number(p?.handicap||0));
       const isRankEligible = (p) => !!(
         p &&
         p.id != null &&
         String(p.nickname || '').trim() &&
-        !p.excluded
+        !p.excluded &&
+        !specialParticipantIds.has(String(p.id))
       );
       const teamA = { roomIdx, roomName: headers[roomIdx], teamIdx: 0, members: [p0, p1], sumResult: val(p0)+val(p1), sumHandicap: Number(p0?.handicap||0)+Number(p1?.handicap||0), isComplete: isRankEligible(p0) && isRankEligible(p1) };
       const teamB = { roomIdx, roomName: headers[roomIdx], teamIdx: 1, members: [p2, p3], sumResult: val(p2)+val(p3), sumHandicap: Number(p2?.handicap||0)+Number(p3?.handicap||0), isComplete: isRankEligible(p2) && isRankEligible(p3) };
       list.push(teamA, teamB);
     });
     return list;
-  }, [resultByRoom, headers, mode]);
+  }, [resultByRoom, headers, mode, specialRoomNumbers, specialParticipantIds]);
 
   const teamRankMap = useMemo(() => {
     const vis = teamsByRoom.filter(t => !hiddenRooms.has(t.roomIdx) && t.isComplete);
@@ -600,7 +627,7 @@ export default function PlayerResults() {
                 <tbody>
                   {teamSortMode === 'room' ? (
                     Array.from({ length: roomCount }).map((_, roomIdx) => {
-                      if (hiddenRooms.has(roomIdx)) return null;
+                      if (hiddenRooms.has(roomIdx) || specialRoomNumbers.has(roomIdx + 1)) return null;
                       const room = resultByRoom[roomIdx];
                       if (!room) return null;
                       const [p0, p1, p2, p3] = room.detail; // 0,1 = A팀 / 2,3 = B팀

@@ -25,6 +25,7 @@ import { computeGroupRoomHoleBattle, defaultGroupRoomHoleBattleParams, normalize
 import { computeBingo, defaultBingoParams, normalizeBingoSelectedHoles, normalizeBingoSpecialZones, normalizeBingoScoreHoleCount } from '../../events/bingo';
 import { computeRankScoreGame, getRankScoreGameTarget, normalizeRankScoreGameParams } from '../../events/rankScoreGame';
 import { computeHiddenEvent, normalizeHiddenEventParams } from '../../events/hiddenEvent';
+import { filterSkillRoomEventParticipants } from '../../utils/skillRoom';
 
 
 function normalizeResultEventParams(template, params, eventDef = null) {
@@ -386,7 +387,7 @@ export default function PlayerEventConfirm() {
     () => getEffectiveParticipants(eventData),
     [eventData?.mode, eventData?.participants, eventData?.participantsStroke, eventData?.participantsFourball]
   );
-  const participants = useMemo(
+  const participantsAll = useMemo(
     () => (typeof overlayScoresToParticipants === 'function' ? overlayScoresToParticipants(participantsBase) : participantsBase),
     [participantsBase, overlayScoresToParticipants]
   );
@@ -405,8 +406,16 @@ const events = useMemo(
     return (Number.isFinite(fromEvent) && fromEvent > 0) ? fromEvent : fromNames;
   }, [roomCount, effectiveRoomNames, eventData?.roomCount]);
 
-  const viewParticipant = useMemo(() => resolveConfirmParticipant(participants, eventId || urlEventId || '', ctxParticipant, authCode), [participants, eventId, urlEventId, ctxParticipant, authCode]);
+  // 본인/방 식별은 전체 참가자 기준으로 유지
+  const viewParticipant = useMemo(() => resolveConfirmParticipant(participantsAll, eventId || urlEventId || '', ctxParticipant, authCode), [participantsAll, eventId, urlEventId, ctxParticipant, authCode]);
   const resolvedCurrentRoom = useMemo(() => resolveConfirmRoom(viewParticipant, eventData, eventId || urlEventId || '', ctxCurrentRoom), [viewParticipant, eventData, eventId, urlEventId, ctxCurrentRoom]);
+
+  // ★ 실력방의 이벤트 미참여는 이벤트 결과 계산에만 적용
+  const participants = useMemo(() => filterSkillRoomEventParticipants(
+    eventData?.skillRoomConfig,
+    participantsAll,
+    { roomCount: effectiveRoomCount, participants: participantsAll }
+  ), [eventData?.skillRoomConfig, effectiveRoomCount, participantsAll]);
 
   useEffect(() => {
     const eid = eventId || urlEventId || '';

@@ -9,6 +9,7 @@ import usePersistRoomTableSelection from '../hooks/usePersistRoomTableSelection'
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import { getAssignmentRoom } from '../utils/assignmentCompat';
+import { getSkillRoomRankExcludedRoomSet } from '../utils/skillRoom';
 // [PATCH] EventContext가 이미 events/{eventId} 문서를 onSnapshot으로 구독하므로
 //         Step6에서 추가 구독(useEventLiveQuery)은 제거(읽기 횟수/중복 리스너 감소)
 
@@ -552,14 +553,22 @@ export default function Step6() {
     });
   }, [byRoom, showHalved, resultExcludedIds]);
 
+  const skillRoomRankExcludedRooms = useMemo(
+    () => getSkillRoomRankExcludedRoomSet(
+      eventData?.skillRoomConfig,
+      { roomCount, participants: sourceParticipants }
+    ),
+    [eventData?.skillRoomConfig, roomCount, sourceParticipants]
+  );
+
   // 등수(낮을수록 1등), 동점 시 합계핸디 낮은 쪽 우선
   const rankMap = useMemo(() => {
     const arr = resultByRoom
       .map((r, i) => ({ idx: i, tot: r.sumResult, hd: r.sumHandicap }))
-      .filter(x => !isHiddenIdx(x.idx) && resultByRoom[x.idx]?.includedCount > 0)
+      .filter(x => !isHiddenIdx(x.idx) && !skillRoomRankExcludedRooms.has(x.idx + 1) && resultByRoom[x.idx]?.includedCount > 0)
       .sort((a, b) => a.tot - b.tot || a.hd - b.hd);
     return Object.fromEntries(arr.map((x, i) => [x.idx, i + 1]));
-  }, [resultByRoom, hiddenRooms]);
+  }, [resultByRoom, hiddenRooms, skillRoomRankExcludedRooms]);
 
   const resultRoomOrder = useMemo(() => {
     const list = Array.from({ length: roomCount }, (_, i) => i).filter(i => !isHiddenIdx(i));

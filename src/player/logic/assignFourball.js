@@ -2,6 +2,12 @@
 
 import { arrayUnion, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { sanitizeForFirestore } from '../../utils/sanitizeForFirestore';
+import {
+  filterSkillFourballPartnerPool,
+  getSkillAllowedRoomNumbers,
+  getSkillRoomGroupForParticipant,
+  normalizeSkillRoomConfig,
+} from '../../utils/skillRoom';
 
 const roomCapacityAt = (roomCapacities, roomNo) => {
   const idx = Number(roomNo) - 1;
@@ -146,6 +152,7 @@ export async function transactionalAssignFourball({
     const rc = toInt(roomCount, toInt(data?.roomCount, 4));
     const caps = Array.from({ length: rc }, (_, i) => roomCapacityAt(data?.roomCapacities || roomCapacities, i + 1));
     if (!rc || rc < 1) throw new Error('invalid_roomCount');
+    const skillCfg = normalizeSkillRoomConfig(data?.skillRoomConfig, { roomCount: rc, participants: parts });
 
     // 1) 레거시 인자(me/partner/roomNumber)가 들어오면 그대로 확정
     let chosenRoom = toInt(roomNumber, 0);
@@ -155,6 +162,48 @@ export async function transactionalAssignFourball({
 
     const self = parts.find((p) => normId(p.id) === pid);
     if (!self) throw new Error('Participant not found');
+
+    // ✅ 특별방은 포볼에서도 스트로크 방식: 파트너 없이 지정 방에 개인 배정
+    const specialGroup = getSkillRoomGroupForParticipant(skillCfg, pid, { roomCount: rc, participants: parts });
+    if (specialGroup) {
+      const existingRoom = toInt(roomOf(self), 0);
+      if (existingRoom) {
+        return { roomNumber: existingRoom, partnerId: null, nextParticipants: parts, specialRoomOnly: true };
+      }
+
+      const targetRoom = toInt(specialGroup.roomNo, 0);
+      if (!targetRoom) throw new Error('special_room_missing');
+      const currentCount = parts.filter((p) => toInt(roomOf(p), 0) === targetRoom).length;
+      if (currentCount >= caps[targetRoom - 1]) throw new Error('no_room');
+
+      const nextSpecial = parts.map((p) => {
+        const r = roomOf(p);
+        const mate = partnerOf(p);
+        if (normId(p.id) === pid) {
+          return { ...p, room: targetRoom, roomNumber: targetRoom, partner: null, teammateId: null, teammate: null };
+        }
+        return { ...p, room: r, roomNumber: r, partner: mate, teammateId: mate, teammate: mate };
+      });
+
+      tx.set(
+        eref,
+        sanitizeForFirestore({
+          participants: nextSpecial,
+          [fieldParts]: nextSpecial,
+          roomTable: buildRoomTable(nextSpecial),
+          participantsUpdatedAt: serverTimestamp(),
+          participantsUpdatedAtClient: Date.now(),
+          updatedAt: serverTimestamp(),
+        }),
+        { merge: true }
+      );
+
+      const fbref = doc(db, 'events', eventId, 'fourballRooms', String(targetRoom));
+      tx.set(fbref, { singles: arrayUnion(pid), updatedAt: serverTimestamp() }, { merge: true });
+
+      return { roomNumber: targetRoom, partnerId: null, nextParticipants: nextSpecial, specialRoomOnly: true };
+    }
+
     if (toInt(self.group) !== 1) throw new Error('group_2_cannot_initiate');
     // 방과 파트너가 모두 있으면 이미 완료. 방만 있고 파트너가 없으면 불완전 배정 상태이므로 보정 진행.
     if (roomOf(self) && partnerOf(self)) throw new Error('already_assigned');
@@ -168,24 +217,27 @@ export async function transactionalAssignFourball({
         if (r >= 1 && r <= rc) counts[r - 1] += 1;
       }
       // 여유 2자리 이상 방 후보
-      let roomCandidates = [];
-      for (let r = 1; r <= rc; r++) {
-        if (counts[r - 1] <= caps[r - 1] - 2) roomCandidates.push(r);
-      }
-      if (roomCandidates.length === 0) {
+      // ★ 특별방 사용 시: 대상자는 지정 방만, 일반 참가자는 예약 특별방을 제외
+      const allRooms = Array.from({ length: rc }, (_, i) => i + 1);
+      const allowedRooms = getSkillAllowedRoomNumbers(skillCfg, pid, allRooms, { roomCount: rc, participants: parts });
+      let roomCandidates = allowedRooms.filter((r) => counts[r - 1] <= caps[r - 1] - 2);
+      if (roomCandidates.length === 0 && !skillCfg.enabled) {
         const min = Math.min(...counts);
-        for (let r = 1; r <= rc; r++) {
-          if (counts[r - 1] === min) roomCandidates.push(r);
-        }
+        roomCandidates = allRooms.filter((r) => counts[r - 1] === min);
       }
+      if (!roomCandidates.length) throw new Error('no_room');
       chosenRoom = roomCandidates[Math.floor(Math.random() * roomCandidates.length)];
     }
 
     if (!mateId) {
-      const pool = parts.filter(
+      const basePool = parts.filter(
         (p) => toInt(p.group) === 2 && !roomOf(p) && normId(p.id) !== pid
       );
-      if (!pool.length) throw new Error('no_free_group2');
+      const pool = filterSkillFourballPartnerPool(skillCfg, pid, basePool, { roomCount: rc, participants: parts });
+      if (!pool.length) {
+        if (skillCfg.enabled) throw new Error('no_free_skill_partner');
+        throw new Error('no_free_group2');
+      }
       mateId = normId(pool[Math.floor(Math.random() * pool.length)].id);
     }
 

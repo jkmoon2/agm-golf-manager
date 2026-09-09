@@ -3,7 +3,7 @@
 // + G핸디 수정 시 이벤트 문서까지 동기화
 // + G핸디 입력칸 길게 누르면 '-' 자동 입력(부분 숫자 허용)
 
-import React, { useContext, useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./Step4.module.css";
 import { StepContext } from "../flows/StepFlow";
 import { EventContext } from "../contexts/EventContext";
@@ -20,6 +20,18 @@ import { db } from "../firebase";
 import * as XLSX from "xlsx";
 import { getAuth } from "firebase/auth";
 import { isRulesAdminUser } from "../utils/adminAuth";
+import SkillRoomEditor from "../components/SkillRoomEditor";
+import { getSkillRoomParticipantIdSet, getSkillRoomSummary, normalizeSkillRoomConfig } from "../utils/skillRoom";
+
+
+// 엑셀/STEP4 조 값 정규화
+// - 빈칸/문자는 기존과 동일하게 1조
+// - 숫자 0은 특별방 표시용 0조로 그대로 유지
+function parseRosterGroup(raw) {
+  if (raw === null || raw === undefined || String(raw).trim() === "") return 1;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 1;
+}
 
 // 구버전 호환 키(사용자 로컬 저장 시 이전 버전과 호환)
 const LEGACY_LAST_SELECTED_FILENAME_KEY = "agm_step4_filename";
@@ -70,6 +82,8 @@ export default function Step4() {
     participants,
     setParticipants,
     roomCount,
+    roomNames,
+    roomCapacities,
     handleFile, // 기존 파서
     goPrev,
     goNext,
@@ -88,6 +102,27 @@ export default function Step4() {
     // Step4에서 G핸디 변경 시 events/{eventId}.participants도 함께 갱신
     updateEventImmediate,
   } = useContext(EventContext);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 특별방(비슷한 G핸디 참가자 반강제 배정) 설정
+  // - 내부 저장 키는 기존 버전 호환을 위해 events/{eventId}.skillRoomConfig 유지
+  // - 참가자 원본/기존 배정 로직은 건드리지 않고 자동/수동/Player 배정에서만 제약을 적용
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [skillRoomEditorOpen, setSkillRoomEditorOpen] = useState(false);
+  const skillRoomConfig = useMemo(
+    () => normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants }),
+    [eventData?.skillRoomConfig, roomCount, participants]
+  );
+  const skillRoomSummary = useMemo(
+    () => getSkillRoomSummary(skillRoomConfig, { roomCount, participants }),
+    [skillRoomConfig, roomCount, participants]
+  );
+
+  const saveSkillRoomConfig = async (nextConfig) => {
+    if (!eventId || typeof updateEventImmediate !== 'function') return;
+    const normalized = normalizeSkillRoomConfig(nextConfig, { roomCount, participants });
+    await updateEventImmediate({ skillRoomConfig: normalized }, false);
+  };
 
   // 최신 participants 참조용 ref (업로드 직후 서버 반영에 사용)
   const participantsRef = useRef(participants);
@@ -419,6 +454,26 @@ export default function Step4() {
     }
   };
 
+  // 특별방 표시용 0조 참가자가 일반 방배정으로 섞이지 않도록 STEP4 이탈 전 확인
+  // - 0조는 선택 사항이지만, 사용했다면 반드시 특별방 설정에 포함되어야 합니다.
+  const validateSpecialGroupParticipants = () => {
+    const zeroGroup = (participants || []).filter((p) =>
+      p && p.id != null && String(p.nickname || '').trim() && Number(p.group) === 0
+    );
+    if (!zeroGroup.length) return true;
+
+    const selectedIds = getSkillRoomParticipantIdSet(skillRoomConfig, { roomCount, participants });
+    const missing = zeroGroup.filter((p) => !selectedIds.has(String(p.id)));
+    if (!skillRoomConfig?.enabled || missing.length) {
+      const names = (missing.length ? missing : zeroGroup).map((p) => p.nickname).slice(0, 8).join(', ');
+      alert(
+        `0조는 특별방 표시용입니다.\n특별방 설정에서 0조 참가자를 모두 대상 방에 선택해주세요.\n\n확인 대상: ${names}${(missing.length ? missing : zeroGroup).length > 8 ? ' 외' : ''}`
+      );
+      return false;
+    }
+    return true;
+  };
+
   // ✅ STEP4에서 다른 STEP으로 이동하기 전에 G핸디 임시 입력값을 모두 저장
   const handlePrevWithCommit = async () => {
     await commitAllHandicaps();
@@ -427,6 +482,7 @@ export default function Step4() {
 
   const handleNextWithCommit = async () => {
     await commitAllHandicaps();
+    if (!validateSpecialGroupParticipants()) return;
     goNext();
   };
 
@@ -494,7 +550,7 @@ export default function Step4() {
 
         rosterFromFile = rowsRoster.map((row, idx) => ({
           id: idx,
-          group: Number(row?.[0]) || 1,
+          group: parseRosterGroup(row?.[0]),
           nickname: String(row?.[1] || "").trim(),
           handicap: Number(row?.[2]) || 0,
           authCode: String(row?.[3] || "").trim(),
@@ -566,7 +622,9 @@ export default function Step4() {
         const email = String(r[4] || "").trim().toLowerCase();
         const nameCell = String(r[5] || "").trim();
         const nickname = String(r[1] || "").trim();
-        const group = Number(r[0]) || null;
+        const groupRaw = r[0];
+        const groupNum = (groupRaw === null || groupRaw === undefined || String(groupRaw).trim() === "") ? null : Number(groupRaw);
+        const group = Number.isFinite(groupNum) ? groupNum : null;
         if (!email) continue;
         buf.push({
           email,
@@ -724,6 +782,35 @@ export default function Step4() {
         )}
       </div>
 
+      {/* 특별방 설정: 기존 참가자 표 레이아웃은 유지하고 상단에 작은 설정 바만 추가 */}
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          margin: '0 0 8px', padding: '6px 8px', border: '1px solid #ccc',
+          background: '#fff', boxSizing: 'border-box'
+        }}
+      >
+        <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+          <div style={{ fontSize: 14, fontWeight: 900, color: '#0b2d59', lineHeight: 1.2 }}>특별방</div>
+          <div style={{ marginTop: 2, fontSize: 10, color: '#667085', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {skillRoomSummary.enabled
+              ? `${skillRoomSummary.roomCount}개 방 · ${skillRoomSummary.participantCount}명 반강제`
+              : '미사용 · 기존 배정 방식 유지'}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setSkillRoomEditorOpen(true)}
+          style={{
+            flex: '0 0 auto', minWidth: 56, height: 32, padding: '0 12px',
+            border: '1px solid #ccc', background: '#fff', color: '#172b4d',
+            fontSize: 13, fontWeight: 700, cursor: 'pointer'
+          }}
+        >
+          설정
+        </button>
+      </div>
+
       {/* 표 헤더 */}
       <div className={styles.participantRowHeader}>
         <div className={`${styles.cell} ${styles.group}`}>조</div>
@@ -754,6 +841,7 @@ export default function Step4() {
                 value={p.group}
                 onChange={(e) => changeGroup(i, Number(e.target.value))}
               >
+                <option value={0}>0조</option>
                 {Array.from({ length: roomCount }, (_, idx) => idx + 1).map((n) => (
                   <option key={n} value={n}>
                     {n}조
@@ -794,6 +882,18 @@ export default function Step4() {
           </div>
         ))}
       </div>
+
+      <SkillRoomEditor
+        open={skillRoomEditorOpen}
+        onClose={() => setSkillRoomEditorOpen(false)}
+        onSave={saveSkillRoomConfig}
+        value={skillRoomConfig}
+        participants={participants}
+        roomCount={roomCount}
+        roomNames={roomNames}
+        roomCapacities={roomCapacities}
+        mode={mode}
+      />
 
       {/* 하단 고정 버튼(원본 유지) */}
       <div

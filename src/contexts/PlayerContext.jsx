@@ -27,6 +27,12 @@ import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSy
 import { readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
 import { diagMerge, diagPush, diagSummaryParticipant } from '../utils/agmDiag';
 import { startPlayerPresence } from '../utils/playerPresence';
+import {
+  filterSkillFourballPartnerPool,
+  getSkillAllowedRoomNumbers,
+  getSkillRoomGroupForParticipant,
+  normalizeSkillRoomConfig,
+} from '../utils/skillRoom';
 
 export const PlayerContext = createContext(null);
 
@@ -251,29 +257,50 @@ const roomCapacityAt = (roomCapacities, roomNo) => {
 };
 
 // 스트로크용: “같은 조 중복 금지 + 방 정원 미만”을 만족하는 방 목록
-const validRoomsForStroke = (list, roomCount, me, roomCapacities) => {
+// ★ 특별방 사용 시:
+// - 특별방 참가자는 지정 방만 허용하고 같은 조 중복 제한은 적용하지 않음
+// - 일반 참가자는 예약된 특별방을 자동/수동 배정 후보에서 제외
+const validRoomsForStroke = (list, roomCount, me, roomCapacities, skillRoomConfig = {}) => {
   const myGroup = toInt(me?.group, 0);
   const counts = countInRoom(list, roomCount);
+  const allRooms = Array.from({ length: roomCount }, (_, i) => i + 1);
+  const cfg = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants: list });
+  const skillGroup = getSkillRoomGroupForParticipant(cfg, me?.id, { roomCount, participants: list });
+  const allowedRooms = getSkillAllowedRoomNumbers(cfg, me?.id, allRooms, { roomCount, participants: list });
   const rooms = [];
-  for (let r = 1; r <= roomCount; r++) {
-    const sameGroupExists = list.some(p => toInt(p.room) === r && toInt(p.group) === myGroup && normId(p.id) !== normId(me?.id));
+
+  for (const r of allowedRooms) {
+    const sameGroupExists = !skillGroup && list.some(
+      (p) => toInt(p.room) === r && toInt(p.group) === myGroup && normId(p.id) !== normId(me?.id)
+    );
     if (!sameGroupExists && counts[r - 1] < roomCapacityAt(roomCapacities, r)) rooms.push(r);
   }
-  if (rooms.length === 0) {
-    for (let r = 1; r <= roomCount; r++) if (counts[r - 1] < roomCapacityAt(roomCapacities, r)) rooms.push(r);
+
+  // 기존 호환: 일반 배정에서는 같은 조 제한으로 방이 없을 때 정원만 확인해 fallback
+  // 특별방 참가자는 자신의 지정 방 이외로 절대 fallback 하지 않음
+  if (rooms.length === 0 && !skillGroup) {
+    for (const r of allowedRooms) {
+      if (counts[r - 1] < roomCapacityAt(roomCapacities, r)) rooms.push(r);
+    }
   }
   return rooms;
 };
 
 // 포볼용: “방 정원 - neededSeats 이상 여유”를 만족하는 방 목록
-const validRoomsForFourball = (list, roomCount, roomCapacities, neededSeats = 2) => {
+// ★ 특별방 사용 시 참가자별 허용 방만 후보로 사용
+const validRoomsForFourball = (list, roomCount, roomCapacities, neededSeats = 2, skillRoomConfig = {}, selfId = '') => {
   const counts = countInRoom(list, roomCount);
+  const allRooms = Array.from({ length: roomCount }, (_, i) => i + 1);
+  const cfg = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants: list });
+  const allowedRooms = getSkillAllowedRoomNumbers(cfg, selfId, allRooms, { roomCount, participants: list });
   const rooms = [];
-  for (let r = 1; r <= roomCount; r++) {
+  for (const r of allowedRooms) {
     const cap = roomCapacityAt(roomCapacities, r);
     if (counts[r - 1] <= cap - neededSeats) rooms.push(r);
   }
-  return rooms.length ? rooms : Array.from({ length: roomCount }, (_, i) => i + 1);
+  // 특별방 사용 중에는 예약 방 규칙을 깨는 fallback 금지
+  if (cfg.enabled && cfg.groups.length) return rooms;
+  return rooms.length ? rooms : allRooms;
 };
 
 // Firestore sanitize
@@ -348,6 +375,7 @@ export function PlayerProvider({ children }) {
   const [roomCapacities, setRoomCapacities] = useState(Array(4).fill(4));
   const [rooms, setRooms]                 = useState([]);
   const [participants, setParticipants]   = useState([]);
+  const [skillRoomConfig, setSkillRoomConfig] = useState({ enabled: false, groups: [] });
   // ✅ scores SSOT(EventContext) 사용: Player쪽에서 /scores 중복 구독 금지
   const { scoresMap, scoresReady, overlayScoresToParticipants } = useContext(EventContext) || {};
 
@@ -457,6 +485,7 @@ const rawParts = primaryParts.length ? mergeParticipantsById(primaryParts, legac
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
+      setSkillRoomConfig(normalizeSkillRoomConfig(data.skillRoomConfig, { roomCount: rc, participants: partArr }));
 
       let me = null;
       if (authCode && authCode.trim()) {
@@ -569,6 +598,7 @@ if (!idCached) {
       setRoomNames(Array.from({ length: rc }, (_, i) => rn[i]?.trim() || ''));
       setRoomCapacities(caps);
       setRooms(Array.from({ length: rc }, (_, i) => ({ number: i + 1, label: makeLabel(rn, i + 1) })));
+      setSkillRoomConfig(normalizeSkillRoomConfig(data.skillRoomConfig, { roomCount: rc, participants: partArr }));
       const resolvedForDiag = resolveParticipantForDirectEntry(partArr, eventId, participant, authCode);
       setParticipant((prev) => {
         if (!prev) return prev;
@@ -816,8 +846,12 @@ if (!idCached) {
         return { roomNumber: Number(me.room), alreadyAssigned: true, next: parts };
       }
 
-      let candidates = validRoomsForStroke(parts, roomCount, me, caps);
-      if (!candidates.length) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+      const cfg = normalizeSkillRoomConfig(data.skillRoomConfig, { roomCount, participants: parts });
+      let candidates = validRoomsForStroke(parts, roomCount, me, caps, cfg);
+      // 기존 기능 미사용일 때만 마지막 호환 fallback 유지.
+      // 특별방 사용 중에는 예약 방 규칙을 깨고 다른 방으로 들어가지 않도록 합니다.
+      if (!candidates.length && !cfg.enabled && Number(me?.group) !== 0) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+      if (!candidates.length) throw new Error('no_room');
       const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
 
       const next = parts.map((p) =>
@@ -863,6 +897,20 @@ if (!idCached) {
     const me = participants.find((p) => normId(p.id) === pid) ||
                (participant ? participants.find((p) => normName(p.nickname) === normName(participant.nickname)) : null);
     if (!me) throw new Error('Participant not found');
+
+    // ✅ 특별방은 포볼에서도 스트로크 방식: 파트너 없이 방만 배정
+    const cfgForSelf = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants });
+    const specialGroupForSelf = getSkillRoomGroupForParticipant(cfgForSelf, pid, { roomCount, participants });
+    if (specialGroupForSelf) {
+      const result = await assignStrokeForOne(pid);
+      return {
+        roomNumber: result?.roomNumber ?? roomOfParticipant(me) ?? null,
+        partnerId: null,
+        partnerNickname: '',
+        alreadyAssigned: !!result?.alreadyAssigned,
+        specialRoomOnly: true,
+      };
+    }
 
     if (toInt(me.group) !== 1) {
       const partnerId = partnerOfParticipant(me);
@@ -942,12 +990,15 @@ if (!idCached) {
           const self = parts.find((p) => normId(p.id) === pid);
           if (!self) throw new Error('Participant not found');
 
-          const rooms = validRoomsForFourball(parts, roomCount, caps, 2);
+          const cfg = normalizeSkillRoomConfig(data.skillRoomConfig, { roomCount, participants: parts });
+          const rooms = validRoomsForFourball(parts, roomCount, caps, 2, cfg, pid);
+          if (!rooms.length) throw new Error('no_room');
           const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
-          const pool = parts.filter(
+          const basePool = parts.filter(
             (p) => toInt(p.group) === 2 && !isValidRoom(roomOfParticipant(p)) && normId(p.id) !== pid
           );
+          const pool = filterSkillFourballPartnerPool(cfg, pid, basePool, { roomCount, participants: parts });
           const mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
           const next = parts.map((p) => {
@@ -997,13 +1048,16 @@ if (!idCached) {
       }
     }
 
-    const rooms = validRoomsForFourball(participants, roomCount, roomCapacities, 2);
+    const cfg = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants });
+    const rooms = validRoomsForFourball(participants, roomCount, roomCapacities, 2, cfg, pid);
+    if (!rooms.length) throw new Error('no_room');
     const roomNumber = rooms[Math.floor(cryptoRand() * rooms.length)];
 
     let mateId = '';
-    const pool = participants.filter(
+    const basePool = participants.filter(
       (p) => toInt(p.group) === 2 && !isValidRoom(roomOfParticipant(p)) && normId(p.id) !== pid
     );
+    const pool = filterSkillFourballPartnerPool(cfg, pid, basePool, { roomCount, participants });
     mateId = pool.length ? normId(shuffle(pool)[0].id) : '';
 
     const next = participants.map((p) => {
@@ -1042,7 +1096,7 @@ if (!idCached) {
     <PlayerContext.Provider
       value={{
         eventId, setEventId,
-        mode, roomCount, roomNames, roomCapacities, rooms,
+        mode, roomCount, roomNames, roomCapacities, rooms, skillRoomConfig,
         participants, participant,
         currentRoom, participantReady,
         setParticipant,

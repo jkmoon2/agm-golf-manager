@@ -11,6 +11,7 @@ import { db, auth, waitForAuthRestored, ensureAnonAfterCode } from '../../fireba
 import { writePlayerRoom } from '../utils/playerState';
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
+import { getSkillRoomGroupForParticipant, normalizeSkillRoomConfig } from '../../utils/skillRoom';
 
 
 function getPlayerTabId(){
@@ -112,7 +113,7 @@ function StrokeLikeSelect() {
 }
 
 function FourballLikeSelect() {
-  const { roomNames, roomCapacities, participants, participant, assignFourballForOneAndPartner } =
+  const { roomNames, roomCapacities, participants, participant, assignFourballForOneAndPartner, assignStrokeForOne } =
     useContext(PlayerContext);
   return (
     <BaseRoomSelect
@@ -121,7 +122,11 @@ function FourballLikeSelect() {
       roomCapacities={roomCapacities}
       participants={participants}
       participant={participant}
-      onAssign={async (myId) => {
+      onAssign={async (myId, specialRoomStroke = false) => {
+        if (specialRoomStroke) {
+          const { roomNumber } = await assignStrokeForOne(myId);
+          return { roomNumber, partnerNickname: null, specialRoomOnly: true };
+        }
         const { roomNumber, partnerNickname } = await assignFourballForOneAndPartner(myId);
         return { roomNumber, partnerNickname };
       }}
@@ -219,6 +224,19 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
   const viewParticipant = effectiveParticipant || participant;
 
+  // 특별방 참가자는 포볼 대회에서도 STEP1 방배정을 스트로크 방식으로 처리
+  const specialRoomConfig = useMemo(() => normalizeSkillRoomConfig(
+    effectiveEventData?.skillRoomConfig ?? eventData?.skillRoomConfig,
+    { roomCount: effectiveRoomNames.length, participants: effectiveParticipants }
+  ), [effectiveEventData?.skillRoomConfig, eventData?.skillRoomConfig, effectiveRoomNames.length, effectiveParticipants]);
+  const specialRoomGroup = useMemo(() => getSkillRoomGroupForParticipant(
+    specialRoomConfig,
+    viewParticipant?.id,
+    { roomCount: effectiveRoomNames.length, participants: effectiveParticipants }
+  ), [specialRoomConfig, viewParticipant?.id, effectiveRoomNames.length, effectiveParticipants]);
+  const specialFourballStroke = variant === 'fourball' && (!!specialRoomGroup || Number(viewParticipant?.group) === 0);
+  const actsLikeStroke = variant === 'stroke' || specialFourballStroke;
+
   // ✅ URL의 eventId가 PlayerContext의 eventId보다 우선 (이전 대회 localStorage 잔상/오배정 방지)
   useEffect(() => {
     if (!urlEventId) return;
@@ -312,7 +330,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
   const compactMembers = useMemo(() => {
     if (!done || assignedRoom == null || !viewParticipant) return [];
-    if (variant === 'fourball') {
+    if (variant === 'fourball' && !specialFourballStroke) {
       const mine = effectiveParticipants.find((p) => String(p.id) === String(viewParticipant.id));
       const minePartnerId = getAssignmentPartnerId(mine);
       const mate = minePartnerId ? effectiveParticipants.find((p) => String(minePartnerId) === String(p.id)) : null;
@@ -322,7 +340,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
     }
     const me = effectiveParticipants.find((p) => String(p.id) === String(viewParticipant.id));
     return [me].filter(Boolean);
-  }, [done, assignedRoom, effectiveParticipants, viewParticipant?.id, variant]);
+  }, [done, assignedRoom, effectiveParticipants, viewParticipant?.id, variant, specialFourballStroke]);
 
   const teamMembersRaw = useMemo(() => {
     if (!done || assignedRoom == null) return [];
@@ -374,10 +392,10 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
   const roomCount = useMemo(() => (Array.isArray(effectiveRoomNames) ? effectiveRoomNames.length : 0), [effectiveRoomNames]);
   const isValidStrokeRoom = (roomNo) => {
-    if (variant !== 'stroke') return true;
+    if (!actsLikeStroke) return true;
     if (!roomNo) return false;
     const myGroup = Number(viewParticipant?.group) || 0;
-    const sameGroupExists = effectiveParticipants.some(
+    const sameGroupExists = !specialFourballStroke && effectiveParticipants.some(
       (p) =>
         Number(getAssignmentRoom(p)) === Number(roomNo) &&
         Number(p.group) === myGroup &&
@@ -389,7 +407,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   };
 
   const isValidFourballRoom = (roomNo) => {
-    if (variant !== 'fourball') return true;
+    if (variant !== 'fourball' || specialFourballStroke) return true;
     if (!roomNo) return false;
     const currentCount = effectiveParticipants.filter((p) => Number(getAssignmentRoom(p)) === Number(roomNo)).length;
     return currentCount <= roomCapacityAt(effectiveRoomCapacities, roomNo) - 2;
@@ -438,7 +456,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       return;
     }
 
-    if (variant === 'fourball' && Number(viewParticipant?.group) === 2) {
+    if (variant === 'fourball' && !specialFourballStroke && Number(viewParticipant?.group) === 2) {
       setIsAssigning(true);
       await sleep(500);
       setIsAssigning(false);
@@ -469,14 +487,14 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       let partnerNickname = null;
 
       while (attempt < 3) {
-        const res = await onAssign(viewParticipant.id);
+        const res = await onAssign(viewParticipant.id, specialFourballStroke);
         roomNumber = res?.roomNumber ?? null;
         partnerNickname = res?.partnerNickname ?? null;
 
         await sleep(120 + Math.floor(Math.random() * 120));
 
         const ok =
-          (variant === 'fourball' ? isValidFourballRoom(roomNumber) : isValidStrokeRoom(roomNumber));
+          (actsLikeStroke ? isValidStrokeRoom(roomNumber) : isValidFourballRoom(roomNumber));
 
         if (ok) break;
 
@@ -484,7 +502,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
         await sleep(150 * attempt + Math.floor(Math.random() * 120));
       }
 
-      if (variant === 'fourball' ? !isValidFourballRoom(roomNumber) : !isValidStrokeRoom(roomNumber)) {
+      if (actsLikeStroke ? !isValidStrokeRoom(roomNumber) : !isValidFourballRoom(roomNumber)) {
         setIsAssigning(false);
         setFlowStep('idle');
         alert('해당 방 정원이 가득 찼습니다. 잠시 후 다시 시도해주세요.');
@@ -501,11 +519,11 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
 
       setFlowStep('afterAssign');
 
-      await sleep(variant === 'fourball' ? TIMINGS.preAlertFourball : TIMINGS.preAlertStroke);
+      await sleep(actsLikeStroke ? TIMINGS.preAlertStroke : TIMINGS.preAlertFourball);
       setIsAssigning(false);
 
       const roomLabel = getLabel(roomNumber);
-      if (variant === 'fourball') {
+      if (variant === 'fourball' && !specialFourballStroke) {
         alert(`${viewParticipant.nickname}님은 ${roomLabel}에 배정되었습니다.\n팀원을 선택하려면 확인을 눌러주세요.`);
         if (partnerNickname) {
           setIsAssigning(true);
@@ -539,7 +557,7 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
   const sumHd = (list) => list.reduce((s, p) => s + (Number(p?.handicap) || 0), 0);
 
   const assignBtnLabel =
-    (variant === 'fourball' && Number(participant?.group) === 2) ? '방확인'
+    (variant === 'fourball' && !specialFourballStroke && Number(participant?.group) === 2) ? '방확인'
       : isEventClosed ? '종료됨'
       : !isMeReady ? '동기화 중…'
       : isAssigning ? '배정 중…'
