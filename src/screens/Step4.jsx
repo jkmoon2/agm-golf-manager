@@ -1281,6 +1281,7 @@ export default function Step4() {
         onSubmit={handleParticipantEditorSubmit}
         participants={participants}
         selectedParticipantIds={selectedParticipantIds}
+        roomNames={roomNames}
         mode={mode}
       />
 
