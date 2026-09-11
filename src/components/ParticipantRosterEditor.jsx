@@ -32,6 +32,7 @@ export default function ParticipantRosterEditor({
   open,
   participants = [],
   selectedParticipantIds = [],
+  roomNames = [],
   mode = 'stroke',
   onClose,
   onSubmit,
@@ -131,6 +132,9 @@ export default function ParticipantRosterEditor({
   };
 
   const assignedRoom = Number(target?.room ?? target?.roomNumber ?? 0) || null;
+  const assignedRoomName = assignedRoom
+    ? (String(roomNames?.[assignedRoom - 1] ?? '').trim() || `${assignedRoom}번방`)
+    : '';
   const hasPartner = target?.partner != null || target?.teammateId != null || target?.teammate != null;
 
   return createPortal(
@@ -283,8 +287,8 @@ export default function ParticipantRosterEditor({
             {editorMode === 'add'
               ? '신규 추가는 기존 참가자의 방배정·점수·파트너 상태를 변경하지 않습니다.'
               : (replaceAction === 'replace'
-                ? `새 참가자로 교체하면 기존 ID${assignedRoom ? `·${assignedRoom}번방` : ''}${hasPartner ? '·포볼 파트너' : ''}를 유지하고, 이전 참가자의 점수만 초기화합니다.`
-                : `정보수정은 기존 ID${assignedRoom ? `·${assignedRoom}번방` : ''}${hasPartner ? '·포볼 파트너' : ''}와 점수를 모두 유지합니다.`)}
+                ? `새 참가자로 교체하면 기존 ID${assignedRoomName ? `·${assignedRoomName}` : ''}${hasPartner ? '·포볼 파트너' : ''}를 유지하고, 이전 참가자의 점수만 초기화합니다.`
+                : `정보수정은 기존 ID${assignedRoomName ? `·${assignedRoomName}` : ''}${hasPartner ? '·포볼 파트너' : ''}와 점수를 모두 유지합니다.`)}
             {['fourball', 'agm'].includes(String(mode || '').toLowerCase()) && editorMode === 'add'
               ? ' 일반 포볼에서 인원만 추가하면 1·2조 균형을 확인해야 합니다.'
               : ''}
