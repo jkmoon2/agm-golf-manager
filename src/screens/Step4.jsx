@@ -15,12 +15,14 @@ import {
   updateDoc,
   getDoc,
   writeBatch,
+  deleteDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import * as XLSX from "xlsx";
 import { getAuth } from "firebase/auth";
 import { isRulesAdminUser } from "../utils/adminAuth";
 import SkillRoomEditor from "../components/SkillRoomEditor";
+import ParticipantRosterEditor from "../components/ParticipantRosterEditor";
 import { getSkillRoomParticipantIdSet, normalizeSkillRoomConfig } from "../utils/skillRoom";
 
 
@@ -99,6 +101,7 @@ export default function Step4() {
     rememberUploadFilename, // (mode, name)
     getUploadFilename, // (mode) => string
     applyNewRoster, // ({participants, mode, uploadFileName, clearScores})
+    persistRoomsFromParticipants, // 수동 삭제 시 rooms/roomTable 미러 정합성 유지
     // Step4에서 G핸디 변경 시 events/{eventId}.participants도 함께 갱신
     updateEventImmediate,
   } = useContext(EventContext);
@@ -109,6 +112,7 @@ export default function Step4() {
   // - 참가자 원본/기존 배정 로직은 건드리지 않고 자동/수동/Player 배정에서만 제약을 적용
   // ─────────────────────────────────────────────────────────────────────────────
   const [skillRoomEditorOpen, setSkillRoomEditorOpen] = useState(false);
+  const [participantEditorOpen, setParticipantEditorOpen] = useState(false);
   const skillRoomConfig = useMemo(
     () => normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants }),
     [eventData?.skillRoomConfig, roomCount, participants]
@@ -273,6 +277,9 @@ export default function Step4() {
             score: baseObj?.score ?? null,
             room: baseObj?.room ?? null,
             partner: baseObj?.partner ?? null,
+            authCode: baseObj?.authCode ?? "",
+            email: String(baseObj?.email ?? "").trim().toLowerCase(),
+            name: baseObj?.name ?? "",
             selected: baseObj?.selected ?? false,
             ...patch,
             updatedAt: serverTimestamp(),
@@ -305,52 +312,120 @@ export default function Step4() {
     }
   };
 
+  // 수동 신규/교체/삭제는 저장 실패를 호출부에서 감지해야 하므로 예외를 삼키지 않는 전용 동기화 사용
+  const syncManualRosterRoot = async (list) => {
+    if (!eventId || typeof updateEventImmediate !== "function") {
+      throw new Error("event update function is not ready");
+    }
+    const compat = (list || []).map((p) => ({
+      ...p,
+      roomNumber: p.room ?? p.roomNumber ?? null,
+      teammateId: p.partner ?? p.teammateId ?? p.teammate ?? null,
+      teammate: p.partner ?? p.teammateId ?? p.teammate ?? null,
+    }));
+    await updateEventImmediate({
+      participants: compat,
+      participantsUpdatedAt: serverTimestamp(),
+    }, false);
+  };
+
   const toggleSelect = (i) => {
     const c = [...participants];
     c[i].selected = !c[i].selected;
     setParticipants(c);
   };
 
-  const addParticipant = async () => {
-    if (!eventId) return alert("이벤트가 설정되지 않았습니다.");
-    const newId = participants.length;
-    const newObj = {
-      id: newId,
-      group: 1,
-      nickname: "",
-      handicap: null,
-      score: null,
-      room: null,
-      partner: null,
-      selected: false,
-      email: '',
-      name: '',
-      updatedAt: serverTimestamp(),
-    };
-    const rootSnap = await getDoc(doc(db, "events", eventId));
-    if (!rootSnap.exists()) return alert("삭제되었거나 존재하지 않는 대회입니다.");
-    await setDoc(doc(db, "events", eventId, "participants", String(newId)), newObj, {
-      merge: true,
-    });
-    setParticipants((p) => [...p, newObj]);
-    setHdInput((prev) => ({ ...prev, [String(newId)]: "" }));
+  const addParticipant = () => {
+    setParticipantEditorOpen(true);
   };
 
   const delSelected = async () => {
     if (!eventId) return alert("이벤트가 설정되지 않았습니다.");
     const ids = participants.filter((x) => x.selected).map((x) => x.id);
+    if (!ids.length) return;
+
+    const idSet = new Set(ids.map((id) => String(id)));
+    const removed = participants.filter((p) => idSet.has(String(p?.id)));
+    const next = participants
+      .filter((p) => !idSet.has(String(p?.id)))
+      .map((p) => {
+        const partnerId = p?.partner ?? p?.teammateId ?? p?.teammate ?? null;
+        if (partnerId == null || !idSet.has(String(partnerId))) {
+          return { ...p, selected: false };
+        }
+        // 삭제 대상과 연결된 포볼 파트너 참조가 남지 않도록 해당 연결만 해제
+        return {
+          ...p,
+          partner: null,
+          teammateId: null,
+          teammate: null,
+          selected: false,
+        };
+      });
+
     const batch = writeBatch(db);
-    ids.forEach((id) =>
-      batch.delete(doc(collection(db, "events", eventId, "participants"), String(id)))
-    );
-    await batch.commit();
-    const after = (p) => p.filter((x) => !x.selected);
-    setParticipants((p) => after(p));
-    setHdInput((prev) => {
-      const n = { ...prev };
-      ids.forEach((id) => delete n[String(id)]);
-      return n;
+    ids.forEach((id) => {
+      batch.delete(doc(collection(db, "events", eventId, "participants"), String(id)));
+      batch.delete(doc(db, 'events', eventId, 'scores', String(id)));
     });
+
+    // 삭제된 참가자를 바라보던 상대 참가자 subdoc도 같은 배치에서 파트너만 해제
+    next.forEach((p) => {
+      const before = participants.find((x) => String(x?.id) === String(p?.id));
+      const beforePartner = before?.partner ?? before?.teammateId ?? before?.teammate ?? null;
+      if (beforePartner != null && idSet.has(String(beforePartner))) {
+        batch.set(
+          doc(db, 'events', eventId, 'participants', String(p.id)),
+          { partner: null, teammateId: null, teammate: null, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      }
+    });
+
+    // 삭제 참가자의 이벤트 범위 이메일 매칭(preMembers)도 함께 제거
+    if (isRulesAdminUser(getAuth().currentUser)) {
+      removed
+        .map((p) => normalizeManualEmail(p?.email))
+        .filter(Boolean)
+        .forEach((email) => batch.delete(doc(db, 'events', eventId, 'preMembers', email)));
+    }
+
+    try {
+      // 먼저 루트 명단을 반영하고, 보조문서 배치가 실패하면 원본 명단으로 롤백
+      await syncManualRosterRoot(next);
+      try {
+        await batch.commit();
+      } catch (batchError) {
+        try { await syncManualRosterRoot(participants); } catch {}
+        throw batchError;
+      }
+
+      participantsRef.current = next;
+      setParticipants(next);
+      setHdInput((prev) => {
+        const n = { ...prev };
+        ids.forEach((id) => delete n[String(id)]);
+        return n;
+      });
+
+      // 방배정이 진행 중인 상태에서 삭제한 경우 rooms/roomTable 미러도 즉시 맞춤
+      if (typeof persistRoomsFromParticipants === 'function') {
+        try { await persistRoomsFromParticipants(next); }
+        catch (e) { console.warn('[Step4] delete rooms mirror sync failed:', e); }
+      }
+
+      // 특별방 설정에 삭제된 참가자 id가 남아 있지 않도록 설정만 정리
+      if (eventData?.skillRoomConfig && typeof updateEventImmediate === 'function') {
+        const nextSkillRoomConfig = normalizeSkillRoomConfig(eventData.skillRoomConfig, {
+          roomCount,
+          participants: next,
+        });
+        await updateEventImmediate({ skillRoomConfig: nextSkillRoomConfig }, false);
+      }
+    } catch (e) {
+      console.warn('[Step4] delete selected participants failed:', e);
+      alert('참가자 삭제 저장에 실패했습니다. 다시 시도해주세요.');
+    }
   };
 
   const changeGroup = async (i, v) => {
@@ -485,6 +560,357 @@ export default function Step4() {
   const [savePII, setSavePII] = useState(
     () => isRulesAdminUser(getAuth().currentUser)
   );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 수동 참가자 신규 추가 / 교체(정보수정)
+  // - 엑셀 재업로드를 하지 않고 해당 참가자만 반영하여 진행 중 방배정을 보존
+  // - 신규 추가: 빈 수동 슬롯/삭제된 id가 있으면 우선 재사용, 없으면 새 id 추가
+  // - 교체: 기존 id/room/partner를 유지하여 포볼·특별방 연결을 최대한 보존
+  // ─────────────────────────────────────────────────────────────────────────────
+  const normalizeManualEmail = (v) => String(v || '').trim().toLowerCase();
+  const normalizeManualCode = (v) => String(v || '').trim();
+  const participantIdKey = (v) => String(v ?? '').trim();
+
+  const totalRoomCapacity = useMemo(() => {
+    if (Array.isArray(roomCapacities) && roomCapacities.length) {
+      return roomCapacities.reduce((sum, raw) => {
+        const n = Number(raw);
+        const cap = Number.isFinite(n) ? Math.min(4, Math.max(1, n)) : 4;
+        return sum + cap;
+      }, 0);
+    }
+    return Number(roomCount || 0) * 4;
+  }, [roomCapacities, roomCount]);
+
+  const selectedParticipantIds = useMemo(
+    () => (participants || []).filter((p) => !!p?.selected).map((p) => p.id),
+    [participants]
+  );
+
+  const getFirstReusableBlankIndex = (list = []) => {
+    return (Array.isArray(list) ? list : []).findIndex((p) => {
+      if (!p || p.id == null) return false;
+      const hasName = String(p?.nickname || '').trim() || String(p?.name || '').trim();
+      const hasIdentity = String(p?.authCode || '').trim() || String(p?.email || '').trim();
+      const hasRoom = p?.room != null || p?.roomNumber != null;
+      const hasPartner = p?.partner != null || p?.teammateId != null || p?.teammate != null;
+      return !hasName && !hasIdentity && !hasRoom && !hasPartner;
+    });
+  };
+
+  const getNextParticipantId = (list = []) => {
+    const used = new Set(
+      (Array.isArray(list) ? list : [])
+        .map((p) => Number(p?.id))
+        .filter((n) => Number.isInteger(n) && n >= 0)
+    );
+    let n = 0;
+    while (used.has(n)) n += 1;
+    return n;
+  };
+
+  const normalizeManualParticipantForm = (form = {}) => {
+    const group = Number(form?.group);
+    if (!Number.isInteger(group) || group < 0 || group > 4) {
+      alert('조는 0~4 중에서 선택해주세요.');
+      return null;
+    }
+
+    const nickname = String(form?.nickname || '').trim();
+    if (!nickname) {
+      alert('닉네임을 입력해주세요.');
+      return null;
+    }
+
+    const hdRaw = String(form?.handicap ?? '').trim();
+    const handicap = hdRaw === '' ? 0 : Number(hdRaw);
+    if (!Number.isFinite(handicap)) {
+      alert('G핸디를 숫자로 입력해주세요.');
+      return null;
+    }
+
+    const authCode = normalizeManualCode(form?.authCode);
+    const email = normalizeManualEmail(form?.email);
+    const name = String(form?.name || '').trim();
+
+    if (email && (!email.includes('@') || email.startsWith('@') || email.endsWith('@'))) {
+      alert('이메일 형식을 확인해주세요.');
+      return null;
+    }
+
+    return { group, nickname, handicap, authCode, email, name };
+  };
+
+  const validateManualIdentityUnique = (values, excludeId = null) => {
+    const codeKey = String(values?.authCode || '').trim().toUpperCase();
+    const emailKey = normalizeManualEmail(values?.email);
+    const excludeKey = participantIdKey(excludeId);
+
+    if (codeKey) {
+      const dup = (participants || []).find((p) =>
+        participantIdKey(p?.id) !== excludeKey &&
+        String(p?.authCode || '').trim().toUpperCase() === codeKey
+      );
+      if (dup) {
+        alert(`이미 사용 중인 인증코드입니다.\n참가자: ${dup.nickname || dup.name || dup.id}`);
+        return false;
+      }
+    }
+
+    if (emailKey) {
+      const dup = (participants || []).find((p) =>
+        participantIdKey(p?.id) !== excludeKey &&
+        normalizeManualEmail(p?.email) === emailKey
+      );
+      if (dup) {
+        alert(`이미 사용 중인 이메일입니다.\n참가자: ${dup.nickname || dup.name || dup.id}`);
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const saveParticipantSubDoc = async (participant) => {
+    if (!eventId || !participant || participant.id == null) return;
+    const room = participant?.room ?? participant?.roomNumber ?? null;
+    const partner = participant?.partner ?? participant?.teammateId ?? participant?.teammate ?? null;
+    const payload = {
+      ...participant,
+      room,
+      roomNumber: room,
+      partner,
+      teammateId: partner,
+      teammate: partner,
+      authCode: normalizeManualCode(participant?.authCode),
+      email: normalizeManualEmail(participant?.email),
+      name: String(participant?.name || '').trim(),
+      updatedAt: serverTimestamp(),
+    };
+    // 점수는 /scores SSOT이므로 참가자 보조문서에도 score/scoreRaw는 저장하지 않음
+    try { delete payload.score; } catch {}
+    try { delete payload.scoreRaw; } catch {}
+    await setDoc(
+      doc(db, 'events', eventId, 'participants', String(participant.id)),
+      payload,
+      { merge: true }
+    );
+  };
+
+  const saveManualPreMember = async (participant) => {
+    const email = normalizeManualEmail(participant?.email);
+    if (!savePII || !email || !eventId) return;
+    const user = getAuth().currentUser;
+    if (!isRulesAdminUser(user)) return;
+    await setDoc(
+      doc(db, 'events', eventId, 'preMembers', email),
+      {
+        email,
+        name: String(participant?.name || '').trim() || null,
+        nickname: String(participant?.nickname || '').trim() || null,
+        group: Number.isFinite(Number(participant?.group)) ? Number(participant.group) : null,
+        uploadedAt: serverTimestamp(),
+        importedFrom: 'manual',
+      },
+      { merge: true }
+    );
+  };
+
+  const removeOldManualPreMember = async (oldEmailRaw, newEmailRaw) => {
+    const oldEmail = normalizeManualEmail(oldEmailRaw);
+    const newEmail = normalizeManualEmail(newEmailRaw);
+    if (!eventId || !oldEmail || oldEmail === newEmail) return;
+    const user = getAuth().currentUser;
+    if (!isRulesAdminUser(user)) return;
+    try {
+      await deleteDoc(doc(db, 'events', eventId, 'preMembers', oldEmail));
+    } catch (e) {
+      console.warn('[Step4] old preMember cleanup failed:', e);
+    }
+  };
+
+  const hasMeaningfulEventInputs = () => {
+    const inputs = eventData?.eventInputs;
+    return !!(inputs && typeof inputs === 'object' && Object.keys(inputs).length > 0);
+  };
+
+  const handleParticipantEditorSubmit = async ({ mode: editMode, replaceAction = 'edit', targetId, form }) => {
+    if (!eventId) {
+      alert('이벤트가 설정되지 않았습니다.');
+      return false;
+    }
+
+    const rootSnap = await getDoc(doc(db, 'events', eventId));
+    if (!rootSnap.exists()) {
+      alert('삭제되었거나 존재하지 않는 대회입니다.');
+      return false;
+    }
+
+    const values = normalizeManualParticipantForm(form);
+    if (!values) return false;
+
+    const isReplace = editMode === 'replace';
+    const excludeId = isReplace ? targetId : null;
+    if (!validateManualIdentityUnique(values, excludeId)) return false;
+
+    if (!values.authCode && !values.email) {
+      const ok = window.confirm(
+        '인증코드와 이메일이 모두 없습니다.\n이 참가자는 Player에서 직접 대회에 접속하기 어렵습니다.\n\n그래도 저장하시겠습니까?'
+      );
+      if (!ok) return false;
+    }
+
+    if (!isReplace) {
+      if (['fourball', 'agm'].includes(String(mode || '').toLowerCase()) && values.group !== 0) {
+        const ok = window.confirm(
+          'AGM 포볼에서 일반 참가자를 신규 추가하면 1조/2조 인원과 파트너 구성을 확인해야 합니다.\n이미 방배정이 진행 중이고 기존 참가자 1명이 빠진 경우에는 "참가자 교체/정보수정"을 사용하는 것이 더 안전합니다.\n\n신규 추가를 계속하시겠습니까?'
+        );
+        if (!ok) return false;
+      }
+
+      const current = Array.isArray(participantsRef.current) ? participantsRef.current : participants;
+      const blankIdx = getFirstReusableBlankIndex(current);
+      if (blankIdx < 0 && current.length >= totalRoomCapacity) {
+        alert(
+          `현재 참가자 수가 전체 방 정원(${totalRoomCapacity}명)에 도달했습니다.\n기존 참가자 1명이 빠진 상황이면 "참가자 교체/정보수정"을 사용해주세요.`
+        );
+        return false;
+      }
+
+      const newId = blankIdx >= 0 ? current[blankIdx].id : getNextParticipantId(current);
+      const newParticipant = {
+        ...(blankIdx >= 0 ? current[blankIdx] : {}),
+        id: newId,
+        group: values.group,
+        nickname: values.nickname,
+        handicap: values.handicap,
+        authCode: values.authCode,
+        email: values.email,
+        name: values.name,
+        score: null,
+        room: null,
+        roomNumber: null,
+        partner: null,
+        teammateId: null,
+        teammate: null,
+        selected: false,
+      };
+      try { delete newParticipant.scoreRaw; } catch {}
+      try { delete newParticipant.dirty; } catch {}
+      try { delete newParticipant.updatedAt; } catch {}
+
+      const next = blankIdx >= 0
+        ? current.map((p, i) => (i === blankIdx ? newParticipant : p))
+        : [...current, newParticipant];
+
+      try {
+        // 가장 먼저 이벤트 루트/현재 모드 명단을 저장 → 기존 참가자 방배정/점수 상태는 그대로 유지
+        await syncManualRosterRoot(next);
+
+        participantsRef.current = next;
+        setParticipants(next);
+        setHdInput((prev) => ({ ...prev, [String(newId)]: String(values.handicap) }));
+
+        // 보조 저장은 루트 저장 이후 수행. 일부 실패해도 Player는 루트 participants로 로그인 가능
+        const secondaryErrors = [];
+        try { await deleteDoc(doc(db, 'events', eventId, 'scores', String(newId))); }
+        catch (e) { secondaryErrors.push('기존 점수 초기화'); console.warn('[Step4] add score cleanup failed:', e); }
+        try { await saveParticipantSubDoc(newParticipant); }
+        catch (e) { secondaryErrors.push('참가자 보조문서'); console.warn('[Step4] add participant subdoc failed:', e); }
+        try { await saveManualPreMember(newParticipant); }
+        catch (e) { secondaryErrors.push('preMembers'); console.warn('[Step4] add preMember failed:', e); }
+
+        if (secondaryErrors.length) {
+          alert(`참가자 명단에는 정상 추가되었습니다.\n다만 보조 저장 일부를 확인해주세요: ${secondaryErrors.join(', ')}`);
+        } else if (hasMeaningfulEventInputs()) {
+          alert(
+            `${values.nickname} 참가자를 추가했습니다.\n\n현재 이벤트 입력값이 이미 존재합니다. 새 참가자는 기존 입력값이 없으므로 진행 중인 이벤트의 참여 대상/입력 상태를 확인해주세요.`
+          );
+        }
+        return true;
+      } catch (e) {
+        console.warn('[Step4] manual participant add failed:', e);
+        alert('참가자 추가 저장에 실패했습니다. 기존 참가자 명단은 변경하지 않았습니다. 다시 시도해주세요.');
+        return false;
+      }
+    }
+
+    const current = Array.isArray(participantsRef.current) ? participantsRef.current : participants;
+    const targetIndex = current.findIndex((p) => participantIdKey(p?.id) === participantIdKey(targetId));
+    if (targetIndex < 0) {
+      alert('교체할 참가자를 찾지 못했습니다.');
+      return false;
+    }
+
+    const oldParticipant = current[targetIndex];
+    const hasAssignment = (
+      oldParticipant?.room != null || oldParticipant?.roomNumber != null ||
+      oldParticipant?.partner != null || oldParticipant?.teammateId != null || oldParticipant?.teammate != null
+    );
+    if (hasAssignment && Number(oldParticipant?.group) !== Number(values.group)) {
+      const ok = window.confirm(
+        '현재 참가자는 이미 방 또는 포볼 파트너가 배정되어 있습니다.\n조를 변경해도 기존 방/파트너 배정은 유지됩니다.\n\n조 변경까지 그대로 진행하시겠습니까?'
+      );
+      if (!ok) return false;
+    }
+
+    if (replaceAction === 'replace' && hasMeaningfulEventInputs()) {
+      const ok = window.confirm(
+        '현재 이벤트 입력값이 이미 존재합니다.\n참가자 교체는 기존 ID를 유지하므로 일부 이벤트가 ID 기준으로 저장한 과거 입력값을 새 참가자가 이어받을 수 있습니다.\n\n교체 후 진행 중인 이벤트 입력/결과를 반드시 확인해주세요. 계속하시겠습니까?'
+      );
+      if (!ok) return false;
+    }
+
+    const replaced = {
+      ...oldParticipant,
+      id: oldParticipant.id,
+      group: values.group,
+      nickname: values.nickname,
+      handicap: values.handicap,
+      authCode: values.authCode,
+      email: values.email,
+      name: values.name,
+      // 정보수정은 점수를 유지하고, 실제 교체일 때만 이전 참가자의 점수를 초기화
+      score: replaceAction === 'replace' ? null : oldParticipant?.score ?? null,
+      selected: false,
+    };
+    try { delete replaced.scoreRaw; } catch {}
+    try { delete replaced.dirty; } catch {}
+    try { delete replaced.updatedAt; } catch {}
+
+    const next = current.map((p, i) => (i === targetIndex ? replaced : p));
+
+    try {
+      // 기존 id/방/파트너를 유지한 명단을 먼저 저장하여 진행 중 배정을 보호
+      await syncManualRosterRoot(next);
+
+      participantsRef.current = next;
+      setParticipants(next);
+      setHdInput((prev) => ({ ...prev, [String(oldParticipant.id)]: String(values.handicap) }));
+
+      const secondaryErrors = [];
+      // 실제 "새 참가자로 교체"일 때만 이전 참가자의 점수 SSOT를 해당 1명만 초기화
+      if (replaceAction === 'replace') {
+        try { await deleteDoc(doc(db, 'events', eventId, 'scores', String(oldParticipant.id))); }
+        catch (e) { secondaryErrors.push('기존 점수 초기화'); console.warn('[Step4] replace score cleanup failed:', e); }
+      }
+      try { await saveParticipantSubDoc(replaced); }
+      catch (e) { secondaryErrors.push('참가자 보조문서'); console.warn('[Step4] replace participant subdoc failed:', e); }
+      try { await removeOldManualPreMember(oldParticipant?.email, values.email); }
+      catch (e) { secondaryErrors.push('기존 preMembers 정리'); console.warn('[Step4] replace old preMember cleanup failed:', e); }
+      try { await saveManualPreMember(replaced); }
+      catch (e) { secondaryErrors.push('preMembers'); console.warn('[Step4] replace preMember failed:', e); }
+
+      if (secondaryErrors.length) {
+        alert(`${replaceAction === 'replace' ? '참가자 교체' : '참가자 정보수정'} 명단은 정상 저장되었습니다.\n다만 보조 저장 일부를 확인해주세요: ${secondaryErrors.join(', ')}`);
+      }
+      return true;
+    } catch (e) {
+      console.warn('[Step4] participant replace failed:', e);
+      alert('참가자 교체/정보수정 저장에 실패했습니다. 기존 참가자 명단은 변경하지 않았습니다. 다시 시도해주세요.');
+      return false;
+    }
+  };
 
   // 참가자 지문(필요 시)
   const seedOfParticipants = (list = []) => {
@@ -846,6 +1272,15 @@ export default function Step4() {
         roomCount={roomCount}
         roomNames={roomNames}
         roomCapacities={roomCapacities}
+        mode={mode}
+      />
+
+      <ParticipantRosterEditor
+        open={participantEditorOpen}
+        onClose={() => setParticipantEditorOpen(false)}
+        onSubmit={handleParticipantEditorSubmit}
+        participants={participants}
+        selectedParticipantIds={selectedParticipantIds}
         mode={mode}
       />
 
