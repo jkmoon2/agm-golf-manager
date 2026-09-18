@@ -15,7 +15,7 @@ import { getParticipantGroupNo, getPickLineupCandidateIds, getPickLineupConfig, 
 import useEffectivePlayerEventData from '../hooks/useEffectivePlayerEventData';
 import { computeGroupRoomHoleBattle, countParticipantUsageForRow, getBattleCellIds, getBattleSharedInputs, getGroupRoomBattleScoreParticipants, getGroupRoomHoleBattleInputRows, getGroupRoomHoleBattleRows, normalizeGroupRoomHoleBattleParams } from '../../events/groupRoomHoleBattle';
 import { getRankScoreGroupSide, getRankScorePairGroupLabel, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../../events/rankScoreGame';
-import { computeHiddenEvent, getHiddenFourballPairsFromPerson, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
+import { computeHiddenEvent, getHiddenFourballGroupStatus, getHiddenFourballPairsFromPerson, getHiddenFourballSide, getHiddenHandicapAdjustment, getHiddenOpponentId, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
 import { diagMerge, diagPush } from '../../utils/agmDiag';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../../utils/assignmentCompat';
 import { filterSkillRoomEventParticipants, isSkillRoomEventParticipant } from '../../utils/skillRoom';
@@ -2429,7 +2429,15 @@ export default function PlayerEventInput(){
     const mineId = String(mine.id || '');
     if (!mineId) return;
 
-    const mySide = getRankScoreGroupSide(mine, { pairGroups: cfg.pairGroups });
+    if (cfg.pairGroupMode === 'participant') {
+      const groupStatus = getHiddenFourballGroupStatus(participants, cfg);
+      if (groupStatus.unassigned.length || !groupStatus.countA || groupStatus.countA !== groupStatus.countB) {
+        alert(`운영자의 A/B 그룹 설정이 완료되지 않았습니다.\n현재 A그룹 ${groupStatus.countA}명 / B그룹 ${groupStatus.countB}명 / 미지정 ${groupStatus.unassigned.length}명입니다.`);
+        return;
+      }
+    }
+
+    const mySide = getHiddenFourballSide(mine, cfg);
     if (!mySide) {
       alert('포볼 선택은 운영자가 지정한 A/B 그룹 참가자만 사용할 수 있습니다.');
       return;
@@ -2471,7 +2479,7 @@ export default function PlayerEventInput(){
           const pid = String(p?.id ?? '');
           if (!pid || pid === mineId) return false;
           if (freshPairs[pid]) return false;
-          return getRankScoreGroupSide(p, { pairGroups: cfg.pairGroups }) === targetSide;
+          return getHiddenFourballSide(p, cfg) === targetSide;
         });
         if (!candidates.length) {
           throw new Error('no-candidate');
@@ -3112,25 +3120,26 @@ export default function PlayerEventInput(){
             if (hiddenCfg.mode === 'fourball') {
               const isSelfFourball = hiddenCfg.fourballMode === 'self';
               const isSelectFourball = hiddenCfg.fourballMode === 'select';
-              const pairs = (isSelfFourball || isSelectFourball)
-                ? (hiddenData?.pairMap || {})
-                : normalizeHiddenFourballPairs(hiddenEffectiveSlot?.shared?.hiddenFourballPairs || hiddenServerSlot?.shared?.hiddenFourballPairs || {});
+              const pairs = hiddenData?.pairMap || {};
               const minePairId = mineId ? pairs[mineId] : '';
               const minePair = minePairId ? participantById.get(String(minePairId)) : null;
               const rows = Array.isArray(hiddenData?.teamRows) ? hiddenData.teamRows : [];
-              const hiddenPairCfg = { pairGroups: hiddenCfg.pairGroups };
-              const pairLabelA = getRankScorePairGroupLabel(hiddenCfg.pairGroups, 'A');
-              const pairLabelB = getRankScorePairGroupLabel(hiddenCfg.pairGroups, 'B');
-              const pairHeaderA = splitRankScorePairLabel(pairLabelA);
-              const pairHeaderB = splitRankScorePairLabel(pairLabelB);
-              const mineSide = mine ? getRankScoreGroupSide(mine, hiddenPairCfg) : '';
+              const directPairGrouping = hiddenCfg.pairGroupMode === 'participant';
+              const hiddenDirectGroupStatus = directPairGrouping ? getHiddenFourballGroupStatus(participants, hiddenCfg) : null;
+              const hiddenDirectGroupReady = !directPairGrouping || !!hiddenDirectGroupStatus?.isComplete;
+              const pairLabelA = directPairGrouping ? 'A그룹' : getRankScorePairGroupLabel(hiddenCfg.pairGroups, 'A');
+              const pairLabelB = directPairGrouping ? 'B그룹' : getRankScorePairGroupLabel(hiddenCfg.pairGroups, 'B');
+              const pairHeaderA = directPairGrouping ? { title: 'A그룹', groups: '' } : splitRankScorePairLabel(pairLabelA);
+              const pairHeaderB = directPairGrouping ? { title: 'B그룹', groups: '' } : splitRankScorePairLabel(pairLabelB);
+              const mineSide = mine ? getHiddenFourballSide(mine, hiddenCfg) : '';
               const selfPickSide = hiddenCfg.selfPickSide || 'A';
               const canUseSelfPickButton = selfPickSide === 'both' || mineSide === selfPickSide;
-              const hasHiddenPairCandidates = isSelfFourball && mine && !!mineSide && canUseSelfPickButton && !minePairId && !hiddenLocked && (participants || []).some((p) => {
+              const hasHiddenPairCandidates = isSelfFourball && hiddenDirectGroupReady && mine && !!mineSide && canUseSelfPickButton && !minePairId && !hiddenLocked && (participants || []).some((p) => {
                 const pid = String(p?.id ?? '');
                 if (!pid || pid === String(mine.id)) return false;
                 if (pairs[pid]) return false;
-                return getRankScoreGroupSide(p, hiddenPairCfg) && getRankScoreGroupSide(p, hiddenPairCfg) !== mineSide;
+                const side = getHiddenFourballSide(p, hiddenCfg);
+                return side && side !== mineSide;
               });
               const hiddenSelectPartnerCandidates = isSelectFourball ? getHiddenFourballSelectCandidates(pairs, minePairId) : [];
               const directFocusKey = `${ev.id}:hidden-fourball-select`;
@@ -3148,6 +3157,12 @@ export default function PlayerEventInput(){
                     <div style={{ border: '1px solid #dbe7ff', background: '#f5f8ff', borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 1.45, color: '#344054' }}>
                       <b style={{ color: '#1d4ed8' }}>히든 포볼</b> · {isSelectFourball ? '참가자가 직접 비밀 팀원을 지목' : (isSelfFourball ? '참가자가 버튼을 누르면 비밀리에 무작위 2인팀 배정' : '운영자가 비밀로 2인1팀 배정한 뒤, 추후 오픈')}
                     </div>
+
+                    {isSelfFourball && directPairGrouping && !hiddenDirectGroupReady && (
+                      <div style={{ marginTop: 8, border: '1px solid #fecdd3', background: '#fff1f2', borderRadius: 10, padding: '8px 10px', fontSize: 12, color: '#be123c', fontWeight: 800, lineHeight: 1.45 }}>
+                        운영자의 A/B 그룹 설정이 완료되지 않았습니다. A {hiddenDirectGroupStatus?.countA || 0}명 / B {hiddenDirectGroupStatus?.countB || 0}명 / 미지정 {hiddenDirectGroupStatus?.unassigned?.length || 0}명
+                      </div>
+                    )}
 
                     {isSelfFourball && (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 10 }}>
@@ -3257,8 +3272,8 @@ export default function PlayerEventInput(){
                             )}
                             {rows.map((row, idx) => {
                               const members = Array.isArray(row.members) ? row.members : [];
-                              const left = isSelectFourball ? (members[0] || null) : (members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'A') || members[0] || null);
-                              const right = isSelectFourball ? (members[1] || null) : (members.find((m) => getRankScoreGroupSide(m, hiddenPairCfg) === 'B') || members.find((m) => String(m?.id || '') !== String(left?.id || '')) || null);
+                              const left = isSelectFourball ? (members[0] || null) : (members.find((m) => getHiddenFourballSide(m, hiddenCfg) === 'A') || members[0] || null);
+                              const right = isSelectFourball ? (members[1] || null) : (members.find((m) => getHiddenFourballSide(m, hiddenCfg) === 'B') || members.find((m) => String(m?.id || '') !== String(left?.id || '')) || null);
                               const hdSum = Number(row?.handicapSum ?? ((Number(left?.handicap || 0) + Number(right?.handicap || 0))));
                               return (
                                 <tr key={`hidden-fourball-${ev.id}-${row.key}`}>
