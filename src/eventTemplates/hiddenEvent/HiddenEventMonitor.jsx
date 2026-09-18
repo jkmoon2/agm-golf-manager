@@ -1,8 +1,7 @@
 // /src/eventTemplates/hiddenEvent/HiddenEventMonitor.jsx
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { computeHiddenEvent, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
-import { getRankScoreGroupSide } from '../../events/rankScoreGame';
+import { computeHiddenEvent, getHiddenFourballSide, normalizeHiddenEventParams, normalizeHiddenFourballPairs } from '../../events/hiddenEvent';
 
 const fmt = (value) => {
   const n = Number(value);
@@ -112,24 +111,15 @@ export default function HiddenEventMonitor({
       Object.entries(person).forEach(([selectorId, rec]) => {
         if (selectorId && getHiddenOpponentId(rec)) set.add(String(selectorId));
       });
-    } else if (cfg.mode === 'fourball' && cfg.fourballMode === 'self') {
-      const pairs = normalizeHiddenFourballPairs({
-        ...normalizeHiddenFourballPairs(inputsByEvent?.shared?.hiddenFourballPairs || inputsByEvent?.shared?.pairs || {}),
-        ...getHiddenFourballPairsFromPerson(person),
-      });
-      Object.entries(pairs).forEach(([a, b]) => {
-        if (a) set.add(String(a));
-        if (b) set.add(String(b));
-      });
     } else if (cfg.mode === 'fourball') {
-      const pairs = normalizeHiddenFourballPairs(inputsByEvent?.shared?.hiddenFourballPairs || inputsByEvent?.shared?.pairs || {});
+      const pairs = normalizeHiddenFourballPairs(data?.pairMap || {});
       Object.entries(pairs).forEach(([a, b]) => {
         if (a) set.add(String(a));
         if (b) set.add(String(b));
       });
     }
     return set;
-  }, [cfg.mode, cfg.fourballMode, inputsByEvent]);
+  }, [cfg.mode, cfg.fourballMode, inputsByEvent, data?.pairMap]);
 
   const unregisteredParticipants = useMemo(() => {
     if (!(cfg.mode === 'personal' || cfg.mode === 'fourball')) return [];
@@ -152,16 +142,11 @@ export default function HiddenEventMonitor({
         const opponentId = getHiddenOpponentId(rec);
         if (selectorId && opponentId) map[String(selectorId)] = String(opponentId);
       });
-    } else if (cfg.mode === 'fourball' && cfg.fourballMode === 'self') {
-      Object.assign(map, normalizeHiddenFourballPairs({
-        ...normalizeHiddenFourballPairs(inputsByEvent?.shared?.hiddenFourballPairs || inputsByEvent?.shared?.pairs || {}),
-        ...getHiddenFourballPairsFromPerson(person),
-      }));
     } else if (cfg.mode === 'fourball') {
-      Object.assign(map, normalizeHiddenFourballPairs(inputsByEvent?.shared?.hiddenFourballPairs || inputsByEvent?.shared?.pairs || {}));
+      Object.assign(map, normalizeHiddenFourballPairs(data?.pairMap || {}));
     }
     return map;
-  }, [cfg.mode, cfg.fourballMode, inputsByEvent]);
+  }, [cfg.mode, cfg.fourballMode, inputsByEvent, data?.pairMap]);
 
   const candidatesById = useMemo(() => {
     const map = {};
@@ -191,12 +176,12 @@ export default function HiddenEventMonitor({
         return;
       }
 
-      const mySide = getRankScoreGroupSide(me, { pairGroups: cfg.pairGroups });
+      const mySide = getHiddenFourballSide(me, cfg);
       const targetSide = mySide === 'A' ? 'B' : mySide === 'B' ? 'A' : '';
       map[meId] = safeParticipants.filter((p) => {
         const pid = String(p?.id ?? '');
         if (!pid || pid === meId) return false;
-        if (!targetSide || getRankScoreGroupSide(p, { pairGroups: cfg.pairGroups }) !== targetSide) return false;
+        if (!targetSide || getHiddenFourballSide(p, cfg) !== targetSide) return false;
         const pairedWith = currentPartnerById[pid];
         return !pairedWith || String(pairedWith) === meId;
       });
@@ -247,7 +232,7 @@ export default function HiddenEventMonitor({
         const partnerId = String(currentPartnerById?.[pid] || '');
         const partner = partnerId ? safeParticipants.find((x) => String(x?.id ?? '') === partnerId) : null;
         const side = cfg.mode === 'fourball' && cfg.fourballMode !== 'select'
-          ? (getRankScoreGroupSide(p, { pairGroups: cfg.pairGroups }) || '-')
+          ? (getHiddenFourballSide(p, cfg) || '-')
           : `${getGroupNo(p) || '-'}조`;
         const candidates = candidatesById[pid] || [];
         return (

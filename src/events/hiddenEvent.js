@@ -20,6 +20,12 @@ export function defaultHiddenEventParams() {
       A: [1, 2],
       B: [3, 4],
     },
+    // 포볼 A/B 구성 기준: group(기존 조 기준) | participant(운영자 참가자 직접 지정)
+    pairGroupMode: 'group',
+    pairParticipantGroups: {
+      A: [],
+      B: [],
+    },
     selectionLocked: false,
     personalPoints: {
       win: 1,
@@ -119,6 +125,68 @@ export function normalizeHiddenHandicapSteps(raw) {
   };
 }
 
+export function normalizeHiddenPairParticipantGroups(raw) {
+  const src = (raw && typeof raw === 'object') ? raw : {};
+  const normalizeIds = (value) => Array.from(new Set((Array.isArray(value) ? value : [])
+    .map((id) => String(id ?? '').trim())
+    .filter(Boolean)));
+
+  const A = normalizeIds(src.A || src.a || src.groupA || src.teamA || src.sideA);
+  const aSet = new Set(A);
+  const B = normalizeIds(src.B || src.b || src.groupB || src.teamB || src.sideB)
+    .filter((id) => !aSet.has(id));
+  return { A, B };
+}
+
+function getHiddenFourballSideFromConfig(participant, cfg) {
+  const pid = String(participant?.id ?? '').trim();
+  if (!pid) return '';
+
+  if (cfg?.pairGroupMode === 'participant') {
+    const direct = cfg?.pairParticipantGroups || { A: [], B: [] };
+    if ((direct.A || []).map(String).includes(pid)) return 'A';
+    if ((direct.B || []).map(String).includes(pid)) return 'B';
+    return '';
+  }
+
+  const g = clampGroupNo(getParticipantGroupNo(participant));
+  if (cfg?.pairGroups?.A?.includes(g)) return 'A';
+  if (cfg?.pairGroups?.B?.includes(g)) return 'B';
+  return '';
+}
+
+export function getHiddenFourballSide(participant, params = {}) {
+  const cfg = normalizeHiddenEventParams(params);
+  return getHiddenFourballSideFromConfig(participant, cfg);
+}
+
+export function getHiddenFourballGroupStatus(participants = [], params = {}) {
+  const cfg = normalizeHiddenEventParams(params);
+  const safeParticipants = Array.isArray(participants) ? participants : [];
+  const A = [];
+  const B = [];
+  const unassigned = [];
+
+  safeParticipants.forEach((p) => {
+    const side = getHiddenFourballSideFromConfig(p, cfg);
+    if (side === 'A') A.push(p);
+    else if (side === 'B') B.push(p);
+    else unassigned.push(p);
+  });
+
+  return {
+    mode: cfg.pairGroupMode,
+    A,
+    B,
+    unassigned,
+    countA: A.length,
+    countB: B.length,
+    total: safeParticipants.length,
+    isBalanced: A.length > 0 && A.length === B.length,
+    isComplete: safeParticipants.length > 0 && unassigned.length === 0 && A.length === B.length,
+  };
+}
+
 export function normalizeHiddenPairGroups(raw) {
   const def = defaultHiddenEventParams().pairGroups;
   const src = (raw && typeof raw === 'object') ? raw : {};
@@ -160,6 +228,9 @@ export function normalizeHiddenEventParams(raw) {
   const rawSelfPickSide = String(src.selfPickSide || src.selfPickerSide || src.pickSide || base.selfPickSide || 'A').toUpperCase();
   const selfPickSide = rawSelfPickSide === 'B' ? 'B' : (rawSelfPickSide === 'BOTH' || rawSelfPickSide === 'ALL' ? 'both' : 'A');
   const excludeSameGroupTargets = src.excludeSameGroupTargets === false || src.excludeOwnGroupTargets === false || src.allowSameGroupTargets === true ? false : true;
+  const rawPairGroupMode = String(src.pairGroupMode || src.pairGroupSource || src.groupBuildMode || base.pairGroupMode || 'group').toLowerCase();
+  const pairGroupMode = ['participant', 'manual', 'direct', 'custom'].includes(rawPairGroupMode) ? 'participant' : 'group';
+  const pairParticipantGroups = normalizeHiddenPairParticipantGroups(src.pairParticipantGroups || src.participantPairGroups || src.manualPairGroups);
   return {
     ...base,
     ...src,
@@ -168,6 +239,12 @@ export function normalizeHiddenEventParams(raw) {
     revealed: !!src.revealed,
     handicapSteps: normalizeHiddenHandicapSteps(src.handicapSteps),
     pairGroups: normalizeHiddenPairGroups(src.pairGroups),
+    pairGroupMode,
+    pairGroupSource: pairGroupMode,
+    groupBuildMode: pairGroupMode,
+    pairParticipantGroups,
+    participantPairGroups: pairParticipantGroups,
+    manualPairGroups: pairParticipantGroups,
     selectionLocked: !!(src.selectionLocked || src.locked),
     personalPoints: normalizeHiddenPersonalPoints(src.personalPoints || src.points),
     pointType,
@@ -194,7 +271,12 @@ export function getHiddenEventMetaText(params) {
   const cfg = normalizeHiddenEventParams(params);
   if (cfg.mode === 'fourball') {
     const method = cfg.fourballMode === 'select' ? '참가자 직접지목' : (cfg.fourballMode === 'self' ? '참가자 무작위배정' : '운영자 무작위');
-    return `hidden-event · 포볼(${method}) · A그룹 ${cfg.pairGroups.A.join('+')}조 / B그룹 ${cfg.pairGroups.B.join('+')}조 · ${cfg.revealed ? '공개' : '비공개'} · ${cfg.selectionLocked ? '마감' : '진행중'}`;
+    const groupText = cfg.fourballMode === 'select'
+      ? ''
+      : (cfg.pairGroupMode === 'participant'
+        ? ` · A/B 참가자 직접지정`
+        : ` · A그룹 ${cfg.pairGroups.A.join('+')}조 / B그룹 ${cfg.pairGroups.B.join('+')}조`);
+    return `hidden-event · 포볼(${method})${groupText} · ${cfg.revealed ? '공개' : '비공개'} · ${cfg.selectionLocked ? '마감' : '진행중'}`;
   }
   return `hidden-event · 개인 1대1 · ${cfg.revealed ? '공개' : '비공개'} · ${cfg.selectionLocked ? '마감' : '진행중'}`;
 }
@@ -331,17 +413,11 @@ function isAvoidedPair(avoidMap, aId, bId) {
 
 export function assignHiddenFourballPairs(participants = [], params = {}, existingPairs = {}, options = {}) {
   const cfg = normalizeHiddenEventParams(params);
-  const groups = cfg.pairGroups;
   const safeParticipants = Array.isArray(participants) ? participants : [];
   const byId = new Map(safeParticipants.map((p) => [String(p?.id ?? ''), p]));
   const avoidPairs = normalizeHiddenFourballPairs(options?.avoidPairs || options?.historyPairs || {});
   const recentHistory = (options?.recentHistory && typeof options.recentHistory === 'object') ? options.recentHistory : {};
-  const sideOf = (p) => {
-    const g = clampGroupNo(getParticipantGroupNo(p));
-    if (groups.A.includes(g)) return 'A';
-    if (groups.B.includes(g)) return 'B';
-    return '';
-  };
+  const sideOf = (p) => getHiddenFourballSideFromConfig(p, cfg);
 
   // 기존 배정팀이 있으면 먼저 유지하고, 남은 참가자만 무작위 배정한다.
   const pairs = {};
@@ -412,6 +488,31 @@ export function normalizeHiddenFourballPairs(raw) {
     if (!pairs[String(b)]) pairs[String(b)] = String(a);
   });
   return pairs;
+}
+
+function filterHiddenFourballPairsByConfig(rawPairs, participants = [], cfg = {}) {
+  const normalized = normalizeHiddenFourballPairs(rawPairs);
+  const byId = new Map((Array.isArray(participants) ? participants : []).map((p) => [String(p?.id ?? ''), p]));
+  const out = {};
+  const seen = new Set();
+
+  Object.entries(normalized).forEach(([aId, bId]) => {
+    const aKey = String(aId || '');
+    const bKey = String(bId || '');
+    if (!aKey || !bKey || aKey === bKey || seen.has(aKey) || seen.has(bKey)) return;
+    const a = byId.get(aKey);
+    const b = byId.get(bKey);
+    if (!a || !b) return;
+    const aSide = getHiddenFourballSideFromConfig(a, cfg);
+    const bSide = getHiddenFourballSideFromConfig(b, cfg);
+    if (!aSide || !bSide || aSide === bSide) return;
+    out[aKey] = bKey;
+    out[bKey] = aKey;
+    seen.add(aKey);
+    seen.add(bKey);
+  });
+
+  return out;
 }
 
 export function getHiddenFourballPairsFromPerson(personSlot = {}) {
@@ -529,6 +630,11 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
     const a = byId.get(aKey);
     const b = byId.get(bKey);
     if (!a || !b) return;
+    if (cfg.fourballMode !== 'select') {
+      const aSide = getHiddenFourballSideFromConfig(a, cfg);
+      const bSide = getHiddenFourballSideFromConfig(b, cfg);
+      if (!aSide || !bSide || aSide === bSide) return;
+    }
     const aScore = Number(a?.score ?? 0) || 0;
     const bScore = Number(b?.score ?? 0) || 0;
     const scoreSum = aScore + bScore;
@@ -576,7 +682,7 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
   } else if (cfg.fourballMode === 'self') {
     const personPairs = getHiddenFourballPairsFromPerson(inputsSlot?.person || {});
     const sharedPairs = normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {});
-    const pairs = normalizeHiddenFourballPairs({ ...sharedPairs, ...personPairs });
+    const pairs = filterHiddenFourballPairsByConfig({ ...sharedPairs, ...personPairs }, participants, cfg);
     const seen = new Set();
     Object.entries(pairs).forEach(([aId, bId]) => {
       const aKey = String(aId || '');
@@ -587,7 +693,7 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
       pushTeam(aKey, bKey, 'self-');
     });
   } else {
-    const pairs = normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {});
+    const pairs = filterHiddenFourballPairsByConfig(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {}, participants, cfg);
     const seen = new Set();
     Object.entries(pairs).forEach(([aId, bId]) => {
       const aKey = String(aId || '');
@@ -648,11 +754,11 @@ function buildFourballRows(eventDef, participants = [], inputsSlot = {}, opt = {
   const pairMap = cfg.fourballMode === 'select'
     ? getHiddenFourballDirectSelectionsFromPerson(inputsSlot?.person || {})
     : (cfg.fourballMode === 'self'
-      ? normalizeHiddenFourballPairs({
+      ? filterHiddenFourballPairsByConfig({
           ...normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {}),
           ...getHiddenFourballPairsFromPerson(inputsSlot?.person || {}),
-        })
-      : normalizeHiddenFourballPairs(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {}));
+        }, participants, cfg)
+      : filterHiddenFourballPairsByConfig(inputsSlot?.shared?.hiddenFourballPairs || inputsSlot?.shared?.pairs || {}, participants, cfg));
   return { kind: 'team', mode: 'fourball', fourballMode: cfg.fourballMode, revealed: cfg.revealed, pairMap, pointType, teamRows: rows, roomRows };
 }
 

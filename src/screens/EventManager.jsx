@@ -38,7 +38,7 @@ import { computeBingo, defaultBingoParams, normalizeBingoBoardCellCount, normali
 import { defaultGroupRoomHoleBattleParams, normalizeBattleType, normalizeGroupRoomHoleBattleParams } from '../events/groupRoomHoleBattle';
 import { getPickLineupConfig, getPickLineupRequiredCount } from '../events/pickLineup';
 import { computeRankScoreGame, getRankScoreGameMetaText, getRankScoreGameTarget, getRankScoreGroupSide, normalizeRankScoreDirectPairs, normalizeRankScoreGameParams, normalizeRankScorePairs } from '../events/rankScoreGame';
-import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballPairsFromPerson, normalizeHiddenEventParams, normalizeHiddenFourballPairs, normalizeHiddenPersonalPoints } from '../events/hiddenEvent';
+import { assignHiddenFourballPairs, computeHiddenEvent, getHiddenEventMetaText, getHiddenFourballGroupStatus, getHiddenFourballPairsFromPerson, getHiddenFourballSide, normalizeHiddenEventParams, normalizeHiddenFourballPairs, normalizeHiddenPersonalPoints } from '../events/hiddenEvent';
 
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -1819,8 +1819,8 @@ if (editForm?.template === 'group-battle') {
       return;
     }
     if (params.mode === 'fourball' && params.fourballMode !== 'select') {
-      const meSide = getRankScoreGroupSide(me, { pairGroups: params.pairGroups });
-      const partnerSide = getRankScoreGroupSide(partner, { pairGroups: params.pairGroups });
+      const meSide = getHiddenFourballSide(me, params);
+      const partnerSide = getHiddenFourballSide(partner, params);
       if (!meSide || !partnerSide || meSide === partnerSide) {
         alert('포볼 배정은 A/B그룹이 서로 다른 참가자끼리만 가능합니다.');
         return;
@@ -1934,6 +1934,19 @@ if (editForm?.template === 'group-battle') {
     if (!ensureEventWriteReady('히든 포볼 무작위 배정')) return;
     const params = normalizeHiddenEventParams(hiddenMonitorEvent.params);
     if (params.mode !== 'fourball') return;
+
+    if (params.fourballMode !== 'select' && params.pairGroupMode === 'participant') {
+      const groupStatus = getHiddenFourballGroupStatus(participants, params);
+      if (groupStatus.unassigned.length) {
+        const names = groupStatus.unassigned.slice(0, 6).map((p) => p?.nickname || p?.name || '-').join(', ');
+        alert(`A/B 그룹이 지정되지 않은 참가자가 ${groupStatus.unassigned.length}명 있습니다.\n히든 이벤트 수정에서 모든 참가자를 A 또는 B그룹으로 지정해주세요.${names ? `\n미지정: ${names}${groupStatus.unassigned.length > 6 ? ' 외' : ''}` : ''}`);
+        return;
+      }
+      if (!groupStatus.countA || groupStatus.countA !== groupStatus.countB) {
+        alert(`A/B 그룹 인원을 동일하게 맞춰주세요.\n현재 A그룹 ${groupStatus.countA}명 / B그룹 ${groupStatus.countB}명입니다.`);
+        return;
+      }
+    }
 
     const currentSlot = (inputsAll && typeof inputsAll === 'object') ? (inputsAll[hiddenMonitorEvent.id] || {}) : {};
     const currentSharedPairs = normalizeHiddenFourballPairs(currentSlot?.shared?.hiddenFourballPairs || currentSlot?.shared?.pairs || {});

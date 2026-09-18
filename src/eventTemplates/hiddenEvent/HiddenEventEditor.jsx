@@ -131,6 +131,28 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
     if (!pairGroups[other].length) pairGroups[other] = [1, 2, 3, 4].filter((g) => !sideSet.has(g));
     emit({ pairGroups });
   };
+  const emitPairGroupMode = (valueText) => {
+    const pairGroupMode = valueText === 'participant' ? 'participant' : 'group';
+    emit({ pairGroupMode, pairGroupSource: pairGroupMode, groupBuildMode: pairGroupMode });
+  };
+  const emitParticipantPairSide = (participantId, side) => {
+    const pid = String(participantId ?? '').trim();
+    if (!pid) return;
+    const current = cfg.pairParticipantGroups || { A: [], B: [] };
+    const A = (current.A || []).map(String).filter((id) => id !== pid);
+    const B = (current.B || []).map(String).filter((id) => id !== pid);
+    const isActive = (current?.[side] || []).map(String).includes(pid);
+    if (!isActive) {
+      if (side === 'A') A.push(pid);
+      else if (side === 'B') B.push(pid);
+    }
+    const pairParticipantGroups = { A, B };
+    emit({
+      pairParticipantGroups,
+      participantPairGroups: pairParticipantGroups,
+      manualPairGroups: pairParticipantGroups,
+    });
+  };
   const emitLimitMode = (nextMode) => {
     if (nextMode !== 'personal') {
       setLimitText({});
@@ -173,6 +195,18 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
 
   const limitModeValue = cfg.targetLimitMode === 'personal' || Object.keys(cfg.targetLimits || {}).length ? 'personal' : 'unlimited';
   const participantList = Array.isArray(participants) ? participants : [];
+  const sortedPairParticipants = [...participantList].sort((a, b) => {
+    const ga = Number(a?.group ?? a?.groupNo ?? 999);
+    const gb = Number(b?.group ?? b?.groupNo ?? 999);
+    if (ga !== gb) return ga - gb;
+    return String(a?.nickname || a?.name || '').localeCompare(String(b?.nickname || b?.name || ''), 'ko');
+  });
+  const directGroupASet = new Set((cfg.pairParticipantGroups?.A || []).map(String));
+  const directGroupBSet = new Set((cfg.pairParticipantGroups?.B || []).map(String));
+  const directUnassignedCount = sortedPairParticipants.filter((p) => {
+    const pid = String(p?.id ?? '');
+    return pid && !directGroupASet.has(pid) && !directGroupBSet.has(pid);
+  }).length;
 
   return (
     <div style={boxStyle}>
@@ -343,35 +377,73 @@ export default function HiddenEventEditor({ value, onChange, participants = [] }
             </label>
           )}
 
+          <label style={{ ...labelStyle, marginTop: 10 }}>포볼 그룹 기준
+            <select style={inputStyle} value={cfg.pairGroupMode === 'participant' ? 'participant' : 'group'} onChange={(e) => emitPairGroupMode(e.target.value)}>
+              <option value="group">기존 조 기준</option>
+              <option value="participant">참가자 직접 A/B 지정</option>
+            </select>
+          </label>
+
           <div style={{ fontSize: 13, fontWeight: 900, color: '#16376c', marginTop: 14 }}>포볼 그룹 구성</div>
-          {['A', 'B'].map((side) => (
-            <div key={side} style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 900, color: '#344054', marginBottom: 5 }}>{side}그룹</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {[1, 2, 3, 4].map((g) => {
-                  const active = (cfg.pairGroups?.[side] || []).includes(g);
+          {cfg.pairGroupMode !== 'participant' ? (
+            ['A', 'B'].map((side) => (
+              <div key={side} style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#344054', marginBottom: 5 }}>{side}그룹</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[1, 2, 3, 4].map((g) => {
+                    const active = (cfg.pairGroups?.[side] || []).includes(g);
+                    return (
+                      <button
+                        key={`${side}-${g}`}
+                        type="button"
+                        onClick={() => emitPairGroup(side, g)}
+                        style={{
+                          border: active ? '1px solid #2563eb' : '1px solid #d7dfec',
+                          background: active ? '#eaf2ff' : '#fff',
+                          color: active ? '#1d4ed8' : '#344054',
+                          borderRadius: 999,
+                          padding: '7px 10px',
+                          fontSize: 12,
+                          fontWeight: 900,
+                        }}
+                      >
+                        {g}조
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div style={{ marginTop: 8, border: '1px solid #e5eaf2', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: '#f8fafc', borderBottom: '1px solid #e5eaf2', fontSize: 12, fontWeight: 900, color: '#344054' }}>
+                <span>A {directGroupASet.size}명 · B {directGroupBSet.size}명</span>
+                <span style={{ color: directUnassignedCount ? '#be123c' : (directGroupASet.size === directGroupBSet.size && directGroupASet.size ? '#1d4ed8' : '#667085') }}>
+                  {directUnassignedCount ? `미지정 ${directUnassignedCount}명` : (directGroupASet.size === directGroupBSet.size && directGroupASet.size ? '배정 가능' : 'A/B 인원 확인')}
+                </span>
+              </div>
+              <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                {sortedPairParticipants.map((p) => {
+                  const pid = String(p?.id ?? '');
+                  const activeA = directGroupASet.has(pid);
+                  const activeB = directGroupBSet.has(pid);
+                  const groupNo = p?.group ?? p?.groupNo ?? p?.groupNumber ?? '';
                   return (
-                    <button
-                      key={`${side}-${g}`}
-                      type="button"
-                      onClick={() => emitPairGroup(side, g)}
-                      style={{
-                        border: active ? '1px solid #2563eb' : '1px solid #d7dfec',
-                        background: active ? '#eaf2ff' : '#fff',
-                        color: active ? '#1d4ed8' : '#344054',
-                        borderRadius: 999,
-                        padding: '7px 10px',
-                        fontSize: 12,
-                        fontWeight: 900,
-                      }}
-                    >
-                      {g}조
-                    </button>
+                    <div key={`hidden-direct-group-${pid}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 46px 46px', gap: 6, alignItems: 'center', padding: '7px 8px', borderBottom: '1px solid #eef2f7' }}>
+                      <div style={{ minWidth: 0, fontSize: 12, color: '#16243f', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p?.nickname || p?.name || '-'}{groupNo !== '' ? <span style={{ color: '#667085', fontWeight: 700 }}> · {groupNo}조</span> : null}
+                      </div>
+                      <button type="button" onClick={() => emitParticipantPairSide(pid, 'A')} style={{ height: 30, borderRadius: 8, border: activeA ? '1px solid #2563eb' : '1px solid #d7dfec', background: activeA ? '#eaf2ff' : '#fff', color: activeA ? '#1d4ed8' : '#344054', fontSize: 12, fontWeight: 900 }}>A</button>
+                      <button type="button" onClick={() => emitParticipantPairSide(pid, 'B')} style={{ height: 30, borderRadius: 8, border: activeB ? '1px solid #2563eb' : '1px solid #d7dfec', background: activeB ? '#eaf2ff' : '#fff', color: activeB ? '#1d4ed8' : '#344054', fontSize: 12, fontWeight: 900 }}>B</button>
+                    </div>
                   );
                 })}
               </div>
+              <div style={{ padding: '8px 10px', fontSize: 11, lineHeight: 1.45, color: '#667085', wordBreak: 'keep-all' }}>
+                모든 참가자를 A/B 중 하나에 지정하고 A/B 인원을 같게 맞추면 기존 조와 무관하게 전원 2인팀 배정이 가능합니다.
+              </div>
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>
