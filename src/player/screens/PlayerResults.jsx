@@ -284,7 +284,7 @@ export default function PlayerResults() {
           includedCount += 1;
           sumHd += hd; sumSc += sc; sumBd += bd; sumRs += rs;
         }
-        return { ...p, score: sc, banddang: bd, result: rs, excluded };
+        return { ...p, score: sc, banddang: bd, result: rs, excluded, isReal };
       });
 
       return { detail, sumHandicap: sumHd, sumScore: sumSc, sumBanddang: sumBd, sumResult: sumRs, includedCount };
@@ -542,7 +542,7 @@ export default function PlayerResults() {
                     <React.Fragment key={`res-sub-${i}`}>
                       <th className={`${styles.subTh} ${styles.nickCol}`}>닉네임</th>
                       <th className={`${styles.subTh} ${styles.metricCol} ${styles.gHead}`}>G핸디</th>
-                      <th className={`${styles.subTh} ${styles.metricCol}`}>점수</th>
+                      {visibleMetrics.score && <th className={`${styles.subTh} ${styles.metricCol}`}>점수</th>}
                       {visibleMetrics.banddang && <th className={`${styles.subTh} ${styles.metricCol}`}>반땅</th>}
                       <th className={`${styles.subTh} ${styles.metricCol}`}>결과</th>
                     </React.Fragment>
@@ -553,15 +553,19 @@ export default function PlayerResults() {
               <tbody>
                 {Array.from({ length: MAX_PER_ROOM }).map((_, ri) => (
                   <tr key={`res-row-${ri}`}>
-                    {resultRoomOrder.map((ci) => (
-                      <React.Fragment key={`res-${ci}-${ri}`}>
-                        <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{(resultByRoom[ci]||{}).detail?.[ri]?.excluded ? `${(resultByRoom[ci]||{}).detail?.[ri]?.nickname || ''} (제외)` : ((resultByRoom[ci]||{}).detail?.[ri]?.nickname || '')}</span></td>
-                        <td className={`${styles.td} ${styles.metricCol}`}>{(resultByRoom[ci]||{}).detail?.[ri]?.handicap || 0}</td>
-                        {visibleMetrics.score    && <td className={`${styles.td} ${styles.metricCol}`}>{(resultByRoom[ci]||{}).detail?.[ri]?.score || 0}</td>}
-                        {visibleMetrics.banddang && <td className={`${styles.td} ${styles.metricCol}`} style={{ color: '#0b61da' }}>{(resultByRoom[ci]||{}).detail?.[ri]?.banddang || 0}</td>}
-                        <td className={`${styles.td} ${styles.metricCol}`} style={{ color:'red', fontWeight:600 }}>{(resultByRoom[ci]||{}).detail?.[ri]?.excluded ? '제외' : ((resultByRoom[ci]||{}).detail?.[ri]?.result ?? 0)}</td>
-                      </React.Fragment>
-                    ))}
+                    {resultRoomOrder.map((ci) => {
+                      const row = (resultByRoom[ci] || {}).detail?.[ri];
+                      const isReal = !!row?.isReal;
+                      return (
+                        <React.Fragment key={`res-${ci}-${ri}`}>
+                          <td className={`${styles.td} ${styles.nickCell}`}><span className={styles.nick}>{isReal ? (row.excluded ? `${row.nickname || ''} (제외)` : (row.nickname || '')) : ''}</span></td>
+                          <td className={`${styles.td} ${styles.metricCol}`}>{isReal ? row.handicap : ''}</td>
+                          {visibleMetrics.score    && <td className={`${styles.td} ${styles.metricCol}`}>{isReal ? row.score : ''}</td>}
+                          {visibleMetrics.banddang && <td className={`${styles.td} ${styles.metricCol}`} style={{ color: '#0b61da' }}>{isReal ? row.banddang : ''}</td>}
+                          <td className={`${styles.td} ${styles.metricCol}`} style={{ color:'red', fontWeight:600 }}>{isReal ? (row.excluded ? '제외' : row.result) : ''}</td>
+                        </React.Fragment>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -573,9 +577,11 @@ export default function PlayerResults() {
                       <td className={`${styles.td} ${styles.totalLabel}`}>합계</td>
                       <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{(resultByRoom[ci]||{}).sumHandicap || 0}</td>
                       {visibleMetrics.score    && <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: 'black' }}>{(resultByRoom[ci]||{}).sumScore || 0}</td>}
-                      <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: visibleMetrics.banddang ? '#0b61da' : 'black' }}>
-                        {visibleMetrics.banddang ? (resultByRoom[ci]||{}).sumBanddang : 0}
-                      </td>
+                      {visibleMetrics.banddang && (
+                        <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color: '#0b61da' }}>
+                          {(resultByRoom[ci]||{}).sumBanddang || 0}
+                        </td>
+                      )}
                       <td className={`${styles.td} ${styles.totalValue} ${styles.metricCol}`} style={{ color:'#cc0000' }}>{(resultByRoom[ci]||{}).sumResult || 0}</td>
                     </React.Fragment>
                   ))}
