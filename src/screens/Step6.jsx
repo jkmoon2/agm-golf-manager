@@ -546,7 +546,7 @@ export default function Step6() {
           sumRs += rs;
         }
 
-        return { ...p, score: sc, banddang: bd, result: rs, excluded };
+        return { ...p, score: sc, banddang: bd, result: rs, excluded, isReal };
       });
 
       return { detail, sumHandicap: sumHd, sumScore: sumSc, sumBanddang: sumBd, sumResult: sumRs, includedCount };
@@ -831,18 +831,20 @@ export default function Step6() {
                 <tr key={ri}>
                   {resultRoomOrder.map((ci) => {
                     const roomObj = resultByRoom[ci];
+                    const row = roomObj.detail[ri];
+                    const isReal = !!row?.isReal;
                     return (
                       <React.Fragment key={ci}>
-                        <td className={styles.cell} style={__COL.resultNick}>{roomObj.detail[ri].excluded ? `${roomObj.detail[ri].nickname} (제외)` : roomObj.detail[ri].nickname}</td>
-                        <td className={styles.cell} style={__COL.resultGhandi}>{roomObj.detail[ri].handicap}</td>
-                        {showScore  && <td className={styles.cell} style={__COL.resultScore}>{roomObj.detail[ri].score}</td>}
+                        <td className={styles.cell} style={__COL.resultNick}>{isReal ? (row.excluded ? `${row.nickname} (제외)` : row.nickname) : ''}</td>
+                        <td className={styles.cell} style={__COL.resultGhandi}>{isReal ? row.handicap : ''}</td>
+                        {showScore  && <td className={styles.cell} style={__COL.resultScore}>{isReal ? row.score : ''}</td>}
                         {showHalved && (
                           <td className={styles.cell} style={{ ...__COL.resultBanddang, color: 'blue' }}>
-                            {roomObj.detail[ri].banddang}
+                            {isReal ? row.banddang : ''}
                           </td>
                         )}
                         <td className={styles.cell} style={{ ...__COL.resultResult, color: 'red' }}>
-                          {roomObj.detail[ri].excluded ? '제외' : roomObj.detail[ri].result}
+                          {isReal ? (row.excluded ? '제외' : row.result) : ''}
                         </td>
                       </React.Fragment>
                     );

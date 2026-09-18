@@ -654,7 +654,7 @@ export default function Step8() {
           sumBd += bd;
           sumRs += rs;
         }
-        return { ...p, score: sc, banddang: bd, result: rs, excluded };
+        return { ...p, score: sc, banddang: bd, result: rs, excluded, isReal };
       });
       return { detail, sumHandicap: sumHd, sumScore: sumSc, sumBanddang: sumBd, sumResult: sumRs, includedCount };
     });
@@ -1101,20 +1101,22 @@ export default function Step8() {
                 <tr key={`res-slot-${ri}`}>
                   {resultRoomOrder.map((ci) => {
                     const room = resultByRoom[ci];
+                    const row = room.detail[ri];
+                    const isReal = !!row?.isReal;
                     return (
                       <React.Fragment key={`res-room-${ci}-slot-${ri}`}>
-                        <td className={styles.cell} style={__COL.resultNick}>{room.detail[ri].excluded ? `${room.detail[ri].nickname} (제외)` : room.detail[ri].nickname}</td>
-                        <td className={styles.cell} style={__COL.resultGhandi}>{room.detail[ri].handicap}</td>
+                        <td className={styles.cell} style={__COL.resultNick}>{isReal ? (row.excluded ? `${row.nickname} (제외)` : row.nickname) : ''}</td>
+                        <td className={styles.cell} style={__COL.resultGhandi}>{isReal ? row.handicap : ''}</td>
                         {visibleMetrics.score    && (
-                          <td className={styles.cell} style={__COL.resultScore}>{room.detail[ri].score}</td>
+                          <td className={styles.cell} style={__COL.resultScore}>{isReal ? row.score : ''}</td>
                         )}
                         {visibleMetrics.banddang && (
                           <td className={styles.cell} style={{ ...__COL.resultBanddang, color: 'blue' }}>
-                            {room.detail[ri].banddang}
+                            {isReal ? row.banddang : ''}
                           </td>
                         )}
                         <td className={styles.cell} style={{ ...__COL.resultResult, color: 'red' }}>
-                          {room.detail[ri].excluded ? '제외' : room.detail[ri].result}
+                          {isReal ? (row.excluded ? '제외' : row.result) : ''}
                         </td>
                       </React.Fragment>
                     );
