@@ -588,3 +588,27 @@
   padding-top: 2px;
   border-top: 1px dashed #e4e8ef;
 }
+
+
+/* ────────────────────────────────────────────────────────────────
+   STEP8 빈 행 높이 고정
+   - 방배정표/최종결과표의 미배정 빈칸도 STEP6와 동일한 행 높이를 유지
+   - 계산값은 변경하지 않고 화면 표시 높이만 보정
+   ──────────────────────────────────────────────────────────────── */
+:root {
+  --row-h-step8: 30px;
+}
+
+.fixedRows thead th,
+.fixedRows tbody td {
+  height: var(--row-h-step8);
+  line-height: var(--row-h-step8);
+  padding-top: 0;
+  padding-bottom: 0;
+  vertical-align: middle;
+}
+
+/* 내용이 비어 있어도 행 높이가 줄어들지 않도록 NBSP 공간 확보 */
+.fixedRows td:empty::before {
+  content: "\00a0";
+}
