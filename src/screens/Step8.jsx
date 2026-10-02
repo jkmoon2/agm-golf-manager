@@ -884,7 +884,7 @@ export default function Step8() {
               )}
             </div>
           </div>
-          <table className={styles.table}>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
             <thead>
               <tr>
                 {headers.map((h, i) =>
@@ -912,9 +912,9 @@ export default function Step8() {
                   {row.map((c, ci) =>
                     !isHiddenIdx(ci) && (
                       <React.Fragment key={`room-${ci}-slot-${ri}`}>
-                        <td className={styles.cell} style={__COL.allocNick}>{c.nickname}</td>
+                        <td className={styles.cell} style={__COL.allocNick}>{c && c.id != null && String(c.nickname || '').trim() ? c.nickname : ''}</td>
                         <td className={styles.cell} style={{ ...__COL.allocGhandi, color: 'blue' }}>
-                          {c.handicap}
+                          {c && c.id != null && String(c.nickname || '').trim() ? c.handicap : ''}
                         </td>
                       </React.Fragment>
                     )
@@ -1063,7 +1063,7 @@ export default function Step8() {
               )}
             </div>
           </div>
-          <table className={styles.table}>
+          <table className={`${styles.table} ${styles.fixedRows}`}>
             <thead>
               <tr>
                 {resultRoomOrder.map((i) => {
