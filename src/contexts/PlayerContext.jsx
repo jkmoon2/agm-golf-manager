@@ -23,7 +23,7 @@ import {
   pickRoomAndPartnerForFourball,
   transactionalAssignFourball,
 } from '../player/logic/assignFourball';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom } from '../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, canEnterRoom, feasibleStrokeRooms } from '../utils/roomAvoidance';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 import { clearPlayerRoom, readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
 import { diagMerge, diagPush, diagSummaryParticipant } from '../utils/agmDiag';
@@ -876,6 +876,20 @@ if (!idCached) {
       // 특별방 사용 중에는 예약 방 규칙을 깨고 다른 방으로 들어가지 않도록 합니다.
       if (!candidates.length && !cfg.enabled && !avoidActive(avoidance) && Number(me?.group) !== 0) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
       if (!candidates.length) throw new Error('no_room');
+      // [2026-10-09] 현재 배정이 뒤의 참가자 방배정을 막지 않는지 트랜잭션 최신 상태에서 검사.
+      // 방조정 미사용 시에는 기존 랜덤 경로를 그대로 사용합니다.
+      if (avoidActive(avoidance)) {
+        const pending = parts.filter(p => !isValidRoom(roomOfParticipant(p)) && String(p.nickname || '').trim());
+        const eligible = feasibleStrokeRooms(parts, me,
+          (person, list) => validRoomsForStroke(list, roomCount, person, caps, cfg)
+            .filter(r => !list.some(x => normId(x.id) !== normId(person.id) &&
+                toInt(x.group) === toInt(person.group) && roomOfParticipant(x) === r) &&
+              canEnterRoom(avoidance, person, r, list, roomOfParticipant)),
+          (list, person, room) => list.map(x => normId(x.id) === normId(person.id)
+            ? { ...x, room, roomNumber: room } : x));
+        candidates = candidates.filter(r => eligible.includes(r));
+        if (!candidates.length && pending.length) throw new Error('no_feasible_room_avoidance');
+      }
       const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
       if (!canEnterRoom(avoidance, me, chosenRoom, parts, roomOfParticipant)) throw new Error('room_avoidance_conflict');
 

@@ -564,7 +564,16 @@ function BaseRoomSelect({ variant, roomNames, roomCapacities, participants, part
       console.error('[assign] error:', e);
       setIsAssigning(false);
       setFlowStep('idle');
-      alert('방 배정 중 오류가 발생했습니다.');
+      const detail = String(e?.message || '');
+      if (detail === 'room_avoidance_no_valid_pair') {
+        alert('현재 배정과 금지 페어 조건으로는 남은 포볼팀 전체를 구성할 수 없습니다. 기존 배정을 취소하거나 금지 페어를 조정해주세요.');
+      } else if (detail === 'room_avoidance_search_limit') {
+        alert('포볼 전체 배정 조합의 탐색 한도에 도달했습니다. 관리자에게 문의해주세요.');
+      } else if (detail === 'room_avoidance_conflict') {
+        alert('이미 배정된 참가자와 금지 페어가 충돌합니다. 관리자에게 배정 확인을 요청해주세요.');
+      } else {
+        alert('방 배정 중 오류가 발생했습니다.');
+      }
     }
   };
 

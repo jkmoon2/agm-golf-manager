@@ -7,7 +7,7 @@ import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (
 import { serverTimestamp } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
 import styles from './Step5.module.css';
 import { getAssignmentRoom } from '../utils/assignmentCompat';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom, getAvoidViolations, solveAvoidance } from '../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, canEnterRoom, getAvoidViolations, solveAvoidance, feasibleStrokeRooms } from '../utils/roomAvoidance';
 import {
   getSkillAllowedRoomNumbers,
   getSkillRoomGroupForParticipant,
@@ -500,7 +500,18 @@ export default function Step5() {
           (skillGroup ? true : !usedRooms.includes(r)) &&
           getRoomCountNow(ps, r) < getRoomCapacity(r) && canEnterRoom(avoidance, target, r, ps, getRoomValue)
         );
-        chosen = available.length ? available[Math.floor(Math.random() * available.length)] : null;
+        // [2026-10-09] 방조정 활성 시 다른 미배정 참가자까지 전원 배정 가능한 방만 허용.
+        const viable = avoidActive(avoidance) ? feasibleStrokeRooms(ps, target,
+          (person, list) => {
+            const group = getSkillRoomGroupForParticipant(cfgNow, person.id, { roomCount, participants: list });
+            return getSkillAllowedRoomNumbers(cfgNow, person.id, rooms, { roomCount, participants: list }).filter(r =>
+              getRoomCountNow(list, r) < getRoomCapacity(r) &&
+              (group || !list.some(q => String(q.id) !== String(person.id) && q.group === person.group && getRoomValue(q) === r)) &&
+              canEnterRoom(avoidance, person, r, list, getRoomValue));
+          },
+          (list, person, room) => list.map(q => String(q.id) === String(person.id) ? withRoomValue(q, room) : q))
+          .filter(r => available.includes(r)) : available;
+        chosen = viable.length ? viable[Math.floor(Math.random() * viable.length)] : null;
 
         nextList = ps.map((p) => (p.id === id ? withRoomValue(p, chosen) : p));
         return nextList;

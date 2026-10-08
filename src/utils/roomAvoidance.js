@@ -76,3 +76,22 @@ export const toFirestoreRoomAvoidance = (raw, participants = []) => {
     pairs: normalized.pairs.map(([a, b]) => ({ a, b }))
   };
 };
+
+// [2026-10-09] 스트로크 전체 잔여 배정 가능성 검사.
+// 한 명의 선택 후 모든 미배정 참가자가 들어갈 방이 남는 후보만 반환합니다.
+// candidateRooms는 호출부의 기존 조/정원/특별방 제한을 그대로 활용합니다.
+export const feasibleStrokeRooms = (initial, person, candidateRooms, assign, limit = 200000) => {
+  const identity = p => String(p.id);
+  const pending = (initial || []).filter(p => {
+    const assigned = p?.room !== undefined && p?.room !== null && p?.room !== '' ? p.room : p?.roomNumber;
+    return p && String(p.nickname || '').trim() && !(Number(assigned) >= 1);
+  });
+  const candidates = shuffleAvoid(candidateRooms(person, initial));
+  const rest = pending.filter(p => identity(p) !== identity(person));
+  const feasible = [];
+  for (const room of candidates) {
+    const withPerson = assign(initial, person, room);
+    if (!rest.length || solveAvoidance(withPerson, rest, candidateRooms, assign, limit)) feasible.push(room);
+  }
+  return feasible;
+};
