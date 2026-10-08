@@ -2,7 +2,7 @@
 
 // ⬆️ 반드시 최상단에 import 배치 (ESLint: import/first 준수)
 import { runTransaction, doc } from 'firebase/firestore';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom } from '../../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, canEnterRoom, feasibleStrokeRooms } from '../../utils/roomAvoidance';
 
 const roomCapacityAt = (roomCapacities, roomNo) => {
   const idx = Number(roomNo) - 1;
@@ -142,7 +142,19 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
       roomAvoidance: normalizeRoomAvoidance(data?.roomAvoidance, parts, data?.skillRoomConfig),
     });
 
-    const chosen = Number(typeof picked === 'number' ? picked : (picked?.roomNumber ?? picked?.room) || 0) || 0;
+    const cfgAvoid = normalizeRoomAvoidance(data?.roomAvoidance, parts, data?.skillRoomConfig);
+    let finalPicked = picked;
+    if (avoidActive(cfgAvoid)) {
+      const eligible = feasibleStrokeRooms(parts, me,
+        (person, list) => Array.from({ length: roomCount }, (_, i) => i + 1).filter(r =>
+          list.filter(x => Number(roomOf(x)) === r).length < roomCapacityAt(roomCapacities, r) &&
+          !list.some(x => String(x.id) !== String(person.id) && Number(roomOf(x)) === r && Number(x.group) === Number(person.group)) &&
+          canEnterRoom(cfgAvoid, person, r, list, roomOf)),
+        (list, person, r) => list.map(x => String(x.id) === String(person.id) ? { ...x, room: r, roomNumber: r } : x));
+      if (!eligible.length) throw new Error('no_feasible_room_avoidance');
+      finalPicked = eligible[Math.floor(Math.random() * eligible.length)];
+    }
+    const chosen = Number(typeof finalPicked === 'number' ? finalPicked : (finalPicked?.roomNumber ?? finalPicked?.room) || 0) || 0;
     if (!chosen) throw new Error('no_room');
 
     // 유효성 재확인: 선택된 방에 동일 조가 있는지, 인원이 정원 미만인지

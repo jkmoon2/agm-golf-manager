@@ -3,10 +3,12 @@
 import { arrayUnion, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { sanitizeForFirestore } from '../../utils/sanitizeForFirestore';
 import { normalizeRoomAvoidance, avoidActive, canEnterRoom, canShareRoom, shuffleAvoid } from '../../utils/roomAvoidance';
+import { solveFourballPlan } from '../../utils/solveFourballPlan';
 import {
   filterSkillFourballPartnerPool,
   getSkillAllowedRoomNumbers,
   getSkillRoomGroupForParticipant,
+  getSkillRoomParticipantIdSet,
   normalizeSkillRoomConfig,
 } from '../../utils/skillRoom';
 
@@ -212,24 +214,26 @@ export async function transactionalAssignFourball({
     if (roomOf(self) && partnerOf(self)) throw new Error('already_assigned');
 
     if (avoidActive(avoidance)) {
-      // 방과 파트너를 한 번에 결정: 다른 팀원까지 포함하여 모든 금지 페어 검사
-      const counts = Array.from({ length: rc }, (_, i) => parts.filter(p => Number(roomOf(p)) === i + 1).length);
-      const allRooms = Array.from({ length: rc }, (_, i) => i + 1);
-      const allowed = chosenRoom ? [chosenRoom] : shuffleAvoid(getSkillAllowedRoomNumbers(skillCfg, pid, allRooms, { roomCount: rc, participants: parts }));
-      const basePool = parts.filter(p => toInt(p.group) === 2 && !roomOf(p) && normId(p.id) !== pid);
-      const candidates = mateId ? parts.filter(p => normId(p.id) === mateId) : shuffleAvoid(filterSkillFourballPartnerPool(skillCfg, pid, basePool, { roomCount: rc, participants: parts }));
-      let found = false;
-      for (const r of allowed) {
-        if (counts[r - 1] > caps[r - 1] - (roomOf(self) ? 1 : 2)) continue;
-        if (!canEnterRoom(avoidance, self, r, parts, roomOf)) continue;
-        const partnerFound = candidates.find(p => !roomOf(p) && canShareRoom(avoidance, pid, p.id) && canEnterRoom(avoidance, p, r, parts, roomOf));
-        if (!partnerFound) continue;
-        chosenRoom = r;
-        mateId = normId(partnerFound.id);
-        found = true;
-        break;
+      // 현재 팀만 확인하는 탐욕적 선택은 이후의 포볼팀을 불가능하게 만들 수 있습니다.
+      // 따라서 전체 미배정 참가자의 완성 가능한 방·파트너 조합을 먼저 찾습니다.
+      const specialIds = getSkillRoomParticipantIdSet(skillCfg, { roomCount: rc, participants: parts });
+      const planned = solveFourballPlan(parts, {
+        avoidance, roomCount: rc, capacityOf: r => caps[Number(r) - 1],
+        roomOf, partnerOf, specialIds,
+        isLeader: p => toInt(p.group) === 1,
+        isPartner: p => toInt(p.group) === 2,
+        allowedRooms: (leader, list) => getSkillAllowedRoomNumbers(skillCfg, leader.id,
+          Array.from({ length: rc }, (_, i) => i + 1), { roomCount: rc, participants: list }),
+        forceLeaderId: pid,
+      });
+      if (!planned.solution) {
+        throw new Error(planned.reason === 'search_limit'
+          ? 'room_avoidance_search_limit' : 'room_avoidance_no_valid_pair');
       }
-      if (!found) throw new Error('room_avoidance_no_valid_pair');
+      const plannedSelf = planned.solution.find(p => normId(p.id) === pid);
+      chosenRoom = toInt(roomOf(plannedSelf), 0);
+      mateId = normId(partnerOf(plannedSelf));
+      if (!chosenRoom || !mateId) throw new Error('room_avoidance_no_valid_pair');
     }
 
     // 2) 신형 호출(selfId/roomCount)일 때는 최신 스냅샷 기준으로 랜덤 선택
