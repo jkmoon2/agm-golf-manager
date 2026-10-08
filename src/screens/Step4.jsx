@@ -23,7 +23,7 @@ import { getAuth } from "firebase/auth";
 import { isRulesAdminUser } from "../utils/adminAuth";
 import SkillRoomEditor from "../components/SkillRoomEditor";
 import RoomAvoidanceEditor from "../components/RoomAvoidanceEditor";
-import { normalizeRoomAvoidance } from "../utils/roomAvoidance";
+import { normalizeRoomAvoidance, toFirestoreRoomAvoidance } from "../utils/roomAvoidance";
 import ParticipantRosterEditor from "../components/ParticipantRosterEditor";
 import { getSkillRoomParticipantIdSet, normalizeSkillRoomConfig } from "../utils/skillRoom";
 
@@ -118,7 +118,7 @@ export default function Step4() {
   const roomAvoidance = useMemo(() => normalizeRoomAvoidance(eventData?.roomAvoidance, participants), [eventData?.roomAvoidance, participants]);
   const saveRoomAvoidance = async next => {
     if (!eventId || !updateEventImmediate) throw new Error("event_not_ready");
-    await updateEventImmediate({ roomAvoidance: normalizeRoomAvoidance(next, participants) }, false);
+    await updateEventImmediate({ roomAvoidance: toFirestoreRoomAvoidance(next, participants) }, false);
   };
   const [participantEditorOpen, setParticipantEditorOpen] = useState(false);
   const skillRoomConfig = useMemo(
@@ -1041,7 +1041,7 @@ export default function Step4() {
         const removed = filtered.pairs.filter(([a, b]) => changedIds.has(a) || changedIds.has(b));
         if (removed.length) {
           filtered.pairs = filtered.pairs.filter(([a, b]) => !changedIds.has(a) && !changedIds.has(b));
-          await updateEventImmediate({ roomAvoidance: filtered }, false);
+          await updateEventImmediate({ roomAvoidance: toFirestoreRoomAvoidance(filtered, incoming) }, false);
           alert(`새 명단에서 참가자가 변경되어 기존 방조정 페어 ${removed.length}건을 정리했습니다. 방조정 메뉴에서 확인해주세요.`);
         }
       }
