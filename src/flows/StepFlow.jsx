@@ -8,6 +8,7 @@ import { collection, deleteDoc, getDocs, serverTimestamp } from 'firebase/firest
 import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
+import { normalizeRoomAvoidance, avoidActive, canEnterRoom, canShareRoom, getAvoidViolations, shuffleAvoid, solveAvoidance } from '../utils/roomAvoidance';
 import {
   filterSkillFourballPartnerPool,
   getSkillAllowedRoomNumbers,
@@ -874,6 +875,25 @@ export default function StepFlow() {
     const allRooms = Array.from({ length: roomCount }, (_, i) => i + 1);
     const allowedRooms = getSkillAllowedRoomNumbers(cfgNow, target.id, allRooms, { roomCount, participants: ps });
 
+    const avoidCfg = normalizeRoomAvoidance(eventData?.roomAvoidance, ps, eventData?.skillRoomConfig);
+    if (avoidActive(avoidCfg)) {
+      const assignedRoom = getAssignmentRoom(target);
+      const candidates = assignedRoom != null ? [Number(assignedRoom)] : shuffleAvoid(allowedRooms);
+      const reservedCount = r => ps.filter(p => Number(getAssignmentRoom(p)) === r).length;
+      const pool = shuffleAvoid(filterSkillFourballPartnerPool(cfgNow, target.id,
+        ps.filter(p => isGroup2(p) && getAssignmentRoom(p) == null), { roomCount, participants: ps }));
+      for (const r of candidates) {
+        if (reservedCount(r) + (assignedRoom == null ? 2 : 1) > getRoomCapacity(r)) continue;
+        if (ps.filter(p => isGroup1(p) && Number(getAssignmentRoom(p)) === r).length + (assignedRoom == null ? 1 : 0) > Math.floor(getRoomCapacity(r) / 2)) continue;
+        if (!canEnterRoom(avoidCfg, target, r, ps, getAssignmentRoom)) continue;
+        const mate = pool.find(p => canShareRoom(avoidCfg, target.id, p.id) && canEnterRoom(avoidCfg, p, r, ps, getAssignmentRoom));
+        if (!mate) continue;
+        await assignPairToRoom(id, mate.id, r);
+        return { roomNo: r, nickname: target.nickname || '', partnerNickname: mate.nickname || null };
+      }
+      return { roomNo: null, nickname: target.nickname || '', partnerNickname: null, blockedAvoidance: true };
+    }
+
     roomNo = getAssignmentRoom(target);
     if (roomNo == null) {
       // 같은 그룹1이 한 방에 최대 floor(capacity / 2)명
@@ -939,6 +959,57 @@ export default function StepFlow() {
     let ps = [...participants];
     const roomsArr = Array.from({ length: roomCount }, (_, i) => i+1);
     const cfgNow = normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants: ps });
+
+    // [방조정] 설정된 페어가 있는 경우에만 기존 랜덤의 후보를 제약합니다.
+    const avoidCfg = normalizeRoomAvoidance(eventData?.roomAvoidance, ps, eventData?.skillRoomConfig);
+    if (avoidActive(avoidCfg)) {
+      if (getAvoidViolations(avoidCfg, ps, getAssignmentRoom).length) {
+        alert('이미 같은 방에 있는 방조정 금지 페어가 있습니다. 기존 배정을 취소하거나 초기화해주세요.');
+        return;
+      }
+      const specialIds = getSkillRoomParticipantIdSet(cfgNow, { roomCount, participants: ps });
+      const specialTargets = ps.filter(p => specialIds.has(String(p.id)) && getAssignmentRoom(p) == null);
+      const afterSpecial = solveAvoidance(ps, specialTargets, (p, list) =>
+        getSkillAllowedRoomNumbers(cfgNow, p.id, roomsArr, { roomCount, participants: list }).filter(r =>
+          list.filter(q => Number(getAssignmentRoom(q)) === r).length < getRoomCapacity(r) &&
+          canEnterRoom(avoidCfg, p, r, list, getAssignmentRoom)
+        ), (list, p, r) => list.map(q => String(q.id) === String(p.id) ? { ...q, room: r, roomNumber: r, partner: null, teammateId: null, teammate: null } : q));
+      if (!afterSpecial) { alert('방조정과 특별방 조건을 동시에 만족할 수 없습니다.'); return; }
+      const reserved = getSkillReservedRoomSet(cfgNow, { roomCount, participants: afterSpecial });
+      const leaders = shuffleAvoid(afterSpecial.filter(p => isGroup1(p) && !specialIds.has(String(p.id)) && getAssignmentPartnerId(p) == null));
+      let visits = 0;
+      const recur = (list, idx) => {
+        if (idx >= leaders.length) return list;
+        if (++visits > 80000) return null;
+        const leader = leaders[idx];
+        const existingRoom = getAssignmentRoom(list.find(p => String(p.id) === String(leader.id)));
+        const allowed = existingRoom != null ? [Number(existingRoom)] : shuffleAvoid(roomsArr.filter(r => !reserved.has(r)));
+        for (const room of allowed) {
+          const occupants = list.filter(p => Number(getAssignmentRoom(p)) === room);
+          const capacity = getRoomCapacity(room);
+          if (occupants.length + (existingRoom == null ? 2 : 1) > capacity) continue;
+          if (occupants.filter(isGroup1).length + (existingRoom == null ? 1 : 0) > Math.floor(capacity / 2)) continue;
+          if (!canEnterRoom(avoidCfg, leader, room, list, getAssignmentRoom)) continue;
+          const mates = shuffleAvoid(list.filter(p => isGroup2(p) && Number(p.group) !== 0 && getAssignmentRoom(p) == null && !specialIds.has(String(p.id))));
+          for (const mate of mates) {
+            if (!canShareRoom(avoidCfg, leader.id, mate.id) || !canEnterRoom(avoidCfg, mate, room, list, getAssignmentRoom)) continue;
+            const next = list.map(p => String(p.id) === String(leader.id)
+              ? { ...p, room, roomNumber: room, partner: mate.id, teammateId: mate.id, teammate: mate.id }
+              : String(p.id) === String(mate.id)
+                ? { ...p, room, roomNumber: room, partner: leader.id, teammateId: leader.id, teammate: leader.id }
+                : p);
+            const done = recur(next, idx + 1);
+            if (done) return done;
+          }
+        }
+        return null;
+      };
+      const solved = recur(afterSpecial, 0);
+      if (!solved) { alert('방조정 조건을 만족하는 포볼 팀·방 조합이 없습니다. 페어를 줄이거나 기존 배정을 취소해주세요.'); return; }
+      setParticipants(solved);
+      await save({ participants: solved });
+      return;
+    }
 
     if (!cfgNow.enabled || !cfgNow.groups.length) {
       // ── 기존 로직 100% 유지 ──

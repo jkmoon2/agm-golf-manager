@@ -7,6 +7,7 @@ import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (
 import { serverTimestamp } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
 import styles from './Step5.module.css';
 import { getAssignmentRoom } from '../utils/assignmentCompat';
+import { normalizeRoomAvoidance, avoidActive, canEnterRoom, getAvoidViolations, solveAvoidance } from '../utils/roomAvoidance';
 import {
   getSkillAllowedRoomNumbers,
   getSkillRoomGroupForParticipant,
@@ -76,6 +77,7 @@ export default function Step5() {
     [eventData?.skillRoomConfig, roomCount, participants]
   );
 
+  const avoidance = useMemo(() => normalizeRoomAvoidance(eventData?.roomAvoidance, participants, eventData?.skillRoomConfig), [eventData?.roomAvoidance, eventData?.skillRoomConfig, participants]);
   const [loadingId, setLoadingId] = useState(null);
 
   // ✅ [ADD] participants 동기화 직렬화(마지막 요청이 항상 최종 반영)
@@ -496,7 +498,7 @@ export default function Step5() {
         const available = allowedRooms.filter((r) =>
           // 특별방 대상자는 같은 조 중복 금지 규칙을 풀고 지정 방으로 모일 수 있게 합니다.
           (skillGroup ? true : !usedRooms.includes(r)) &&
-          getRoomCountNow(ps, r) < getRoomCapacity(r)
+          getRoomCountNow(ps, r) < getRoomCapacity(r) && canEnterRoom(avoidance, target, r, ps, getRoomValue)
         );
         chosen = available.length ? available[Math.floor(Math.random() * available.length)] : null;
 
@@ -607,6 +609,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     let prevRoom = null;
     let nextList = null;
     let blockedFull = false;
+    let blockedAvoidance = false;
 
     setParticipants((ps) => {
       const target = ps.find((p) => p.id === id);
@@ -642,11 +645,17 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
         nextList = ps.map((p) => (p.id === id ? { ...p, room, roomNumber: room } : p));
       }
 
+      if (avoidActive(avoidance) && getAvoidViolations(avoidance, nextList, getRoomValue).length) {
+        blockedAvoidance = true;
+        nextList = null;
+        return ps;
+      }
       return nextList;
     });
 
     closeForceMenu();
 
+    if (blockedAvoidance) { alert('방조정에서 같은 방 금지로 설정된 참가자가 있습니다.'); return; }
     if (blockedFull) {
       alert('선택한 방 정원이 가득 찼습니다.');
       return;
@@ -669,6 +678,26 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
     if (!window.confirm('자동배정을 실행하시겠습니까?\n확인을 누르면 미배정 참가자 자동배정이 바로 반영됩니다.')) return;
 
     let nextSnapshot = null;
+
+    if (avoidActive(avoidance)) {
+      const ps = latestParticipantsRef.current || participants;
+      const existing = getAvoidViolations(avoidance, ps, getRoomValue);
+      if (existing.length) { alert(`이미 같은 방에 배정된 방조정 페어 ${existing.length}건이 있습니다. 강제/취소 또는 초기화로 해결해주세요.`); return; }
+      const cfg = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants: ps });
+      const targets = ps.filter(p => getRoomValue(p) == null && String(p.nickname || '').trim());
+      const result = solveAvoidance(ps, targets, (p, list) => {
+        const reserved = getSkillAllowedRoomNumbers(cfg, p.id, rooms, { roomCount, participants: list });
+        const special = getSkillRoomGroupForParticipant(cfg, p.id, { roomCount, participants: list });
+        return reserved.filter(r => getRoomCountNow(list, r) < getRoomCapacity(r) &&
+          (special || !list.some(q => q.id !== p.id && q.group === p.group && getRoomValue(q) === r)) &&
+          canEnterRoom(avoidance, p, r, list, getRoomValue));
+      }, (list, p, room) => list.map(q => q.id === p.id ? withRoomValue(q, room) : q));
+      if (!result) { alert('방조정 조건, 조 구성, 정원, 특별방 설정을 모두 만족하는 배정이 없습니다. 페어를 줄이거나 기존 배정을 취소한 뒤 다시 시도해주세요.'); return; }
+      setParticipants(result);
+      latestParticipantsRef.current = result;
+      syncParticipantsToEvent(result);
+      return;
+    }
 
     setParticipants((ps) => {
       let updated = [...ps];

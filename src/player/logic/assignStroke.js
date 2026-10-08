@@ -2,6 +2,7 @@
 
 // ⬆️ 반드시 최상단에 import 배치 (ESLint: import/first 준수)
 import { runTransaction, doc } from 'firebase/firestore';
+import { normalizeRoomAvoidance, avoidActive, canEnterRoom } from '../../utils/roomAvoidance';
 
 const roomCapacityAt = (roomCapacities, roomNo) => {
   const idx = Number(roomNo) - 1;
@@ -40,6 +41,7 @@ export function pickRoomForStroke({
   roomCount,     // 방 개수 (정수)
   roomCapacities = [],
   strategy = 'pure', // 'pure' | 'balanced'
+  roomAvoidance,
 }) {
   const myGroup = Number(me.group) || 0;
 
@@ -65,6 +67,10 @@ export function pickRoomForStroke({
       candidates.push({ r, cnt: slot.people.length });
     }
   }
+
+  if (avoidActive(roomAvoidance)) candidates = candidates.filter(c => canEnterRoom(roomAvoidance, me, c.r, participants, roomOf));
+  // 방조정 사용 시에는 같은 조/정원/방조정 위반 방으로 fallback하지 않습니다.
+  if (avoidActive(roomAvoidance) && candidates.length === 0) return null;
 
   // 만약 전부 같은 조 있거나 꽉 찼다면, 아직 정원 미만인 방 중에서
   if (candidates.length === 0) {
@@ -133,6 +139,7 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
       roomCount,
       roomCapacities,
       strategy: 'balanced',
+      roomAvoidance: normalizeRoomAvoidance(data?.roomAvoidance, parts, data?.skillRoomConfig),
     });
 
     const chosen = Number(typeof picked === 'number' ? picked : (picked?.roomNumber ?? picked?.room) || 0) || 0;
@@ -143,6 +150,7 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
     const hasSameGroup = current.some(p => Number(p.group) === Number(me.group));
     if (hasSameGroup) throw new Error('conflict_same_group');
     if (current.length >= roomCapacityAt(roomCapacities, chosen)) throw new Error('room_full');
+    if (!canEnterRoom(normalizeRoomAvoidance(data?.roomAvoidance, parts, data?.skillRoomConfig), me, chosen, parts, roomOf)) throw new Error('room_avoidance_conflict');
 
     // 커밋: room/roomNumber + 현재 모드 participants 필드 + roomTable을 같이 맞춤
     parts[meIdx] = { ...me, room: chosen, roomNumber: chosen };

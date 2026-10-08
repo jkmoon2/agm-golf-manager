@@ -22,6 +22,8 @@ import * as XLSX from "xlsx";
 import { getAuth } from "firebase/auth";
 import { isRulesAdminUser } from "../utils/adminAuth";
 import SkillRoomEditor from "../components/SkillRoomEditor";
+import RoomAvoidanceEditor from "../components/RoomAvoidanceEditor";
+import { normalizeRoomAvoidance } from "../utils/roomAvoidance";
 import ParticipantRosterEditor from "../components/ParticipantRosterEditor";
 import { getSkillRoomParticipantIdSet, normalizeSkillRoomConfig } from "../utils/skillRoom";
 
@@ -112,6 +114,12 @@ export default function Step4() {
   // - 참가자 원본/기존 배정 로직은 건드리지 않고 자동/수동/Player 배정에서만 제약을 적용
   // ─────────────────────────────────────────────────────────────────────────────
   const [skillRoomEditorOpen, setSkillRoomEditorOpen] = useState(false);
+  const [roomAvoidanceOpen, setRoomAvoidanceOpen] = useState(false);
+  const roomAvoidance = useMemo(() => normalizeRoomAvoidance(eventData?.roomAvoidance, participants), [eventData?.roomAvoidance, participants]);
+  const saveRoomAvoidance = async next => {
+    if (!eventId || !updateEventImmediate) throw new Error("event_not_ready");
+    await updateEventImmediate({ roomAvoidance: normalizeRoomAvoidance(next, participants) }, false);
+  };
   const [participantEditorOpen, setParticipantEditorOpen] = useState(false);
   const skillRoomConfig = useMemo(
     () => normalizeSkillRoomConfig(eventData?.skillRoomConfig, { roomCount, participants }),
@@ -1021,6 +1029,23 @@ export default function Step4() {
         await syncEventDocParticipants(rosterFromFile || participantsRef.current || []);
       }
 
+      // 새 엑셀에서 동일 id가 다른 사람으로 바뀌면, 이전 방조정 페어는 안전하게 비활성화
+      const incoming = rosterFromFile || participantsRef.current || [];
+      const previous = Array.isArray(eventData?.participants) ? eventData.participants : [];
+      const changedIds = new Set(previous.filter(old => {
+        const next = incoming.find(p => String(p.id) === String(old.id));
+        return !next || String(old.nickname || '').trim() !== String(next.nickname || '').trim();
+      }).map(p => String(p.id)));
+      if (changedIds.size && eventData?.roomAvoidance?.pairs?.length && updateEventImmediate) {
+        const filtered = normalizeRoomAvoidance(eventData.roomAvoidance, incoming);
+        const removed = filtered.pairs.filter(([a, b]) => changedIds.has(a) || changedIds.has(b));
+        if (removed.length) {
+          filtered.pairs = filtered.pairs.filter(([a, b]) => !changedIds.has(a) && !changedIds.has(b));
+          await updateEventImmediate({ roomAvoidance: filtered }, false);
+          alert(`새 명단에서 참가자가 변경되어 기존 방조정 페어 ${removed.length}건을 정리했습니다. 방조정 메뉴에서 확인해주세요.`);
+        }
+      }
+
       // ★ patch: 같은 파일 재선택 가능하도록 file input value 초기화
       try {
         if (e?.target) e.target.value = "";
@@ -1187,6 +1212,7 @@ export default function Step4() {
               >
                 <span>특별방</span>
               </button>
+              <button type="button" onClick={() => setRoomAvoidanceOpen(true)} className={`${styles.pmToggleBtn} ${styles.specialRoomBtn}`} title="방조정 설정"><span>방조정</span></button>
             </div>
           </div>
         )}
@@ -1263,6 +1289,7 @@ export default function Step4() {
         ))}
       </div>
 
+      <RoomAvoidanceEditor open={roomAvoidanceOpen} onClose={() => setRoomAvoidanceOpen(false)} onSave={saveRoomAvoidance} value={roomAvoidance} participants={participants} skillRoomConfig={skillRoomConfig} />
       <SkillRoomEditor
         open={skillRoomEditorOpen}
         onClose={() => setSkillRoomEditorOpen(false)}
