@@ -23,6 +23,7 @@ import {
   pickRoomAndPartnerForFourball,
   transactionalAssignFourball,
 } from '../player/logic/assignFourball';
+import { normalizeRoomAvoidance, avoidActive, canEnterRoom } from '../utils/roomAvoidance';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 import { clearPlayerRoom, readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
 import { diagMerge, diagPush, diagSummaryParticipant } from '../utils/agmDiag';
@@ -866,11 +867,17 @@ if (!idCached) {
 
       const cfg = normalizeSkillRoomConfig(data.skillRoomConfig, { roomCount, participants: parts });
       let candidates = validRoomsForStroke(parts, roomCount, me, caps, cfg);
+      // ✅ Player STEP1에서도 Firestore 최신 방조정 페어를 반드시 확인합니다.
+      const avoidance = normalizeRoomAvoidance(data.roomAvoidance, parts, cfg);
+      if (avoidActive(avoidance)) {
+        candidates = candidates.filter((r) => canEnterRoom(avoidance, me, r, parts, roomOfParticipant));
+      }
       // 기존 기능 미사용일 때만 마지막 호환 fallback 유지.
       // 특별방 사용 중에는 예약 방 규칙을 깨고 다른 방으로 들어가지 않도록 합니다.
-      if (!candidates.length && !cfg.enabled && Number(me?.group) !== 0) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+      if (!candidates.length && !cfg.enabled && !avoidActive(avoidance) && Number(me?.group) !== 0) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
       if (!candidates.length) throw new Error('no_room');
       const chosenRoom = candidates[Math.floor(cryptoRand() * candidates.length)];
+      if (!canEnterRoom(avoidance, me, chosenRoom, parts, roomOfParticipant)) throw new Error('room_avoidance_conflict');
 
       const next = parts.map((p) =>
         normId(p.id) === normId(me.id) ? sanitizeParticipantForWrite({ ...p, room: chosenRoom, roomNumber: chosenRoom }) : sanitizeParticipantForWrite(p)
@@ -948,6 +955,8 @@ if (!idCached) {
       return { roomNumber: Number(existingRoom), partnerId: existingPartnerId, partnerNickname, alreadyAssigned: true };
     }
 
+    // 방조정 사용 여부와 관계없이 안전 트랜잭션을 우선합니다.
+    // 실패한 경우 방조정 설정이 있으면 제약 없는 레거시 경로로 진행하지 않습니다.
     if (FOURBALL_USE_TRANSACTION) {
       try {
         if (typeof transactionalAssignFourball === 'function') {
@@ -978,7 +987,10 @@ if (!idCached) {
         }
       } catch (e) {
         try { diagPush('timeline', { type: 'player.assignFourball:txUtilFail', eventId, participantId: pid, error: String(e?.message || e || '') }); } catch {}
-        console.warn('[fourball tx util] fallback to manual tx:', e?.message);
+        console.warn('[fourball tx util] failed:', e?.message);
+        // 방조정 활성화 상태에서는 제약 미검사 레거시 배정을 허용하지 않습니다.
+        // 현재 설정이 구독 지연 중일 수 있으므로 실패 자체를 상위로 반환합니다.
+        throw e;
       }
 
       try {
@@ -1066,6 +1078,18 @@ if (!idCached) {
       }
     }
 
+    // 트랜잭션 기능 옵션이 꺼져도 최신 서버 스냅샷으로 금지 페어를 검사합니다.
+    // 비트랜잭션 fallback은 동시 배정 시 충돌을 만들 수 있어 사용하지 않습니다.
+    const safeResult = await transactionalAssignFourball({ db, eventId, participants, roomCount, roomCapacities, selfId: pid });
+    if (safeResult?.nextParticipants) {
+      setParticipants(safeResult.nextParticipants);
+      const latestMe = safeResult.nextParticipants.find((p) => normId(p.id) === pid);
+      if (latestMe) setParticipant(latestMe);
+    }
+    const safePartner = (safeResult?.nextParticipants || participants).find((p) => normId(p.id) === normId(safeResult?.partnerId));
+    return { roomNumber: safeResult?.roomNumber ?? null, partnerId: safeResult?.partnerId || null, partnerNickname: safePartner?.nickname || '' };
+
+    /* 기존 비트랜잭션 코드 보존 (실행 경로만 차단)
     const cfg = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants });
     const rooms = validRoomsForFourball(participants, roomCount, roomCapacities, 2, cfg, pid);
     if (!rooms.length) throw new Error('no_room');
@@ -1108,6 +1132,7 @@ if (!idCached) {
       diagPush('timeline', { type: 'player.assignFourball:success', source: 'fallback', eventId, participantId: pid, roomNumber, partnerId: mateId || null, hasPartnerName: !!partnerNickname });
     } catch {}
     return { roomNumber, partnerId: mateId || null, partnerNickname };
+    */
   }
 
   return (

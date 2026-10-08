@@ -273,6 +273,15 @@ export async function transactionalAssignFourball({
       return { ...p, room: r, roomNumber: r, partner: mate, teammateId: mate, teammate: mate };
     });
 
+    // ✅ 확정 직전 최종 방구성 검사 (파트너끼리 + 다른 팀 모두)
+    if (avoidActive(avoidance)) {
+      const myself = next.find(p => normId(p.id) === pid);
+      const mate = mateId ? next.find(p => normId(p.id) === mateId) : null;
+      const withoutMine = next.filter(p => normId(p.id) !== pid && (!mateId || normId(p.id) !== mateId));
+      if (!myself || !canEnterRoom(avoidance, myself, chosenRoom, withoutMine, roomOf)) throw new Error('room_avoidance_conflict');
+      if (mate && (!canShareRoom(avoidance, pid, mateId) || !canEnterRoom(avoidance, mate, chosenRoom, withoutMine, roomOf))) throw new Error('room_avoidance_conflict');
+    }
+
     tx.set(
       eref,
       sanitizeForFirestore({
