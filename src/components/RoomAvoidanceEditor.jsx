@@ -23,6 +23,15 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
   const [busy, setBusy] = useState(false);
   const people = useMemo(() => [...participants].filter(p => p?.id != null && String(p.nickname || '').trim()).sort((a,b) => Number(a.group) - Number(b.group) || String(a.nickname).localeCompare(String(b.nickname), 'ko')), [participants]);
   const names = useMemo(() => new Map(people.map(p => [String(p.id), `${p.group}조 · ${p.nickname}`])), [people]);
+  // 표시용: 페어 내부도 조 순서로, 등록 페어 전체도 조 번호 순서로 정렬.
+  // 실제 저장되는 참가자 ID와 배정 규칙은 변경하지 않습니다.
+  const memberOrder = useMemo(() => new Map(people.map((p, i) => [String(p.id), i])), [people]);
+  const orderedPairs = useMemo(() => draft.pairs.map(pair => [...pair].sort((a, b) =>
+    (memberOrder.get(a) ?? Infinity) - (memberOrder.get(b) ?? Infinity)
+  )).sort((p, q) =>
+    (memberOrder.get(p[0]) ?? Infinity) - (memberOrder.get(q[0]) ?? Infinity) ||
+    (memberOrder.get(p[1]) ?? Infinity) - (memberOrder.get(q[1]) ?? Infinity)
+  ), [draft.pairs, memberOrder]);
   useEffect(() => { if (open) { setDraft(normalizeRoomAvoidance(value, participants)); setFirst(''); setSecond(''); setPicker(null); } }, [open, value, participants]);
   useEffect(() => {
     if (!open) return undefined;
@@ -81,7 +90,7 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
           </div>}
           <div style={{ fontSize: 13, fontWeight: 800, color: '#344054', padding: '8px 0' }}>등록된 페어 ({draft.pairs.length}건)</div>
           <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, background: '#fbfdff', maxHeight: 230, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            {!draft.pairs.length ? <div style={{ padding: 16, fontSize: 13, textAlign: 'center', color: '#7b8794' }}>등록된 페어가 없습니다.</div> : draft.pairs.map(([a,b],i) => <div key={`${a}-${b}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 9px', gap: 8, borderBottom: '1px solid #edf2f7', fontSize: 12 }}><span style={{ flex: 1 }}>{i+1}. {names.get(a)||a} ↔ {names.get(b)||b}</span><button type="button" style={removeBtnStyle} onClick={() => setDraft(d => ({ ...d, pairs: d.pairs.filter((_,j) => i!==j) }))}>삭제</button></div>)}
+            {!draft.pairs.length ? <div style={{ padding: 16, fontSize: 13, textAlign: 'center', color: '#7b8794' }}>등록된 페어가 없습니다.</div> : orderedPairs.map(([a,b],i) => <div key={`${a}-${b}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 9px', gap: 8, borderBottom: '1px solid #edf2f7', fontSize: 12 }}><span style={{ flex: 1 }}>{i+1}. {names.get(a)||a} ↔ {names.get(b)||b}</span><button type="button" style={removeBtnStyle} onClick={() => setDraft(d => ({ ...d, pairs: d.pairs.filter(p => !(p.includes(a) && p.includes(b))) }))}>삭제</button></div>)}
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 12, borderTop: '1px solid #e7edf5' }}><button type="button" style={secondaryBtnStyle} disabled={busy} onClick={onClose}>취소</button><button type="button" style={primaryBtnStyle} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button></div>

@@ -12,8 +12,10 @@ export const normalizeRoomAvoidance = (raw, participants = [], skillRoomConfig =
   const seen = new Set();
   const pairs = [];
   (Array.isArray(raw?.pairs) ? raw.pairs : []).forEach(pair => {
-    if (!Array.isArray(pair) || pair.length !== 2) return;
-    const [a, b] = pair.map(String);
+    // Firestore 저장형({a,b}) 및 구버전 메모리형([a,b]) 모두 읽기
+    const entries = Array.isArray(pair) ? pair : (pair && typeof pair === 'object' ? [pair.a, pair.b] : []);
+    if (entries.length !== 2 || entries.some(v => v == null)) return;
+    const [a, b] = entries.map(String);
     if (a === b || !valid.has(a) || !valid.has(b)) return;
     if (specialIds.has(a) || specialIds.has(b)) return;
     const sorted = [a, b].sort();
@@ -62,4 +64,15 @@ export const solveAvoidance = (initial, targets, candidateRooms, assign, limit =
     return null;
   };
   return recurse(initial, shuffleAvoid(targets));
+};
+
+// Firestore는 배열 내부에 배열을 저장할 수 없으므로 저장 경계에서만 객체 배열로 변환.
+// 배정/검사 함수는 기존 [a,b] 메모리 형태를 그대로 사용합니다.
+export const toFirestoreRoomAvoidance = (raw, participants = []) => {
+  const normalized = normalizeRoomAvoidance(raw, participants);
+  return {
+    enabled: normalized.enabled,
+    includeSpecialRooms: normalized.includeSpecialRooms,
+    pairs: normalized.pairs.map(([a, b]) => ({ a, b }))
+  };
 };
