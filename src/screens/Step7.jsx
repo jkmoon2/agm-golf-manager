@@ -3,6 +3,7 @@
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import styles from './Step7.module.css';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
+import { normalizeRoomAvoidance, avoidActive, getAvoidViolations } from '../utils/roomAvoidance';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
@@ -231,6 +232,11 @@ export default function Step7() {
     // ✅ 핵심 보정: room만 바꾸면 roomNumber가 옛값으로 남아 STEP8/Player가 예전 방을 계속 볼 수 있음
     const normalizedChanges = normalizeForceChanges(changes);
     const nextParticipants = applyChangesToList(participants, normalizedChanges);
+    const avoidCfg = normalizeRoomAvoidance(eventData?.roomAvoidance, participants, eventData?.skillRoomConfig);
+    if (avoidActive(avoidCfg) && getAvoidViolations(avoidCfg, nextParticipants, getRoomValue).length) {
+      alert('방조정에서 같은 방 금지로 설정된 페어가 발생하여 이동/교환을 취소했습니다.');
+      return false;
+    }
     const compatParticipants = buildCompatParticipants(nextParticipants);
 
     // 1순위: StepFlow에서 제공하는 updateParticipantsBulk 사용
@@ -323,10 +329,10 @@ export default function Step7() {
 
     // 0팀/1팀(<= 2명) → 그냥 팀 이동
     if (dstCount <= getRoomCapacity(dstRoom) - 2) {
-      await applyBulkChanges([
+      if (await applyBulkChanges([
         { id: me1.id, fields: makeRoomFields(dstRoom) },
         { id: me2.id, fields: makeRoomFields(dstRoom) },
-      ]);
+      ]) === false) return;
       alert(
         `팀 이동 완료:\n${me1.nickname} / ${me2.nickname} → ${getRoomLabel(dstRoom)}`
       );
@@ -366,12 +372,12 @@ export default function Step7() {
     const b1 = pick.g1;
     const b2 = pick.g2;
 
-    await applyBulkChanges([
+    if (await applyBulkChanges([
       { id: me1.id, fields: makeRoomFields(dstRoom) },
       { id: me2.id, fields: makeRoomFields(dstRoom) },
       { id: b1.id, fields: makeRoomFields(srcRoom) },
       { id: b2.id, fields: makeRoomFields(srcRoom) },
-    ]);
+    ]) === false) return;
 
     alert(
       `팀 맞트레이드 완료:\n${me1.nickname} / ${me2.nickname} ↔ ${b1.nickname} / ${b2.nickname}`
@@ -451,7 +457,7 @@ export default function Step7() {
       { id: dest2.id, fields: makePartnerFields(me1.id) },
     ];
 
-    await applyBulkChanges(changes);
+    if (await applyBulkChanges(changes) === false) return;
 
     alert(
       `팀원(1조) 맞트레이드 완료:\n${me1.nickname} ↔ ${dest1.nickname}`
@@ -672,7 +678,7 @@ export default function Step7() {
           }
         }
       } else {
-        alert(`${nickname}님 수동 배정이 완료되었습니다.`);
+        alert(res?.blockedAvoidance ? '방조정 조건을 만족하는 빈 방/파트너가 없습니다.' : `${nickname}님 수동 배정이 완료되었습니다.`);
       }
     } finally {
       setLoadingId(null);
@@ -718,7 +724,7 @@ export default function Step7() {
         alert('선택한 방 정원이 가득 찼습니다.');
         return;
       }
-      await applyBulkChanges([{ id: me.id, fields: { ...makeRoomFields(roomNo), ...makePartnerFields(null) } }]);
+      if (await applyBulkChanges([{ id: me.id, fields: { ...makeRoomFields(roomNo), ...makePartnerFields(null) } }]) === false) return;
       alert(`${me.nickname}님은 ${getRoomLabel(roomNo)}에 강제 배정되었습니다.`);
       return;
     }
