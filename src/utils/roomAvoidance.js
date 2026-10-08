@@ -4,7 +4,8 @@ import { getSkillRoomParticipantIdSet } from './skillRoom';
 export const normalizeRoomAvoidance = (raw, participants = [], skillRoomConfig = null) => {
   // 원본 방조정 페어는 Firestore에 그대로 보존합니다. 실제 배정 검사 시에만
   // 특별방 설정(enabled + 선택된 참가자 ID)에 해당하는 페어를 제외합니다.
-  const specialIds = skillRoomConfig
+  const includeSpecialRooms = raw?.includeSpecialRooms === true;
+  const specialIds = skillRoomConfig && !includeSpecialRooms
     ? getSkillRoomParticipantIdSet(skillRoomConfig, { participants })
     : new Set();
   const valid = new Set((participants || []).map(p => String(p.id)));
@@ -21,7 +22,7 @@ export const normalizeRoomAvoidance = (raw, participants = [], skillRoomConfig =
     seen.add(key);
     pairs.push(sorted);
   });
-  return { enabled: raw?.enabled === true, pairs };
+  return { enabled: raw?.enabled === true, includeSpecialRooms, pairs };
 };
 export const avoidActive = cfg => !!(cfg?.enabled && cfg?.pairs?.length);
 export const canShareRoom = (cfg, a, b) => !avoidActive(cfg) || !cfg.pairs.some(
