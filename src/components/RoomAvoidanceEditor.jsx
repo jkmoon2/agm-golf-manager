@@ -87,6 +87,7 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
     setBusy(true);
     try {
       await onSave(next);
+      window.alert('방조정 설정이 저장되었습니다.');
       onClose();
     } catch (e) {
       console.error('[RoomAvoidanceEditor] save failed', e);
