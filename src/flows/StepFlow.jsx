@@ -8,7 +8,7 @@ import { collection, deleteDoc, getDocs, serverTimestamp } from 'firebase/firest
 import { EventContext } from '../contexts/EventContext';
 import { db } from '../firebase';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom, canShareRoom, getAvoidViolations, shuffleAvoid, solveAvoidance } from '../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, roomConstraintsActive, canEnterRoom, canShareRoom, getAvoidViolations, getConstraintViolations, shuffleAvoid, solveAvoidance } from '../utils/roomAvoidance';
 import { solveFourballPlan } from '../utils/solveFourballPlan';
 import {
   filterSkillFourballPartnerPool,
@@ -854,6 +854,10 @@ export default function StepFlow() {
         return { roomNo: null, nickname: target?.nickname || '', partnerNickname: null, specialRoomOnly: true };
       }
 
+      const specialAvoid = normalizeRoomAvoidance(eventData?.roomAvoidance, ps, eventData?.skillRoomConfig);
+      if (!canEnterRoom(specialAvoid, target, roomNo, ps, getAssignmentRoom)) {
+        return { roomNo: null, nickname: target.nickname || '', partnerNickname: null, blockedAvoidance: true, specialRoomOnly: true };
+      }
       ps = ps.map((p) => p.id === id
         ? { ...p, room: roomNo, roomNumber: roomNo, partner: null, teammateId: null, teammate: null }
         : p
@@ -877,7 +881,7 @@ export default function StepFlow() {
     const allowedRooms = getSkillAllowedRoomNumbers(cfgNow, target.id, allRooms, { roomCount, participants: ps });
 
     const avoidCfg = normalizeRoomAvoidance(eventData?.roomAvoidance, ps, eventData?.skillRoomConfig);
-    if (avoidActive(avoidCfg)) {
+    if (roomConstraintsActive(avoidCfg)) {
       const specialIds = getSkillRoomParticipantIdSet(cfgNow, { roomCount, participants: ps });
       const planned = solveFourballPlan(ps, {
         avoidance: avoidCfg, roomCount, capacityOf: getRoomCapacity,
@@ -968,8 +972,8 @@ export default function StepFlow() {
 
     // [방조정] 설정된 페어가 있는 경우에만 기존 랜덤의 후보를 제약합니다.
     const avoidCfg = normalizeRoomAvoidance(eventData?.roomAvoidance, ps, eventData?.skillRoomConfig);
-    if (avoidActive(avoidCfg)) {
-      if (getAvoidViolations(avoidCfg, ps, getAssignmentRoom).length) {
+    if (roomConstraintsActive(avoidCfg)) {
+      if (getConstraintViolations(avoidCfg, ps, getAssignmentRoom).length) {
         alert('이미 같은 방에 있는 방조정 금지 페어가 있습니다. 기존 배정을 취소하거나 초기화해주세요.');
         return;
       }

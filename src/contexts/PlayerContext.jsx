@@ -23,7 +23,7 @@ import {
   pickRoomAndPartnerForFourball,
   transactionalAssignFourball,
 } from '../player/logic/assignFourball';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom, feasibleStrokeRooms } from '../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, roomConstraintsActive, canEnterRoom, feasibleStrokeRooms } from '../utils/roomAvoidance';
 import { broadcastEventSync, subscribeEventSync } from '../utils/crossTabEventSync';
 import { clearPlayerRoom, readPlayerAuthCode, readPlayerParticipant, readPlayerRoom, writePlayerParticipant, writePlayerRoom } from '../player/utils/playerState';
 import { diagMerge, diagPush, diagSummaryParticipant } from '../utils/agmDiag';
@@ -869,16 +869,16 @@ if (!idCached) {
       let candidates = validRoomsForStroke(parts, roomCount, me, caps, cfg);
       // ✅ Player STEP1에서도 Firestore 최신 방조정 페어를 반드시 확인합니다.
       const avoidance = normalizeRoomAvoidance(data.roomAvoidance, parts, cfg);
-      if (avoidActive(avoidance)) {
+      if (roomConstraintsActive(avoidance)) {
         candidates = candidates.filter((r) => canEnterRoom(avoidance, me, r, parts, roomOfParticipant));
       }
       // 기존 기능 미사용일 때만 마지막 호환 fallback 유지.
       // 특별방 사용 중에는 예약 방 규칙을 깨고 다른 방으로 들어가지 않도록 합니다.
-      if (!candidates.length && !cfg.enabled && !avoidActive(avoidance) && Number(me?.group) !== 0) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
+      if (!candidates.length && !cfg.enabled && !roomConstraintsActive(avoidance) && Number(me?.group) !== 0) candidates = Array.from({ length: roomCount }, (_, i) => i + 1);
       if (!candidates.length) throw new Error('no_room');
       // [2026-10-09] 현재 배정이 뒤의 참가자 방배정을 막지 않는지 트랜잭션 최신 상태에서 검사.
       // 방조정 미사용 시에는 기존 랜덤 경로를 그대로 사용합니다.
-      if (avoidActive(avoidance)) {
+      if (roomConstraintsActive(avoidance)) {
         const pending = parts.filter(p => !isValidRoom(roomOfParticipant(p)) && String(p.nickname || '').trim());
         const eligible = feasibleStrokeRooms(parts, me,
           (person, list) => validRoomsForStroke(list, roomCount, person, caps, cfg)
