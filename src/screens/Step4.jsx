@@ -1293,7 +1293,7 @@ export default function Step4() {
         ))}
       </div>
 
-      <RoomAvoidanceEditor open={roomAvoidanceOpen} onClose={() => setRoomAvoidanceOpen(false)} onSave={saveRoomAvoidance} value={roomAvoidance} participants={participants} skillRoomConfig={skillRoomConfig} roomCount={roomCount} roomNames={roomNames} />
+      <RoomAvoidanceEditor open={roomAvoidanceOpen} onClose={() => setRoomAvoidanceOpen(false)} onSave={saveRoomAvoidance} value={roomAvoidance} participants={participants} skillRoomConfig={skillRoomConfig} roomCount={roomCount} roomNames={roomNames} roomCapacities={roomCapacities} mode={mode} />
       <SkillRoomEditor
         open={skillRoomEditorOpen}
         onClose={() => setSkillRoomEditorOpen(false)}

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { normalizeRoomAvoidance, getConstraintViolations, getRoomConstraintIssues } from '../utils/roomAvoidance';
 import { getAssignmentRoom } from '../utils/assignmentCompat';
+import { validateRoomAdjustment } from '../utils/validateRoomAdjustment';
 
 const overlayStyle = { position: 'fixed', inset: 0, zIndex: 10050, background: 'rgba(15,23,42,0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, boxSizing: 'border-box' };
 const modalStyle = { width: 'min(430px, 100%)', maxHeight: '88dvh', background: '#fff', borderRadius: 16, border: '1px solid #dbe3ef', boxShadow: '0 18px 48px rgba(15,23,42,0.2)', overflow: 'hidden', display: 'flex', flexDirection: 'column', color: '#172b4d' };
@@ -15,7 +16,7 @@ const primaryBtnStyle = { minHeight: 40, border: '1px solid #2563eb', borderRadi
 const chooserButtonStyle = { width: '100%', minHeight: 37, textAlign: 'left', background: '#fff', border: '1px solid #d0d7e2', borderRadius: 9, color: '#172b4d', fontSize: 12, padding: '6px 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const removeBtnStyle = { border: '1px solid #fecaca', background: '#fff5f5', color: '#dc2626', borderRadius: 8, padding: '5px 8px', fontSize: 11, fontWeight: 800 };
 
-export default function RoomAvoidanceEditor({ open, onClose, onSave, value, participants = [], skillRoomConfig, roomCount = 4, roomNames = [] }) {
+export default function RoomAvoidanceEditor({ open, onClose, onSave, value, participants = [], skillRoomConfig, roomCount = 4, roomNames = [], roomCapacities = [], mode = 'stroke' }) {
   const [draft, setDraft] = useState({ enabled: false, includeSpecialRooms: false, pairs: [], sameRoomEnabled: false, sameRoomPairs: [], roomSelectionEnabled: false, roomSelections: [] });
   const [first, setFirst] = useState('');
   const [second, setSecond] = useState('');
@@ -79,8 +80,10 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
     const active = normalizeRoomAvoidance(next, participants, skillRoomConfig);
     const issues = getRoomConstraintIssues(active, participants, roomCount);
     if (issues.length) return alert('서로 충돌하는 방조정 조건이 있습니다.\n' + issues.slice(0,5).join('\n'));
+    const feasibility = validateRoomAdjustment(next, participants, { mode, roomCount, roomNames, roomCapacities, skillRoomConfig });
+    if (feasibility.status !== 'ok') return alert('방조정 설정을 저장할 수 없습니다.\n' + feasibility.issues.join('\n'));
     const violations = getConstraintViolations(active, participants, getAssignmentRoom);
-    if (violations.length && !window.confirm(`이미 같은 방에 배정된 금지 페어 ${violations.length}건이 있습니다.\n현재 배정은 자동 변경되지 않습니다. 배정을 취소/초기화한 뒤 다시 배정해주세요.\n설정을 저장하시겠습니까?`)) return;
+    if (violations.length) return alert(`현재 확정된 방배정과 새 방조정 조건이 충돌합니다 (${violations.length}건).\n기존 방배정을 초기화하거나 해당 설정을 조정한 후 저장해주세요.`);
     setBusy(true);
     try {
       await onSave(next);
