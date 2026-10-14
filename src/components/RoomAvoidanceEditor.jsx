@@ -41,7 +41,15 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
     (memberOrder.get(p[0]) ?? Infinity) - (memberOrder.get(q[0]) ?? Infinity) ||
     (memberOrder.get(p[1]) ?? Infinity) - (memberOrder.get(q[1]) ?? Infinity)
   ), [draft.pairs, memberOrder]);
-  useEffect(() => { if (open) { setDraft(normalizeRoomAvoidance(value, participants)); setFirst(''); setSecond(''); setPicker(null); setSelectedRoom(''); setPairType('avoid'); } }, [open, value, participants]);
+  // 팝업을 새로 열 때만 서버 설정을 초깃값으로 복원합니다.
+  // 열려 있는 동안 participants/eventData 스냅샷이 갱신되어도 사용자의 편집/전체 해제는 유지합니다.
+  useEffect(() => {
+    if (!open) return;
+    setDraft(normalizeRoomAvoidance(value, participants));
+    setFirst(''); setSecond(''); setPicker(null); setSelectedRoom(''); setPairType('avoid');
+    // 팝업을 여는 시점의 값만 사용합니다. 편집 중 value/participants 동기화로 덮어쓰면 안 됩니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   useEffect(() => {
     if (!open) return undefined;
     const before = document.body.style.overflow;
@@ -96,7 +104,7 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
         <div style={bodyStyle}>
           {/* 중복 체크 메뉴 삭제: 아래 한 줄의 탭에서 설정 종류 선택 */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) minmax(0, .72fr)', gap: 4, marginBottom: 8 }}>
-            {[['avoid','금지-페어'],['together','한방-페어'],['room','방 선택']].map(([v,label]) => <button key={v} type="button" onClick={() => {setPairType(v);setPicker(null);setFirst('');setSecond('');setSelectedRoom('');}} style={{ ...secondaryBtnStyle, minWidth:0, padding:'0 2px', minHeight:34, fontSize:11, background:pairType===v?'#eaf2ff':'#fff', borderColor:pairType===v?'#2563eb':'#cfd8e6', color:pairType===v?'#1d4ed8':'#344054' }}>{label}</button>)}
+            {[['avoid','금지-페어',draft.pairs.length],['together','한방-페어',draft.sameRoomPairs.length],['room','방 선택',draft.roomSelections.length]].map(([v,label,count]) => <button key={v} type="button" onClick={() => {setPairType(v);setPicker(null);setFirst('');setSecond('');setSelectedRoom('');}} style={{ ...secondaryBtnStyle, minWidth:0, padding:'0 2px', minHeight:34, fontSize:11, display:'flex', alignItems:'center', justifyContent:'center', gap:3, whiteSpace:'nowrap', background:pairType===v?'#eaf2ff':'#fff', borderColor:pairType===v?'#2563eb':'#cfd8e6', color:pairType===v?'#1d4ed8':'#344054' }}><span>{label}</span><span aria-label={`${count}건`} style={{fontSize:10, fontWeight:800, color:count?'#2563eb':'#94a3b8', fontVariantNumeric:'tabular-nums'}}>{count}</span></button>)}
             <button type="button" onClick={clearAll} style={{ ...secondaryBtnStyle, minWidth:0, padding:'0 2px', minHeight:34, fontSize:11, color:'#b91c1c', borderColor:'#fecaca', background:'#fff7f7' }}>해제</button>
           </div>
           <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 8 }}>
