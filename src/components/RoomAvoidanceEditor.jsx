@@ -15,7 +15,7 @@ const primaryBtnStyle = { minHeight: 40, border: '1px solid #2563eb', borderRadi
 const chooserButtonStyle = { width: '100%', minHeight: 37, textAlign: 'left', background: '#fff', border: '1px solid #d0d7e2', borderRadius: 9, color: '#172b4d', fontSize: 12, padding: '6px 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const removeBtnStyle = { border: '1px solid #fecaca', background: '#fff5f5', color: '#dc2626', borderRadius: 8, padding: '5px 8px', fontSize: 11, fontWeight: 800 };
 
-export default function RoomAvoidanceEditor({ open, onClose, onSave, value, participants = [], skillRoomConfig, roomCount = 4 }) {
+export default function RoomAvoidanceEditor({ open, onClose, onSave, value, participants = [], skillRoomConfig, roomCount = 4, roomNames = [] }) {
   const [draft, setDraft] = useState({ enabled: false, includeSpecialRooms: false, pairs: [], sameRoomEnabled: false, sameRoomPairs: [], roomSelectionEnabled: false, roomSelections: [] });
   const [first, setFirst] = useState('');
   const [second, setSecond] = useState('');
@@ -23,6 +23,13 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
   const [pairType, setPairType] = useState('avoid');
   const [selectedRoom, setSelectedRoom] = useState('');
   const [busy, setBusy] = useState(false);
+  // Admin STEP2에서 지정한 방 이름을 사용하되, 빈 이름은 기존 번호로 표시합니다.
+  const roomLabel = n => String(roomNames?.[Number(n) - 1] || '').trim() || `${n}번 방`;
+  const clearAll = () => {
+    if (!window.confirm('금지-페어, 한방-페어, 방 선택의 등록 내용 전체를 해제하시겠습니까?\n저장 버튼을 눌러야 실제 대회에 반영됩니다.')) return;
+    setDraft(d => ({ ...d, enabled: false, includeSpecialRooms: false, pairs: [], sameRoomEnabled: false, sameRoomPairs: [], roomSelectionEnabled: false, roomSelections: [] }));
+    setFirst(''); setSecond(''); setSelectedRoom(''); setPicker(null);
+  };
   const people = useMemo(() => [...participants].filter(p => p?.id != null && String(p.nickname || '').trim()).sort((a,b) => Number(a.group) - Number(b.group) || String(a.nickname).localeCompare(String(b.nickname), 'ko')), [participants]);
   const names = useMemo(() => new Map(people.map(p => [String(p.id), `${p.group}조 · ${p.nickname}`])), [people]);
   // 표시용: 페어 내부도 조 순서로, 등록 페어 전체도 조 번호 순서로 정렬.
@@ -87,16 +94,14 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
       <div role="dialog" aria-modal="true" aria-label="방조정 설정" style={modalStyle}>
         <div style={headerStyle}><b style={{ fontSize: 17, fontWeight: 900, color: '#0b2d59' }}>방조정 설정</b><button type="button" style={closeBtnStyle} onClick={onClose}>닫기</button></div>
         <div style={bodyStyle}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, fontSize: 14 }}><input type="checkbox" checked={draft.enabled} onChange={e => setDraft(d => ({ ...d, enabled: e.target.checked }))}/><b>금지-페어</b></label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, marginBottom: 8, fontSize: 13, color: '#344054' }}><input type="checkbox" checked={draft.includeSpecialRooms === true} onChange={e => setDraft(d => ({ ...d, includeSpecialRooms: e.target.checked }))}/><b>특별방 포함</b></label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, fontSize: 14 }}><input type="checkbox" checked={draft.sameRoomEnabled} onChange={e => setDraft(d => ({ ...d, sameRoomEnabled: e.target.checked }))}/><b>한방-페어</b></label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, fontSize: 14 }}><input type="checkbox" checked={draft.roomSelectionEnabled} onChange={e => setDraft(d => ({ ...d, roomSelectionEnabled: e.target.checked }))}/><b>방 선택</b></label>
-          <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
-            {[['avoid','금지-페어'],['together','한방-페어'],['room','방 선택']].map(([v,label]) => <button key={v} type="button" onClick={() => {setPairType(v);setPicker(null);setFirst('');setSecond('');}} style={{ ...secondaryBtnStyle, minHeight:33, flex:1, fontSize:12, background:pairType===v?'#eaf2ff':'#fff', borderColor:pairType===v?'#2563eb':'#cfd8e6' }}>{label}</button>)}
+          {/* 중복 체크 메뉴 삭제: 아래 한 줄의 탭에서 설정 종류 선택 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) minmax(0, .72fr)', gap: 4, marginBottom: 8 }}>
+            {[['avoid','금지-페어'],['together','한방-페어'],['room','방 선택']].map(([v,label]) => <button key={v} type="button" onClick={() => {setPairType(v);setPicker(null);setFirst('');setSecond('');setSelectedRoom('');}} style={{ ...secondaryBtnStyle, minWidth:0, padding:'0 2px', minHeight:34, fontSize:11, background:pairType===v?'#eaf2ff':'#fff', borderColor:pairType===v?'#2563eb':'#cfd8e6', color:pairType===v?'#1d4ed8':'#344054' }}>{label}</button>)}
+            <button type="button" onClick={clearAll} style={{ ...secondaryBtnStyle, minWidth:0, padding:'0 2px', minHeight:34, fontSize:11, color:'#b91c1c', borderColor:'#fecaca', background:'#fff7f7' }}>해제</button>
           </div>
           <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: 8 }}>
             {chooser('first', first, second, pairType === 'room' ? '참가자' : '참가자 A')}
-            {pairType === 'room' ? <select value={selectedRoom} onChange={e => setSelectedRoom(e.target.value)} style={{ ...chooserButtonStyle, flex:1, minWidth:0 }}><option value="">방 선택</option>{Array.from({length:roomCount},(_,i)=>i+1).map(n=><option key={n} value={n}>{n}번 방</option>)}</select> : <><span>–</span>{chooser('second', second, first, '참가자 B')}</>}
+            {pairType === 'room' ? <select value={selectedRoom} onChange={e => setSelectedRoom(e.target.value)} style={{ ...chooserButtonStyle, flex:1, minWidth:0 }}><option value="">방 선택</option>{Array.from({length:roomCount},(_,i)=>i+1).map(n=><option key={n} value={n}>{roomLabel(n)}</option>)}</select> : <><span>–</span>{chooser('second', second, first, '참가자 B')}</>}
             <button type="button" style={{ ...closeBtnStyle, minWidth: 44, padding: '0 8px' }} onClick={add}>추가</button>
           </div>
           {picker && <div style={{ border: '1px solid #dce5f1', background: '#fbfdff', borderRadius: 10, marginBottom: 10, overflow: 'hidden' }}>
@@ -105,12 +110,26 @@ export default function RoomAvoidanceEditor({ open, onClose, onSave, value, part
               {people.filter(p => String(p.id) !== (picker === 'first' ? second : first)).map(p => <button type="button" key={p.id} onClick={() => { if (picker === 'first') setFirst(String(p.id)); else setSecond(String(p.id)); setPicker(null); }} style={{ display: 'block', width: '100%', textAlign: 'left', border: 0, borderBottom: '1px solid #edf2f7', background: '#fff', minHeight: 38, padding: '8px 10px', color: '#172b4d', fontSize: 13 }}>{names.get(String(p.id))}</button>)}
             </div>
           </div>}
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#344054', padding: '8px 0' }}>등록된 설정 ({draft.pairs.length + draft.sameRoomPairs.length + draft.roomSelections.length}건)</div>
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, background: '#fbfdff', maxHeight: 230, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            {!draft.pairs.length ? <div style={{ padding: 16, fontSize: 13, textAlign: 'center', color: '#7b8794' }}>등록된 페어가 없습니다.</div> : orderedPairs.map(([a,b],i) => <div key={`${a}-${b}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 9px', gap: 8, borderBottom: '1px solid #edf2f7', fontSize: 12 }}><span style={{ flex: 1 }}>{i+1}. {names.get(a)||a} ↔ {names.get(b)||b}</span><button type="button" style={removeBtnStyle} onClick={() => setDraft(d => ({ ...d, pairs: d.pairs.filter(p => !(p.includes(a) && p.includes(b))) }))}>삭제</button></div>)}
-          </div>
-          {!!draft.sameRoomPairs.length && <><div style={{fontSize:13,fontWeight:800,margin:'12px 0 5px'}}>한방-페어 ({draft.sameRoomPairs.length}건)</div><div style={{border:'1px solid #e2e8f0',borderRadius:9,maxHeight:150,overflowY:'auto'}}>{draft.sameRoomPairs.map(([a,b])=><div key={`${a}-${b}`} style={{display:'flex',justifyContent:'space-between',padding:8,fontSize:12}}><span>{names.get(a)} ↔ {names.get(b)}</span><button type="button" style={removeBtnStyle} onClick={()=>setDraft(d=>({...d,sameRoomPairs:d.sameRoomPairs.filter(x=>!(x.includes(a)&&x.includes(b)))}))}>삭제</button></div>)}</div></>}
-          {!!draft.roomSelections.length && <><div style={{fontSize:13,fontWeight:800,margin:'12px 0 5px'}}>방 선택 ({draft.roomSelections.length}건)</div><div style={{border:'1px solid #e2e8f0',borderRadius:9,maxHeight:150,overflowY:'auto'}}>{[...draft.roomSelections].sort((a,b)=>(memberOrder.get(a.id)??999)-(memberOrder.get(b.id)??999)).map(x=><div key={x.id} style={{display:'flex',justifyContent:'space-between',padding:8,fontSize:12}}><span>{names.get(x.id)} → {x.room}번 방</span><button type="button" style={removeBtnStyle} onClick={()=>setDraft(d=>({...d,roomSelections:d.roomSelections.filter(y=>y.id!==x.id)}))}>삭제</button></div>)}</div></>}
+          {pairType === 'avoid' && <>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#344054', padding: '8px 0' }}>금지-페어 ({draft.pairs.length}건)</div>
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, background: '#fbfdff', maxHeight: 230, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              {!draft.pairs.length ? <div style={{ padding: 16, fontSize: 13, textAlign: 'center', color: '#7b8794' }}>등록된 금지-페어가 없습니다.</div> : orderedPairs.map(([a,b],i) => <div key={`${a}-${b}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 9px', gap: 8, borderBottom: '1px solid #edf2f7', fontSize: 12 }}><span style={{ flex: 1 }}>{i+1}. {names.get(a)||a} ↔ {names.get(b)||b}</span><button type="button" style={removeBtnStyle} onClick={() => setDraft(d => ({ ...d, pairs: d.pairs.filter(p => !(p.includes(a) && p.includes(b))) }))}>삭제</button></div>)}
+            </div>
+          </>}
+          {pairType === 'together' && <>
+            <div style={{fontSize:13,fontWeight:800,padding:'8px 0'}}>한방-페어 ({draft.sameRoomPairs.length}건)</div>
+            <div style={{border:'1px solid #e2e8f0',borderRadius:9,maxHeight:230,overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
+              {!draft.sameRoomPairs.length ? <div style={{padding:16,fontSize:13,textAlign:'center',color:'#7b8794'}}>등록된 한방-페어가 없습니다.</div> : [...draft.sameRoomPairs].map(pair=>[...pair].sort((a,b)=>(memberOrder.get(a)??Infinity)-(memberOrder.get(b)??Infinity))).sort((p,q)=>(memberOrder.get(p[0])??Infinity)-(memberOrder.get(q[0])??Infinity)||(memberOrder.get(p[1])??Infinity)-(memberOrder.get(q[1])??Infinity)).map(([a,b],i)=><div key={`${a}-${b}`} style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,padding:8,borderBottom:'1px solid #edf2f7',fontSize:12}}><span style={{flex:1}}>{i+1}. {names.get(a)||a} ↔ {names.get(b)||b}</span><button type="button" style={removeBtnStyle} onClick={()=>setDraft(d=>({...d,sameRoomPairs:d.sameRoomPairs.filter(x=>!(x.includes(a)&&x.includes(b)))}))}>삭제</button></div>)}
+            </div>
+          </>}
+          {pairType === 'room' && <>
+            <div style={{fontSize:13,fontWeight:800,padding:'8px 0'}}>방 선택 ({draft.roomSelections.length}건)</div>
+            <div style={{border:'1px solid #e2e8f0',borderRadius:9,maxHeight:230,overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
+              {!draft.roomSelections.length ? <div style={{padding:16,fontSize:13,textAlign:'center',color:'#7b8794'}}>등록된 방 선택이 없습니다.</div> : [...draft.roomSelections].sort((a,b)=>(memberOrder.get(a.id)??999)-(memberOrder.get(b.id)??999)).map((x,i)=><div key={x.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,padding:8,borderBottom:'1px solid #edf2f7',fontSize:12}}><span style={{flex:1}}>{i+1}. {names.get(x.id)||x.id} → {roomLabel(x.room)}</span><button type="button" style={removeBtnStyle} onClick={()=>setDraft(d=>({...d,roomSelections:d.roomSelections.filter(y=>y.id!==x.id)}))}>삭제</button></div>)}
+            </div>
+          </>}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, marginTop: 12, paddingTop: 8, borderTop: '1px solid #e7edf5', fontSize: 13, color: '#344054' }}><input type="checkbox" checked={draft.includeSpecialRooms === true} onChange={e => setDraft(d => ({ ...d, includeSpecialRooms: e.target.checked }))}/><b>특별방 포함</b></label>
+
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 12, borderTop: '1px solid #e7edf5' }}><button type="button" style={secondaryBtnStyle} disabled={busy} onClick={onClose}>취소</button><button type="button" style={primaryBtnStyle} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button></div>
       </div>
