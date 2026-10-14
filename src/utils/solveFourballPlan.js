@@ -1,7 +1,7 @@
 // /src/utils/solveFourballPlan.js
 // 방조정 사용 시 포볼 전체 완성 가능성을 먼저 확인합니다.
 // 기존에 확정된 배정은 유지하고, 모든 후보 선택은 Fisher-Yates 무작위 순서로 탐색합니다.
-import { canEnterRoom, canShareRoom, shuffleAvoid } from './roomAvoidance';
+import { canEnterRoom, canShareRoom, shuffleAvoid, requiredRoom, getConstraintViolations } from './roomAvoidance';
 
 export function solveFourballPlan(initial, {
   avoidance, roomCount, capacityOf, roomOf, partnerOf,
@@ -11,6 +11,7 @@ export function solveFourballPlan(initial, {
   let nodes = 0;
   let exhausted = false;
   const skip = p => specialIds.has(String(p.id));
+  if (getConstraintViolations(avoidance, initial, roomOf).length) return { solution: null, reason: 'existing_conflict' };
   const leaders = initial.filter(p => !skip(p) && isLeader(p) && !partnerOf(p));
   const mates = initial.filter(p => !skip(p) && isPartner(p) && roomOf(p) == null);
   if (leaders.length !== mates.length) return { solution: null, reason: 'unbalanced' };
@@ -38,6 +39,8 @@ export function solveFourballPlan(initial, {
     const fixed = roomOf(a);
     const allowed = fixed != null ? [Number(fixed)] : allowedRooms(a, list);
     return allowed.filter(r => {
+      if (requiredRoom(avoidance, a.id) != null && requiredRoom(avoidance, a.id) !== Number(r)) return false;
+      if (requiredRoom(avoidance, b.id) != null && requiredRoom(avoidance, b.id) !== Number(r)) return false;
       if (!Number.isInteger(Number(r)) || r < 1 || r > roomCount) return false;
       const occupants = list.filter(p => Number(roomOf(p)) === Number(r));
       if (occupants.length + (fixed == null ? 2 : 1) > capacityOf(r)) return false;
@@ -47,7 +50,13 @@ export function solveFourballPlan(initial, {
     });
   };
   const recur = (list, remainingLeaders, remainingMates, first) => {
-    if (!remainingLeaders.length) return list;
+    if (!remainingLeaders.length) {
+      if (avoidance?.sameRoomEnabled && (avoidance.sameRoomPairs || []).some(([a,b]) => {
+        const x = list.find(p => key(p) === a), y = list.find(p => key(p) === b);
+        return x && y && roomOf(x) !== roomOf(y);
+      })) return null;
+      return getConstraintViolations(avoidance, list, roomOf).length ? null : list;
+    }
     if (++nodes > maxNodes) { exhausted = true; return null; }
     // 남은 각 2조가 적어도 한 1조와 짝을 이룰 수 있어야 합니다.
     const mateOptions = remainingMates.map(b => ({

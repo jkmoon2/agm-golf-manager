@@ -2,7 +2,7 @@
 
 import { arrayUnion, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { sanitizeForFirestore } from '../../utils/sanitizeForFirestore';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom, canShareRoom, shuffleAvoid } from '../../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, roomConstraintsActive, canEnterRoom, canShareRoom, shuffleAvoid } from '../../utils/roomAvoidance';
 import { solveFourballPlan } from '../../utils/solveFourballPlan';
 import {
   filterSkillFourballPartnerPool,
@@ -213,7 +213,7 @@ export async function transactionalAssignFourball({
     // 방과 파트너가 모두 있으면 이미 완료. 방만 있고 파트너가 없으면 불완전 배정 상태이므로 보정 진행.
     if (roomOf(self) && partnerOf(self)) throw new Error('already_assigned');
 
-    if (avoidActive(avoidance)) {
+    if (roomConstraintsActive(avoidance)) {
       // 현재 팀만 확인하는 탐욕적 선택은 이후의 포볼팀을 불가능하게 만들 수 있습니다.
       // 따라서 전체 미배정 참가자의 완성 가능한 방·파트너 조합을 먼저 찾습니다.
       const specialIds = getSkillRoomParticipantIdSet(skillCfg, { roomCount: rc, participants: parts });
@@ -278,7 +278,7 @@ export async function transactionalAssignFourball({
     });
 
     // ✅ 확정 직전 최종 방구성 검사 (파트너끼리 + 다른 팀 모두)
-    if (avoidActive(avoidance)) {
+    if (roomConstraintsActive(avoidance)) {
       const myself = next.find(p => normId(p.id) === pid);
       const mate = mateId ? next.find(p => normId(p.id) === mateId) : null;
       const withoutMine = next.filter(p => normId(p.id) !== pid && (!mateId || normId(p.id) !== mateId));

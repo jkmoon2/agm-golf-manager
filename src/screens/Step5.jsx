@@ -7,7 +7,7 @@ import { EventContext } from '../contexts/EventContext';  // ✅ 경로 고정 (
 import { serverTimestamp } from 'firebase/firestore';     // ✅ [ADD] participantsUpdatedAt 동기화용
 import styles from './Step5.module.css';
 import { getAssignmentRoom } from '../utils/assignmentCompat';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom, getAvoidViolations, solveAvoidance, feasibleStrokeRooms } from '../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, roomConstraintsActive, canEnterRoom, getAvoidViolations, getConstraintViolations, solveAvoidance, feasibleStrokeRooms } from '../utils/roomAvoidance';
 import {
   getSkillAllowedRoomNumbers,
   getSkillRoomGroupForParticipant,
@@ -501,7 +501,7 @@ export default function Step5() {
           getRoomCountNow(ps, r) < getRoomCapacity(r) && canEnterRoom(avoidance, target, r, ps, getRoomValue)
         );
         // [2026-10-09] 방조정 활성 시 다른 미배정 참가자까지 전원 배정 가능한 방만 허용.
-        const viable = avoidActive(avoidance) ? feasibleStrokeRooms(ps, target,
+        const viable = roomConstraintsActive(avoidance) ? feasibleStrokeRooms(ps, target,
           (person, list) => {
             const group = getSkillRoomGroupForParticipant(cfgNow, person.id, { roomCount, participants: list });
             return getSkillAllowedRoomNumbers(cfgNow, person.id, rooms, { roomCount, participants: list }).filter(r =>
@@ -656,7 +656,7 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
         nextList = ps.map((p) => (p.id === id ? { ...p, room, roomNumber: room } : p));
       }
 
-      if (avoidActive(avoidance) && getAvoidViolations(avoidance, nextList, getRoomValue).length) {
+      if (roomConstraintsActive(avoidance) && getConstraintViolations(avoidance, nextList, getRoomValue).length) {
         blockedAvoidance = true;
         nextList = null;
         return ps;
@@ -690,9 +690,9 @@ const menuH = Math.min(320, rooms.length * 36 + 12);
 
     let nextSnapshot = null;
 
-    if (avoidActive(avoidance)) {
+    if (roomConstraintsActive(avoidance)) {
       const ps = latestParticipantsRef.current || participants;
-      const existing = getAvoidViolations(avoidance, ps, getRoomValue);
+      const existing = getConstraintViolations(avoidance, ps, getRoomValue);
       if (existing.length) { alert(`이미 같은 방에 배정된 방조정 페어 ${existing.length}건이 있습니다. 강제/취소 또는 초기화로 해결해주세요.`); return; }
       const cfg = normalizeSkillRoomConfig(skillRoomConfig, { roomCount, participants: ps });
       const targets = ps.filter(p => getRoomValue(p) == null && String(p.nickname || '').trim());

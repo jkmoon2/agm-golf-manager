@@ -2,7 +2,7 @@
 
 // ⬆️ 반드시 최상단에 import 배치 (ESLint: import/first 준수)
 import { runTransaction, doc } from 'firebase/firestore';
-import { normalizeRoomAvoidance, avoidActive, canEnterRoom, feasibleStrokeRooms } from '../../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, roomConstraintsActive, canEnterRoom, feasibleStrokeRooms } from '../../utils/roomAvoidance';
 
 const roomCapacityAt = (roomCapacities, roomNo) => {
   const idx = Number(roomNo) - 1;
@@ -68,9 +68,9 @@ export function pickRoomForStroke({
     }
   }
 
-  if (avoidActive(roomAvoidance)) candidates = candidates.filter(c => canEnterRoom(roomAvoidance, me, c.r, participants, roomOf));
+  if (roomConstraintsActive(roomAvoidance)) candidates = candidates.filter(c => canEnterRoom(roomAvoidance, me, c.r, participants, roomOf));
   // 방조정 사용 시에는 같은 조/정원/방조정 위반 방으로 fallback하지 않습니다.
-  if (avoidActive(roomAvoidance) && candidates.length === 0) return null;
+  if (roomConstraintsActive(roomAvoidance) && candidates.length === 0) return null;
 
   // 만약 전부 같은 조 있거나 꽉 찼다면, 아직 정원 미만인 방 중에서
   if (candidates.length === 0) {
@@ -144,7 +144,7 @@ export async function transactionalAssignStroke({ db, eventId, participantId }) 
 
     const cfgAvoid = normalizeRoomAvoidance(data?.roomAvoidance, parts, data?.skillRoomConfig);
     let finalPicked = picked;
-    if (avoidActive(cfgAvoid)) {
+    if (roomConstraintsActive(cfgAvoid)) {
       const eligible = feasibleStrokeRooms(parts, me,
         (person, list) => Array.from({ length: roomCount }, (_, i) => i + 1).filter(r =>
           list.filter(x => Number(roomOf(x)) === r).length < roomCapacityAt(roomCapacities, r) &&

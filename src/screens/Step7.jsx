@@ -3,7 +3,7 @@
 import React, { useState, useContext, useRef, useEffect } from 'react';
 import styles from './Step7.module.css';
 import { getAssignmentPartnerId, getAssignmentRoom } from '../utils/assignmentCompat';
-import { normalizeRoomAvoidance, avoidActive, getAvoidViolations } from '../utils/roomAvoidance';
+import { normalizeRoomAvoidance, avoidActive, roomConstraintsActive, getAvoidViolations, getConstraintViolations } from '../utils/roomAvoidance';
 import { StepContext } from '../flows/StepFlow';
 import { EventContext } from '../contexts/EventContext';
 import { serverTimestamp } from 'firebase/firestore';
@@ -233,7 +233,7 @@ export default function Step7() {
     const normalizedChanges = normalizeForceChanges(changes);
     const nextParticipants = applyChangesToList(participants, normalizedChanges);
     const avoidCfg = normalizeRoomAvoidance(eventData?.roomAvoidance, participants, eventData?.skillRoomConfig);
-    if (avoidActive(avoidCfg) && getAvoidViolations(avoidCfg, nextParticipants, getRoomValue).length) {
+    if (roomConstraintsActive(avoidCfg) && getConstraintViolations(avoidCfg, nextParticipants, getRoomValue).length) {
       alert('방조정에서 같은 방 금지로 설정된 페어가 발생하여 이동/교환을 취소했습니다.');
       return false;
     }

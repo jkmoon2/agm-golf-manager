@@ -24,15 +24,86 @@ export const normalizeRoomAvoidance = (raw, participants = [], skillRoomConfig =
     seen.add(key);
     pairs.push(sorted);
   });
-  return { enabled: raw?.enabled === true, includeSpecialRooms, pairs };
+  const sameRoomPairs = [];
+  const togetherSeen = new Set();
+  (Array.isArray(raw?.sameRoomPairs) ? raw.sameRoomPairs : []).forEach(pair => {
+    const values = Array.isArray(pair) ? pair : (pair && typeof pair === 'object' ? [pair.a, pair.b] : []);
+    if (values.length !== 2 || values.some(v => v == null)) return;
+    const [a, b] = values.map(String).sort();
+    if (a === b || !valid.has(a) || !valid.has(b) || togetherSeen.has(`${a}|${b}`)) return;
+    if (specialIds.has(a) || specialIds.has(b)) return;
+    togetherSeen.add(`${a}|${b}`);
+    sameRoomPairs.push([a, b]);
+  });
+  const roomSelections = [];
+  const seenSelections = new Set();
+  (Array.isArray(raw?.roomSelections) ? raw.roomSelections : []).forEach(item => {
+    const id = String(item?.id ?? '');
+    const room = Number(item?.room);
+    if (!valid.has(id) || specialIds.has(id) || !Number.isInteger(room) || room < 1 || seenSelections.has(id)) return;
+    seenSelections.add(id);
+    roomSelections.push({ id, room });
+  });
+  return { enabled: raw?.enabled === true, includeSpecialRooms, pairs,
+    sameRoomEnabled: raw?.sameRoomEnabled === true, sameRoomPairs,
+    roomSelectionEnabled: raw?.roomSelectionEnabled === true, roomSelections };
 };
 export const avoidActive = cfg => !!(cfg?.enabled && cfg?.pairs?.length);
+export const roomConstraintsActive = cfg => !!(avoidActive(cfg) ||
+  (cfg?.sameRoomEnabled && cfg?.sameRoomPairs?.length) ||
+  (cfg?.roomSelectionEnabled && cfg?.roomSelections?.length));
+export const requiredRoom = (cfg, id) => cfg?.roomSelectionEnabled
+  ? cfg.roomSelections.find(x => x.id === String(id))?.room ?? null : null;
+export const getRoomConstraintIssues = (cfg, participants = [], roomCount = Infinity) => {
+  const issues = [];
+  const byId = new Map(participants.map(p => [String(p.id), p]));
+  if (cfg?.roomSelectionEnabled) for (const x of cfg.roomSelections || []) {
+    if (x.room > roomCount) issues.push(`${byId.get(x.id)?.nickname || x.id}: 존재하지 않는 방`);
+  }
+  if (cfg?.sameRoomEnabled) for (const [a,b] of cfg.sameRoomPairs || []) {
+    if (cfg.enabled && !canShareRoom(cfg,a,b)) issues.push(`${byId.get(a)?.nickname || a} ↔ ${byId.get(b)?.nickname || b}: 금지-페어와 한방-페어 중복`);
+    const ra = requiredRoom(cfg,a), rb = requiredRoom(cfg,b);
+    if (ra != null && rb != null && ra !== rb) issues.push(`${byId.get(a)?.nickname || a} ↔ ${byId.get(b)?.nickname || b}: 서로 다른 지정 방`);
+    const pa=byId.get(a), pb=byId.get(b);
+    if (pa && pb && Number(pa.group) === Number(pb.group) && Number(pa.group) !== 0)
+      issues.push(`${pa.nickname} ↔ ${pb.nickname}: 같은 조 참가자는 기존 일반방 규칙으로 같은 방 배정 불가`);
+  }
+  return issues;
+};
 export const canShareRoom = (cfg, a, b) => !avoidActive(cfg) || !cfg.pairs.some(
   ([x, y]) => (x === String(a) && y === String(b)) || (y === String(a) && x === String(b))
 );
-export const canEnterRoom = (cfg, person, room, list, roomOf) =>
-  (list || []).every(p => String(p.id) === String(person.id) || Number(roomOf(p)) !== Number(room) || canShareRoom(cfg, person.id, p.id));
-export const getAvoidViolations = (cfg, list, roomOf) => (cfg?.pairs || []).filter(([a, b]) => {
+export const canEnterRoom = (cfg, person, room, list, roomOf) => {
+  const id = String(person.id), dest = Number(room);
+  const pinned = requiredRoom(cfg, id);
+  if (pinned != null && pinned !== dest) return false;
+  if (!(list || []).every(p => String(p.id) === id || Number(roomOf(p)) !== dest || canShareRoom(cfg, id, p.id))) return false;
+  if (cfg?.sameRoomEnabled) for (const [a,b] of cfg.sameRoomPairs || []) {
+    if (a !== id && b !== id) continue;
+    const other = (list || []).find(p => String(p.id) === (a === id ? b : a));
+    if (!other) continue;
+    const r = roomOf(other);
+    if (r != null && Number(r) > 0 && Number(r) !== dest) return false;
+    const otherPinned = requiredRoom(cfg, other.id);
+    if (otherPinned != null && otherPinned !== dest) return false;
+  }
+  return true;
+};
+export const getConstraintViolations = (cfg, list, roomOf) => {
+  const violations = getAvoidViolations(cfg, list, roomOf).map(pair => ({ kind: 'avoid', pair }));
+  if (cfg?.roomSelectionEnabled) for (const {id, room} of cfg.roomSelections || []) {
+    const p = list.find(x => String(x.id) === id);
+    if (p && roomOf(p) != null && Number(roomOf(p)) > 0 && Number(roomOf(p)) !== room)
+      violations.push({ kind:'room', id });
+  }
+  if (cfg?.sameRoomEnabled) for (const [a,b] of cfg.sameRoomPairs || []) {
+    const x = list.find(p => String(p.id) === a), y = list.find(p => String(p.id) === b);
+    if (x && y && roomOf(x) != null && roomOf(y) != null && Number(roomOf(x)) > 0 && Number(roomOf(y)) > 0 && Number(roomOf(x)) !== Number(roomOf(y)))
+      violations.push({ kind:'same', pair:[a,b] });
+  }
+  return violations;
+};
+export const getAvoidViolations = (cfg, list, roomOf) => (avoidActive(cfg) ? cfg.pairs : []).filter(([a, b]) => {
   const x = list.find(p => String(p.id) === a);
   const y = list.find(p => String(p.id) === b);
   const r = x && roomOf(x);
@@ -73,7 +144,11 @@ export const toFirestoreRoomAvoidance = (raw, participants = []) => {
   return {
     enabled: normalized.enabled,
     includeSpecialRooms: normalized.includeSpecialRooms,
-    pairs: normalized.pairs.map(([a, b]) => ({ a, b }))
+    pairs: normalized.pairs.map(([a, b]) => ({ a, b })),
+    sameRoomEnabled: normalized.sameRoomEnabled,
+    sameRoomPairs: normalized.sameRoomPairs.map(([a,b]) => ({a,b})),
+    roomSelectionEnabled: normalized.roomSelectionEnabled,
+    roomSelections: normalized.roomSelections.map(({id,room}) => ({id,room}))
   };
 };
 
