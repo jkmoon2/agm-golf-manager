@@ -6,14 +6,14 @@ export const TEMPLATE_REGISTRY = [
   {
     type: 'raw-number',
     label: '숫자 입력(그대로 점수)',
-    defaultParams: { aggregator: 'sum' },
+    defaultParams: { aggregator: 'sum', bonus: [] },
     help: '* 입력 숫자를 그대로 점수로 사용합니다.',
     ui: {
       inputMode: true,
       paramsJson: true,
       factor: false,
       rangeTable: false,
-      bonusTable: false,
+      bonusTable: true,
       supportsEventInputs: true,
       supportsQuickInput: true,
     },

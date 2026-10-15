@@ -14,6 +14,7 @@ import { diagMerge, diagPush } from '../utils/agmDiag';
 import { filterSkillRoomEventParticipants } from '../utils/skillRoom';
 import css from './EventManager.module.css';
 import { TEMPLATE_REGISTRY, getTemplateByType, getTemplateHelp, templateUi } from '../eventTemplates/registry';
+import EventAttemptRanking, { isAttemptTemplate } from '../components/EventAttemptRanking';
 import GroupBattleEditor from '../eventTemplates/groupBattle/GroupBattleEditor';
 import GroupBattlePreview from '../eventTemplates/groupBattle/GroupBattlePreview';
 import GroupBattleHandicapEditor from '../eventTemplates/groupBattle/GroupBattleHandicapEditor';
@@ -1124,7 +1125,7 @@ if (editForm?.template === 'group-battle') {
         }
         base = hit;
       }
-      if (t === 'range-convert-bonus') {
+      if (t === 'range-convert-bonus' || t === 'raw-number') {
         const tag = (raw && typeof raw === 'object' && Array.isArray(raw.bonus)) ? raw.bonus[i] : (raw && typeof raw === 'object' ? raw.bonus : undefined);
         const bonus = bonusMap[String(tag || '')] || 0;
         return base + bonus;
@@ -2095,12 +2096,15 @@ if (editForm?.template === 'group-battle') {
           const v = quickValues[i];
           return (v===''||v==null) ? '' : Number(v);
         }) };
-        if (ev.template === 'range-convert-bonus') {
+        if (ev.template === 'range-convert-bonus' || (ev.template === 'raw-number' && Array.isArray(ev.params?.bonus) && ev.params.bonus.length)) {
           obj.bonus = Array.from({length:N}, (_,i)=> quickBonus[i] ?? '');
         }
         person[quickKey] = obj;
       } else {
-        person[quickKey] = (quickValues[0]===''||quickValues[0]==null) ? '' : Number(quickValues[0]);
+        const input = (quickValues[0]===''||quickValues[0]==null) ? '' : Number(quickValues[0]);
+        const hasBonus = (ev.template === 'range-convert-bonus' || ev.template === 'raw-number') &&
+          Array.isArray(ev.params?.bonus) && ev.params.bonus.length > 0 && !!quickBonus[0];
+        person[quickKey] = hasBonus ? { values: [input], bonus: [quickBonus[0]] } : input;
       }
       slot.person = person;
     } else if (quickTarget === 'room') {
@@ -2552,10 +2556,10 @@ if (editForm?.template === 'group-battle') {
                     <div className={css.quickRow}>
                       {ev.inputMode === 'accumulate'
                         ? quickValues.map((v, i) => (
-                            <div key={i} style={{display:'grid', gridTemplateColumns: (ev.template==='range-convert-bonus' ? '1fr 1fr' : '1fr'), gap:6, width:'100%'}}>
+                            <div key={i} style={{display:'grid', gridTemplateColumns: ((ev.template==='range-convert-bonus' || (ev.template==='raw-number' && ev.params?.bonus?.length)) ? '1fr 1fr' : '1fr'), gap:6, width:'100%'}}>
                               <input className={`${css.input} ${css.inputSmall}`} type="number" value={v}
                                 onChange={(e)=>setQuickValues(arr=>{ const n=[...arr]; n[i]=e.target.value; return n; })} placeholder={`입력${i+1}`} />
-                              {ev.template==='range-convert-bonus' && (
+                              {(ev.template==='range-convert-bonus' || (ev.template==='raw-number' && ev.params?.bonus?.length)) && (
                                 <select className={`${css.select} ${css.inputSmall}`} value={quickBonus[i]||''}
                                   onChange={(e)=>setQuickBonus(arr=>{ const n=[...arr]; n[i]=e.target.value; return n; })}>
                                   <option value="">보너스</option>
@@ -2564,8 +2568,19 @@ if (editForm?.template === 'group-battle') {
                               )}
                             </div>
                           ))
-                        : <input className={`${css.input} ${css.quickGrow}`} type="number" value={quickValues[0]}
-                            onChange={(e)=>setQuickValues([e.target.value])} placeholder="입력값" />
+                        : <>
+                            <input className={`${css.input} ${css.quickGrow}`} type="number" value={quickValues[0]}
+                              onChange={(e)=>setQuickValues([e.target.value])} placeholder="입력값" />
+                            {(ev.template==='range-convert-bonus' || (ev.template==='raw-number' && ev.params?.bonus?.length)) && (
+                              <select className={`${css.select} ${css.inputSmall}`} value={quickBonus[0] || ''}
+                                onChange={(e)=>setQuickBonus([e.target.value])}>
+                                <option value="">보너스</option>
+                                {(Array.isArray(ev?.params?.bonus) ? ev.params.bonus : []).map((b, bi) => (
+                                  <option key={bi} value={b.label ?? b}>{b.label ?? b}{b.score != null ? ` (+${b.score})` : ''}</option>
+                                ))}
+                              </select>
+                            )}
+                          </>
                       }
                     </div>
 
@@ -2811,6 +2826,11 @@ if (editForm?.template === 'group-battle') {
             </div>
 
             {!previewDef && <div className={css.empty}>선택된 이벤트가 없습니다.</div>}
+
+            {previewDef && isAttemptTemplate(previewDef) && (
+              <EventAttemptRanking key={previewDef.id} eventDef={{ ...previewDef, rankOrder:viewOrder }}
+                participants={participants} inputs={inputsAll?.[previewId] || {}} roomNames={roomNames} />
+            )}
 
             {previewDef && viewTab === 'person' && (
               previewDef.template === 'rank-score-game' ? (
