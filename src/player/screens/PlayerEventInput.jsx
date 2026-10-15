@@ -1710,12 +1710,15 @@ export default function PlayerEventInput(){
     const all  = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
-    const prev = String(person[pid] ?? '');
+    const current = person[pid];
+    const prev = String(current && typeof current === 'object' && Array.isArray(current.values) ? (current.values[0] ?? '') : (current ?? ''));
     const next = String(value ?? '');
     if (prev === next) return;
     if (next.trim() === '') markSingleDeleted(evId, pid);
     else clearSingleDeleted(evId, pid);
-    person[pid] = next;
+    // 선택형 보너스가 있는 갱신 입력: 보너스를 삭제하지 않고 숫자만 교체
+    person[pid] = current && typeof current === 'object' && Array.isArray(current.values)
+      ? { ...current, values: [next] } : next;
     slot.person = person; all[evId] = slot;
     applyDraft(all);
     setDirty(true);
@@ -1836,7 +1839,9 @@ export default function PlayerEventInput(){
       delete person[pid];
     } else {
       clearSingleDeleted(evId, pid);
-      person[pid] = num;
+      const previous = person[pid];
+      person[pid] = previous && typeof previous === 'object' && Array.isArray(previous.values)
+        ? { ...previous, values: [num] } : num;
     }
 
     slot.person = person; all[evId] = slot;
@@ -1893,6 +1898,8 @@ export default function PlayerEventInput(){
         obj.bonus = arr;
       }
     } else {
+      // 기존 숫자 입력을 유지하면서 단일 회차의 보너스만 변경
+      if (!Array.isArray(obj.values)) obj.values = [person[pid] == null ? '' : person[pid]];
       const prev = String(obj.bonus ?? '');
       const next = String(value ?? '');
       if (prev !== next) obj.bonus = next;
@@ -1904,7 +1911,7 @@ export default function PlayerEventInput(){
   const calcPopupWidth = (evId) => {
     try {
       const ev = events.find(e => e.id === evId);
-      const opts = (ev && ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus))
+      const opts = (ev && (ev.template === 'range-convert-bonus' || ev.template === 'raw-number') && Array.isArray(ev.params?.bonus))
         ? ev.params.bonus : [];
       const labels = [
         ...opts.map(b => `${b.label}${b.score != null ? ` (+${b.score})` : ''}`),
@@ -3004,7 +3011,7 @@ export default function PlayerEventInput(){
           const ONE_PCT  = isHoleRankForce ? Math.max(10, 53 / Math.max(selectedHoles.length || 1, 1)) : (65 / 4);
           const TOTAL_PCT = isHoleRankForce ? 12 : 0;
           const tableWidthPct = isAccum ? (NICK_PCT + attempts * ONE_PCT + TOTAL_PCT) : 100;
-          const bonusOpts = (ev.template === 'range-convert-bonus' && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
+          const bonusOpts = ((ev.template === 'range-convert-bonus' || ev.template === 'raw-number') && Array.isArray(ev.params?.bonus)) ? ev.params.bonus : [];
           const pickCfg = ev.template === 'pick-lineup' ? getPickLineupConfig(ev) : null;
           const orderedRoomRows = orderSlotsByPairs(
             participants.filter((p) => Number(getAssignmentRoom(p)) === (Number.isFinite(roomIdx) ? roomIdx : NaN)),
@@ -4667,7 +4674,7 @@ export default function PlayerEventInput(){
                                 autoCapitalize="off"
                                 spellCheck={false}
                                 className={tCss.cellInput}
-                                value={p ? (inputsByEvent?.[ev.id]?.person?.[p.id] ?? '') : ''}
+                                value={p ? (() => { const raw = inputsByEvent?.[ev.id]?.person?.[p.id]; return raw && typeof raw === 'object' && Array.isArray(raw.values) ? (raw.values[0] ?? '') : (raw ?? ''); })() : ''}
                                 onChange={(e)=> p && patchValue(ev.id, p.id, e.target.value)}
                                 onBlur={(e)=> p && finalizeValue(ev.id, p.id, e.target.value)}
                                 data-focus-evid={ev.id}
@@ -4957,7 +4964,7 @@ export default function PlayerEventInput(){
 
               {bonusPopup.open && (()=>{ 
                 const evv = events.find(e=> e.id===bonusPopup.evId);
-                const opts = (evv && evv.template==='range-convert-bonus' && Array.isArray(evv.params?.bonus)) ? evv.params.bonus : [];
+                const opts = (evv && (evv.template==='range-convert-bonus' || evv.template==='raw-number') && Array.isArray(evv.params?.bonus)) ? evv.params.bonus : [];
                 const onPick = (label)=>{
                   const isAccum2 = !!(evv && evv.inputMode==='accumulate');
                   patchBonus(bonusPopup.evId, bonusPopup.pid, bonusPopup.idx, label || '', isAccum2, bonusPopup.attempts);

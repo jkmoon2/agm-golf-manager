@@ -3,6 +3,7 @@
 // 카드 폭 조정은 CSS에서 처리합니다.
 
 import React, { useMemo, useContext, useEffect } from 'react';
+import EventAttemptRanking, { isAttemptTemplate } from '../../components/EventAttemptRanking';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { PlayerContext } from '../../contexts/PlayerContext';
@@ -340,13 +341,13 @@ function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, 
 
     let val;
     if (typeof slot === 'object' && slot && Array.isArray(slot.values)) {
-      if (template === 'range-convert-bonus') {
+      if (template === 'range-convert-bonus' || (template === 'raw-number' && Array.isArray(params?.bonus) && params.bonus.length)) {
         const map = bonusMapFromParams(params);
         const vals = Array.isArray(slot.values) ? slot.values : [];
         const bons = Array.isArray(slot.bonus) ? slot.bonus : [];
         let total = 0;
         for (let i = 0; i < vals.length; i += 1) {
-          const base = evaluateValue('range-convert', params, vals[i]);
+          const base = evaluateValue(template === 'raw-number' ? 'raw-number' : 'range-convert', params, vals[i]);
           total += (Number.isFinite(base) ? base : 0) + (map[String(bons[i] || '')] || 0);
         }
         val = total;
@@ -354,8 +355,8 @@ function buildPersonRowsForJoPreview(ev, participants = [], inputsByEvent = {}, 
         const folded = foldAccum(slot, agg);
         val = evaluateValue(template === 'range-convert-bonus' ? 'raw-number' : template, params, folded);
       }
-    } else if (template === 'range-convert-bonus' && typeof slot === 'object' && slot) {
-      const base = evaluateValue('range-convert', params, slot?.values ? slot.values[0] : slot);
+    } else if ((template === 'range-convert-bonus' || template === 'raw-number') && typeof slot === 'object' && slot) {
+      const base = evaluateValue(template === 'raw-number' ? 'raw-number' : 'range-convert', params, slot?.values ? slot.values[0] : slot);
       const map = bonusMapFromParams(params);
       const b = (Array.isArray(slot.bonus) ? slot.bonus[0] : slot.bonus);
       val = (Number.isFinite(base) ? base : 0) + (map[String(b || '')] || 0);
@@ -693,13 +694,13 @@ const events = useMemo(
         let val;
         if (typeof slot === 'object' && slot && Array.isArray(slot.values)) {
           let folded;
-          if (template === 'range-convert-bonus') {
+          if (template === 'range-convert-bonus' || (template === 'raw-number' && Array.isArray(params?.bonus) && params.bonus.length)) {
             const map = bonusMapFromParams(params);
             const vals = Array.isArray(slot.values) ? slot.values : [];
             const bons = Array.isArray(slot.bonus) ? slot.bonus : [];
             let total = 0;
             for (let i=0;i<vals.length;i++){
-              const base = evaluateValue('range-convert', params, vals[i]);
+              const base = evaluateValue(template === 'raw-number' ? 'raw-number' : 'range-convert', params, vals[i]);
               total += (Number.isFinite(base)? base : 0) + (map[String(bons[i]||'')] || 0);
             }
             folded = total;
@@ -708,8 +709,8 @@ const events = useMemo(
           }
           val = evaluateValue(template === 'range-convert-bonus' ? 'raw-number' : template, params, folded);
         } else {
-          if (template === 'range-convert-bonus' && typeof slot === 'object' && slot){
-          const base = evaluateValue('range-convert', params, slot?.values ? slot.values[0] : slot);
+          if ((template === 'range-convert-bonus' || template === 'raw-number') && typeof slot === 'object' && slot){
+          const base = evaluateValue(template === 'raw-number' ? 'raw-number' : 'range-convert', params, slot?.values ? slot.values[0] : slot);
           const map = bonusMapFromParams(params);
           const b = (Array.isArray(slot.bonus) ? slot.bonus[0] : slot.bonus);
           val = (Number.isFinite(base)? base:0) + (map[String(b||'')]||0);
@@ -733,17 +734,17 @@ const events = useMemo(
           const slot = inputsByEvent?.[evId]?.person?.[p.id];
           let per;
           if (typeof slot === 'object' && slot && Array.isArray(slot.values)){
-            if (template === 'range-convert-bonus'){
+            if (template === 'range-convert-bonus' || (template === 'raw-number' && Array.isArray(params?.bonus) && params.bonus.length)){
               const map = bonusMapFromParams(params);
               let total=0; const vals=slot.values||[]; const bons=slot.bonus||[];
               for (let i=0;i<vals.length;i++){
-                const base = evaluateValue('range-convert', params, vals[i]);
+                const base = evaluateValue(template === 'raw-number' ? 'raw-number' : 'range-convert', params, vals[i]);
                 total += (Number.isFinite(base)?base:0) + (map[String(bons[i]||'')]||0);
               }
               per = total;
             } else per = foldAccum(slot, agg);
           } else per = asNum(slot);
-          return evaluateValue(template==='range-convert-bonus' ? 'raw-number' : template, params, per);
+          return evaluateValue((template==='range-convert-bonus' || (template==='raw-number' && Array.isArray(params?.bonus) && params.bonus.length)) ? 'raw-number' : template, params, per);
         }).filter(isFiniteNum);
         const value = aggregate(vals, agg);
         return { key: String(idx1), label: getRoomLabel(idx1), value: asNum(value) };
@@ -769,17 +770,17 @@ const events = useMemo(
             const slot = inputsByEvent?.[evId]?.person?.[m?.id];
             let per;
             if (typeof slot === 'object' && slot && Array.isArray(slot.values)){
-              if (template === 'range-convert-bonus'){
+              if (template === 'range-convert-bonus' || (template === 'raw-number' && Array.isArray(params?.bonus) && params.bonus.length)){
                 const map = bonusMapFromParams(params);
                 let total=0; const vals=slot.values||[]; const bons=slot.bonus||[];
                 for (let i=0;i<vals.length;i++){
-                  const base = evaluateValue('range-convert', params, vals[i]);
+                  const base = evaluateValue(template === 'raw-number' ? 'raw-number' : 'range-convert', params, vals[i]);
                   total += (Number.isFinite(base)?base:0) + (map[String(bons[i]||'')]||0);
                 }
                 per = total;
               } else per = foldAccum(slot, agg);
             } else per = asNum(slot);
-            return evaluateValue(template==='range-convert-bonus' ? 'raw-number' : template, params, per);
+            return evaluateValue((template==='range-convert-bonus' || (template==='raw-number' && Array.isArray(params?.bonus) && params.bonus.length)) ? 'raw-number' : template, params, per);
           })
           .filter(isFiniteNum);
 
@@ -916,6 +917,10 @@ const events = useMemo(
                   </div>
                 </div>
 
+                {isAttemptTemplate(ev) && (
+                  <EventAttemptRanking key={ev.id} eventDef={ev} participants={participants}
+                    inputs={inputsByEvent?.[ev.id] || {}} roomNames={effectiveRoomNames} />
+                )}
                 <div className={`${baseCss.tableWrap} ${tCss.noOverflow}`}>
                   <table className={`${tCss.table} ${tCss['kind-' + res.kind]} ${res.isHiddenPersonal ? tCss.hiddenPersonalTable : ''}`}>
                     <colgroup>
