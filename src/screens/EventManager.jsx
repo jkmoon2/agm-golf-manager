@@ -302,6 +302,31 @@ const TOUCH_CANCEL_PX = 24;
 const MOUSE_CANCEL_PX = 12;
 
 
+
+// /src/screens/EventManager.jsx — 숫자 템플릿 홀 선택 (전체홀 기본)
+const normalizedInputHoles = (value) => {
+  if (!Array.isArray(value)) return Array.from({length:18},(_,i)=>i+1);
+  return [...new Set(value.map(Number).filter(h=>Number.isInteger(h)&&h>=1&&h<=18))].sort((a,b)=>a-b);
+};
+function HoleInputSelector({ holes, onChange }) {
+  const selected = normalizedInputHoles(holes);
+  const all = selected.length === 18;
+  return (
+    <div style={{border:'1px solid #dbe2ec',borderRadius:8,padding:9,margin:'8px 0'}}>
+      <label style={{display:'flex',gap:7,alignItems:'center',fontSize:13,fontWeight:600}}>
+        <input type="checkbox" checked={all} onChange={e=>onChange(e.target.checked?Array.from({length:18},(_,i)=>i+1):[])} /> 전체홀 (1~18홀)
+      </label>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(6,minmax(0,1fr))',gap:6,marginTop:9}}>
+        {Array.from({length:18},(_,i)=>i+1).map(h=>(
+          <label key={h} style={{fontSize:12,display:'flex',alignItems:'center',gap:2}}>
+            <input type="checkbox" checked={selected.includes(h)} onChange={e=>onChange(e.target.checked?[...selected,h].sort((a,b)=>a-b):selected.filter(x=>x!==h))} />{h}홀
+          </label>
+        ))}
+      </div>
+      {!selected.length && <div style={{fontSize:11,color:'#dc2626',marginTop:6}}>최소 1개 홀을 선택해주세요.</div>}
+    </div>
+  );
+}
 export default function EventManager() {
   const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, updateEventInputsTransaction, overlayScoresToParticipants } = useContext(EventContext) || {};
 
@@ -464,8 +489,8 @@ if (t === 'group-battle') {
   const onRangeChange = (idx, key, v) => {
     const table = Array.isArray(params.table) ? [...params.table] : [];
     const row = { ...(table[idx] || { min: '', max: '', score: 0 }) };
-    if (key === 'min' || 'max') row[key] = v === '' ? '' : Number(v);
-    if (key === 'score') row[key] = Number(v || 0);
+    if (key === 'min' || key === 'max') row[key] = v === '' ? '' : Number(v);
+    if (key === 'score') row[key] = v === '' ? '' : v;
     table[idx] = row;
     setParams({ ...params, table, aggregator: params.aggregator || 'sum' });
   };
@@ -476,7 +501,7 @@ if (t === 'group-battle') {
   const onBonusChange = (idx, key, v) => {
     const bonus = Array.isArray(params.bonus) ? [...params.bonus] : [];
     const row = { ...(bonus[idx] || { label:'', score:0 }) };
-    row[key] = key === 'score' ? Number(v || 0) : String(v || '');
+    row[key] = key === 'score' ? (v === '' ? '' : v) : String(v || '');
     bonus[idx] = row;
     setParams({ ...params, bonus, aggregator: params.aggregator || 'sum' });
   };
@@ -529,6 +554,7 @@ if (form.template === 'group-battle') {
   return;
 }
       const parsed = JSON.parse(form.paramsJson || '{}');
+      if (form.inputMode === 'hole' && isAttemptTemplate({template:form.template}) && normalizedInputHoles(parsed.selectedHoles).length === 0) { alert('홀을 1개 이상 선택해주세요.'); return; }
       if (form.template === 'bingo' && !isValidBingoParams(parsed)) {
         alert('빙고 이벤트는 빙고판 칸 수와 동일한 홀 수를 선택해야 합니다.');
         return;
@@ -554,12 +580,12 @@ if (form.template === 'group-battle') {
         id: uid(),
         title: form.title.trim() || '이벤트',
         template: form.template,
-        params: hiddenParams || rankScoreParams || pickLineupParams || parsed,
+        params: hiddenParams || rankScoreParams || pickLineupParams || (form.inputMode === 'hole' && isAttemptTemplate({template:form.template}) ? { ...parsed, selectedHoles: normalizedInputHoles(parsed.selectedHoles) } : parsed),
         ...(isHiddenEvent ? { sameGroupOnly: !!hiddenParams.sameGroupOnly, sameGroupTargetOnly: !!hiddenParams.sameGroupOnly, targetScope: hiddenParams.targetScope || 'all', opponentScope: hiddenParams.opponentScope || 'all' } : {}),
         target: isHiddenEvent ? normalizeHiddenPreviewTarget(hiddenParams) : (isRankScoreGame ? getRankScoreGameTarget(rankScoreParams) : (isPickLineup && (pickLineupParams?.mode === 'vote1' || pickLineupParams?.mode === 'vote2') ? 'vote' : (isBingo ? 'room' : (isGroupRoomHoleBattle ? (battleMode === 'room' ? 'room' : battleMode === 'person' ? 'person' : 'group') : 'person')))),
         rankOrder: isHiddenEvent ? normalizeHiddenPreviewOrder(hiddenParams) : (isRankScoreGame ? rankScoreParams.winnerOrder : (isPickLineup && (pickLineupParams?.mode === 'vote1' || pickLineupParams?.mode === 'vote2') ? 'asc' : (isBingo ? 'desc' : 'asc'))),
         inputMode: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 'accumulate' : form.inputMode,                // refresh | accumulate
-        attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : Number(form.attempts || 4),     // 누적 칸수
+        attempts: (form.template === 'hole-rank-force' || form.template === 'bingo') ? 18 : (form.inputMode === 'hole' ? 18 : Number(form.attempts || 4)),     // 누적 칸수
         enabled: true,
       };
       const list = [...eventsOfSelected, item];
@@ -1010,7 +1036,7 @@ const resetEditGroupBattle = (params) => {
     const t = Array.isArray(editParams.table) ? [...editParams.table] : [];
     const r = { ...(t[i] || { min: '', max: '', score: 0 }) };
     if (k === 'min' || k === 'max') r[k] = v === '' ? '' : Number(v);
-    if (k === 'score') r[k] = Number(v || 0);
+    if (k === 'score') r[k] = v === '' ? '' : v;
     t[i] = r;
     setEditParams({ ...editParams, table: t, aggregator: editParams.aggregator || 'sum' });
   };
@@ -1020,7 +1046,7 @@ const resetEditGroupBattle = (params) => {
   const onEditBonusChange = (i, k, v) => {
     const b = Array.isArray(editParams.bonus) ? [...editParams.bonus] : [];
     const row = { ...(b[i] || { label:'', score:0 }) };
-    row[k] = k === 'score' ? Number(v || 0) : String(v || '');
+    row[k] = k === 'score' ? (v === '' ? '' : v) : String(v || '');
     b[i] = row;
     setEditParams({ ...editParams, bonus: b, aggregator: editParams.aggregator || 'sum' });
   };
@@ -1056,6 +1082,19 @@ if (editForm?.template === 'group-battle') {
   return;
 }
       const parsed = JSON.parse(editForm.paramsJson || '{}');
+      // 홀 입력을 이미 사용한 이벤트에서 홀 구성을 바꾸면 숨겨진 기존 값이 합계에 남을 수 있으므로 차단합니다.
+      if (editForm.inputMode === 'hole' && isAttemptTemplate({template:editForm.template})) {
+        const before = eventsOfSelected.find(e => e.id === editId);
+        const previous = JSON.stringify(normalizedInputHoles(before?.params?.selectedHoles));
+        const selected = JSON.stringify(normalizedInputHoles(parsed.selectedHoles));
+        const data = inputsAll?.[editId]?.person || {};
+        const hasInputs = Object.values(data).some(v => v !== null && v !== '' && (typeof v !== 'object' || (Array.isArray(v.values) && v.values.some(x => x !== '' && x != null))));
+        if (hasInputs && (before?.inputMode !== 'hole' || previous !== selected)) {
+          alert('입력 데이터가 있는 이벤트는 홀 구성을 변경할 수 없습니다. 기존 결과 보호를 위해 새 이벤트를 생성해주세요.');
+          return;
+        }
+      }
+      if (editForm.inputMode === 'hole' && isAttemptTemplate({template:editForm.template}) && normalizedInputHoles(parsed.selectedHoles).length === 0) { alert('홀을 1개 이상 선택해주세요.'); return; }
       if (editForm.template === 'bingo' && !isValidBingoParams(parsed)) {
         alert('빙고 이벤트는 빙고판 칸 수와 동일한 홀 수를 선택해야 합니다.');
         return;
@@ -1081,12 +1120,12 @@ if (editForm?.template === 'group-battle') {
         ...e,
         title: editForm.title.trim() || e.title,
         template: editForm.template,
-        params: hiddenParamsEdit || rankScoreParamsEdit || pickLineupParamsEdit || parsed,
+        params: hiddenParamsEdit || rankScoreParamsEdit || pickLineupParamsEdit || (editForm.inputMode === 'hole' && isAttemptTemplate({template:editForm.template}) ? { ...parsed, selectedHoles: normalizedInputHoles(parsed.selectedHoles) } : parsed),
         ...(isHiddenEventEdit ? { sameGroupOnly: !!hiddenParamsEdit.sameGroupOnly, sameGroupTargetOnly: !!hiddenParamsEdit.sameGroupOnly, targetScope: hiddenParamsEdit.targetScope || 'all', opponentScope: hiddenParamsEdit.opponentScope || 'all' } : {}),
         target: isHiddenEventEdit ? normalizeHiddenPreviewTarget(hiddenParamsEdit, e.target) : (isRankScoreGameEdit ? getRankScoreGameTarget(rankScoreParamsEdit) : (isPickLineupEdit ? ((pickLineupParamsEdit?.mode === 'vote1' || pickLineupParamsEdit?.mode === 'vote2') ? 'vote' : (e.target === 'vote' ? 'person' : e.target)) : (isBingoEdit ? 'room' : (isGroupRoomHoleBattleEdit ? (battleModeEdit === 'room' ? 'room' : battleModeEdit === 'person' ? 'person' : 'group') : e.target)))),
         rankOrder: isHiddenEventEdit ? normalizeHiddenPreviewOrder(hiddenParamsEdit, e.rankOrder) : (isRankScoreGameEdit ? rankScoreParamsEdit.winnerOrder : (isPickLineupEdit && (pickLineupParamsEdit?.mode === 'vote1' || pickLineupParamsEdit?.mode === 'vote2') ? ((e.rankOrder === 'desc' || e.rankOrder === 'asc') ? e.rankOrder : 'asc') : (isBingoEdit ? 'desc' : (isGroupRoomHoleBattleEdit ? 'asc' : e.rankOrder)))),
         inputMode: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 'accumulate' : editForm.inputMode,
-        attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : Number(editForm.attempts || 4),
+        attempts: (editForm.template === 'hole-rank-force' || editForm.template === 'bingo') ? 18 : (editForm.inputMode === 'hole' ? 18 : Number(editForm.attempts || 4)),
       } : e);
       await commitEventsList(next);
       setEditId(null);
@@ -1424,7 +1463,7 @@ if (editForm?.template === 'group-battle') {
       : ev.template === 'range-convert' ? 'range'
       : ev.template === 'range-convert-bonus' ? 'range+bonus'
       : 'number-convert';
-    const mode = ev.inputMode === 'accumulate' ? `누적(${ev.attempts || 4})` : '갱신';
+    const mode = ev.inputMode === 'hole' ? '홀' : ev.inputMode === 'accumulate' ? `누적(${ev.attempts || 4})` : '갱신';
     return `${t} · ${mode}`;
   };
 
@@ -2036,11 +2075,11 @@ if (editForm?.template === 'group-battle') {
     if (!quickId || !quickKey) return;
     const ev = eventsOfSelected.find(e=>e.id===quickId);
     if (!ev) return;
-    const N = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+    const N = ev.inputMode === 'hole' ? 18 : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
     const slotAll = getInputsSlot(ev.id);
     if (quickTarget === 'person') {
       const rec = (slotAll.person || {})[quickKey];
-      if (ev.inputMode === 'accumulate') {
+      if (ev.inputMode === 'accumulate' || ev.inputMode === 'hole') {
         const vals = Array.from({length:N}, (_,i)=> (rec && rec.values ? (rec.values[i] ?? '') : ''));
         const bons = Array.from({length:N}, (_,i)=> (rec && rec.bonus ? (rec.bonus[i] ?? '') : ''));
         setQuickValues(vals.map(v => (v===null? '' : String(v))));
@@ -2074,7 +2113,7 @@ if (editForm?.template === 'group-battle') {
     setQuickId(ev.id);
     setQuickTarget('person');
     setQuickKey('');
-    const N = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+    const N = ev.inputMode === 'hole' ? 18 : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
     setQuickValues(Array.from({length: N}, () => ''));
     setQuickBonus(Array.from({length: N}, () => ''));
     setOpenMenuId(null); setMenuUpId(null);
@@ -2090,8 +2129,8 @@ if (editForm?.template === 'group-battle') {
 
     if (quickTarget === 'person') {
       const person = { ...(slot.person || {}) };
-      const N = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
-      if (ev.inputMode === 'accumulate') {
+      const N = ev.inputMode === 'hole' ? 18 : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+      if (ev.inputMode === 'accumulate' || ev.inputMode === 'hole') {
         const obj = { values: Array.from({length:N}, (_,i)=> {
           const v = quickValues[i];
           return (v===''||v==null) ? '' : Number(v);
@@ -2261,7 +2300,7 @@ if (editForm?.template === 'group-battle') {
                         <input className={`${css.input} ${css.center}`} type="number" step="0.01" placeholder="예: 0.5"
                           value={row.max ?? ''} onChange={e => onRangeChange(idx, 'max', e.target.value)} />
                         <input className={`${css.input} ${css.center}`} type="number" step="1" placeholder="예: 3"
-                          value={row.score ?? 0} onChange={e => onRangeChange(idx, 'score', e.target.value)} />
+                          value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onRangeChange(idx, 'score', ''); }} onChange={e => onRangeChange(idx, 'score', e.target.value)} />
                         <button className={css.btnDanger} type="button" onClick={() => removeRangeRow(idx)}>삭제</button>
                       </div>
                     ))}
@@ -2282,7 +2321,7 @@ if (editForm?.template === 'group-battle') {
                     {(params.bonus || []).map((row, idx) => (
                       <div key={idx} className={css.rangeRow} style={{ gridTemplateColumns:'1fr 1fr 60px 0' }}>
                         <input className={css.input} placeholder="예: 파" value={row.label ?? ''} onChange={e => onBonusChange(idx, 'label', e.target.value)} />
-                        <input className={`${css.input} ${css.center}`} type="number" step="1" placeholder="예: 1" value={row.score ?? 0} onChange={e => onBonusChange(idx, 'score', e.target.value)} />
+                        <input className={`${css.input} ${css.center}`} type="number" step="1" placeholder="예: 1" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onBonusChange(idx, 'score', ''); }} onChange={e => onBonusChange(idx, 'score', e.target.value)} />
                         <button className={css.btnDanger} type="button" onClick={() => removeBonusRow(idx)}>삭제</button>
                       </div>
                     ))}
@@ -2303,6 +2342,7 @@ if (editForm?.template === 'group-battle') {
                   <select className={css.select} value={form.inputMode} onChange={e => setForm(s => ({ ...s, inputMode: e.target.value }))}>
                     <option value="refresh">갱신(1칸)</option>
                     <option value="accumulate">누적(여러 칸)</option>
+                    <option value="hole">홀</option>
                   </select>
                 </label>
                 {form.inputMode === 'accumulate' && (
@@ -2315,6 +2355,10 @@ if (editForm?.template === 'group-battle') {
                   </label>
                 )}
               </div>
+
+              {uiCreate.inputMode && form.inputMode === 'hole' && (
+                <HoleInputSelector holes={params.selectedHoles} onChange={holes => setParams({...params, selectedHoles:holes})} />
+              )}
 
               {uiCreate.paramsJson && (
               <div className={css.collapse}>
@@ -2554,11 +2598,11 @@ if (editForm?.template === 'group-battle') {
                     </div>
 
                     <div className={css.quickRow}>
-                      {ev.inputMode === 'accumulate'
-                        ? quickValues.map((v, i) => (
+                      {(ev.inputMode === 'accumulate' || ev.inputMode === 'hole')
+                        ? quickValues.map((v, i) => (ev.inputMode === 'hole' && !normalizedInputHoles(ev.params?.selectedHoles).includes(i+1) ? null : (
                             <div key={i} style={{display:'grid', gridTemplateColumns: ((ev.template==='range-convert-bonus' || (ev.template==='raw-number' && ev.params?.bonus?.length)) ? '1fr 1fr' : '1fr'), gap:6, width:'100%'}}>
                               <input className={`${css.input} ${css.inputSmall}`} type="number" value={v}
-                                onChange={(e)=>setQuickValues(arr=>{ const n=[...arr]; n[i]=e.target.value; return n; })} placeholder={`입력${i+1}`} />
+                                onChange={(e)=>setQuickValues(arr=>{ const n=[...arr]; n[i]=e.target.value; return n; })} placeholder={ev.inputMode === 'hole' ? `${i+1}홀` : `입력${i+1}`} />
                               {(ev.template==='range-convert-bonus' || (ev.template==='raw-number' && ev.params?.bonus?.length)) && (
                                 <select className={`${css.select} ${css.inputSmall}`} value={quickBonus[i]||''}
                                   onChange={(e)=>setQuickBonus(arr=>{ const n=[...arr]; n[i]=e.target.value; return n; })}>
@@ -2567,7 +2611,7 @@ if (editForm?.template === 'group-battle') {
                                 </select>
                               )}
                             </div>
-                          ))
+                          )))
                         : <>
                             <input className={`${css.input} ${css.quickGrow}`} type="number" value={quickValues[0]}
                               onChange={(e)=>setQuickValues([e.target.value])} placeholder="입력값" />
@@ -2695,7 +2739,7 @@ if (editForm?.template === 'group-battle') {
                               <div key={idx} className={css.rangeRow}>
                                 <input className={`${css.input} ${css.center}`} type="number" step="0.01" value={row.min ?? ''} onChange={e => onEditRangeChange(idx, 'min', e.target.value)} />
                                 <input className={`${css.input} ${css.center}`} type="number" step="0.01" value={row.max ?? ''} onChange={e => onEditRangeChange(idx, 'max', e.target.value)} />
-                                <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? 0} onChange={e => onEditRangeChange(idx, 'score', e.target.value)} />
+                                <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onEditRangeChange(idx, 'score', ''); }} onChange={e => onEditRangeChange(idx, 'score', e.target.value)} />
                                 <button className={css.btnDanger} type="button" onClick={() => removeEditRangeRow(idx)}>삭제</button>
                               </div>
                             ))}
@@ -2716,7 +2760,7 @@ if (editForm?.template === 'group-battle') {
                             {(editParams.bonus || []).map((row, idx) => (
                               <div key={idx} className={css.rangeRow} style={{ gridTemplateColumns:'1fr 1fr 60px 0' }}>
                                 <input className={css.input} value={row.label ?? ''} onChange={e => onEditBonusChange(idx, 'label', e.target.value)} />
-                                <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? 0} onChange={e => onEditBonusChange(idx, 'score', e.target.value)} />
+                                <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onEditBonusChange(idx, 'score', ''); }} onChange={e => onEditBonusChange(idx, 'score', e.target.value)} />
                                 <button className={css.btnDanger} type="button" onClick={() => removeEditBonusRow(idx)}>삭제</button>
                               </div>
                             ))}
@@ -2756,6 +2800,7 @@ if (editForm?.template === 'group-battle') {
                           <select className={css.select} value={editForm.inputMode} onChange={e => setEditForm(s => ({ ...s, inputMode: e.target.value }))}>
                             <option value="refresh">갱신(1칸)</option>
                             <option value="accumulate">누적(여러 칸)</option>
+                    <option value="hole">홀</option>
                           </select>
                         </label>
                         {editForm.inputMode === 'accumulate' && (
@@ -2768,6 +2813,9 @@ if (editForm?.template === 'group-battle') {
                           </label>
                         )}
                       </div>
+                      )}
+                      {uiEdit.inputMode && editForm.inputMode === 'hole' && (
+                        <HoleInputSelector holes={editParams.selectedHoles} onChange={holes => setEditParams({...editParams, selectedHoles:holes})} />
                       )}
 
                         </>
@@ -2829,7 +2877,11 @@ if (editForm?.template === 'group-battle') {
 
             {previewDef && isAttemptTemplate(previewDef) && (
               <EventAttemptRanking key={previewDef.id} eventDef={{ ...previewDef, rankOrder:viewOrder }}
-                participants={participants} inputs={inputsAll?.[previewId] || {}} roomNames={roomNames} />
+                participants={participants} inputs={inputsAll?.[previewId] || {}} roomNames={roomNames}
+                onToggleVisible={async()=>{
+                  const enabled = !previewDef.attemptRankVisible;
+                  await commitEventsList(eventsOfSelected.map(e=>e.id===previewDef.id?{...e,attemptRankVisible:enabled}:e),'attempt-ranking-visibility');
+                }} />
             )}
 
             {previewDef && viewTab === 'person' && (
