@@ -1891,7 +1891,7 @@ export default function PlayerEventInput(){
     const obj = current && typeof current === 'object'
       ? { ...current } : (isAccum ? { values: [] } : { values: [current ?? ''] });
     if (isAccum) {
-      const arr = Array.isArray(obj.bonus) ? [...obj.bonus] : [];
+      const arr = Array.isArray(obj.bonus) ? [...obj.bonus] : (obj.bonus == null || obj.bonus === '' ? [] : [String(obj.bonus)]);
       const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (Number(idxOrVal)+1);
       while (arr.length < atts) arr.push('');
       const prev = String(arr[idxOrVal] ?? '');
@@ -2877,7 +2877,7 @@ export default function PlayerEventInput(){
       for (const ev of events) {
         const evId = ev.id;
         const isAccum = ev.inputMode === 'accumulate' || ev.inputMode === 'hole';
-        const attempts = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+        const attempts = ev.inputMode === 'hole' ? 18 : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
 
         const dSlot = draft?.[evId]?.person || {};
         const sSlot = inputsByEventServer?.[evId]?.person || {};
@@ -4662,18 +4662,18 @@ export default function PlayerEventInput(){
                                     onBlur={e=> p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, (isHoleRankForce || isInputHole) ? 18 : attempts)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
-                                      if (isHoleRankForce && p) {
+                                      if (p && (isHoleRankForce || isInputHole || ['raw-number', 'range-convert', 'range-convert-bonus'].includes(ev.template))) {
                                         e.stopPropagation();
-                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, (isHoleRankForce || isInputHole) ? 18 : attempts);
                                       }
                                     }}
                                     onPointerUp={() => cancelEventLongPress(inputKey)}
                                     onPointerCancel={() => cancelEventLongPress(inputKey)}
                                     onPointerLeave={() => cancelEventLongPress(inputKey)}
                                     onTouchStart={(e) => {
-                                      if (isHoleRankForce && p) {
+                                      if (p && (isHoleRankForce || isInputHole || ['raw-number', 'range-convert', 'range-convert-bonus'].includes(ev.template))) {
                                         e.stopPropagation();
-                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, 18);
+                                        startEventLongMinus(ev.id, p.id, valueIndex, cellValue, (isHoleRankForce || isInputHole) ? 18 : attempts);
                                       }
                                     }}
                                     onTouchEnd={() => cancelEventLongPress(inputKey)}
@@ -4990,7 +4990,7 @@ export default function PlayerEventInput(){
                 const evv = events.find(e=> e.id===bonusPopup.evId);
                 const opts = (evv && (evv.template==='range-convert-bonus' || evv.template==='raw-number') && Array.isArray(evv.params?.bonus)) ? evv.params.bonus : [];
                 const onPick = (label)=>{
-                  const isAccum2 = !!(evv && evv.inputMode==='accumulate');
+                  const isAccum2 = !!(evv && (evv.inputMode === 'accumulate' || evv.inputMode === 'hole')); // 홀은 18칸 배열로 보너스 저장
                   patchBonus(bonusPopup.evId, bonusPopup.pid, bonusPopup.idx, label || '', isAccum2, bonusPopup.attempts);
                   closeBonusPopup();
                   setTimeout(()=>{

@@ -501,6 +501,24 @@ if (t === 'group-battle') {
   const addRangeRow    = () => setParams(p => ({ ...p, table: [ ...(Array.isArray(p.table) ? p.table : []), { min: '', max: '', score: 0 } ], aggregator: p.aggregator || 'sum' }));
   const removeRangeRow = (idx) => setParams(p => { const t = [ ...(Array.isArray(p.table) ? p.table : []) ]; t.splice(idx, 1); return { ...p, table: t }; });
 
+  // 모바일 숫자 키패드에 '-' 키가 없는 경우: 보너스 점수를 길게 눌러 음수로 전환.
+  const bonusMinusTimersRef = useRef({});
+  const cancelBonusMinus = (key) => {
+    if (bonusMinusTimersRef.current[key]) clearTimeout(bonusMinusTimersRef.current[key]);
+    delete bonusMinusTimersRef.current[key];
+  };
+  const startBonusMinus = (key, value, change) => {
+    cancelBonusMinus(key);
+    bonusMinusTimersRef.current[key] = setTimeout(() => {
+      const current = String(value ?? '').trim();
+      change(current.startsWith('-') ? current : `-${current}`);
+      delete bonusMinusTimersRef.current[key];
+    }, 450);
+  };
+  useEffect(() => () => {
+    Object.values(bonusMinusTimersRef.current).forEach(clearTimeout);
+  }, []);
+
   // 보너스 편집(UI 간단 버전: 라벨/점수 리스트)
   const onBonusChange = (idx, key, v) => {
     const bonus = Array.isArray(params.bonus) ? [...params.bonus] : [];
@@ -2325,7 +2343,10 @@ if (editForm?.template === 'group-battle') {
                     {(params.bonus || []).map((row, idx) => (
                       <div key={idx} className={css.rangeRow} style={{ gridTemplateColumns:'1fr 1fr 60px 0' }}>
                         <input className={css.input} placeholder="예: 파" value={row.label ?? ''} onChange={e => onBonusChange(idx, 'label', e.target.value)} />
-                        <input className={`${css.input} ${css.center}`} type="number" step="1" placeholder="예: 1" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onBonusChange(idx, 'score', ''); }} onChange={e => onBonusChange(idx, 'score', e.target.value)} />
+                        <input className={`${css.input} ${css.center}`} type="text" inputMode="decimal" placeholder="예: 1" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onBonusChange(idx, 'score', ''); }} onChange={e => onBonusChange(idx, 'score', e.target.value)}
+                          onTouchStart={() => startBonusMinus(`create:${idx}`, row.score, (v) => onBonusChange(idx, 'score', v))}
+                          onTouchEnd={() => cancelBonusMinus(`create:${idx}`)} onTouchCancel={() => cancelBonusMinus(`create:${idx}`)}
+                          onContextMenu={(e) => { e.preventDefault(); onBonusChange(idx, 'score', String(row.score ?? '').startsWith('-') ? String(row.score) : `-${String(row.score ?? '')}`); }} />
                         <button className={css.btnDanger} type="button" onClick={() => removeBonusRow(idx)}>삭제</button>
                       </div>
                     ))}
@@ -2743,7 +2764,7 @@ if (editForm?.template === 'group-battle') {
                               <div key={idx} className={css.rangeRow}>
                                 <input className={`${css.input} ${css.center}`} type="number" step="0.01" value={row.min ?? ''} onChange={e => onEditRangeChange(idx, 'min', e.target.value)} />
                                 <input className={`${css.input} ${css.center}`} type="number" step="0.01" value={row.max ?? ''} onChange={e => onEditRangeChange(idx, 'max', e.target.value)} />
-                                <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onEditRangeChange(idx, 'score', ''); }} onChange={e => onEditRangeChange(idx, 'score', e.target.value)} />
+                                <input className={`${css.input} ${css.center}`} type="text" inputMode="decimal" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onEditRangeChange(idx, 'score', ''); }} onChange={e => onEditRangeChange(idx, 'score', e.target.value)} />
                                 <button className={css.btnDanger} type="button" onClick={() => removeEditRangeRow(idx)}>삭제</button>
                               </div>
                             ))}
@@ -2764,7 +2785,10 @@ if (editForm?.template === 'group-battle') {
                             {(editParams.bonus || []).map((row, idx) => (
                               <div key={idx} className={css.rangeRow} style={{ gridTemplateColumns:'1fr 1fr 60px 0' }}>
                                 <input className={css.input} value={row.label ?? ''} onChange={e => onEditBonusChange(idx, 'label', e.target.value)} />
-                                <input className={`${css.input} ${css.center}`} type="number" step="1" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onEditBonusChange(idx, 'score', ''); }} onChange={e => onEditBonusChange(idx, 'score', e.target.value)} />
+                                <input className={`${css.input} ${css.center}`} type="text" inputMode="decimal" value={row.score ?? ''} onFocus={() => { if (String(row.score ?? '') === '0') onEditBonusChange(idx, 'score', ''); }} onChange={e => onEditBonusChange(idx, 'score', e.target.value)}
+                                  onTouchStart={() => startBonusMinus(`edit:${idx}`, row.score, (v) => onEditBonusChange(idx, 'score', v))}
+                                  onTouchEnd={() => cancelBonusMinus(`edit:${idx}`)} onTouchCancel={() => cancelBonusMinus(`edit:${idx}`)}
+                                  onContextMenu={(e) => { e.preventDefault(); onEditBonusChange(idx, 'score', String(row.score ?? '').startsWith('-') ? String(row.score) : `-${String(row.score ?? '')}`); }} />
                                 <button className={css.btnDanger} type="button" onClick={() => removeEditBonusRow(idx)}>삭제</button>
                               </div>
                             ))}
