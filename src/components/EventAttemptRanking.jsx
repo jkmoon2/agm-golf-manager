@@ -52,12 +52,15 @@ export function buildAttemptRows(ev, participants, inputs, index, scope, roomNam
     return { ...r, rank: lastRank };
   });
 }
-export default function EventAttemptRanking({ eventDef, participants = [], inputs = {}, roomNames = [], defaultScope = 'person' }) {
+export default function EventAttemptRanking({ eventDef, participants = [], inputs = {}, roomNames = [], defaultScope = 'person', onToggleVisible }) {
   const [attemptIndex, setAttemptIndex] = useState(0);
   const [scope, setScope] = useState(defaultScope);
-  const count = eventDef?.inputMode === 'accumulate' ? Math.max(1, Math.min(20, Number(eventDef.attempts) || 4)) : 1;
+  const isHoleMode = eventDef?.inputMode === 'hole';
+  const holes = isHoleMode ? (Array.isArray(eventDef?.params?.selectedHoles) && eventDef.params.selectedHoles.length ? eventDef.params.selectedHoles : Array.from({length:18},(_,i)=>i+1)).map(Number).filter(h=>h>=1&&h<=18) : [];
+  const count = isHoleMode ? holes.length : eventDef?.inputMode === 'accumulate' ? Math.max(1, Math.min(20, Number(eventDef.attempts) || 4)) : 1;
+  const activeIndex = isHoleMode ? (holes[Math.min(attemptIndex, Math.max(0,count-1))] - 1) : Math.min(attemptIndex, count - 1);
   const current = Math.min(attemptIndex, count - 1);
-  const rows = useMemo(() => buildAttemptRows(eventDef, participants, inputs, current, scope, roomNames), [eventDef, participants, inputs, current, scope, roomNames]);
+  const rows = useMemo(() => buildAttemptRows(eventDef, participants, inputs, activeIndex, scope, roomNames), [eventDef, participants, inputs, activeIndex, scope, roomNames]);
   if (!isAttemptTemplate(eventDef)) return null;
   return (
     <div style={{ margin:'10px 0', padding:'10px', border:'1px solid #e5e7eb', borderRadius:8, background:'#fff', minWidth:0 }}>
@@ -66,15 +69,22 @@ export default function EventAttemptRanking({ eventDef, participants = [], input
         <div style={{display:'flex', gap:5}}>
           <button type="button" onClick={() => setScope('person')} style={{fontSize:12, fontWeight:scope==='person'?700:400, color:scope==='person'?'#2563eb':'#666'}}>개인</button>
           <button type="button" onClick={() => setScope('room')} style={{fontSize:12, fontWeight:scope==='room'?700:400, color:scope==='room'?'#2563eb':'#666'}}>방</button>
+          {typeof onToggleVisible === 'function' && (
+            <button type="button" onClick={onToggleVisible} aria-label="Player STEP6 회차별 순위 공개 설정"
+              aria-pressed={!!eventDef.attemptRankVisible}
+              style={{fontSize:11,fontWeight:700,border:'1px solid #cbd5e1',borderRadius:5,padding:'3px 6px',background:eventDef.attemptRankVisible?'#2563eb':'#f1f5f9',color:eventDef.attemptRankVisible?'#fff':'#475569'}}>
+              {eventDef.attemptRankVisible?'ON':'OFF'}
+            </button>
+          )}
         </div>
       </div>
       <div style={{display:'flex', gap:5, overflowX:'auto', padding:'8px 0'}}>
         {Array.from({length:count}, (_,i) => <button key={i} type="button" onClick={() => setAttemptIndex(i)}
-          style={{flex:'0 0 auto', fontSize:12, padding:'5px 10px', borderRadius:5, border:'1px solid #ddd', background:current===i?'#2563eb':'#fff', color:current===i?'#fff':'#333'}}>{`입력${i+1}`}</button>)}
+          style={{flex:'0 0 auto', fontSize:12, padding:'5px 10px', borderRadius:5, border:'1px solid #ddd', background:current===i?'#2563eb':'#fff', color:current===i?'#fff':'#333'}}>{isHoleMode ? `${holes[i]}홀` : `입력${i+1}`}</button>)}
       </div>
-      <div style={{maxHeight:260, overflowY:'auto'}}>
+      <div style={{maxHeight:182, overflowY:'auto', overscrollBehavior:'contain', WebkitOverflowScrolling:'touch'}}>
         <table style={{width:'100%', borderCollapse:'collapse', fontSize:12, textAlign:'center'}}>
-          <thead><tr><th style={{padding:6, borderBottom:'1px solid #ddd'}}>순위</th><th style={{padding:6, borderBottom:'1px solid #ddd'}}>{scope==='room'?'방':'참가자'}</th><th style={{padding:6, borderBottom:'1px solid #ddd'}}>결과</th></tr></thead>
+          <thead style={{position:'sticky',top:0,background:'#fff',zIndex:1}}><tr><th style={{padding:6, borderBottom:'1px solid #ddd'}}>순위</th><th style={{padding:6, borderBottom:'1px solid #ddd'}}>{scope==='room'?'방':'참가자'}</th><th style={{padding:6, borderBottom:'1px solid #ddd'}}>결과</th></tr></thead>
           <tbody>{rows.map(r => <tr key={r.id}><td style={{padding:6, borderBottom:'1px solid #eee'}}>{r.rank}위</td><td style={{padding:6, borderBottom:'1px solid #eee'}}>{r.name}</td><td style={{padding:6, borderBottom:'1px solid #eee', fontWeight:700}}>{Number(r.score.toFixed(2))}</td></tr>)}</tbody>
         </table>
         {!rows.length && <div style={{padding:12, textAlign:'center', color:'#888', fontSize:12}}>해당 회차 입력이 없습니다.</div>}

@@ -2872,7 +2872,7 @@ export default function PlayerEventInput(){
     const hasDiff = () => {
       for (const ev of events) {
         const evId = ev.id;
-        const isAccum = ev.inputMode === 'accumulate';
+        const isAccum = ev.inputMode === 'accumulate' || ev.inputMode === 'hole';
         const attempts = Math.max(2, Math.min(Number(ev.attempts || 4), 20));
 
         const dSlot = draft?.[evId]?.person || {};
@@ -3005,8 +3005,10 @@ export default function PlayerEventInput(){
           const bingoSelectedHoles = isBingo ? normalizeBingoSelectedHoles(ev?.params?.selectedHoles) : [];
           const forcedRanks = isHoleRankForce ? normalizeForcedRanks(ev?.params?.forcedRanks) : {};
           const hasForcedViewer = isHoleRankForce && Object.keys(forcedRanks || {}).length > 0;
-          const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate');
-          const attempts = isHoleRankForce ? selectedHoles.length : Math.max(2, Math.min(Number(ev.attempts || 4), 20));
+          const isInputHole = !isHoleRankForce && ev.inputMode === 'hole' && ['raw-number','range-convert','range-convert-bonus'].includes(ev.template);
+          const inputHoles = isInputHole ? (Array.isArray(ev?.params?.selectedHoles) && ev.params.selectedHoles.length ? ev.params.selectedHoles : Array.from({length:18},(_,i)=>i+1)).map(Number).filter(h=>h>=1&&h<=18) : [];
+          const isAccum  = isHoleRankForce ? true : (ev.inputMode === 'accumulate' || isInputHole);
+          const attempts = isHoleRankForce ? selectedHoles.length : (isInputHole ? inputHoles.length : Math.max(2, Math.min(Number(ev.attempts || 4), 20)));
           const NICK_PCT = 35;
           const ONE_PCT  = isHoleRankForce ? Math.max(10, 53 / Math.max(selectedHoles.length || 1, 1)) : (65 / 4);
           const TOTAL_PCT = isHoleRankForce ? 12 : 0;
@@ -4585,7 +4587,7 @@ export default function PlayerEventInput(){
                       {isAccum
                         ? (isHoleRankForce
                           ? selectedHoles.map((holeNo) => (<th key={holeNo}>{holeNo}</th>))
-                          : Array.from({length: attempts}, (_,i)=>(<th key={i}>{`입력${i+1}`}</th>)))
+                          : (isInputHole ? inputHoles.map(h=><th key={h}>{h}홀</th>) : Array.from({length: attempts}, (_,i)=>(<th key={i}>{`입력${i+1}`}</th>))))
                         : <th>입력값</th>}
                       {isHoleRankForce && <th>합계</th>}
                     </tr>
@@ -4611,15 +4613,15 @@ export default function PlayerEventInput(){
                           <td>{p ? p.nickname : ''}</td>
 
                           {isAccum ? (
-                            (isHoleRankForce ? selectedHoles : Array.from({length: attempts}, (_,i)=>i+1)).map((holeOrIdx, cellIdx) => {
-                              const valueIndex = isHoleRankForce ? (holeOrIdx - 1) : cellIdx;
+                            (isHoleRankForce ? selectedHoles : isInputHole ? inputHoles : Array.from({length: attempts}, (_,i)=>i+1)).map((holeOrIdx, cellIdx) => {
+                              const valueIndex = (isHoleRankForce || isInputHole) ? (holeOrIdx - 1) : cellIdx;
                               const cellValue = p ? (inputsByEvent?.[ev.id]?.person?.[p.id]?.values?.[valueIndex] ?? '') : '';
                               const inputKey = `${ev.id}:${p ? p.id : 'empty'}:${valueIndex}`;
                               return (
                                 <td
                                   key={holeOrIdx}
                                   className={tCss.cellEditable}
-                                  onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, cellIdx, attempts, e); }}
+                                  onClick={(e)=>{ if (bonusOpts.length) openBonusPopup(ev.id, p?.id, valueIndex, isInputHole ? 18 : attempts, e); }}
                                 >
                                   <input
                                     ref={(el) => {
@@ -4634,8 +4636,8 @@ export default function PlayerEventInput(){
                                     spellCheck={false}
                                     className={tCss.cellInput}
                                     value={cellValue}
-                                    onChange={e=> p && patchAccum(ev.id, p.id, valueIndex, e.target.value, isHoleRankForce ? 18 : attempts)}
-                                    onBlur={e=> p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, isHoleRankForce ? 18 : attempts)}
+                                    onChange={e=> p && patchAccum(ev.id, p.id, valueIndex, e.target.value, (isHoleRankForce || isInputHole) ? 18 : attempts)}
+                                    onBlur={e=> p && finalizeAccum(ev.id, p.id, valueIndex, e.target.value, (isHoleRankForce || isInputHole) ? 18 : attempts)}
                                     onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     onPointerDown={(e) => {
                                       if (isHoleRankForce && p) {

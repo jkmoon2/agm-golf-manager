@@ -917,7 +917,7 @@ const events = useMemo(
                   </div>
                 </div>
 
-                {isAttemptTemplate(ev) && (
+                {isAttemptTemplate(ev) && ev.attemptRankVisible === true && (
                   <EventAttemptRanking key={ev.id} eventDef={ev} participants={participants}
                     inputs={inputsByEvent?.[ev.id] || {}} roomNames={effectiveRoomNames} />
                 )}
