@@ -1680,7 +1680,9 @@ export default function PlayerEventInput(){
   const getServerSingle = (evId, pid) => {
     const v = inputsByEventServer?.[evId]?.person?.[pid];
     if (v === '' || v == null) return null;
-    const n = Number(v);
+    const raw = v && typeof v === 'object' && Array.isArray(v.values) ? v.values[0] : v;
+    if (raw === '' || raw == null) return null;
+    const n = Number(raw);
     return Number.isFinite(n) ? n : null;
   };
   const getServerAccum = (evId, pid, attempts) => {
@@ -1885,8 +1887,9 @@ export default function PlayerEventInput(){
     const all = { ...(draft || {}) };
     const slot = { ...(all[evId] || {}) };
     const person = { ...(slot.person || {}) };
-    const obj = person[pid] && typeof person[pid]==='object'
-      ? { ...person[pid] } : {};
+    const current = person[pid];
+    const obj = current && typeof current === 'object'
+      ? { ...current } : (isAccum ? { values: [] } : { values: [current ?? ''] });
     if (isAccum) {
       const arr = Array.isArray(obj.bonus) ? [...obj.bonus] : [];
       const atts = Number.isFinite(Number(attemptsOverride)) ? Number(attemptsOverride) : (Number(idxOrVal)+1);
@@ -1906,6 +1909,7 @@ export default function PlayerEventInput(){
     }
     person[pid] = obj; slot.person = person; all[evId] = slot;
     applyDraft(all);
+    setDirty(true); // 보너스만 변경한 경우에도 저장 버튼 활성화
   };
 
   const calcPopupWidth = (evId) => {
@@ -2980,11 +2984,29 @@ export default function PlayerEventInput(){
             for (let i = 0; i < dVals.length; i += 1) {
               if (!eq(dVals[i], baseArr[i])) return true;
             }
+            // 숫자가 같아도 회차별 보너스가 달라지면 저장 대상임
+            if (['raw-number', 'range-convert-bonus'].includes(ev.template) && Array.isArray(ev.params?.bonus)) {
+              const readBonus = (record, index) => {
+                const b = record && typeof record === 'object' ? record.bonus : null;
+                return String(Array.isArray(b) ? (b[index] ?? '') : (index === 0 ? (b ?? '') : ''));
+              };
+              for (let i = 0; i < attempts; i += 1) {
+                if (readBonus(dSlot?.[pid], i) !== readBonus(sSlot?.[pid], i)) return true;
+              }
+            }
           } else {
             const sNum = getServerSingle(evId, pid);
             const dRaw = dSlot?.[pid];
-            const dNum = toNumOrNull(dRaw);
+            const dVal = dRaw && typeof dRaw === 'object' && Array.isArray(dRaw.values) ? dRaw.values[0] : dRaw;
+            const dNum = toNumOrNull(dVal);
             if (!eq(sNum ?? null, dNum ?? null)) return true;
+            if (['raw-number', 'range-convert-bonus'].includes(ev.template) && Array.isArray(ev.params?.bonus)) {
+              const readBonus = (record) => {
+                const b = record && typeof record === 'object' ? record.bonus : null;
+                return String(Array.isArray(b) ? (b[0] ?? '') : (b ?? ''));
+              };
+              if (readBonus(dRaw) !== readBonus(sSlot?.[pid])) return true;
+            }
           }
         }
       }
