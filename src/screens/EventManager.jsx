@@ -310,23 +310,27 @@ const normalizedInputHoles = (value) => {
 };
 function HoleInputSelector({ holes, onChange }) {
   const selected = normalizedInputHoles(holes);
-  const all = selected.length === 18;
+  const [expanded, setExpanded] = React.useState(true);
+  const allHoles = Array.from({ length: 18 }, (_, i) => i + 1);
+  const toggle = h => onChange(selected.includes(h) ? selected.filter(n => n !== h) : [...selected, h].sort((a,b)=>a-b));
+  const summary = selected.length === 18 ? '1홀, 2홀, 3홀, 4홀, 5홀, 6홀, 7홀, 8홀, 9홀...' : (selected.map(h => `${h}홀`).join(', ') || '선택된 홀 없음');
   return (
-    <div style={{border:'1px solid #dbe2ec',borderRadius:8,padding:9,margin:'8px 0'}}>
-      <label style={{display:'flex',gap:7,alignItems:'center',fontSize:13,fontWeight:600}}>
-        <input type="checkbox" checked={all} onChange={e=>onChange(e.target.checked?Array.from({length:18},(_,i)=>i+1):[])} /> 전체홀 (1~18홀)
-      </label>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(6,minmax(0,1fr))',gap:6,marginTop:9}}>
-        {Array.from({length:18},(_,i)=>i+1).map(h=>(
-          <label key={h} style={{fontSize:12,display:'flex',alignItems:'center',gap:2}}>
-            <input type="checkbox" checked={selected.includes(h)} onChange={e=>onChange(e.target.checked?[...selected,h].sort((a,b)=>a-b):selected.filter(x=>x!==h))} />{h}홀
-          </label>
-        ))}
-      </div>
+    <div style={{ border:'1px solid #e5e7eb', borderRadius:12, padding:12, margin:'8px 0', boxSizing:'border-box', background:'#fff' }}>
+      <button type="button" onClick={()=>setExpanded(v=>!v)} style={{width:'100%',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,border:0,background:'#fff',textAlign:'left',padding:'2px 0 10px',cursor:'pointer'}}>
+        <span style={{minWidth:0}}><strong style={{fontSize:14}}>사용 홀 선택</strong><span style={{display:'block',fontSize:12,color:'#667085',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{summary}</span></span>
+        <span style={{color:'#64748b',fontSize:12}}>{expanded ? '▲' : '▼'}</span>
+      </button>
+      {expanded && <>
+        <div style={{display:'flex',justifyContent:'flex-end',marginBottom:10}}><button type="button" onClick={()=>onChange(allHoles)} style={{padding:'8px 12px',background:'#fff',border:'1px solid #d0d7de',borderRadius:10,fontSize:13,fontWeight:700}}>기본값</button></div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:8}}>
+          {allHoles.map(h=><button key={h} type="button" onClick={()=>toggle(h)} style={{width:'100%',padding:'10px 4px',borderRadius:10,border:'1px solid '+(selected.includes(h)?'#8bb6ff':'#d5deea'),background:selected.includes(h)?'#edf5ff':'#fff',color:selected.includes(h)?'#1d4ed8':'#1f2937',fontWeight:700,fontSize:13}}>{h}홀</button>)}
+        </div>
+      </>}
       {!selected.length && <div style={{fontSize:11,color:'#dc2626',marginTop:6}}>최소 1개 홀을 선택해주세요.</div>}
     </div>
   );
 }
+
 export default function EventManager() {
   const { allEvents = [], eventId, eventData, loadEvent, updateEventImmediate, updateEventInputsTransaction, overlayScoresToParticipants } = useContext(EventContext) || {};
 
